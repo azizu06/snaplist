@@ -131,7 +131,25 @@ describe("addressing a device", () => {
         alert: { title: MESSAGE.title, body: MESSAGE.body },
         sound: "default",
       },
+      moment: "listingReady",
     });
+  });
+
+  it("names the moment in the payload so a foreground app knows it is ours", async () => {
+    // With the app open, iOS asks the app whether to draw the system banner,
+    // and the app answers by reading this payload. The collapse id carries the
+    // same fact but rides an APNs header, which the device never sees.
+    const transport = recordingTransport();
+
+    await senderWith(transport).send({
+      ...sendOf(PRODUCTION_DEVICE),
+      moment: "listingPublished",
+      collapseId: "listingPublished:listing-1",
+    });
+
+    expect(JSON.parse(transport.requests[0]!.body).moment).toBe(
+      "listingPublished",
+    );
   });
 });
 

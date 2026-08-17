@@ -209,6 +209,17 @@ final class PushRegistrationCoordinator {
         }
     }
 
+    /// The seller turned the Settings switch on (#891).
+    ///
+    /// The same single prompt #890 defines, reached deliberately instead of
+    /// after a submission. The row only produces this while iOS still reports
+    /// the status undetermined, which is the only state in which the prompt can
+    /// appear at all, so this does not reopen the question for a seller who
+    /// already answered it.
+    func notificationsRequestedFromSettings() async {
+        await perform(.askOnce)
+    }
+
     private func perform(_ command: PushRegistrationCommand) async {
         switch command {
         case .doNothing:

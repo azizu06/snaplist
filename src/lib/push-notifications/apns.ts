@@ -158,6 +158,11 @@ export function createHttpApnsSender(input: {
               alert: { title: request.message.title, body: request.message.body },
               sound: "default",
             },
+            // Read by the app when it is open and iOS asks whether to draw the
+            // system banner. The collapse id says the same thing, but it rides
+            // an APNs header the device never sees. Nothing about the seller
+            // is in here: it is one of two fixed words.
+            moment: request.moment,
           }),
         });
       } catch (error) {

@@ -50,6 +50,9 @@ struct AppShellView: View {
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// Shared with the app delegate, which is the only thing that receives a
+    /// foreground push (#891).
+    private let foregroundPush = PushRegistrationComposition.foregroundPresenter
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
@@ -255,6 +258,28 @@ struct AppShellView: View {
         .overlay(alignment: .bottom) {
             activationGuidanceOverlay
         }
+        // Issue #891. Attached here rather than inside the shell so a push that
+        // lands during onboarding still has somewhere to draw; the bottom is
+        // the dock's, so this takes the top.
+        .overlay(alignment: .top) {
+            if let notification = foregroundPush.visible {
+                ForegroundPushBanner(
+                    notification: notification,
+                    dismiss: foregroundPush.dismiss
+                )
+                .padding(.horizontal, SnapListMetrics.screenGutter)
+            }
+        }
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.16),
+            value: foregroundPush.visible
+        )
+        // The delegate reads this to decide whether it may suppress Apple's
+        // banner. It is set from the surface that actually draws, because a
+        // presenter that claimed to be mounted while nothing was on screen
+        // would swallow the notification entirely.
+        .onAppear { foregroundPush.mounted = true }
+        .onDisappear { foregroundPush.mounted = false }
         // Attached above the shell/onboarding split so both sign-in entry points
         // reach the same surface, whichever host is on screen.
         .sheet(isPresented: $router.presentedAccountEntry) {

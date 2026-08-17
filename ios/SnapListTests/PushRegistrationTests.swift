@@ -457,3 +457,195 @@ private final class PushDeviceTokenURLProtocolStub: URLProtocol, @unchecked Send
 
     override func stopLoading() {}
 }
+
+/// Issue #891. What the seller sees when a push lands with the app already open.
+///
+/// iOS asks the app whether to draw its banner, and an app that answers "draw
+/// nothing" has taken responsibility for showing the seller something itself.
+/// Those are two separate things in two places, and the failure that matters is
+/// when only the first one happens: the system banner is suppressed, no in-app
+/// surface exists to draw the replacement, and a seller whose listing just
+/// finished is told nothing at all. That is worse than the plain system banner,
+/// and it is silent.
+///
+/// So suppression is not a decision about the payload. It is a report from the
+/// surface that actually drew it.
+final class ForegroundPushPresentationTests: XCTestCase {
+    private let readyPayload: [AnyHashable: Any] = [
+        "aps": [
+            "alert": [
+                "title": "Sony WH-1000XM4 is ready to review",
+                "body": "Open SnapList to check the details before you publish.",
+            ],
+            "sound": "default",
+        ],
+        "moment": "listingReady",
+    ]
+
+    func testTheSystemBannerIsSuppressedOnlyWhenTheAppDrewTheReplacement() {
+        let options = ForegroundPushPolicy.presentationOptions(
+            for: readyPayload,
+            showInApp: { _ in true }
+        )
+
+        XCTAssertFalse(options.contains(.banner))
+        XCTAssertFalse(options.contains(.sound))
+    }
+
+    func testANotificationTheAppDrewIsStillFiledInNotificationCentre() {
+        // `.list` here is not a leftover, and making this the empty set is the
+        // obvious cleanup that would break it. Empty means show nothing
+        // anywhere, and the in-app banner is transient: a seller who looked
+        // away for a few seconds would have a finished listing with no record
+        // of it anywhere on the phone and nothing to pull down and check.
+        let options = ForegroundPushPolicy.presentationOptions(
+            for: readyPayload,
+            showInApp: { _ in true }
+        )
+
+        XCTAssertTrue(options.contains(.list))
+    }
+
+    func testTheSystemBannerStandsWhenNoInAppSurfaceTookIt() {
+        // No window scene yet, a shell that is mid-transition, a presenter that
+        // is not mounted. The seller sees Apple's banner, which is the correct
+        // outcome and not a degraded one.
+        let options = ForegroundPushPolicy.presentationOptions(
+            for: readyPayload,
+            showInApp: { _ in false }
+        )
+
+        XCTAssertFalse(options.isEmpty)
+        XCTAssertTrue(options.contains(.banner))
+    }
+
+    func testAPayloadThatIsNotOursIsNeverOfferedToTheInAppSurface() {
+        var offered = 0
+        let options = ForegroundPushPolicy.presentationOptions(
+            for: ["aps": ["alert": ["title": "Something", "body": "Else"]]],
+            showInApp: { _ in
+                offered += 1
+                return true
+            }
+        )
+
+        XCTAssertEqual(offered, 0)
+        XCTAssertFalse(options.isEmpty)
+    }
+
+    func testAPayloadMissingItsCopyIsLeftToTheSystem() {
+        // An in-app banner with no words is not a notification. iOS draws
+        // whatever it was given rather than the app drawing nothing.
+        let options = ForegroundPushPolicy.presentationOptions(
+            for: ["aps": ["alert": ["title": "Ready"]], "moment": "listingReady"],
+            showInApp: { _ in true }
+        )
+
+        XCTAssertFalse(options.isEmpty)
+    }
+
+    func testTheInAppSurfaceGetsExactlyWhatAppleWouldHavePrinted() {
+        // Same two moments, same truth. The copy is built once on the server and
+        // the app repeats it; a foreground seller and a locked-screen seller
+        // must not be told two different things about one item.
+        var shown: ForegroundPushNotification?
+
+        _ = ForegroundPushPolicy.presentationOptions(
+            for: readyPayload,
+            showInApp: { notification in
+                shown = notification
+                return true
+            }
+        )
+
+        XCTAssertEqual(
+            shown,
+            ForegroundPushNotification(
+                moment: .listingReady,
+                title: "Sony WH-1000XM4 is ready to review",
+                body: "Open SnapList to check the details before you publish."
+            )
+        )
+    }
+
+    func testBothMomentsAreRecognised() {
+        for (raw, moment) in [
+            ("listingReady", ForegroundPushMoment.listingReady),
+            ("listingPublished", ForegroundPushMoment.listingPublished),
+        ] {
+            var shown: ForegroundPushNotification?
+            _ = ForegroundPushPolicy.presentationOptions(
+                for: [
+                    "aps": ["alert": ["title": "Title", "body": "Body"]],
+                    "moment": raw,
+                ],
+                showInApp: { notification in
+                    shown = notification
+                    return true
+                }
+            )
+            XCTAssertEqual(shown?.moment, moment, raw)
+        }
+    }
+}
+
+@MainActor
+final class ForegroundPushPresenterTests: XCTestCase {
+    func testAPresenterWithNowhereToDrawRefusesTheNotification() {
+        // The refusal is the whole point: it is what keeps the system banner.
+        let presenter = ForegroundPushPresenter()
+
+        XCTAssertFalse(presenter.show(.init(
+            moment: .listingReady,
+            title: "Title",
+            body: "Body"
+        )))
+        XCTAssertNil(presenter.visible)
+    }
+
+    func testAMountedPresenterShowsTheNotificationAndReportsThatItDid() {
+        let presenter = ForegroundPushPresenter()
+        presenter.mounted = true
+
+        let notification = ForegroundPushNotification(
+            moment: .listingPublished,
+            title: "Your listing is live on eBay",
+            body: "Open SnapList to view or edit it."
+        )
+
+        XCTAssertTrue(presenter.show(notification))
+        XCTAssertEqual(presenter.visible, notification)
+    }
+
+    func testTheSecondMomentReplacesTheFirstRatherThanStacking() {
+        // Two moments for one item can land close together. One surface, showing
+        // the newest truth, is what the collapse id already gives a seller whose
+        // phone is locked.
+        let presenter = ForegroundPushPresenter()
+        presenter.mounted = true
+        let published = ForegroundPushNotification(
+            moment: .listingPublished,
+            title: "Your listing is live on eBay",
+            body: "Open SnapList to view or edit it."
+        )
+
+        _ = presenter.show(.init(
+            moment: .listingReady,
+            title: "Ready",
+            body: "Open SnapList."
+        ))
+        _ = presenter.show(published)
+
+        XCTAssertEqual(presenter.visible, published)
+    }
+
+    func testDismissingClearsIt() {
+        let presenter = ForegroundPushPresenter()
+        presenter.mounted = true
+        _ = presenter.show(.init(moment: .listingReady, title: "T", body: "B"))
+
+        presenter.dismiss()
+
+        XCTAssertNil(presenter.visible)
+    }
+}

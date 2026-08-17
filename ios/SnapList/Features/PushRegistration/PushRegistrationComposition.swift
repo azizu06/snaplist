@@ -15,6 +15,12 @@ import UserNotifications
 enum PushRegistrationComposition {
     private(set) static var coordinator: PushRegistrationCoordinator?
 
+    /// The one in-app notification surface (#891). The app delegate asks it
+    /// whether it can draw, and the shell tells it when it can. Neither can
+    /// hold a reference to the other, which is the same reason the coordinator
+    /// lives here.
+    static let foregroundPresenter = ForegroundPushPresenter()
+
     static func start(
         apiOrigin: URL,
         tokenProvider: any BearerTokenProviding,
@@ -54,6 +60,13 @@ enum PushRegistrationComposition {
     /// fixture run) does nothing, which is the same thing a refusal does.
     static func itemSubmitted() {
         Task { await coordinator?.itemSubmitted() }
+    }
+
+    /// The seller turned the Settings switch on (#891). A launch with no
+    /// composed coordinator leaves the switch where it was, which is the truth:
+    /// nothing asked, so nothing changed.
+    static func notificationsRequestedFromSettings() async {
+        await coordinator?.notificationsRequestedFromSettings()
     }
 
     static func deviceTokenReceived(_ token: Data) {
