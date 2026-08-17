@@ -2057,25 +2057,32 @@ final class SnapListUITests: XCTestCase {
     /// wide with a wide lens. The simulator has no camera at all, so its honest
     /// result is no control rather than a `.5x` the hardware would refuse.
     /// `--scan-zoom=dual-wide` stands in for a device that does have one.
-    ///
-    /// `1x` stays the default. The reference screenshot happens to show `.5x`
-    /// selected, but that is the state its user left it in, and defaulting to
-    /// the ultra wide would silently rewiden every seller's framing.
-    func testIssue885ZoomControlIsOfferedOnlyWhenTheHardwareCanReachTheUltraWide() {
+    func testIssue885ZoomControlIsNotOfferedWithoutAnUltraWideCamera() {
         let withoutUltraWide = launch(extraArguments: ["--visual-state=CAM-01"])
         XCTAssertTrue(withoutUltraWide.buttons["scan.shutter"].waitForExistence(timeout: 3))
         XCTAssertFalse(withoutUltraWide.otherElements["scan.zoom"].exists)
         XCTAssertFalse(withoutUltraWide.buttons["scan.zoom.ultra-wide"].exists)
         XCTAssertFalse(withoutUltraWide.buttons["scan.zoom.wide"].exists)
-        withoutUltraWide.terminate()
+    }
 
-        let app = launch(extraArguments: ["--visual-state=CAM-01", "--scan-zoom=dual-wide"])
-        // This is the second app instance in one test, and the first was
-        // terminated a moment ago, so wait for it to actually be frontmost
-        // before reading anything out of it.
-        XCTAssertTrue(
-            app.wait(for: .runningForeground, timeout: 10),
-            "The relaunched app must be frontmost before its controls are tapped."
+    /// The other half of the gate, kept in its own test so each launch belongs
+    /// to one test rather than the second one being a relaunch inside the first.
+    ///
+    /// `1x` stays the default. The reference screenshot happens to show `.5x`
+    /// selected, but that is the state its user left it in, and defaulting to
+    /// the ultra wide would silently rewiden every seller's framing.
+    func testIssue885ZoomControlSwitchesToTheUltraWideWhenTheHardwareHasOne() {
+        // Park activation guidance on another surface. Left to whatever the
+        // preceding tests persisted, the ACT-01 coach mark docks over this band
+        // and takes the chip's taps, which is a real collision this issue found
+        // and did not fix. Pinning the state keeps this test measuring the zoom
+        // control rather than that overlap.
+        let app = launch(
+            extraArguments: [
+                "--visual-state=CAM-01",
+                "--scan-zoom=dual-wide",
+                "--activation-guidance-step=listingReview",
+            ]
         )
         let zoom = app.otherElements["scan.zoom"]
         let ultraWide = app.buttons["scan.zoom.ultra-wide"]
@@ -2096,14 +2103,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertLessThan(zoom.frame.maxY, shutter.frame.minY, receipt)
         XCTAssertEqual(zoom.frame.midX, shutter.frame.midX, accuracy: 2, receipt)
 
-        // Existence is not reachability. Whole-suite runs have caught this chip
-        // existing at a correct on-screen frame while XCUITest could not compute
-        // a hit point for it, and a tap issued in that window is dropped without
-        // error, which then surfaces here as the wrong lens rather than as the
-        // unreachable control it actually is. Waiting on hittability makes the
-        // precondition a named failure instead of a silent one. Running this
-        // test alone has never reproduced the window, so this is a stated
-        // precondition rather than a proven cure.
+        // Existence is not reachability, and a tap on an element with no hit
+        // point is dropped without error, so it would surface below as the
+        // wrong selected lens rather than as the unreachable control it is.
+        // Keeping the wait means anything that covers this band in future
+        // fails here, by name, instead of somewhere further down.
         let reachable = expectation(
             for: NSPredicate(format: "isHittable == true"),
             evaluatedWith: ultraWide
