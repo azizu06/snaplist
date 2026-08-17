@@ -232,8 +232,13 @@ final class EbayPublishUITests: XCTestCase {
             extraArguments: ["--reduced-motion", "--dynamic-type=accessibility3"]
         )
         let titleLabel = confirmation.staticTexts["Title"]
+        // #926. This was still the denim jacket the confirmation fixture used
+        // before #887/#912 moved it to a Sony DualSense, so the wait was on a
+        // string the app no longer contains at any Dynamic Type size. The two
+        // titles are both 40 characters, so the wrap this test measures is the
+        // same one it was written for.
         let titleValue = confirmation.staticTexts[
-            "Medium wash denim trucker jacket, size M"
+            "Sony DualSense wireless controller, white"
         ]
         let conditionValue = confirmation.staticTexts["Used, good"]
         XCTAssertTrue(titleLabel.waitForExistence(timeout: 10))
@@ -262,7 +267,15 @@ final class EbayPublishUITests: XCTestCase {
     /// another row rather than the start of a new block. The fixed row adds
     /// extra top padding to the DESCRIPTION label; this proves the resulting
     /// gap clears a margin over the ordinary row-to-row gap (averaged across
-    /// Brand→Color and Color→Size) instead of matching it.
+    /// Brand→Color and Color→Platform) instead of matching it.
+    ///
+    /// #926. The rows were Brand → Color → Size when this was written, against
+    /// the denim jacket the fixture carried before #887/#912. The fixture's
+    /// item is a Sony DualSense now, so `keys.sorted()` renders
+    /// Brand → Color → Platform and there is no Size row to wait for. Which
+    /// three attributes appear is incidental to the claim — that item
+    /// specifics and DESCRIPTION read as two blocks rather than one uniform
+    /// list — so the third row's name follows the fixture.
     func testItemSpecificsAndDescriptionReadAsTwoDistinctBlocksWhenExpanded() {
         let confirmation = launch(
             fixture: "confirmation",
@@ -277,9 +290,9 @@ final class EbayPublishUITests: XCTestCase {
 
         let brand = confirmation.staticTexts["Brand"]
         let color = confirmation.staticTexts["Color"]
-        let size = confirmation.staticTexts["Size"]
+        let platform = confirmation.staticTexts["Platform"]
         let description = confirmation.staticTexts["DESCRIPTION"]
-        for element in [brand, color, size, description] {
+        for element in [brand, color, platform, description] {
             XCTAssertTrue(
                 element.waitForExistence(timeout: 5),
                 confirmation.debugDescription
@@ -287,11 +300,11 @@ final class EbayPublishUITests: XCTestCase {
         }
 
         let receipt =
-            "brand=\(brand.frame), color=\(color.frame), size=\(size.frame), description=\(description.frame)"
+            "brand=\(brand.frame), color=\(color.frame), platform=\(platform.frame), description=\(description.frame)"
         let rowGap =
             ((color.frame.minY - brand.frame.maxY)
-                + (size.frame.minY - color.frame.maxY)) / 2
-        let sectionGap = description.frame.minY - size.frame.maxY
+                + (platform.frame.minY - color.frame.maxY)) / 2
+        let sectionGap = description.frame.minY - platform.frame.maxY
 
         XCTAssertGreaterThan(
             sectionGap,
