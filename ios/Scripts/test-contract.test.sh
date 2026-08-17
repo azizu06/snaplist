@@ -697,6 +697,11 @@ run_serialized_test_script() {
   (
     export PATH="${serialized_bin}:${PATH}"
     export SNAPLIST_IOS_LOCK_FILE=$lock_file
+    # Without these the production defaults apply, so a release regression
+    # would sit on a stale lock for two hours before exiting 75. The suite
+    # would look hung rather than red.
+    export SNAPLIST_IOS_LOCK_POLL_SECONDS=1
+    export SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS=30
     export SNAPLIST_IOS_ONLY_TESTING=$selector
     export SNAPLIST_XCODEBUILD_ACTIVE_MARKER=$serialized_active_marker
     export SNAPLIST_XCODEBUILD_OVERLAP_LOG=$serialized_overlap_log
