@@ -40,6 +40,13 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
     private var interruptionEndedObserver: NSObjectProtocol?
     private var runtimeErrorObserver: NSObjectProtocol?
     private var flashMode: CaptureFlashMode = .off
+    /// The lens the seller has asked for, held the way `flashMode` is held so
+    /// the hardware can be pointed at it again whenever the session comes back.
+    ///
+    /// A dual wide device opens at the ultra wide's own field of view, which
+    /// would rewiden every seller's framing, so this starts at the lens they
+    /// already shoot with. Written and read on `sessionQueue` only.
+    private var zoomLens: ScanZoomLens = .wide
 
     override init() {
         let selection = Self.selectBackCamera()
@@ -83,7 +90,9 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
 
     func selectZoomLens(_ lens: ScanZoomLens) {
         sessionQueue.async { [weak self] in
-            self?.applyZoomLens(lens)
+            guard let self, self.zoomControl.lenses.contains(lens) else { return }
+            self.zoomLens = lens
+            self.applyZoomLens(lens)
         }
     }
 
@@ -176,6 +185,17 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
                 }
                 do {
                     try self.configureIfNeeded()
+                    // Point the hardware at the lens after the configuration has
+                    // committed, not inside it. Setting `sessionPreset` hands the
+                    // session control of the device's `activeFormat`, and the
+                    // header is explicit that the new format is applied in
+                    // `commitConfiguration`. `applyZoomLens` clamps against
+                    // `min`/`maxAvailableVideoZoomFactor`, which `activeFormat`
+                    // determines, so a write before the commit is clamped against
+                    // a format that is about to be replaced. Doing it here also
+                    // means a stop/start reaches it, which the `configured`
+                    // guarded body does not because it runs once.
+                    self.applyZoomLens(self.zoomLens)
                     self.setFrameHandler(frameHandler)
                     self.wantsToRun = true
                     if !self.session.isRunning {
@@ -248,11 +268,6 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
         session.addInput(input)
         session.addOutput(photoOutput)
 
-        // A dual wide device opens at the ultra wide's own field of view, which
-        // would rewiden every seller's framing. Start at the lens they already
-        // shoot with.
-        applyZoomLens(.wide)
-
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
@@ -289,6 +304,11 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
         sessionQueue.async { [weak self] in
             guard let self, self.wantsToRun, !self.session.isRunning else { return }
             self.session.startRunning()
+            // Whatever took the camera away can have left the device on another
+            // factor, and this path does not go through `start()`, so point it
+            // back at the lens the seller chose rather than at whatever it
+            // came back on.
+            self.applyZoomLens(self.zoomLens)
         }
     }
 
