@@ -1304,7 +1304,18 @@ html:has(.mkt) {
   align-self: stretch;
   margin-inline: auto;
   display: grid;
-  grid-template-rows: repeat(5, minmax(0, 1fr));
+  /* Rows size to their own copy, and the height left over against the phone
+     goes between the cards rather than inside them. Equal 1fr rows used to
+     stretch each card to a fifth of the phone column, which at a desktop width
+     is 174px around 115px of text. Aziz, after the phone grew: "it made the
+     height of the cards longer ... about two to three lines could fit in the
+     height of the card." The measured slack was 59px per card, and it is worst
+     between roughly 1000 and 1300 because the blurbs still fit on two lines
+     there while the column keeps the phone's height. space-between keeps the
+     first card on the phone's top edge and the last on its bottom, so the two
+     columns still read as one block. */
+  grid-template-rows: repeat(5, auto);
+  align-content: space-between;
   gap: clamp(16px, 1.6vw, 20px);
 }
 
@@ -1392,6 +1403,11 @@ html:has(.mkt) {
     width: 100%;
     max-width: var(--phone-w);
     min-height: auto;
+    /* Equal rows are kept here on purpose. In the stacked layout the column has
+       no phone to match, so 1fr sizes every card to the tallest one and the
+       five read as a set. There is no leftover height to redistribute, which is
+       the only thing the desktop rule was changed to fix. */
+    grid-template-rows: repeat(5, minmax(0, 1fr));
     gap: 14px;
   }
   .mkt-tab {

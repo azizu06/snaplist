@@ -214,17 +214,39 @@ describe("marketing honesty", () => {
 });
 
 describe("marketing destinations", () => {
-  it("keeps the five includes cards equal-height and centers the unstretched phone beside them", () => {
+  it("sizes the includes cards to their copy beside the phone and keeps them equal once stacked", () => {
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
     const explorer = css.match(/\.mkt-explorer\s*\{[^}]*\}/)?.[0] ?? "";
     const stage = css.match(/\.mkt-explorer__stage\s*\{[^}]*\}/)?.[0] ?? "";
-    const tablist = css.match(/\.mkt-tablist\s*\{[^}]*\}/)?.[0] ?? "";
+    // There is more than one `@media (max-width: 759px)` block in the file, so
+    // anchoring on the media query walks into the wrong rule. Pick the two
+    // `.mkt-tablist` blocks apart by what only the stacked one declares.
+    const tablistRules = css.match(/\.mkt-tablist\s*\{[^}]*\}/g) ?? [];
+    const tablist = tablistRules.find((rule) => !/max-width:\s*var\(--phone-w\)/.test(rule)) ?? "";
+    const stackedTablist =
+      tablistRules.find((rule) => /max-width:\s*var\(--phone-w\)/.test(rule)) ?? "";
+
+    expect(tablist).not.toBe("");
+    expect(stackedTablist).not.toBe("");
     const selectedCard = css.match(/\.mkt-tab\[aria-selected="true"\]\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(explorer).toMatch(/align-items:\s*center/);
     expect(stage).toMatch(/transform:\s*translateY\(31px\)/);
     expect(tablist).toMatch(/display:\s*grid/);
-    expect(tablist).toMatch(/grid-template-rows:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
+
+    // Beside the phone the rows take their own copy's height and the leftover
+    // column height goes between the cards. Equal 1fr rows used to stretch each
+    // card to a fifth of the phone, which left about 59px of empty card at a
+    // desktop width once the phone grew.
+    expect(tablist).toMatch(/grid-template-rows:\s*repeat\(5,\s*auto\)/);
+    expect(tablist).toMatch(/align-content:\s*space-between/);
+    expect(tablist).not.toMatch(/grid-template-rows:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
+
+    // Stacked, there is no phone to match and no leftover to redistribute, so
+    // the five stay equal to the tallest.
+    expect(stackedTablist).toMatch(/min-height:\s*auto/);
+    expect(stackedTablist).toMatch(/grid-template-rows:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
+
     expect(selectedCard).toMatch(/transform:\s*translateY\(-8px\)/);
     expect(selectedCard).not.toMatch(/scale\(/);
     expect(css).not.toMatch(/\.mkt-tab\[aria-selected="true"\][^{]*\{[^}]*scale\(/);
