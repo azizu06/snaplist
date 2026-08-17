@@ -1998,11 +1998,14 @@ final class SnapListUITests: XCTestCase {
     func testApprovedScanCameraZeroAndFivePhotoStatesExposeTheFrozenControls() {
         let zero = launch(extraArguments: ["--visual-state=CAM-01"])
 
-        for identifier in [
-            "scan.flash", "scan.library", "scan.shutter", "dock.scan", "dock.trophy-wall"
-        ] {
+        for identifier in ["scan.flash", "scan.library", "scan.shutter"] {
             XCTAssertTrue(zero.buttons[identifier].waitForExistence(timeout: 2), identifier)
         }
+        // #885: the owner removed the dock from the camera preview, since
+        // `scan.close` already returns the seller where they came from. The
+        // real shell has always hidden it here; this route now matches.
+        XCTAssertFalse(zero.buttons["dock.scan"].exists)
+        XCTAssertFalse(zero.buttons["dock.trophy-wall"].exists)
         XCTAssertFalse(zero.buttons["scan.review"].exists)
         XCTAssertFalse(zero.staticTexts["scan.photo-count"].exists)
         zero.terminate()
@@ -2067,6 +2070,14 @@ final class SnapListUITests: XCTestCase {
         withoutUltraWide.terminate()
 
         let app = launch(extraArguments: ["--visual-state=CAM-01", "--scan-zoom=dual-wide"])
+        // This is the second app instance in one test, and the first was
+        // terminated a moment ago. Elements are queryable as soon as the
+        // hierarchy exists, but nothing in it is hittable until the app is
+        // actually frontmost, so a tap issued before then lands nowhere.
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 5),
+            "The relaunched app must be frontmost before its controls are tapped."
+        )
         let zoom = app.otherElements["scan.zoom"]
         let ultraWide = app.buttons["scan.zoom.ultra-wide"]
         let wide = app.buttons["scan.zoom.wide"]
@@ -2087,9 +2098,16 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(zoom.frame.midX, shutter.frame.midX, accuracy: 2, receipt)
 
         ultraWide.tap()
-        XCTAssertTrue(ultraWide.isSelected)
-        XCTAssertFalse(wide.isSelected)
-        XCTAssertEqual(zoom.value as? String, "0.5x")
+        // Frames and hittability, because the way this assertion fails in
+        // practice is a tap that never lands rather than a lens that switched
+        // to the wrong value.
+        let switchReceipt = """
+        ultraWide=\(ultraWide.frame) hittable=\(ultraWide.isHittable) \
+        wide=\(wide.frame) zoomContainer=\(zoom.frame) appState=\(app.state.rawValue)
+        """
+        XCTAssertTrue(ultraWide.isSelected, switchReceipt)
+        XCTAssertFalse(wide.isSelected, switchReceipt)
+        XCTAssertEqual(zoom.value as? String, "0.5x", switchReceipt)
     }
 
     /// #885. Moving three controls onto one row and adding a fourth above it is
@@ -2148,26 +2166,31 @@ final class SnapListUITests: XCTestCase {
         let library = app.buttons["scan.library"]
         let shutter = app.buttons["scan.shutter"]
         let review = app.buttons["scan.review"]
-        let dockScan = app.buttons["dock.scan"]
 
         XCTAssertTrue(window.waitForExistence(timeout: 3))
         XCTAssertEqual(window.frame.size.width, 402, accuracy: 0.5)
         XCTAssertEqual(window.frame.size.height, 874, accuracy: 0.5)
 
-        for element in [firstPhoto, secondPhoto, library, shutter, review, dockScan] {
+        for element in [firstPhoto, secondPhoto, library, shutter, review] {
             XCTAssertTrue(element.waitForExistence(timeout: 3), element.identifier)
         }
 
-        XCTAssertEqual(firstPhoto.frame.size.width, 35, accuracy: 0.5)
-        XCTAssertEqual(firstPhoto.frame.size.height, 44, accuracy: 0.5)
+        // #885: the preview no longer floats a dock, and the height that
+        // freed went to the two things the owner named. The thumbnails are the
+        // larger half of that spend.
+        XCTAssertEqual(firstPhoto.frame.size.width, 45, accuracy: 0.5)
+        XCTAssertEqual(firstPhoto.frame.size.height, 57, accuracy: 0.5)
         XCTAssertEqual(secondPhoto.frame.minX - firstPhoto.frame.maxX, 10, accuracy: 0.5)
         // #885 moved review off the bottom row onto its own line between the
         // strip and the controls, so the strip no longer sits directly above
         // the library. What used to be one 45pt gap is now the review row.
-        XCTAssertEqual(review.frame.minY - firstPhoto.frame.maxY, 10, accuracy: 2)
+        XCTAssertEqual(review.frame.minY - firstPhoto.frame.maxY, 16, accuracy: 2)
         XCTAssertEqual(library.frame.minY - review.frame.maxY, 29, accuracy: 2)
-        XCTAssertEqual(dockScan.frame.minY - shutter.frame.maxY, 40, accuracy: 2)
-        XCTAssertEqual(dockScan.frame.height, 52, accuracy: 0.5)
+        // #885: no dock on the camera preview, so the shutter row is the last
+        // thing above the home indicator rather than the second to last.
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
+        XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
+        XCTAssertLessThanOrEqual(shutter.frame.maxY, window.frame.maxY)
     }
 
     func testIssue775RealAppShellRemovesDockFromLiveCameraPreviewAt402x874() {
@@ -3040,14 +3063,17 @@ final class SnapListUITests: XCTestCase {
 
         XCTAssertTrue(app.otherElements["scan.motion-reduced"].waitForExistence(timeout: 2))
 
+        // #885: the live preview carries no dock, so the controls that must
+        // stay reachable are the camera's own.
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
+        XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
+
         for control in [
             app.buttons["scan.close"],
             app.buttons["scan.flash"],
             app.buttons["scan.library"],
             app.buttons["scan.shutter"],
-            app.buttons["scan.review"],
-            app.buttons["dock.scan"],
-            app.buttons["dock.trophy-wall"]
+            app.buttons["scan.review"]
         ] {
             XCTAssertTrue(control.waitForExistence(timeout: 2))
             XCTAssertGreaterThanOrEqual(

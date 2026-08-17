@@ -509,7 +509,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .accessibilitySortPriority(10)
             }
 
-            ResponsiveFramingCorners()
+            ResponsiveFramingCorners(additionalBottomInset: framingCornersClearance)
                 .ignoresSafeArea()
                 .accessibilityHidden(true)
 
@@ -541,7 +541,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                             .transition(reduceMotion ? .identity : .opacity)
                     }
                     .padding(.horizontal, 15)
-                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 10)
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 20 : 16)
                 }
 
                 ScanZoomControlView(
@@ -549,7 +549,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     selectedLens: selectedZoomLens,
                     selectLens: selectZoomLens
                 )
-                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 16 : 12)
+                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 22 : 18)
 
                 cameraControls
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
@@ -612,6 +612,38 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             photoIDs: photoIDs,
             removePhoto: removePhoto
         )
+    }
+
+    /// How this surface's control stack differs from the one the framing
+    /// corners' base inset was tuned against.
+    ///
+    /// Every term is signed: the rows #885 adds push the corners up, and the
+    /// dock this surface does not float pulls them back down. Both added rows
+    /// are optional, so this is summed from what is actually on screen rather
+    /// than assumed.
+    private var framingCornersClearance: CGFloat {
+        let isAccessibility = dynamicTypeSize.isAccessibilitySize
+        // The base inset reserves room for a dock, because the recovery
+        // surfaces it was tuned against still float one. A live preview never
+        // does, so this surface hands that height back and the framing box
+        // grows into it rather than leaving dead space above the controls.
+        var clearance = -FloatingDockMetrics.containerHeight(for: .scan)
+        if !thumbnailURLs.isEmpty {
+            // The review row's lead-in, control, and gap to the control row,
+            // less the 28pt (38pt at accessibility sizes) the strip used to pad
+            // below itself, plus the 13pt the strip itself grew by.
+            //
+            // At accessibility sizes the strip also outgrows what the base
+            // inset assumed: its thumbnails hold their size, but the count
+            // capsule beside them is text and roughly doubles the row.
+            clearance += isAccessibility
+                ? (20 + 60 + 22) - 38 + 64 + 13
+                : (16 + 48 + 18) - 28 + 13
+        }
+        if zoomControl.isOffered {
+            clearance += isAccessibility ? 22 + 52 : 18 + 44
+        }
+        return clearance
     }
 
     // A `ZStack` that absolutely centers the shutter over an independent `HStack` once let
@@ -809,9 +841,9 @@ private struct ScanPhotoThumbnail: View {
                 ScanPhotoPlaceholder()
             }
         }
-        .frame(width: 34, height: 43)
-        .clipShape(.rect(cornerRadius: 6))
-        .overlay { RoundedRectangle(cornerRadius: 6).stroke(SnapListColorToken.onDarkSurface.color.opacity(0.9), lineWidth: 1) }
+        .frame(width: 44, height: 56)
+        .clipShape(.rect(cornerRadius: 8))
+        .overlay { RoundedRectangle(cornerRadius: 8).stroke(SnapListColorToken.onDarkSurface.color.opacity(0.9), lineWidth: 1) }
         .shadow(color: .black.opacity(0.28), radius: 4, y: 3)
         .accessibilityIdentifier("scan.photo-\(index + 1)")
         .accessibilityLabel("Photo \(index + 1) of \(count)")
@@ -892,13 +924,32 @@ struct ScanCameraVisualStateView: View {
         zoomFixture?.control ?? .wideOnly
     }
 
-    /// The fixture route renders a camera surface without the app shell, so it
-    /// floats the approved dock itself. Scan is a primary destination, so a
-    /// capture of it that carried no dock would not be the screen the product
-    /// ships. Selection is inert here because the fixture has no router, which
-    /// is what the retired per-camera dock did in this route too.
+    /// The live preview carries no dock. The recovery surfaces still do.
+    ///
+    /// This route used to float a dock over every state, on the reasoning that
+    /// Scan is a primary destination and a capture without a dock would not be
+    /// the shipping screen. The owner overruled that for the preview from the
+    /// device (#885): the X in the top left already returns the seller where
+    /// they came from, so a tab bar underneath is redundant, and the height it
+    /// was taking is the height the photo strip and Review need. The real
+    /// shell already hides the dock on the live preview, so this also stops
+    /// the fixture from diverging from what ships.
+    ///
+    /// Recovery is not the preview. `AppShellView` gives those surfaces a dock
+    /// in the real app, so the fixture keeps giving them one here.
     var body: some View {
-        surface.floatingDock(selectedTab: .scan, select: { _ in })
+        if carriesDock {
+            surface.floatingDock(selectedTab: .scan, select: { _ in })
+        } else {
+            surface
+        }
+    }
+
+    private var carriesDock: Bool {
+        switch state {
+        case .scanCameraUnavailable, .scanCameraDenied: true
+        default: false
+        }
     }
 
     @ViewBuilder
@@ -1044,45 +1095,102 @@ private actor LocalCaptureImageLoader {
     }
 }
 
+/// The four corner brackets that frame the item in the preview.
+///
+/// Drawn to match the reference the owner supplied: the arms meet in a rounded
+/// elbow rather than a sharp right angle, and the stroke is heavy enough to
+/// read against a busy photo. Round caps finish the open ends so an arm does
+/// not end in a cut edge.
 private struct FramingCorners: View {
     let length: CGFloat
+    let cornerRadius: CGFloat
+    let lineWidth: CGFloat
 
-    init(length: CGFloat = 24) {
+    init(length: CGFloat = 24, cornerRadius: CGFloat = 14, lineWidth: CGFloat = 3) {
         self.length = length
+        self.cornerRadius = cornerRadius
+        self.lineWidth = lineWidth
     }
 
     var body: some View {
         Canvas { context, size in
-            let lineWidth: CGFloat = 2
-            let color = SnapListColorToken.onDarkSurface.color.opacity(0.86)
+            let color = SnapListColorToken.onDarkSurface.color.opacity(0.95)
+            // A centered stroke would spill half its width past the canvas, so
+            // the path runs inside by that much and the bracket stays whole.
+            let inset = lineWidth / 2
+            let minX = inset
+            let minY = inset
+            let maxX = size.width - inset
+            let maxY = size.height - inset
+            // An elbow can never be rounder than the arm it joins, or wider
+            // than half the box it corners.
+            let radius = min(cornerRadius, length, min(size.width, size.height) / 2)
             var path = Path()
 
-            path.move(to: CGPoint(x: 0, y: length))
-            path.addLine(to: CGPoint(x: 0, y: 0))
-            path.addLine(to: CGPoint(x: length, y: 0))
-            path.move(to: CGPoint(x: size.width - length, y: 0))
-            path.addLine(to: CGPoint(x: size.width, y: 0))
-            path.addLine(to: CGPoint(x: size.width, y: length))
-            path.move(to: CGPoint(x: size.width, y: size.height - length))
-            path.addLine(to: CGPoint(x: size.width, y: size.height))
-            path.addLine(to: CGPoint(x: size.width - length, y: size.height))
-            path.move(to: CGPoint(x: length, y: size.height))
-            path.addLine(to: CGPoint(x: 0, y: size.height))
-            path.addLine(to: CGPoint(x: 0, y: size.height - length))
+            // Each corner is arm, elbow, arm. The quadratic's control point is
+            // the sharp corner the elbow replaces.
+            path.move(to: CGPoint(x: minX, y: minY + length))
+            path.addLine(to: CGPoint(x: minX, y: minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: minX + radius, y: minY),
+                control: CGPoint(x: minX, y: minY)
+            )
+            path.addLine(to: CGPoint(x: minX + length, y: minY))
 
-            context.stroke(path, with: .color(color), lineWidth: lineWidth)
+            path.move(to: CGPoint(x: maxX - length, y: minY))
+            path.addLine(to: CGPoint(x: maxX - radius, y: minY))
+            path.addQuadCurve(
+                to: CGPoint(x: maxX, y: minY + radius),
+                control: CGPoint(x: maxX, y: minY)
+            )
+            path.addLine(to: CGPoint(x: maxX, y: minY + length))
+
+            path.move(to: CGPoint(x: maxX, y: maxY - length))
+            path.addLine(to: CGPoint(x: maxX, y: maxY - radius))
+            path.addQuadCurve(
+                to: CGPoint(x: maxX - radius, y: maxY),
+                control: CGPoint(x: maxX, y: maxY)
+            )
+            path.addLine(to: CGPoint(x: maxX - length, y: maxY))
+
+            path.move(to: CGPoint(x: minX + length, y: maxY))
+            path.addLine(to: CGPoint(x: minX + radius, y: maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: minX, y: maxY - radius),
+                control: CGPoint(x: minX, y: maxY)
+            )
+            path.addLine(to: CGPoint(x: minX, y: maxY - length))
+
+            context.stroke(
+                path,
+                with: .color(color),
+                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+            )
         }
     }
 }
 
 private struct ResponsiveFramingCorners: View {
+    /// Extra clearance for control rows the caller shows below the preview.
+    ///
+    /// The base insets were tuned against the control stack as it stood before
+    /// #885. Rather than re-tune them for every combination of optional rows,
+    /// a caller adds exactly the height of the rows it introduced, so the
+    /// margin the corners had is the margin they keep.
+    var additionalBottomInset: CGFloat = 0
+
     var body: some View {
         GeometryReader { proxy in
             let isCompactHeight = proxy.size.height <= 700
             let horizontalInset: CGFloat = proxy.size.width <= 375 ? 28 : 34
             let topInset: CGFloat = isCompactHeight ? 112 : 140
-            let bottomInset: CGFloat = isCompactHeight ? 264 : 300
-            FramingCorners(length: isCompactHeight ? 24 : 30)
+            let bottomInset: CGFloat =
+                (isCompactHeight ? 264 : 300) + additionalBottomInset
+            FramingCorners(
+                length: isCompactHeight ? 34 : 42,
+                cornerRadius: isCompactHeight ? 12 : 15,
+                lineWidth: isCompactHeight ? 2.5 : 3
+            )
                 .frame(
                     width: max(180, proxy.size.width - (horizontalInset * 2)),
                     height: max(140, proxy.size.height - topInset - bottomInset)
