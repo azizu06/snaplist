@@ -32,8 +32,34 @@ duplicated_shard_inventory_file=${temporary_directory}/duplicated-test-shards.js
 empty_shard_inventory_file=${temporary_directory}/empty-test-shards.json
 stale_timing_inventory_file=${temporary_directory}/stale-timing-test-shards.json
 nested_test_repository=${temporary_directory}/nested-test-repository
+lock_file=${temporary_directory}/xcodebuild.lock
+serialized_bin=${temporary_directory}/serialized-bin
+serialized_active_marker=${temporary_directory}/xcodebuild-active
+serialized_overlap_log=${temporary_directory}/xcodebuild-overlap
+serialized_started_log=${temporary_directory}/xcodebuild-started
+holder_diagnostics_file=${temporary_directory}/holder-diagnostics
+waiter_diagnostics_file=${temporary_directory}/waiter-diagnostics
+holder_selector="SnapListTests/LockHolderProbeTests/testHoldsTheBuildLock"
 
-mkdir -p "$fake_bin" "$target_repository"
+mkdir -p "$fake_bin" "$target_repository" "$serialized_bin"
+
+cat > "${serialized_bin}/xcodebuild" <<'EOF'
+#!/bin/zsh
+
+if mkdir "$SNAPLIST_XCODEBUILD_ACTIVE_MARKER" 2>/dev/null; then
+  print -r -- "$$" >> "$SNAPLIST_XCODEBUILD_STARTED_LOG"
+  sleep "$SNAPLIST_XCODEBUILD_SLEEP_SECONDS"
+  rmdir "$SNAPLIST_XCODEBUILD_ACTIVE_MARKER"
+else
+  print -r -- "$$" >> "$SNAPLIST_XCODEBUILD_OVERLAP_LOG"
+  print -r -- "$$" >> "$SNAPLIST_XCODEBUILD_STARTED_LOG"
+  sleep "$SNAPLIST_XCODEBUILD_SLEEP_SECONDS"
+fi
+
+exit "${SNAPLIST_XCODEBUILD_EXIT_STATUS:-0}"
+EOF
+
+chmod +x "${serialized_bin}/xcodebuild"
 
 cat > "${fake_bin}/xcodebuild" <<'EOF'
 #!/bin/zsh
@@ -63,6 +89,7 @@ run_test_script() {
     export PATH="${fake_bin}:${PATH}"
     export SNAPLIST_XCODEBUILD_ARGUMENTS=$arguments_file
     export SNAPLIST_XCODEBUILD_WORKING_DIRECTORY=$working_directory_file
+    export SNAPLIST_IOS_LOCK_FILE=$lock_file
 
     if [[ $selector_mode == "set" ]]; then
       export SNAPLIST_IOS_ONLY_TESTING=$selector
@@ -662,6 +689,137 @@ EOF
   assert_manual_dispatch_cannot_cancel_automatic_runs "$job_run_scoped_workflow_file"
 }
 
+run_serialized_test_script() {
+  local selector=$1
+  local diagnostics_file=$2
+  local sleep_seconds=$3
+
+  (
+    export PATH="${serialized_bin}:${PATH}"
+    export SNAPLIST_IOS_LOCK_FILE=$lock_file
+    # Without these the production defaults apply, so a release regression
+    # would sit on a stale lock for two hours before exiting 75. The suite
+    # would look hung rather than red.
+    export SNAPLIST_IOS_LOCK_POLL_SECONDS=1
+    export SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS=30
+    export SNAPLIST_IOS_ONLY_TESTING=$selector
+    export SNAPLIST_XCODEBUILD_ACTIVE_MARKER=$serialized_active_marker
+    export SNAPLIST_XCODEBUILD_OVERLAP_LOG=$serialized_overlap_log
+    export SNAPLIST_XCODEBUILD_STARTED_LOG=$serialized_started_log
+    export SNAPLIST_XCODEBUILD_SLEEP_SECONDS=$sleep_seconds
+    export SNAPLIST_XCODEBUILD_EXIT_STATUS=${4:-0}
+
+    unset SNAPLIST_IOS_SHARD
+    unset SNAPLIST_IOS_REPOSITORY_ROOT
+
+    "$test_script"
+  ) >/dev/null 2>"$diagnostics_file"
+}
+
+assert_a_concurrent_invocation_waits_for_the_holder_instead_of_colliding() {
+  local holder_job holder_status waiter_status
+  local polls=0
+  local acquisition_delay
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$holder_diagnostics_file"
+  : > "$waiter_diagnostics_file"
+
+  run_serialized_test_script "$holder_selector" "$holder_diagnostics_file" 4 &
+  holder_job=$!
+
+  while [[ ! -d $serialized_active_marker ]]; do
+    sleep 0.1
+    polls=$((polls + 1))
+
+    if (( polls > 200 )); then
+      kill "$holder_job" 2>/dev/null
+      wait "$holder_job" 2>/dev/null
+      return 1
+    fi
+  done
+
+  run_serialized_test_script \
+    "SnapListTests/LockWaiterProbeTests/testWaitsForTheBuildLock" \
+    "$waiter_diagnostics_file" \
+    1
+  waiter_status=$?
+
+  wait "$holder_job"
+  holder_status=$?
+
+  if (( holder_status != 0 || waiter_status != 0 )); then
+    return 1
+  fi
+
+  if [[ -s $serialized_overlap_log ]]; then
+    return 1
+  fi
+
+  if [[ $(grep -c . "$serialized_started_log") -ne 2 ]]; then
+    return 1
+  fi
+
+  if grep -Fq -- "Waiting for the iOS build lock" "$holder_diagnostics_file"; then
+    return 1
+  fi
+
+  if ! grep -Fq -- "Waiting for the iOS build lock at ${lock_file}" \
+    "$waiter_diagnostics_file"; then
+    return 1
+  fi
+
+  if ! grep -Eq -- "held by pid [0-9]+" "$waiter_diagnostics_file"; then
+    return 1
+  fi
+
+  if ! grep -Fq -- "$holder_selector" "$waiter_diagnostics_file"; then
+    return 1
+  fi
+
+  acquisition_delay=$(
+    sed -n 's/.*Acquired the iOS build lock after \([0-9][0-9]*\)s.*/\1/p' \
+      "$waiter_diagnostics_file" | tail -n 1
+  )
+
+  [[ -n $acquisition_delay ]] && (( acquisition_delay >= 1 ))
+}
+
+assert_a_failing_build_leaves_no_lock_behind() {
+  local failing_status successor_status
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$holder_diagnostics_file"
+  : > "$waiter_diagnostics_file"
+
+  run_serialized_test_script "$holder_selector" "$holder_diagnostics_file" 0 65
+  failing_status=$?
+
+  if (( failing_status != 65 )); then
+    return 1
+  fi
+
+  if [[ -e ${lock_file}.owner ]]; then
+    return 1
+  fi
+
+  run_serialized_test_script \
+    "SnapListTests/LockSuccessorProbeTests/testTakesTheReleasedLock" \
+    "$waiter_diagnostics_file" \
+    0
+  successor_status=$?
+
+  if (( successor_status != 0 )); then
+    return 1
+  fi
+
+  ! grep -Fq -- "Waiting for the iOS build lock" "$waiter_diagnostics_file"
+}
+
 failures=0
 
 for contract_case in \
@@ -686,7 +844,9 @@ for contract_case in \
   assert_job_level_manual_dispatches_cannot_cancel_each_other \
   assert_job_level_matrix_isolation_is_accepted \
   assert_a_misspelled_job_context_is_still_rejected \
-  assert_a_job_group_unique_to_every_run_is_accepted
+  assert_a_job_group_unique_to_every_run_is_accepted \
+  assert_a_concurrent_invocation_waits_for_the_holder_instead_of_colliding \
+  assert_a_failing_build_leaves_no_lock_behind
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"
