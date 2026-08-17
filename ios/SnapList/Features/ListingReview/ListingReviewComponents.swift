@@ -846,7 +846,12 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
 /// which is what the rest of the element already does. The point is clamped
 /// into the band the glyphs occupy before it is resolved; a value tall enough
 /// to fill the element has no band to clamp into and is untouched.
-private final class ListingReviewInlineTextView: UITextView {
+///
+/// Internal rather than private so the clamp can be tested against a plain
+/// `UITextView` directly. The behavior is a coordinate calculation on a
+/// scrolling view, and the first version of it was wrong in the one state a
+/// 44pt single-line field never reaches.
+final class ListingReviewInlineTextView: UITextView {
     override func closestPosition(to point: CGPoint) -> UITextPosition? {
         super.closestPosition(to: clampedIntoGlyphs(point))
     }
@@ -862,13 +867,24 @@ private final class ListingReviewInlineTextView: UITextView {
     /// view is free to grow to its own bounds. One point inside each edge, so
     /// the clamped point resolves against the line rather than against the
     /// boundary between it and the empty room.
-    private func clampedIntoGlyphs(_ point: CGPoint) -> CGPoint {
+    ///
+    /// Every term here is in the text view's own coordinate space, and for a
+    /// `UIScrollView` that space is the content, not the window onto it:
+    /// `bounds.origin` is `contentOffset`, so the point handed in already
+    /// carries the scroll. The band must therefore not carry it a second time.
+    /// The first version of this subtracted `contentOffset.y` from both edges,
+    /// which left the band correct at rest and dragged it up by the scroll
+    /// distance everywhere else: a description scrolled 200pt answered a tap on
+    /// its glyphs 119 characters earlier than `UITextView` does. `bottom > top`
+    /// cannot catch that, because the gap between the two is what the offset
+    /// cancels out of.
+    func clampedIntoGlyphs(_ point: CGPoint) -> CGPoint {
         guard bounds.width > 0 else { return point }
         let glyphs = sizeThatFits(
             CGSize(width: bounds.width, height: .greatestFiniteMagnitude)
         ).height
-        let top = textContainerInset.top + 1 - contentOffset.y
-        let bottom = glyphs - textContainerInset.bottom - 1 - contentOffset.y
+        let top = textContainerInset.top + 1
+        let bottom = glyphs - textContainerInset.bottom - 1
         guard bottom > top else { return point }
         return CGPoint(x: point.x, y: min(max(point.y, top), bottom))
     }
