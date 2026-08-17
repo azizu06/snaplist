@@ -1,5 +1,19 @@
 import XCTest
 
+/// A control laid out at exactly the floor comes back from XCUITest as
+/// `43.99999999999994`, because the height is the sum of a scaled font
+/// metric and two paddings. Rounding to the nearest point keeps the
+/// comparison at the scale the floor is written in. A control that is
+/// genuinely short still fails: 43.4 rounds to 43. Shared across the UI test
+/// target so every touch-target assertion rounds the same way before
+/// comparing to 44 — a raw comparison here and a rounded one elsewhere could
+/// go red on one path and green on the other for the same control.
+enum TouchTargetFloor {
+    static func isMet(_ measurement: CGFloat) -> Bool {
+        measurement.rounded() >= 44
+    }
+}
+
 final class ListingReviewUITests: XCTestCase {
     private let loadedTreeTimeout: TimeInterval = 30
 
@@ -759,24 +773,28 @@ final class ListingReviewUITests: XCTestCase {
         assertMeetsTouchTargetFloor(back.frame.width, frameReceipt)
     }
 
-    /// A control laid out at exactly the floor comes back from XCUITest as
-    /// 43.99999999999994, because the height is the sum of a scaled font
-    /// metric and two paddings. Rounding to the nearest point keeps the
-    /// assertion at the scale the floor is written in. A control that is
-    /// genuinely short still fails: 43.4 rounds to 43.
     private func assertMeetsTouchTargetFloor(
         _ measurement: CGFloat,
         _ receipt: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        XCTAssertGreaterThanOrEqual(
-            measurement.rounded(),
-            44,
+        XCTAssertTrue(
+            TouchTargetFloor.isMet(measurement),
             receipt,
             file: file,
             line: line
         )
+    }
+
+    /// The exact value a control laid out at the floor comes back as (see
+    /// `TouchTargetFloor`'s doc comment). Proves both touch-target helpers —
+    /// this one and `EbayPublishUITests.assertHittableButton` — now round the
+    /// same way, since before this fix one of them compared the raw value and
+    /// would have gone red here while the other stayed green.
+    func testTouchTargetFloorRoundsBeforeComparing() {
+        XCTAssertTrue(TouchTargetFloor.isMet(43.99999999999994))
+        XCTAssertFalse(TouchTargetFloor.isMet(43.4))
     }
 
     /// `XCUIElement.value` is `Any?`, so `String(describing:)` on it renders
