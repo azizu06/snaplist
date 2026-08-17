@@ -33,14 +33,25 @@ screen, and the frames in `marketing.css` are built to that number so `object-fi
 nothing to trim.
 
 All five have the OS status bar and, where the canvas draws one, the Dynamic Island removed before
-capture, so app content starts at the very top edge of the glass. Aziz asked for this after putting
-the page next to Cal AI, whose device render carries neither: "use that extra space instead of the
-dynamic notch for room." Scan gained the most, because its status bar was white text sitting on a
-white wall and its island was a black pill over the viewfinder; both are simply gone now rather than
-faint. The removal is structural rather than another `data-dc-tpl` list, because only `scanfix` is
-plain markup and the other four build their phones from templates where the row has no stable
-attribute until the board renders. It runs against the already-resolved live screen and throws if it
-cannot find a status bar, so a silent miss cannot ship a screen that disagrees with the other four.
+capture. Aziz asked for this after putting the page next to Cal AI, whose device render carries
+neither: "use that extra space instead of the dynamic notch for room." Scan gained the most, because
+its status bar was white text sitting on a white wall and its island was a black pill over the
+viewfinder; both are simply gone now rather than faint. The removal is structural rather than another
+`data-dc-tpl` list, because only `scanfix` is plain markup and the other four build their phones from
+templates where the row has no stable attribute until the board renders. It runs against the
+already-resolved live screen and throws if it cannot find a status bar, so a silent miss cannot ship
+a screen that disagrees with the other four.
+
+The row is hidden with `visibility`, not `display`, and that word is the whole of a second
+correction. Three of the five canvases build the row as a static element in normal flow, so
+`display: none` deleted its 54px of layout along with its glyphs and every header below it slid up
+flush against the glass. Aziz, looking at all five at once: "it's way too close to the top edge where
+the headline and stuff is in the trophy wall headline and then the profile ... moving it down a bit
+so there's breathing room." Keeping the box and suppressing only the paint returns each screen to the
+safe-area geometry it was actually laid out against, rather than inventing a new inset. On `scanfix`
+and `aefix`, whose rows are absolutely positioned, it is a no-op, which is correct: they never spent
+the space to begin with, and re-encoding proved it, with those two coming out byte-identical while
+the other three changed.
 
 Three of the five need the page put into a particular state first, and the script asserts each one
 rather than trusting it. Publish clicks its first row. Trophy Wall substitutes a settled-wall state
@@ -62,9 +73,8 @@ Scrolling could not fix it, since four rows of 228 against a 732 viewport always
 Growing the phone could not either, because the capture is a fixed screen that scales
 proportionally and takes the sliver with it. So `TRIM_ROW` removes the last row at capture time and
 asserts its way there: eight tiles, four distinct row tops, exactly two hidden, and the remaining
-grid must end above the screen edge or it throws. With the status bar already stripped the content
-sits ~54px higher, so the last surviving row ends at 743 of 844 and leaves clearance under it for
-the dock. Three complete rows ship. The horizontal gutters were never the problem and measure
+grid must end above the screen edge or it throws. The last surviving row ends at 797 of 844 and
+leaves clearance under it for the dock. Three complete rows ship. The horizontal gutters were never the problem and measure
 symmetric at 16px in the canvas and 13 to 14px in the rendered frame.
 
 **The App Store panel set is not touched.** `captures/appstore-sb/` stays exactly as approved. This
