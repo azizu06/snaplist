@@ -1,3 +1,7 @@
+import { generateKeyPairSync } from "node:crypto";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearApnsTestEnv, configureApnsTestEnv } from "@/test/apns-test-config";
 import { createSellerPushDispatcherFor } from "./composition";
@@ -193,5 +197,91 @@ describe("building the sender once per process, not once per caller", () => {
     createSellerPushDispatcherFor(recordingClient());
 
     expect(createHttpApnsSender).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Issue #891 standards review, second pass. Nothing proved the self-healing
+ * behavior itself, end to end: a transient `resolveApnsConfig` failure — one
+ * that is not an `ApnsMisconfiguredError` — must not be cached, so the very
+ * next call re-resolves and gets a working sender rather than staying stuck
+ * reporting the same failure for the life of the process.
+ *
+ * This drives the real `resolveApnsConfig` from ./apns, not a mock of it, so
+ * a regression that mislabels the read-failure branch as
+ * `ApnsMisconfiguredError` (the exact bug this fix closed) fails this test
+ * too, not just the unit test of `resolveApnsConfig` in apns.test.ts.
+ * `createHttpApnsSender` and the transport are mocked only to skip real JWT
+ * signing and HTTP/2, neither of which this test is about.
+ */
+describe("recovering from a transient resolveApnsConfig failure", () => {
+  afterEach(() => {
+    vi.doUnmock("./apns");
+    vi.resetModules();
+    configureApnsTestEnv();
+  });
+
+  it("re-resolves and reaches the database once a transient key-read failure clears", async () => {
+    vi.resetModules();
+    const createHttpApnsSender = vi.fn(() => ({ send: vi.fn() }));
+    vi.doMock("./apns", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./apns")>();
+      return {
+        ...actual,
+        createHttpApnsSender,
+        createApnsHttp2Transport: vi.fn(() => ({})),
+      };
+    });
+    const { createSellerPushDispatcherFor } = await import("./composition");
+
+    // A key file that does not exist yet — the mid-mount or mid-rotation
+    // moment the fix in #891 exists to survive.
+    const keyPath = join(
+      tmpdir(),
+      `snaplist-transient-apns-test-${process.pid}.p8`,
+    );
+    if (existsSync(keyPath)) unlinkSync(keyPath);
+    process.env.APNS_KEY_ID = "TEST_KEY_ID";
+    process.env.APNS_TEAM_ID = "TEST_TEAM_ID";
+    process.env.APNS_BUNDLE_ID = "com.snaplist.app.test";
+    process.env.APNS_AUTH_KEY_PATH = keyPath;
+
+    try {
+      const log = vi.fn();
+      const firstClient = recordingClient();
+      await createSellerPushDispatcherFor(firstClient, log).listingReady({
+        userId: "user-1",
+        runId: "run-1",
+        itemName: "Lamp",
+      });
+
+      expect(log).toHaveBeenCalledWith(
+        "push_not_configured",
+        expect.objectContaining({
+          reason: expect.stringContaining("APNS_AUTH_KEY_PATH"),
+        }),
+      );
+      expect(firstClient.rpc).not.toHaveBeenCalled();
+
+      // The key lands — the mount finishes, the rotation completes.
+      writeFileSync(
+        keyPath,
+        generateKeyPairSync("ec", { namedCurve: "P-256" })
+          .privateKey.export({ format: "pem", type: "pkcs8" })
+          .toString(),
+      );
+
+      const secondClient = recordingClient();
+      await createSellerPushDispatcherFor(secondClient, log).listingReady({
+        userId: "user-1",
+        runId: "run-1",
+        itemName: "Lamp",
+      });
+
+      expect(secondClient.rpc).toHaveBeenCalled();
+      expect(createHttpApnsSender).toHaveBeenCalledTimes(1);
+    } finally {
+      if (existsSync(keyPath)) unlinkSync(keyPath);
+    }
   });
 });

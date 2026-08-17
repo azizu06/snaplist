@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import { beforeAll, describe, expect, it } from "vitest";
 import { decodeProtectedHeader, decodeJwt } from "jose";
 import {
+  ApnsMisconfiguredError,
   createApnsHttp2Transport,
   createHttpApnsSender,
   resolveApnsConfig,
@@ -376,6 +377,35 @@ describe("starting up without the credential", () => {
     expect(() => resolveApnsConfig({})).toThrow(
       /APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_AUTH_KEY_PATH/,
     );
+  });
+
+  it("throws ApnsMisconfiguredError for a missing variable, and nothing else (#891)", () => {
+    // The composition root caches a failure only when it is this class. A read
+    // failure or a malformed key file must never throw it, or the cache stops
+    // self-healing and the exact bug #891 fixed comes back.
+    expect(() => resolveApnsConfig({})).toThrow(ApnsMisconfiguredError);
+  });
+
+  it("does not classify a key-file read failure as a misconfiguration (#891)", () => {
+    const env = {
+      APNS_KEY_ID: KEY_ID,
+      APNS_TEAM_ID: TEAM_ID,
+      APNS_BUNDLE_ID: BUNDLE_ID,
+      APNS_AUTH_KEY_PATH: "/keys/AuthKey.p8",
+    };
+    const readThatFails = () => {
+      throw new Error("EMFILE");
+    };
+
+    let caught: unknown;
+    try {
+      resolveApnsConfig(env, readThatFails);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught).not.toBeInstanceOf(ApnsMisconfiguredError);
   });
 
   it("refuses a configuration that is missing only the key material", () => {
