@@ -176,7 +176,21 @@ actor NativeIntake {
     static let writingOptions: Data.WritingOptions = [.atomic, .completeFileProtection]
 
     private struct Scope: Equatable {
+        /// What the directory component names, which is not the same question
+        /// as whether a principal owns it.
+        ///
+        /// #855. An App Attest key and the anonymous installation id both name
+        /// this installation, so moving between them renames the seller's own
+        /// directory. A Clerk subject names an account, and moving to or from
+        /// one is a different person taking the device over. The component is a
+        /// digest, so this cannot be read back off the path.
+        enum Authority: Equatable {
+            case sellerAccount
+            case device
+        }
+
         let directoryComponent: String
+        let authority: Authority
         /// Whether this scope is filed under a seller principal — a Clerk
         /// subject or a persisted App Attest key — rather than under the
         /// installation. The directory component is a digest, so nothing
@@ -653,6 +667,7 @@ actor NativeIntake {
         let root = nextScope.map {
             applicationSupportRoot.appendingPathComponent($0.directoryComponent, isDirectory: true)
         } ?? ephemeralRoot
+        adoptDepartingDeviceBundle(into: nextScope, at: root)
         active = loadBundle(scope: nextScope, root: root, activationID: UUID())
         if shouldDismissReview {
             publish(.dismissActivePhotoReview)
@@ -661,13 +676,107 @@ actor NativeIntake {
         rescheduleRetention()
     }
 
+    /// Carries the intake the seller has already staged across a change to the
+    /// name this device is filed under.
+    ///
+    /// #855. Renewing a stale App Attest key, and discarding a pending one Apple
+    /// rejected, both change the resolved scope digest, and the bundle directory
+    /// is derived from that digest. Without this the staged photos stay in the
+    /// departing directory, the arriving one loads empty, and a seller who did
+    /// nothing but tap Start listing is returned to Scan with no item.
+    ///
+    /// Only a device-to-device move qualifies. A Clerk subject names an account
+    /// rather than a phone, so crossing that boundary in either direction would
+    /// hand one person another's photos; those keep opening their own directory,
+    /// exactly as before. An arriving scope that already owns a bundle keeps it —
+    /// a key that comes back is not authority to overwrite what it left behind.
+    ///
+    /// Moving `Current` is the whole migration because nothing inside it names
+    /// the departing directory: `loadPhotos` and `loadVoice` re-derive every
+    /// asset URL from the arriving root and keep only the stored filename. The
+    /// revision, expiry, photo identities and bytes therefore all arrive intact,
+    /// so the photo set the guest allowance and AI-item credit are fingerprinted
+    /// over is the same set, and a scope change still spends nothing.
+    ///
+    /// What is left behind is a scope root with no `Current`, which
+    /// `readStoredBundle` reports as `.malformed`. The retention sweep this
+    /// call's caller reschedules already removes exactly that, along with any
+    /// deferred unmatched voice under it at its own original deadline.
+    ///
+    /// Fails closed on the bytes rather than on the directories. A move that
+    /// does not happen leaves `Current` in the departing root, where it keeps
+    /// its own expiry and stays readable for the rest of its window, which is
+    /// what happened before this existed. `prepareRoot` runs first, so a failed
+    /// move can leave the arriving root created and empty; `readStoredBundle`
+    /// reports that as `.malformed` and the sweep removes it.
+    ///
+    /// Only `Current` travels. The sibling `ItemRunSubmission/attempt.json` is
+    /// deliberately left behind: it holds an idempotency key minted under the
+    /// departing App Attest key, and replaying it under the key that replaced it
+    /// is a question about credit accounting rather than about staged photos.
+    /// #935 owns that decision.
+    private func adoptDepartingDeviceBundle(into arriving: Scope?, at root: URL) {
+        guard let arriving,
+              arriving.authority == .device,
+              let departing = active,
+              let departingScope = departing.scope,
+              departingScope.authority == .device,
+              departingScope.directoryComponent != arriving.directoryComponent
+        else {
+            return
+        }
+        let source = departing.root.appendingPathComponent(
+            "Current",
+            isDirectory: true
+        )
+        let destination = root.appendingPathComponent(
+            "Current",
+            isDirectory: true
+        )
+        do {
+            try Self.validateContainedPath(
+                source,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+            try Self.validateContainedPath(
+                destination,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+            guard fileManager.fileExists(atPath: source.path),
+                  !fileManager.fileExists(atPath: destination.path) else {
+                return
+            }
+            try Self.prepareRoot(
+                root,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+            try fileManager.moveItem(at: source, to: destination)
+        } catch {
+            return
+        }
+    }
+
     private func resolveScope(_ identity: Identity) throws -> Scope? {
         let authenticated = Self.usable(identity.verifiedClerkSubject)
         let guest = Self.usable(identity.persistedAppAttestKeyID)
-        let taggedIdentity = authenticated.map { ("clerk-subject", $0) }
-            ?? guest.map { ("app-attest-key-id", $0) }
-        if let (tag, value) = taggedIdentity {
-            return Self.scope(tag: tag, value: value, isPrincipalBound: true)
+        if let authenticated {
+            return Self.scope(
+                tag: "clerk-subject",
+                value: authenticated,
+                authority: .sellerAccount,
+                isPrincipalBound: true
+            )
+        }
+        if let guest {
+            return Self.scope(
+                tag: "app-attest-key-id",
+                value: guest,
+                authority: .device,
+                isPrincipalBound: true
+            )
         }
         switch identitySource.anonymousScopePersistence {
         case .processPrivate:
@@ -677,6 +786,7 @@ actor NativeIntake {
             return Self.scope(
                 tag: "anonymous-installation-id",
                 value: identity.id.uuidString.lowercased(),
+                authority: .device,
                 isPrincipalBound: false
             )
         }
@@ -685,6 +795,7 @@ actor NativeIntake {
     private static func scope(
         tag: String,
         value: String,
+        authority: Scope.Authority,
         isPrincipalBound: Bool
     ) -> Scope {
         let tagged = ["dev.snaplist.native-intake-principal", "v1", tag, value]
@@ -694,6 +805,7 @@ actor NativeIntake {
             .joined()
         return Scope(
             directoryComponent: "v1-\(digest)",
+            authority: authority,
             isPrincipalBound: isPrincipalBound
         )
     }

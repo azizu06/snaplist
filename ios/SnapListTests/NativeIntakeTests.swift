@@ -64,6 +64,293 @@ final class NativeIntakeTests: XCTestCase {
         let returnedAuthenticated = try await session.nextSnapshot()
         XCTAssertEqual(returnedAuthenticated.photos.count, 1)
     }
+    /// #855, the path that reaches this through key renewal. A guest with a
+    /// verified key and an expired bearer taps Start listing.
+    /// `AppAttestClient.attestInstallation` finds the key stale, removes it and
+    /// enrolls a replacement, and the new key id resolves a different scope
+    /// digest. The intake files its bundle under a directory derived from that
+    /// digest, so the photos the seller staged seconds earlier stay in the
+    /// departing directory unless the arriving scope takes them with it.
+    func testRenewingTheAppAttestKeyKeepsTheGuestsStagedPhotosAndVoice() async throws {
+        let harness = NativeIntakeHarness(
+            identity: .init(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "guest-key-that-goes-stale"
+            )
+        )
+        addTeardownBlock { harness.cleanUp() }
+        let session = try await installationScopedSession(harness)
+        assertEmpty(session.snapshot)
+        _ = try await session.commit(
+            .addPhotos([
+                harness.photoInput(seed: 0),
+                harness.photoInput(seed: 1)
+            ])
+        )
+        let voiceBytes = Data("a renewal must not strand this".utf8)
+        let complete = try await session.commit(
+            .setVoice(.init(duration: 4.5, loadData: { voiceBytes }))
+        )
+        XCTAssertEqual(complete.photos.count, 2)
+        let stagedPhotoBytes = try complete.photos.map {
+            try Data(contentsOf: $0.photoURL)
+        }
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(id: "guest-key-after-renewal", state: .verified)
+        )
+        let renewed = try await session.nextSnapshot()
+        XCTAssertNotEqual(
+            renewed.version.activationID, complete.version.activationID,
+            """
+            Control: a renewed key is still a principal transition, so the \
+            submission built against the departing bearer has to be cancelled \
+            and reset rather than allowed to continue.
+            """
+        )
+        XCTAssertEqual(
+            renewed.photos.map(\.id), complete.photos.map(\.id),
+            """
+            The seller staged these photos seconds ago and did nothing to \
+            discard them. Renewing this device's key renames the directory \
+            they are filed under; it does not hand them to someone else.
+            """
+        )
+        XCTAssertEqual(
+            try renewed.photos.map { try Data(contentsOf: $0.photoURL) },
+            stagedPhotoBytes,
+            "The arriving scope named a photo file but not the staged bytes."
+        )
+        for photo in renewed.photos {
+            XCTAssertTrue(
+                files.fileExists(atPath: photo.thumbnailURL.path),
+                "The thumbnail is unreachable from the arriving scope."
+            )
+        }
+        XCTAssertEqual(renewed.voice?.duration, 4.5)
+        XCTAssertEqual(
+            try renewed.voice.map { try Data(contentsOf: $0.mediaURL) },
+            voiceBytes,
+            "The voice note rides in the same bundle and has to arrive with it."
+        )
+    }
+    /// #855, the path that reaches this through enrollment rejection. #843 item
+    /// 5 discards a pending key when Apple or the server rejects it, and the
+    /// intake scopes by whatever key is persisted with no state filter. The
+    /// removal therefore resolves the scope back to the anonymous installation
+    /// digest, which is a different directory from the pending key's.
+    func testAnEnrollmentRejectionKeepsThePendingGuestsStagedPhotos() async throws {
+        let harness = NativeIntakeHarness(identity: .none)
+        addTeardownBlock { harness.cleanUp() }
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(id: "pending-enrollment-key", state: .pending)
+        )
+        let session = try await installationScopedSession(harness)
+        assertEmpty(session.snapshot)
+        let staged = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 2)])
+        )
+        XCTAssertTrue(staged.isPrincipalBound)
+        let stagedBytes = try Data(
+            contentsOf: XCTUnwrap(staged.photos.first).photoURL
+        )
+        // `AppAttestClient.enrollNewKey`'s `rejected(_:)`: the pending key is
+        // removed and nothing replaces it.
+        await harness.identity.set(clerkSubject: nil, appAttestKey: nil)
+        let rejected = try await session.nextSnapshot()
+        XCTAssertFalse(
+            rejected.isPrincipalBound,
+            """
+            Control: the rejection really did drop this intake back onto the \
+            installation, which is what #843 item 3 makes submission read.
+            """
+        )
+        XCTAssertEqual(
+            rejected.photos.map(\.id), staged.photos.map(\.id),
+            """
+            Apple refusing to attest a key says nothing about who staged these \
+            photos. The seller is the same person on the same phone.
+            """
+        )
+        XCTAssertEqual(
+            try rejected.photos.map { try Data(contentsOf: $0.photoURL) },
+            [stagedBytes],
+            "The installation scope named a photo file but not the staged bytes."
+        )
+    }
+    /// Control for #855. Signing in is a different principal taking the device
+    /// over, not a rename of it, so the guest bundle stays where it is and the
+    /// account opens its own — before and after adoption exists.
+    func testSigningInLeavesTheGuestBundleUnderTheGuestScope() async throws {
+        let harness = NativeIntakeHarness(
+            identity: .init(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "guest-key-before-sign-in"
+            )
+        )
+        addTeardownBlock { harness.cleanUp() }
+        let session = try await installationScopedSession(harness)
+        let staged = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 3)])
+        )
+        XCTAssertEqual(staged.photos.count, 1)
+        await harness.identity.set(
+            clerkSubject: "user_native_intake_855",
+            appAttestKey: .init(id: "guest-key-before-sign-in", state: .verified)
+        )
+        assertEmpty(try await session.nextSnapshot())
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(id: "guest-key-before-sign-in", state: .verified)
+        )
+        let returned = try await session.nextSnapshot()
+        XCTAssertEqual(
+            returned.photos.map(\.id), staged.photos.map(\.id),
+            """
+            The guest bundle has to still be under the guest scope after the \
+            account scope opened and closed over it.
+            """
+        )
+        XCTAssertEqual(
+            try returned.photos.map { try Data(contentsOf: $0.photoURL) },
+            try staged.photos.map { try Data(contentsOf: $0.photoURL) }
+        )
+    }
+    /// A key that comes back is not authority to overwrite what it left behind.
+    ///
+    /// This one passes on the parent commit by construction — the parent adopts
+    /// nothing, so the arriving scope trivially keeps its own bundle. It is a
+    /// regression guard rather than evidence for #855: it holds the rule that
+    /// the arriving bundle wins, which an adoption written as remove-then-move
+    /// would break silently, taking a seller's item with it.
+    func testAScopeThatAlreadyHoldsABundleKeepsItsOwnRatherThanTheArrivingOne()
+        async throws
+    {
+        let harness = NativeIntakeHarness(
+            identity: .init(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "guest-key-that-comes-back"
+            )
+        )
+        addTeardownBlock { harness.cleanUp() }
+        let session = try await installationScopedSession(harness)
+        let original = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 5)])
+        )
+        XCTAssertEqual(original.photos.count, 1)
+        // Sign in, which parks the first bundle under the guest scope, then sign
+        // out onto a *different* key so the second bundle is built somewhere
+        // else. Neither hop adopts: an account is not a phone.
+        await harness.identity.set(
+            clerkSubject: "user_native_intake_855_return",
+            appAttestKey: .init(
+                id: "guest-key-that-comes-back",
+                state: .verified
+            )
+        )
+        assertEmpty(try await session.nextSnapshot())
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(id: "guest-key-somewhere-else", state: .verified)
+        )
+        assertEmpty(try await session.nextSnapshot())
+        let elsewhere = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 6)])
+        )
+        XCTAssertNotEqual(
+            elsewhere.photos.map(\.id), original.photos.map(\.id),
+            "Control: the second bundle has to be a different item to tell apart."
+        )
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(
+                id: "guest-key-that-comes-back",
+                state: .verified
+            )
+        )
+        let returned = try await session.nextSnapshot()
+        XCTAssertEqual(
+            returned.photos.map(\.id), original.photos.map(\.id),
+            """
+            Both roots hold a bundle here, and the one the seller is arriving \
+            at is the one they left there. Adoption has to decline rather than \
+            replace it.
+            """
+        )
+        XCTAssertEqual(
+            try returned.photos.map { try Data(contentsOf: $0.photoURL) },
+            try original.photos.map { try Data(contentsOf: $0.photoURL) }
+        )
+    }
+    /// #855 acceptance: leaving Photo Review and what the seller finds after it
+    /// have to agree. A device-identity change still dismisses the review — the
+    /// bearer the submission behind it was built against is gone, and the
+    /// departing generation deliberately publishes no retention to explain
+    /// itself — but the Scan it lands on now holds the same item, so the silence
+    /// is honest instead of a loss the seller has to discover.
+    func testADeviceIdentityChangeLeavesPhotoReviewOntoAScanHoldingTheItem() async throws {
+        let harness = NativeIntakeHarness(
+            identity: .init(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "guest-key-under-review"
+            )
+        )
+        addTeardownBlock { harness.cleanUp() }
+        let session = try await installationScopedSession(harness)
+        let staged = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 4)])
+        )
+        let entered = await session.perform(
+            .photoReviewEntered(activationID: staged.version.activationID)
+        )
+        XCTAssertEqual(entered, .committed)
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(
+                id: "guest-key-under-review-renewed",
+                state: .verified
+            )
+        )
+        let dismissal = await session.nextEvent()
+        XCTAssertEqual(
+            dismissal, .dismissActivePhotoReview,
+            """
+            Control: the submission on this screen was built against a bearer \
+            the renewal retired, so the shell still has to leave the departed \
+            intake.
+            """
+        )
+        let arrived = try await session.nextSnapshot()
+        XCTAssertEqual(
+            arrived.photos.map(\.id), staged.photos.map(\.id),
+            """
+            And the Scan that dismissal lands on has to hold the item the \
+            seller was looking at a moment ago.
+            """
+        )
+    }
+    /// The production identity source, whose anonymous scope is the durable
+    /// installation rather than a process-private one. #855's second path
+    /// resolves to exactly that scope, so the default harness source — which
+    /// falls to the ephemeral root instead — cannot express it.
+    private func installationScopedSession(
+        _ harness: NativeIntakeHarness
+    ) async throws -> NativeIntakeTestSession {
+        let inputs = harness.identity
+        return try await NativeIntakeTestSession(
+            NativeIntake(
+                applicationSupportDirectory: harness.applicationSupport,
+                identitySource:
+                    ClerkAuthenticationComposition.makeNativeIntakeIdentitySource(
+                        keyStore: inputs,
+                        verifiedClerkSubject: inputs.clerkSubject,
+                        clerkChanges: inputs.changes,
+                        appAttestChanges: { AsyncStream { $0.finish() } }
+                    )
+            )
+        )
+    }
     func testAnAppAttestKeyChangePostedBeforeAnyoneIteratesIsStillDelivered() async {
         let center = NotificationCenter()
         let changes = ClerkAuthenticationComposition.appAttestChanges(center: center)
