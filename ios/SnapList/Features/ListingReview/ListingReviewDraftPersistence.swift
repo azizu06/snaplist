@@ -50,7 +50,13 @@ struct ListingReviewDraft: Codable, Equatable, Sendable {
     }
 
     static func isIdentitySpecificName(_ name: String) -> Bool {
-        saveContractKey(for: name).hasPrefix("reserved:")
+        // `hasRequiredCopy` trims before it takes the key and this did not, so
+        // a name that arrived as " Brand" read as an ordinary specific. It
+        // decides both the edit route and the store's write guard, and a miss
+        // here writes an identity value without rerunning the price.
+        saveContractKey(
+            for: name.trimmingCharacters(in: .whitespacesAndNewlines)
+        ).hasPrefix("reserved:")
     }
 
     private static func saveContractKey(for name: String) -> String {

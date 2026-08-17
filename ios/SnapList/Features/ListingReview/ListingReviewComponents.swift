@@ -667,10 +667,60 @@ struct ListingReviewInlineField<Content: View>: View {
     }
 }
 
+/// A free-text value the seller has typed but that has not reached the draft.
+enum ListingReviewInlineEdit: Hashable {
+    case title
+    case description
+    case specific(String)
+
+    /// Dictionaries have no order, and a flush that writes in a different
+    /// order each time is a flush that cannot be tested.
+    fileprivate var sortKey: String {
+        switch self {
+        case .title: "0"
+        case .description: "1"
+        case .specific(let name): "2\(name)"
+        }
+    }
+}
+
+/// Everything typed into an inline field and not yet committed.
+///
+/// This is deliberately not state inside the field. Item specifics is a pushed
+/// screen, so a field's own state dies with the pop, and a commit fired from a
+/// disappearing view is a commit nobody can wait for. The review screen owns
+/// this instead and hands it down, so Back, Done, and losing focus all reach
+/// the same pending text and can await the same write.
+@MainActor
+@Observable
+final class ListingReviewInlineEdits {
+    var typed: [ListingReviewInlineEdit: String] = [:]
+
+    /// Sends every pending value through the store's own write path.
+    ///
+    /// Identity specifics never appear here. They have no typed field, and
+    /// `setSpecific` refuses them regardless, so the coherent-correction seam
+    /// holds even if one ever did.
+    func flush(into store: ListingReviewStore) async {
+        for (field, text) in typed.sorted(by: { $0.key.sortKey < $1.key.sortKey }) {
+            switch field {
+            case .title:
+                await store.setTitle(text)
+            case .description:
+                await store.setDescription(text)
+            case .specific(let name):
+                await store.setSpecific(name: name, value: text)
+            }
+            typed[field] = nil
+        }
+    }
+}
+
 /// A free-text value typed where it sits, with no pushed screen behind it.
 ///
-/// The value commits when the field gives up focus rather than on every
-/// keystroke. Staging per keystroke would persist the draft to disk once per
+/// The field only records what it holds. It never writes: the screen that owns
+/// the pending edits decides when they land, which is what keeps the draft off
+/// the keystroke path. Staging per keystroke would persist to disk once per
 /// character, and `setSpecific` restores the suggested value for an empty
 /// string, so it would also make clearing a field to retype it impossible.
 struct ListingReviewInlineTextField<Focus: Hashable>: View {
@@ -678,9 +728,10 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
     let value: String
     let pending: Bool
     let identifier: String
+    let field: ListingReviewInlineEdit
+    let edits: ListingReviewInlineEdits
     let focusValue: Focus
     let lineLimit: ClosedRange<Int>
-    let commit: (String) async -> Void
     @FocusState.Binding var focus: Focus?
     @State private var text: String
 
@@ -689,18 +740,20 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
         value: String,
         pending: Bool = false,
         identifier: String,
+        field: ListingReviewInlineEdit,
+        edits: ListingReviewInlineEdits,
         focusValue: Focus,
         focus: FocusState<Focus?>.Binding,
-        lineLimit: ClosedRange<Int> = 1...4,
-        commit: @escaping (String) async -> Void
+        lineLimit: ClosedRange<Int> = 1...4
     ) {
         self.label = label
         self.value = value
         self.pending = pending
         self.identifier = identifier
+        self.field = field
+        self.edits = edits
         self.focusValue = focusValue
         self.lineLimit = lineLimit
-        self.commit = commit
         _focus = focus
         _text = State(initialValue: value)
     }
@@ -720,15 +773,15 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
                 )
                 .accessibilityIdentifier(identifier)
         }
-        .onChange(of: focus) { previous, _ in
-            guard previous == focusValue, text != value else { return }
-            Task { await commit(text) }
+        .onChange(of: text) { _, typed in
+            edits.typed[field] = typed == value ? nil : typed
         }
         // The store can refuse or normalize what was committed, so the field
         // takes the settled value back rather than keeping what was typed.
         .onChange(of: value) { _, updated in
             guard focus != focusValue else { return }
             text = updated
+            edits.typed[field] = nil
         }
     }
 }
@@ -781,7 +834,7 @@ struct ListingReviewChoiceField: View {
                     Image(systemName: accessory.symbol)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(
-                            accessory == .identity
+                            enabled && accessory == .identity
                                 ? SnapListColorToken.action.color
                                 : SnapListColorToken.textTertiary.color
                         )

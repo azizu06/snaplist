@@ -610,6 +610,43 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertEqual(requests.count, 0)
     }
 
+    func testFlushingPendingEditsReachesTheDraftBeforeDoneReadsIt() async throws {
+        // An inline field holds what was typed until something flushes it.
+        // Done and Back both await this, so a seller who types and leaves
+        // without dismissing the keyboard does not lose the edit.
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        let edits = ListingReviewInlineEdits()
+        edits.typed[.title] = "Sony WH-1000XM4 over-ear headphones"
+        edits.typed[.description] = "Worn a handful of times."
+        edits.typed[.specific("Color")] = "Midnight"
+        // An identity key never gets a typed field, so nothing should ever put
+        // one here. If something does, the store's own guard is what refuses
+        // it, and the flush must not become a second way in.
+        edits.typed[.specific("Brand")] = "Typed by hand"
+
+        await edits.flush(into: store)
+
+        XCTAssertTrue(edits.typed.isEmpty)
+        XCTAssertEqual(
+            store.draft?.title,
+            "Sony WH-1000XM4 over-ear headphones"
+        )
+        XCTAssertEqual(store.draft?.description, "Worn a handful of times.")
+        XCTAssertEqual(
+            store.draft?.specifics.map(\.value),
+            ["Sony", "WH-1000XM4", "very-good", "Midnight"]
+        )
+        XCTAssertTrue(store.isDirty)
+    }
+
     private func makeStore(
         service: any ListingReviewServing,
         persistence: any ListingReviewDraftPersisting =

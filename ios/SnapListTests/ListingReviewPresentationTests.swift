@@ -97,7 +97,7 @@ final class ListingReviewPresentationTests: XCTestCase {
         XCTAssertTrue(SnapListPageDots.isVisible(pageCount: 2))
     }
 
-    func testANonIdentitySpecificEditsInPlaceAndAnIdentityOneReachesGuidedCorrection() {
+    func testTheEditingRouteSendsOnlyNonIdentitySpecificsToAnInPlaceField() {
         // The route is the whole contract. A reserved identity key can never
         // resolve to an in-place edit, because a typed value would bypass the
         // pricing rerun, the composite confidence, and the generator.
@@ -131,6 +131,22 @@ final class ListingReviewPresentationTests: XCTestCase {
                 ),
                 .spent,
                 reserved
+            )
+        }
+    }
+
+    func testAnIdentityNameWithStrayWhitespaceStillRoutesToGuidedCorrection() {
+        // Generated specifics are not guaranteed to arrive tidy, and an
+        // untrimmed " Brand" reading as an ordinary specific would put a typed
+        // brand straight into the draft with no pricing rerun behind it.
+        for padded in [" Brand", "Brand ", "\tISBN", "Type\n"] {
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: padded,
+                    correctionAvailable: true
+                ),
+                .guidedCorrection,
+                padded
             )
         }
     }

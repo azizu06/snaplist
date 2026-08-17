@@ -10,6 +10,9 @@ private struct ListingReviewIdentityDrawerTarget: Hashable, Identifiable {
 struct ItemSpecificsEditorView: View {
     @Bindable var store: ListingReviewStore
     let correctionAvailable: Bool
+    /// Owned by the review screen. This one is pushed, so anything it held
+    /// itself would be gone before the seller ever reached Done.
+    let inlineEdits: ListingReviewInlineEdits
     @State private var drawer: ListingReviewIdentityDrawerTarget?
     @State private var correctionPresented = false
     @State private var returnFocusName: String?
@@ -17,25 +20,7 @@ struct ItemSpecificsEditorView: View {
     @AccessibilityFocusState private var focusedName: String?
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                ForEach(store.draft?.specifics ?? [], id: \.name) { specific in
-                    specificRow(specific)
-                }
-
-                if let spentIdentityLine {
-                    Text(spentIdentityLine)
-                        .font(.callout)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier(
-                            "listing-review.specifics.correction-spent"
-                        )
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-        }
+        ScrollView { fields }
         .background(SnapListColorToken.canvas.color)
         .navigationTitle("Item specifics")
         .navigationBarTitleDisplayMode(.inline)
@@ -57,6 +42,10 @@ struct ItemSpecificsEditorView: View {
         .navigationDestination(isPresented: $correctionPresented) {
             ListingReviewCorrectionBoundaryView()
         }
+        .onChange(of: focusedField) { previous, _ in
+            guard previous != nil else { return }
+            Task { await inlineEdits.flush(into: store) }
+        }
         .onChange(of: correctionPresented) { previous, current in
             guard previous, !current else { return }
             focusedName = returnFocusName
@@ -65,6 +54,26 @@ struct ItemSpecificsEditorView: View {
             focusedName = returnFocusName
         }
         .accessibilityIdentifier("listing-review.specifics")
+    }
+
+    private var fields: some View {
+        VStack(spacing: 12) {
+            ForEach(store.draft?.specifics ?? [], id: \.name) { specific in
+                specificRow(specific)
+            }
+
+            if let spentIdentityLine {
+                Text(spentIdentityLine)
+                    .font(.callout)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier(
+                        "listing-review.specifics.correction-spent"
+                    )
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 
     @ViewBuilder
@@ -85,11 +94,11 @@ struct ItemSpecificsEditorView: View {
                 value: specific.value,
                 pending: pending,
                 identifier: identifier,
+                field: .specific(specific.name),
+                edits: inlineEdits,
                 focusValue: specific.name,
                 focus: $focusedField
-            ) { typed in
-                await store.setSpecific(name: specific.name, value: typed)
-            }
+            )
             .accessibilityFocused($focusedName, equals: specific.name)
         case .guidedCorrection, .spent:
             ListingReviewChoiceField(
@@ -166,7 +175,7 @@ struct ItemSpecificsEditorView: View {
     }
 }
 
-extension String {
+private extension String {
     var accessibilityKey: String {
         lowercased()
             .replacingOccurrences(of: " ", with: "-")

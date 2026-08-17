@@ -46,6 +46,9 @@ struct ListingReviewView: View {
     @State private var priceInvalid = false
     @State private var conditionDrawerPresented = false
     @State private var conditionSelection = ListingReviewCondition.good
+    // Owned here rather than by the fields, because Item specifics is pushed
+    // and its fields would otherwise take their pending text down with them.
+    @State private var inlineEdits = ListingReviewInlineEdits()
     @FocusState private var focusedField: ListingReviewInlineFocus?
     @AccessibilityFocusState private var focusedElement:
         ListingReviewFocus?
@@ -66,7 +69,13 @@ struct ListingReviewView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    dismissReview()
+                    // Leaving is not discarding. Whatever is sitting in a
+                    // field goes to the draft before the screen goes away.
+                    Task {
+                        await inlineEdits.flush(into: store)
+                        await commitPrice()
+                        dismissReview()
+                    }
                 } label: {
                     Label("Back", systemImage: "chevron.left")
                 }
@@ -152,8 +161,14 @@ struct ListingReviewView: View {
             // fields are reached by focus rather than by a button now, so the
             // activation hook has to hang off focus instead.
             if current != nil { activationInteraction() }
-            guard previous == .price else { return }
-            Task { await commitPrice() }
+            // Losing focus is the ordinary commit point for every field, so
+            // the draft stays off the keystroke path. Done and Back run the
+            // same flush, so nothing depends on this having fired first.
+            guard previous != nil else { return }
+            Task {
+                await inlineEdits.flush(into: store)
+                if previous == .price { await commitPrice() }
+            }
         }
         .onChange(of: destination?.id) { previous, current in
             guard previous != nil, current == nil else { return }
@@ -452,12 +467,12 @@ struct ListingReviewView: View {
                 value: draft.title,
                 pending: draft.title != snapshot.listing.title,
                 identifier: "listing-review.title",
+                field: .title,
+                edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.title,
                 focus: $focusedField,
                 lineLimit: 1...3
-            ) { typed in
-                await store.setTitle(typed)
-            }
+            )
             .accessibilityFocused($focusedElement, equals: .title)
 
             ListingReviewInlineTextField(
@@ -465,12 +480,12 @@ struct ListingReviewView: View {
                 value: draft.description,
                 pending: draft.description != snapshot.listing.description,
                 identifier: "listing-review.description",
+                field: .description,
+                edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.description,
                 focus: $focusedField,
                 lineLimit: 3...10
-            ) { typed in
-                await store.setDescription(typed)
-            }
+            )
             .accessibilityFocused($focusedElement, equals: .description)
 
             ListingReviewChoiceField(
@@ -667,7 +682,8 @@ struct ListingReviewView: View {
         case .specifics:
             ItemSpecificsEditorView(
                 store: store,
-                correctionAvailable: correctionAvailable
+                correctionAvailable: correctionAvailable,
+                inlineEdits: inlineEdits
             )
         case .sold(let index):
             if let matches = store.snapshot?.verifiedSoldMatches,
@@ -852,10 +868,11 @@ struct ListingReviewView: View {
     }
 
     private func finish(retry: Bool) async -> ListingReviewDoneOutcome {
-        // The field is always live now, so Done flushes whatever is in it
-        // rather than relying on an editing flag being set. Focus is left
-        // alone: resigning it here would race this commit against the blur
-        // handler's.
+        // Every field is always live now, so Done flushes whatever is in them
+        // rather than relying on an editing flag being set, and it waits for
+        // the write before reading the draft. Focus is left alone: resigning
+        // it here would race this flush against the blur handler's.
+        await inlineEdits.flush(into: store)
         guard await commitPrice() else { return .stayed }
         let outcome = retry
             ? await store.retrySave()
