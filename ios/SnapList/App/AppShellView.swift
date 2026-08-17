@@ -75,8 +75,7 @@ struct AppShellView: View {
     /// whether it has adopted one at all. Both are needed: the scope can be nil
     /// for a launch with no signed-in seller, and a transition can arrive
     /// without the scope changing.
-    @State private var adoptedTrophyWallCoverPhotoScope: String?
-    @State private var hasAdoptedTrophyWallCoverPhotos = false
+    @State private var trophyWallCoverPhotoAdoption = TrophyWallCoverPhotoAdoption()
     @State private var activationCompletionChecked = false
     @State private var hasCompletedActivation = false
     @State private var activationAuthentication = ActivationAuthenticationState.unknown
@@ -459,19 +458,19 @@ struct AppShellView: View {
                         // It also reverts the wall to the unavailable cover
                         // store, so the arriving principal has to adopt again
                         // even when the intake resolves to the same directory.
-                        hasAdoptedTrophyWallCoverPhotos = false
+                        trophyWallCoverPhotoAdoption.principalDidTransition()
                     }
-                    // One owner for the durable cover store, and it is this
-                    // loop, because this loop is already the one that observes
-                    // the intake's principal. A second observing task could
-                    // adopt for the arriving seller while this one is still
-                    // writing cards for the departing one.
-                    let coverPhotoScope = await dependencies.nativeIntake
-                        .currentPrincipalScopeComponent()
-                    if !hasAdoptedTrophyWallCoverPhotos
-                        || coverPhotoScope != adoptedTrophyWallCoverPhotoScope {
-                        hasAdoptedTrophyWallCoverPhotos = true
-                        adoptedTrophyWallCoverPhotoScope = coverPhotoScope
+                    // The principal the wall stores under is the one this
+                    // snapshot carries — the same value the fence above was
+                    // decided from. Asking the intake again here would be a
+                    // second read across an await, and the two can disagree:
+                    // the fence would not fire, the wall would still hold the
+                    // departing seller's cards, and their photos would be
+                    // written into the arriving seller's directory.
+                    if case .adopt(let coverPhotoScope) =
+                        trophyWallCoverPhotoAdoption.scopeToAdopt(
+                            for: snapshot.principalScopeComponent
+                        ) {
                         trophyWallStore.adoptLocalCoverPhotoStore(
                             TrophyWallLocalCoverPhotoStoreFactory.make(
                                 scopeDirectoryComponent: coverPhotoScope

@@ -36,6 +36,45 @@ struct TrophyWallLocalCoverPhotoPrincipal: Hashable, Sendable {
     }
 }
 
+/// Which durable home the shell hands the wall, and when it hands over another.
+///
+/// The principal is read once, from the intake snapshot the shell is already
+/// processing, and never a second time from the intake itself. A second read is
+/// taken after an `await`, so it can name a different seller than the cards the
+/// shell has in hand: the fence would not fire, the wall would keep the
+/// departing seller's cards, and adopting the arriving seller's store would
+/// write those cards' photos into the arriving seller's directory — surviving a
+/// sign-out that had already reported completion (#871).
+struct TrophyWallCoverPhotoAdoption {
+    enum Decision: Equatable {
+        /// Hand the wall a store for this scope. A nil scope is a decision too:
+        /// it is the store that writes nothing.
+        case adopt(String?)
+        case keepCurrent
+    }
+
+    private var hasAdopted = false
+    private var adoptedScope: String?
+
+    init() {}
+
+    /// The principal fence reverted the wall to the store that writes nothing,
+    /// so the next snapshot has to hand one over again — including for the same
+    /// scope, which the intake resolves to whenever the seller returns.
+    mutating func principalDidTransition() {
+        hasAdopted = false
+    }
+
+    mutating func scopeToAdopt(for snapshotScope: String?) -> Decision {
+        guard !hasAdopted || snapshotScope != adoptedScope else {
+            return .keepCurrent
+        }
+        hasAdopted = true
+        adoptedScope = snapshotScope
+        return .adopt(snapshotScope)
+    }
+}
+
 /// Where the seller's own processing photo lives between launches.
 ///
 /// Bytes rather than a path, for the same reason the card carries bytes (#855):
@@ -50,7 +89,11 @@ protocol TrophyWallLocalCoverPhotoStoring {
     /// expired records are deleted here rather than on a timer, because the wall
     /// is the only thing that ever reads them.
     func loadAll() -> [UUID: Data]
-    func save(_ photoData: Data, forRun runID: UUID)
+    /// Whether the bytes are now on disk. A caller that remembers a failed write
+    /// as a success never tries again, and believes it has a durable copy it
+    /// does not have.
+    @discardableResult
+    func save(_ photoData: Data, forRun runID: UUID) -> Bool
     func remove(forRun runID: UUID)
 }
 
@@ -60,7 +103,7 @@ protocol TrophyWallLocalCoverPhotoStoring {
 /// seller or restore from the previous one.
 struct UnavailableTrophyWallLocalCoverPhotoStore: TrophyWallLocalCoverPhotoStoring {
     func loadAll() -> [UUID: Data] { [:] }
-    func save(_ photoData: Data, forRun runID: UUID) {}
+    func save(_ photoData: Data, forRun runID: UUID) -> Bool { false }
     func remove(forRun runID: UUID) {}
 }
 
@@ -137,7 +180,7 @@ struct FileTrophyWallLocalCoverPhotoStore: TrophyWallLocalCoverPhotoStoring {
         return photos
     }
 
-    func save(_ photoData: Data, forRun runID: UUID) {
+    func save(_ photoData: Data, forRun runID: UUID) -> Bool {
         let url = fileURL(forRun: runID)
         do {
             try fileManager.createDirectory(
@@ -157,10 +200,14 @@ struct FileTrophyWallLocalCoverPhotoStore: TrophyWallLocalCoverPhotoStoring {
                 photo: photoData
             )
             try encoder.encode(stored).write(to: url, options: Self.writingOptions)
+            return true
         } catch {
             // A photo that cannot be written is decoration the wall does without.
             // The in-memory card still carries it for this launch, and the next
-            // relaunch renders today's slot rather than claiming a photo.
+            // relaunch renders today's slot rather than claiming a photo. The
+            // caller is told, so a transient failure is tried again rather than
+            // remembered as a durable copy.
+            return false
         }
     }
 

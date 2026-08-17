@@ -835,7 +835,12 @@ final class TrophyWallStore {
         guard persistedCoverPhotos[runID] != photoData else {
             return
         }
-        localCoverPhotos.save(photoData, forRun: runID)
+        guard localCoverPhotos.save(photoData, forRun: runID) else {
+            // Recording a write that did not happen would short-circuit every
+            // later attempt for this run, so the wall would spend the launch
+            // believing in a durable copy it does not have.
+            return
+        }
         persistedCoverPhotos[runID] = photoData
     }
 

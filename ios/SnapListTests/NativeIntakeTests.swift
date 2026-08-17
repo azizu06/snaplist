@@ -1517,6 +1517,28 @@ final class NativeIntakeTests: XCTestCase {
     private func voice(_ text: String, duration: TimeInterval) -> NativeIntake.VoiceInput {
         .init(duration: duration, loadData: { Data(text.utf8) })
     }
+    /// The shell reads the principal exactly once, from the snapshot it is
+    /// already processing, so the snapshot has to name the principal the intake
+    /// filed it under (#871). Two sellers sharing a component would share a
+    /// durable directory, and an installation-scoped intake names no principal
+    /// at all rather than one nobody can claim.
+    func testASnapshotNamesThePrincipalItIsFiledUnder() async throws {
+        let (harness, session) = try await makeSession(.clerk("user_native_intake_scope_a"))
+        XCTAssertTrue(session.snapshot.isPrincipalBound)
+        let seller = try XCTUnwrap(session.snapshot.principalScopeComponent)
+
+        await harness.identity.set(.clerk("user_native_intake_scope_b"))
+        let arriving = try await session.nextSnapshot()
+        XCTAssertTrue(arriving.isPrincipalBound)
+        XCTAssertNotEqual(arriving.principalScopeComponent, seller,
+            "Two sellers sharing a component would share one durable directory.")
+
+        await harness.identity.set(.none)
+        let installation = try await session.nextSnapshot()
+        XCTAssertFalse(installation.isPrincipalBound)
+        XCTAssertNil(installation.principalScopeComponent,
+            "An installation-scoped intake has no principal to file a photo under.")
+    }
     private func makeSession(_ identity: NativeIntake.Identity) async throws -> (NativeIntakeHarness, NativeIntakeTestSession) {
         let harness = NativeIntakeHarness(identity: identity)
         addTeardownBlock { harness.cleanUp() }
