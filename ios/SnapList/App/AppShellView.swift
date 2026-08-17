@@ -55,6 +55,7 @@ struct AppShellView: View {
     private let foregroundPush = PushRegistrationComposition.foregroundPresenter
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
     @State private var isDeleteAccountFlowPresented = false
@@ -1039,10 +1040,42 @@ struct AppShellView: View {
         guard let coachMark = activationCoachMark else { return 24 }
         // One anchor contract, proved at the policy seam, so the shell and the
         // coach mark can never disagree about where a state docks.
-        return ActivationCoachMarkAnchorPolicy.anchor(
+        let anchor = ActivationCoachMarkAnchorPolicy.anchor(
             for: coachMark,
             reduceMotion: reduceMotion
-        ).bottomInset
+        )
+        return anchor.bottomInset + activationZoomRowClearance(for: coachMark)
+    }
+
+    /// ACT-01 and ACT-06 are the two states that dock against the Scan camera
+    /// control stack, and the approved 112pt inset was measured against that
+    /// stack before #885 added a zoom row above it on hardware with an ultra
+    /// wide. That approved value never accounted for the row, so it stays
+    /// unchanged here; this adds exactly the band the row reserves, on top of
+    /// it, only when the row is actually on screen. `ScanZoomRowMetrics`
+    /// is the same metric `LiveScanCameraSurface`'s own layout reads, so
+    /// neither side can drift from what the row actually occupies.
+    private func activationZoomRowClearance(
+        for coachMark: ActivationCoachMark
+    ) -> CGFloat {
+        guard coachMark == .act01 || coachMark == .act06,
+              isScanZoomRowOffered else { return 0 }
+        return ScanZoomRowMetrics.reservedHeight(
+            isAccessibility: dynamicTypeSize.isAccessibilitySize
+        )
+    }
+
+    /// The Scan camera renders one of two ways: the real device preview,
+    /// backed by `captureFlow`, or (DEBUG only) a `--visual-state` fixture
+    /// that stands in for hardware the simulator does not have and answers
+    /// its own zoom question from `configuration.scanZoomFixture` instead.
+    /// Whichever is on screen is where this reads its offered state from, so
+    /// the fixture route can prove this fix without a real ultra wide.
+    private var isScanZoomRowOffered: Bool {
+        if let scanZoomFixture = configuration.scanZoomFixture {
+            return scanZoomFixture.control.isOffered
+        }
+        return captureFlow.zoomControl.isOffered
     }
 
     private func dismissActivationGuidance() {
