@@ -2071,11 +2071,10 @@ final class SnapListUITests: XCTestCase {
 
         let app = launch(extraArguments: ["--visual-state=CAM-01", "--scan-zoom=dual-wide"])
         // This is the second app instance in one test, and the first was
-        // terminated a moment ago. Elements are queryable as soon as the
-        // hierarchy exists, but nothing in it is hittable until the app is
-        // actually frontmost, so a tap issued before then lands nowhere.
+        // terminated a moment ago, so wait for it to actually be frontmost
+        // before reading anything out of it.
         XCTAssertTrue(
-            app.wait(for: .runningForeground, timeout: 5),
+            app.wait(for: .runningForeground, timeout: 10),
             "The relaunched app must be frontmost before its controls are tapped."
         )
         let zoom = app.otherElements["scan.zoom"]
@@ -2096,6 +2095,24 @@ final class SnapListUITests: XCTestCase {
         let receipt = "zoom=\(zoom.frame) shutter=\(shutter.frame)"
         XCTAssertLessThan(zoom.frame.maxY, shutter.frame.minY, receipt)
         XCTAssertEqual(zoom.frame.midX, shutter.frame.midX, accuracy: 2, receipt)
+
+        // Existence is not reachability. Whole-suite runs have caught this chip
+        // existing at a correct on-screen frame while XCUITest could not compute
+        // a hit point for it, and a tap issued in that window is dropped without
+        // error, which then surfaces here as the wrong lens rather than as the
+        // unreachable control it actually is. Waiting on hittability makes the
+        // precondition a named failure instead of a silent one. Running this
+        // test alone has never reproduced the window, so this is a stated
+        // precondition rather than a proven cure.
+        let reachable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: ultraWide
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [reachable], timeout: 5),
+            .completed,
+            "The 0.5x chip must become hittable before it is tapped."
+        )
 
         ultraWide.tap()
         // Frames and hittability, because the way this assertion fails in
