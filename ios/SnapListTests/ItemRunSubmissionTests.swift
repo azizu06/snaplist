@@ -5045,13 +5045,13 @@ final class ItemRunSubmissionTests: XCTestCase {
     /// `PhotoReviewSubmissionPresentation`, which exists only while
     /// `PhotoReviewLiveHost.session` does. The same generation change drives the
     /// shell's departed-intake dismissal, which is `leaveForDepartedIntake`, and
-    /// after it there is no session and therefore no renderer. A published
-    /// banner would also claim the item is still saved on this phone while the
-    /// new scope points at an empty bundle in a different directory.
+    /// after it there is no session and therefore no renderer.
     ///
     /// So the assertion is silence at the submission seam plus an absent
-    /// surface at the shell seam. The seller-visible answer belongs on Scan,
-    /// which has no notice surface today; that is #855.
+    /// surface at the shell seam. This row rotates one Clerk subject to
+    /// another, which opens that account's own directory by design; #855 covers
+    /// the device-identity rotations, where the staged bundle now travels with
+    /// the seller into the arriving scope.
     @MainActor
     func testAPrincipalChangeDuringASubmissionLeavesNoSurfaceToAnswerOn()
         async throws {

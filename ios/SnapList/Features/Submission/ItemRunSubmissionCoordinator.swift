@@ -590,15 +590,12 @@ final class ItemRunSubmissionHost {
             // `leaveForDepartedIntake` plus a return to Scan. By the time a
             // banner could be read, the screen that reads it is gone.
             //
-            // Publishing anyway would also lie. A changed scope loads a new
-            // empty bundle under a different directory component with no
-            // migration, so "your item is still saved on this phone" is false
-            // exactly when the seller most needs it to be true, and every retry
-            // this family offers would target an empty intake.
-            //
-            // The seller-visible answer therefore belongs on Scan, which has no
-            // notice surface to carry it. That surface and the orphaned bundle
-            // behind it are #855.
+            // What the seller keeps is settled behind this seam rather than by a
+            // banner here. #855 makes a device-identity change — a renewed or
+            // rejected App Attest key — carry the staged bundle into the
+            // arriving scope, so Scan holds the same item the seller was looking
+            // at. A seller-account change still opens that account's own
+            // directory, which is the point of scoping by account at all.
             //
             // `testAPrincipalChangeDuringASubmissionLeavesNoSurfaceToAnswerOn`
             // holds this shut: it fails if a retention is published here.
