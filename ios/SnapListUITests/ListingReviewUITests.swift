@@ -734,6 +734,31 @@ final class ListingReviewUITests: XCTestCase {
         assertMeetsTouchTargetFloor(price.frame.height, frameReceipt)
     }
 
+    /// The toolbar back item, measured in both dimensions.
+    ///
+    /// #928. It carried `.frame(minWidth:minHeight:)` around the button
+    /// together with `.buttonStyle(.plain)` — the arrangement #926 measured at
+    /// 22.67pt on the eBay publish screen, because a frame around a
+    /// `ToolbarItem`'s button never reaches that button's hit rect and the
+    /// plain style takes away the toolbar's own capsule that was propping it
+    /// up. Nothing on this screen asserted the size, so it shipped at whatever
+    /// the chevron happened to be.
+    ///
+    /// Width is asserted as well as height. A toolbar chevron is short in the
+    /// dimension a height-only floor never looks at, so the assertion that
+    /// would have caught this is the one about width.
+    func testTheReviewBackButtonMeetsTheTouchTargetFloorInBothDimensions() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let back = app.buttons["listing-review.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: loadedTreeTimeout))
+        let frameReceipt = "back.frame=\(back.frame)"
+        XCTAssertTrue(back.isHittable, frameReceipt)
+        assertMeetsTouchTargetFloor(back.frame.height, frameReceipt)
+        assertMeetsTouchTargetFloor(back.frame.width, frameReceipt)
+    }
+
     /// A control laid out at exactly the floor comes back from XCUITest as
     /// 43.99999999999994, because the height is the sum of a scaled font
     /// metric and two paddings. Rounding to the nearest point keeps the
@@ -790,7 +815,12 @@ final class ListingReviewUITests: XCTestCase {
         let color = app.textViews["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
         let before = stringValue(of: color)
-        color.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
+        // Low in the box on purpose. The glyphs occupy roughly the top 20pt of
+        // the 44pt element, and everything under them used to resolve to the
+        // end of the value (#928). At dy 0.5 the tap lands within a point of
+        // that boundary, which is why this read green here and red on CI from
+        // the same code. dy 0.85 is unambiguously in the band that was broken.
+        color.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.85)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
         color.typeText("Z")
 

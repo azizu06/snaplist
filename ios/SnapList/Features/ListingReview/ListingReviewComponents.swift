@@ -825,6 +825,71 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
     }
 }
 
+/// The text view the inline control publishes, with one behavior added.
+///
+/// The element is floored to 44pt (#918), so a value shorter than that leaves
+/// room inside the element that the glyphs do not occupy. `UITextView` answers
+/// a tap in that room by putting the caret at the end of the text, because
+/// below the last line is where a document ends. That is right for a document
+/// and wrong here: this is one field, the room only exists because of a touch
+/// floor the seller cannot see, and the seller who taps the box they were told
+/// to tap gets the caret somewhere they did not touch (#928).
+///
+/// Measured on iPhone 17 Pro / iOS 26.5: the element is 44pt tall and a
+/// one-line value at the default Dynamic Type size occupies about 20 of them,
+/// so taps land on the glyphs down to roughly 22pt and jump to the end below
+/// that. The vertical middle of the element sat within a point of that edge,
+/// which is why the same tap placed the caret correctly here and at the end of
+/// the value on CI.
+///
+/// The fix is to answer with the position the finger is over horizontally,
+/// which is what the rest of the element already does. The point is clamped
+/// into the band the glyphs occupy before it is resolved; a value tall enough
+/// to fill the element has no band to clamp into and is untouched.
+///
+/// Internal rather than private so the clamp can be tested against a plain
+/// `UITextView` directly. The behavior is a coordinate calculation on a
+/// scrolling view, and the first version of it was wrong in the one state a
+/// 44pt single-line field never reaches.
+final class ListingReviewInlineTextView: UITextView {
+    override func closestPosition(to point: CGPoint) -> UITextPosition? {
+        super.closestPosition(to: clampedIntoGlyphs(point))
+    }
+
+    override func closestPosition(
+        to point: CGPoint,
+        within range: UITextRange
+    ) -> UITextPosition? {
+        super.closestPosition(to: clampedIntoGlyphs(point), within: range)
+    }
+
+    /// Measured from `sizeThatFits` rather than `contentSize`, which a scroll
+    /// view is free to grow to its own bounds. One point inside each edge, so
+    /// the clamped point resolves against the line rather than against the
+    /// boundary between it and the empty room.
+    ///
+    /// Every term here is in the text view's own coordinate space, and for a
+    /// `UIScrollView` that space is the content, not the window onto it:
+    /// `bounds.origin` is `contentOffset`, so the point handed in already
+    /// carries the scroll. The band must therefore not carry it a second time.
+    /// The first version of this subtracted `contentOffset.y` from both edges,
+    /// which left the band correct at rest and dragged it up by the scroll
+    /// distance everywhere else: a description scrolled 200pt answered a tap on
+    /// its glyphs 119 characters earlier than `UITextView` does. `bottom > top`
+    /// cannot catch that, because the gap between the two is what the offset
+    /// cancels out of.
+    func clampedIntoGlyphs(_ point: CGPoint) -> CGPoint {
+        guard bounds.width > 0 else { return point }
+        let glyphs = sizeThatFits(
+            CGSize(width: bounds.width, height: .greatestFiniteMagnitude)
+        ).height
+        let top = textContainerInset.top + 1
+        let bottom = glyphs - textContainerInset.bottom - 1
+        guard bottom > top else { return point }
+        return CGPoint(x: point.x, y: min(max(point.y, top), bottom))
+    }
+}
+
 /// The control every inline text field publishes.
 ///
 /// SwiftUI's vertical-axis `TextField` is backed by a text view that hugs its
@@ -877,7 +942,7 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+        let view = ListingReviewInlineTextView()
         view.delegate = context.coordinator
         context.coordinator.textView = view
         view.backgroundColor = .clear
