@@ -288,10 +288,9 @@ enum ListingReviewLaunchFixture {
                 "specifics": [
                     ["name": "Brand", "value": "Sony"],
                     ["name": "Type", "value": "Wireless controller"],
-                    ["name": "Department", "value": "Men"],
-                    ["name": "Color", "value": "Blue"],
-                    ["name": "Material", "value": "Denim"],
-                    ["name": "Size", "value": "M"],
+                    ["name": "Platform", "value": "PlayStation 5"],
+                    ["name": "Color", "value": "White"],
+                    ["name": "Connectivity", "value": "Wireless"],
                 ],
             ],
             "pricing": [

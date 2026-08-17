@@ -110,17 +110,41 @@ the Unsplash License**. The app does not fetch these at runtime; they compile in
 - Attribution is not required by the license. Author and source links are kept
   here so the app has the same auditable record the public demo has.
 
+#### Depicted trademarks, which the Unsplash License does not cover
+
+The Unsplash License grants rights in the photograph, not in what the photograph
+shows. Two of these assets picture third-party products:
+
+- `FirstValueController` and the four `FirstValueControllerSold*` comps show a
+  Sony DualSense. The onboarding copy names it as the item a seller is listing,
+  which is nominative use of a product name to identify that product. This is the
+  same posture as the marketing set, which already ships `dualsense.webp` from
+  the same source photograph.
+- `FirstValueTradingCard` shows a Pokémon card. Its ONB-01 tile is large enough
+  that the card art, the Pokémon wordmark, and the `©2016 Pokémon` line are all
+  readable on a 3x screen; the ONB-05 row at 62pt is not. Verified by capture, not
+  assumed. The ONB-05 row also names it "Charizard card", which is again
+  nominative use of a product name to identify the item, the same wording a
+  reseller would put in a listing title. The same photograph is already shipped by
+  the marketing site under #136.
+
+Recording this because the license alone does not settle it. If a human decides
+the depicted mark is not acceptable in shipped onboarding, `FirstValueTradingCard`
+is the one asset to swap. It is decorative, carries no price fixture, and appears
+on two screens, so replacing it is a one-asset change rather than a reshoot of
+the set.
+
 | Local asset | Shown as | Source and author | Source pixels | Square crop | License / attribution |
 | --- | --- | --- | --- | --- | --- |
-| `FirstValueController` | The seller's own item, on every onboarding screen | [Photo](https://unsplash.com/photos/playstation-5-dualsense-controller-on-a-red-surface-yc5Z3xNlyUw) by User_Pascal | 5871×3914 | 3914px at 1331,0 | Unsplash License; credit: User_Pascal / Unsplash |
+| `FirstValueController` | The seller's own item, on every onboarding screen | [Photo](https://unsplash.com/photos/white-and-black-game-controller-qF-ZZzybOqQ) by Krzysztof Hepner | 4000×6000 | 4000px at 0,100 | Unsplash License; credit: Krzysztof Hepner / Unsplash |
 | `FirstValueHeadphones` | ONB-01 tile, ONB-05 work row | [Photo](https://unsplash.com/photos/a-pair-of-headphones--lnvREpbLu0) by Jason Zhang | 4032×2268 | 2268px at 882,0 | Unsplash License; credit: Jason Zhang / Unsplash |
 | `FirstValueTradingCard` | ONB-01 tile, ONB-05 work row | [Photo](https://unsplash.com/photos/pokemon-trading-card-on-gray-textile-OB756zZDYi0) by Steven Cordes | 5504×8256 | 4000px at 1357,3449 | Unsplash License; credit: Steven Cordes / Unsplash |
 | `FirstValueControllerSold1` | ONB-03 sold comp, $66 | [Photo](https://unsplash.com/photos/a-white-video-game-controller-Iz4N0nXmmRU) by Daniel ZH | 6000×4000 | 4000px at 1000,0 | Unsplash License; credit: Daniel ZH / Unsplash |
-| `FirstValueControllerSold2` | ONB-03 sold comp, $62 | [Photo](https://unsplash.com/photos/white-and-black-game-controller-qF-ZZzybOqQ) by Krzysztof Hepner | 4000×6000 | 4000px at 0,100 | Unsplash License; credit: Krzysztof Hepner / Unsplash |
+| `FirstValueControllerSold2` | ONB-03 sold comp, $62 | [Photo](https://unsplash.com/photos/playstation-5-dualsense-controller-on-a-red-surface-yc5Z3xNlyUw) by User_Pascal | 5871×3914 | 3914px at 1331,0 | Unsplash License; credit: User_Pascal / Unsplash |
 | `FirstValueControllerSold3` | ONB-03 sold comp, $55 | [Photo](https://unsplash.com/photos/a-close-up-of-a-video-game-controller-oCQdAzy6u8I) by chris panas | 5464×8192 | 4000px at 1005,4192 | Unsplash License; credit: chris panas / Unsplash |
 | `FirstValueControllerSold4` | ONB-03 sold comp, $49 | [Photo](https://unsplash.com/photos/a-video-game-console-sitting-on-top-of-a-wooden-table-IAAxRtlmD9w) by Amanz | 4240×2384 | 1800px at 732,584 | Unsplash License; credit: Amanz / Unsplash |
 
-### Why these three items
+### Why these items
 
 The onboarding screens carry one item all the way through, from its photographs
 to its sold comps to its finished listing, so that item also has to carry the
@@ -128,9 +152,19 @@ price fixture. A DualSense controller retails at $69.99 new and resells used in
 the $40 to $66 range, which is the band the screens already showed. A PS5, an
 iPhone 15, or AirPods Max would have made the existing $49 to $66 range, the $40
 to $70 chart axis, and the $58 suggestion untrue, and rewriting those numbers was
-not what the issue asked for. `FirstValueController` reuses the same source photo
-the marketing site already ships as `public/demo/reseller/dualsense.webp`, so the
-item a seller meets in onboarding is one they can also see on the site.
+not what the issue asked for. The set also reuses the source photo the marketing
+site already ships as `public/demo/reseller/dualsense.webp`, so the item a seller
+meets in onboarding is one they can also see on the site.
+
+Which photograph plays which part changed once, on the owner's direction. The
+seller's own item was first the red-field photograph (`yc5Z3xNlyUw`). On ONB-06
+that fills a 254pt hero with a saturated red that fights the White Seller Utility
+palette, so the roles were swapped: the light gray sweep (`qF-ZZzybOqQ`) is now
+the seller's item across every screen, and the red-field photograph moved into the
+$62 comp, where it appears once at 36pt. Nothing was sourced or recolored; the two
+files traded imagesets. The swap also improved the ONB-02 crops, because the gray
+photograph fills its frame while the red one sat the controller in open background,
+which is what made a close crop land on nothing.
 
 The other two are the ONB-01 tiles and the ONB-05 work rows, where the job is to
 be recognizable next to the controller rather than to be priced. Headphones and a

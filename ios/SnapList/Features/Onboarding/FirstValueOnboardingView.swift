@@ -14,23 +14,33 @@ enum FirstValueOnboardingHeaderMetrics {
 enum FirstValueOnboardingLayoutMetrics {
     static let draftScoutTopPadding: CGFloat = 8
 
-    /// ONB-02 puts two stacked photos beside one tall photo. The tall one has to absorb
-    /// the caption row the stacked column spends between its two photos, or the bottom
-    /// caption on each side sits at a different height.
+    /// ONB-02 puts two stacked photos beside one tall photo. Each photo carries a caption
+    /// under it, so the tall one has to absorb the caption row the stacked column spends
+    /// between its two photos, or the bottom caption on each side sits at a different
+    /// height. The tall height is computed rather than written down: the previous literal
+    /// assumed a 24 point caption block against a real one nearer 26, and the two drifted
+    /// apart silently.
     static let contextShortPhotoHeight: CGFloat = 174
-    static let contextTallPhotoHeight: CGFloat = 384
     static let contextColumnSpacing: CGFloat = 10
     /// One caption row plus the gap between it and the photo it labels.
     static let contextCaptionBlockHeight: CGFloat = 26
     static let contextCaptionSpacing: CGFloat = 6
 
+    static var contextTallPhotoHeight: CGFloat {
+        contextShortPhotoHeight * 2 + contextColumnSpacing + contextCaptionBlockHeight
+    }
+
+    /// Both columns plus the caption under the last photo in each.
+    static var contextGridHeight: CGFloat {
+        contextTallPhotoHeight + contextCaptionBlockHeight
+    }
+
     /// ONB-06's hero card sat its price row 12 points below the title and roughly 7 above
-    /// the card's own edge, so the band read as bottom-cropped. The two paddings match now,
-    /// and the height is a floor rather than a lid: a title that wraps grows the card
-    /// instead of being clipped by it.
+    /// the card's own edge, so the band read as bottom-cropped. The band takes its height
+    /// from these two paddings now instead of a fixed 67, which means a title that wraps
+    /// grows the card rather than being clipped by it.
     static let includedCardTextTopPadding: CGFloat = 12
     static let includedCardTextBottomPadding: CGFloat = 12
-    static let includedCardTextMinHeight: CGFloat = 79
 }
 
 @MainActor
@@ -250,7 +260,7 @@ struct FirstValueOnboardingView: View {
                     )
                     photographTile(
                         "FirstValueController",
-                        label: "A white game controller on a red surface",
+                        label: "A white game controller on a plain gray surface",
                         width: tileWidth
                     )
                     photographTile(
@@ -339,14 +349,12 @@ struct FirstValueOnboardingView: View {
                     VStack(spacing: metrics.contextColumnSpacing) {
                         contextPhoto(
                             crop: .whole,
-                            caption: FirstValueOnboardingCopy.contextCaptions[0],
                             height: metrics.contextShortPhotoHeight,
                             width: columnWidth
                         )
                         .accessibilitySortPriority(3)
                         contextPhoto(
                             crop: .flaw,
-                            caption: FirstValueOnboardingCopy.contextCaptions[1],
                             height: metrics.contextShortPhotoHeight,
                             width: columnWidth
                         )
@@ -354,14 +362,13 @@ struct FirstValueOnboardingView: View {
                     }
                     contextPhoto(
                         crop: .details,
-                        caption: FirstValueOnboardingCopy.contextCaptions[2],
                         height: metrics.contextTallPhotoHeight,
                         width: columnWidth
                     )
                     .accessibilitySortPriority(1)
                 }
             }
-            .frame(height: 412)
+            .frame(height: FirstValueOnboardingLayoutMetrics.contextGridHeight)
             Divider()
                 .padding(.top, 14)
                 .padding(.bottom, 16)
@@ -646,19 +653,8 @@ struct FirstValueOnboardingView: View {
             }
             .padding(.horizontal, 14)
             .padding(.top, FirstValueOnboardingLayoutMetrics.includedCardTextTopPadding)
-            .padding(
-                .bottom,
-                dynamicTypeSize.isAccessibilitySize
-                    ? 14
-                    : FirstValueOnboardingLayoutMetrics.includedCardTextBottomPadding
-            )
+            .padding(.bottom, FirstValueOnboardingLayoutMetrics.includedCardTextBottomPadding)
             .frame(maxWidth: .infinity, alignment: .top)
-            .frame(
-                minHeight: dynamicTypeSize.isAccessibilitySize
-                    ? nil
-                    : FirstValueOnboardingLayoutMetrics.includedCardTextMinHeight,
-                alignment: .top
-            )
         }
         .background(SnapListColorToken.canvas.color)
         .clipShape(RoundedRectangle(cornerRadius: 18))
@@ -698,13 +694,22 @@ struct FirstValueOnboardingView: View {
 
     private enum ItemCrop: Equatable { case whole, flaw, details }
 
+    private func contextCaption(_ crop: ItemCrop) -> String {
+        let captions = FirstValueOnboardingCopy.contextCaptions
+        switch crop {
+        case .whole: return captions.whole
+        case .flaw: return captions.flaw
+        case .details: return captions.details
+        }
+    }
+
     private func contextPhoto(
         crop: ItemCrop,
-        caption: String,
         height: CGFloat,
         width: CGFloat
     ) -> some View {
-        VStack(spacing: FirstValueOnboardingLayoutMetrics.contextCaptionSpacing) {
+        let caption = contextCaption(crop)
+        return VStack(spacing: FirstValueOnboardingLayoutMetrics.contextCaptionSpacing) {
             itemCropImage(crop)
                 .frame(width: width, height: height)
                 .clipped()
@@ -727,6 +732,13 @@ struct FirstValueOnboardingView: View {
 
     /// Three views of the seller's own item, which is one photograph. The scale and anchor
     /// are what make them three different views rather than the same frame three times.
+    ///
+    /// The anchors belong to this photograph, not to the layout. They were carried over
+    /// from the jacket this asset replaced and broke twice: a corner anchor that framed a
+    /// jacket landed on empty background once the subject changed, and changed again when
+    /// the subject moved from a red field to a gray one. Re-derive them against the actual
+    /// file if the asset changes, and check that `contextAlt` still describes what is in
+    /// frame.
     @ViewBuilder
     private func itemCropImage(_ crop: ItemCrop) -> some View {
         switch crop {
@@ -735,19 +747,22 @@ struct FirstValueOnboardingView: View {
         case .flaw:
             Image("FirstValueController")
                 .resizable().scaledToFill()
-                .scaleEffect(3, anchor: .bottomLeading)
+                .scaleEffect(2.2, anchor: .bottomLeading)
         case .details:
             Image("FirstValueController")
                 .resizable().scaledToFill()
-                .scaleEffect(1.9, anchor: .top)
+                .scaleEffect(1.6, anchor: UnitPoint(x: 0.5, y: 0.72))
         }
     }
 
+    /// Describes what the crop actually shows. The listing copy says the controller has a
+    /// scuff; this photograph does not show one, so the alternative text names the parts in
+    /// frame rather than sending a screen reader looking for a mark that is not there.
     private func contextAlt(_ crop: ItemCrop) -> String {
         switch crop {
         case .whole: "The whole controller photographed on a plain surface"
-        case .flaw: "Close view of the scuff on the left grip"
-        case .details: "Close view of the buttons and thumbsticks"
+        case .flaw: "Close view of the face buttons and the grip below them"
+        case .details: "Close view of the thumbstick, speaker holes and USB-C port"
         }
     }
 

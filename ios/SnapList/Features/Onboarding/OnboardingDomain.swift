@@ -415,6 +415,15 @@ struct SoldComparisonRow: Hashable {
     let price: String
 }
 
+/// The three ONB-02 captions, one per crop of the seller's photograph.
+struct ContextCaptionSet: Hashable {
+    let whole: String
+    let flaw: String
+    let details: String
+
+    var all: [String] { [whole, flaw, details] }
+}
+
 enum FirstValueOnboardingCopy {
     static let backgroundExampleRows: [BackgroundExampleRow] = [
         .init(
@@ -450,10 +459,23 @@ enum FirstValueOnboardingCopy {
 
     /// ONB-06's reassurance. "Before anything leaves the app" promised a boundary
     /// onboarding does not own; publishing is the moment the seller actually acts on.
-    static let includedScoutLine = "No account needed to start. You edit every field before you publish."
+    ///
+    /// Length is load bearing, and the budget is smaller than it looks. The Scout mascot
+    /// takes most of the row, leaving this about 26 characters a line, so 68 characters
+    /// broke three ways and left "publish." alone on the last one. Two even lines need 52
+    /// or fewer, which costs a claim: "every field" went so that "before you publish" could
+    /// stay, since the timing is the part that reassures. "Yet" rather than "to start"
+    /// because publishing to eBay does need an account later.
+    static let includedScoutLine = "No account needed yet. You edit before you publish."
 
-    /// What each ONB-02 photograph is for, in the order the screen reads them.
-    static let contextCaptions = ["Whole item", "Any damage", "Close details"]
+    /// What each ONB-02 photograph is for. Keyed rather than indexed: the screen draws
+    /// these three in a two-column layout whose reading order is not the array order, so
+    /// `[0]`/`[1]`/`[2]` could be reshuffled into the wrong tiles without a test noticing.
+    static let contextCaptions = ContextCaptionSet(
+        whole: "Whole item",
+        flaw: "Any damage",
+        details: "Close details"
+    )
 
     /// Four sellers who sold the same controller, each photographed on their own surface.
     static let soldComparisonRows: [SoldComparisonRow] = [

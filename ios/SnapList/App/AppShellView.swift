@@ -1408,7 +1408,7 @@ enum TrophyWallProcessingLaunchFixture {
                             uuidString: "37500000-0000-4000-8000-000000000011"
                         )!,
                         state: .accepted,
-                        itemName: "White leather sneaker",
+                        itemName: "DualSense controller",
                         localCoverPhotoData: stagedCoverPhoto,
                         lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5)
                     ),

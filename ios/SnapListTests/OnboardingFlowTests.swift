@@ -1458,8 +1458,8 @@ final class OnboardingFlowTests: XCTestCase {
     /// nothing in the flow may name them again.
     func testOnboardingItemCopyNamesTheBrandedItem() {
         let strings = FirstValueOnboardingCopy.backgroundExampleRows.map(\.item)
-            + FirstValueOnboardingCopy.soldComparisonRows.map(\.imageName)
-            + FirstValueOnboardingCopy.contextCaptions
+            + FirstValueOnboardingCopy.soldComparisonRows.map(\.condition)
+            + FirstValueOnboardingCopy.contextCaptions.all
             + [FirstValueOnboardingCopy.includedScoutLine,
                FirstValueOnboardingCopy.listingTitle,
                FirstValueOnboardingCopy.shortListingTitle,
@@ -1483,9 +1483,15 @@ final class OnboardingFlowTests: XCTestCase {
 
         XCTAssertEqual(
             line,
-            "No account needed to start. You edit every field before you publish."
+            "No account needed yet. You edit before you publish."
         )
         XCTAssertFalse(line.lowercased().contains("anything"))
+        XCTAssertLessThanOrEqual(
+            line.count,
+            52,
+            "The Scout row fits about 26 characters a line. Past 52 this breaks three "
+                + "ways and orphans the last word, which is what #887 asks to fix."
+        )
     }
 
     /// The item on ONB-04 and ONB-06 is the one the seller just watched get photographed
@@ -1520,8 +1526,10 @@ final class OnboardingFlowTests: XCTestCase {
     func testContextCaptionsNameWhatThePhotographShows() {
         let captions = FirstValueOnboardingCopy.contextCaptions
 
-        XCTAssertEqual(captions, ["Whole item", "Any damage", "Close details"])
-        for caption in captions {
+        XCTAssertEqual(captions.whole, "Whole item")
+        XCTAssertEqual(captions.flaw, "Any damage")
+        XCTAssertEqual(captions.details, "Close details")
+        for caption in captions.all {
             XCTAssertFalse(
                 caption.lowercased().contains("thing"),
                 "\(caption) still leans on \"thing\"."
@@ -1531,25 +1539,36 @@ final class OnboardingFlowTests: XCTestCase {
 
     /// The tall right-hand photo stands beside two stacked photos and their caption rows.
     /// When its height stops matching that column, the bottom caption on each side lands
-    /// on a different baseline, which is what made the row look hand-placed.
+    /// on a different baseline, which is what made the row look hand-placed. The heights
+    /// are derived, so what this pins is the result: the grid ONB-02 actually draws is
+    /// 410 points tall, and changing a photo height or the caption block has to be a
+    /// deliberate edit to this number rather than a silent shift on screen.
     func testContextTallPhotoMatchesTheStackedColumnItStandsBeside() {
         let metrics = FirstValueOnboardingLayoutMetrics.self
 
+        XCTAssertEqual(metrics.contextTallPhotoHeight, 384)
+        XCTAssertEqual(metrics.contextGridHeight, 410)
         XCTAssertEqual(
-            metrics.contextTallPhotoHeight,
+            metrics.contextGridHeight,
             metrics.contextShortPhotoHeight * 2
                 + metrics.contextColumnSpacing
-                + metrics.contextCaptionBlockHeight
+                + metrics.contextCaptionBlockHeight * 2,
+            "The tall photo's column and the stacked column no longer end together."
         )
     }
 
-    /// A comp naming an asset the catalog does not carry draws an empty tile, which the
-    /// copy assertions above cannot see.
-    func testSoldComparisonRowsNameBundledAssets() {
-        for row in FirstValueOnboardingCopy.soldComparisonRows {
+    /// An onboarding screen naming an asset the catalog does not carry draws an empty
+    /// tile, which the copy assertions above cannot see. Every asset #887 introduced is
+    /// checked here, not only the comps.
+    func testOnboardingScreensNameBundledAssets() {
+        let names = FirstValueOnboardingCopy.soldComparisonRows.map(\.imageName)
+            + FirstValueOnboardingCopy.backgroundExampleRows.map(\.imageName)
+
+        XCTAssertEqual(Set(names).count, 7)
+        for name in names {
             XCTAssertNotNil(
-                UIImage(named: row.imageName),
-                "\(row.imageName) is not in the asset catalog."
+                UIImage(named: name),
+                "\(name) is not in the asset catalog."
             )
         }
     }
