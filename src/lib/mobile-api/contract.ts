@@ -79,6 +79,15 @@ export const activationGuidanceEnvelopeSchema = z
  */
 export const deviceTokenRegistrationSchema = z
   .object({
+    /**
+     * Which APNs host this token is reachable on (#891). Required, and never
+     * inferred: it is fixed by the `aps-environment` entitlement of the build
+     * that produced the token, so a development build and the App Store build
+     * on one handset are two addresses on two hosts. A default either way would
+     * be wrong for half the builds, and wrong here is a push that Apple accepts
+     * and drops.
+     */
+    apnsEnvironment: z.enum(["sandbox", "production"]),
     platform: z.literal("ios"),
     token: z.string().regex(/^[0-9a-f]{64,512}$/),
   })

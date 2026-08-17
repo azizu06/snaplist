@@ -170,6 +170,7 @@ describe("a claimed guest keeps its device registration", () => {
     const member = await provisionMember("device_claim_moves");
 
     const { error } = await guest.client.from("device_tokens").insert({
+      apns_environment: "production",
       platform: "ios",
       token: GUEST_DEVICE_TOKEN,
       user_id: guest.id,
@@ -194,6 +195,7 @@ describe("a claimed guest keeps its device registration", () => {
 
     for (const seller of [guest, member]) {
       const { error } = await seller.client.from("device_tokens").insert({
+        apns_environment: "production",
         platform: "ios",
         token: GUEST_DEVICE_TOKEN,
         user_id: seller.id,
@@ -214,6 +216,7 @@ describe("a claimed guest keeps its device registration", () => {
     const member = await provisionMember("device_claim_in_progress");
 
     const { error } = await guest.client.from("device_tokens").insert({
+      apns_environment: "production",
       platform: "ios",
       token: GUEST_DEVICE_TOKEN,
       user_id: guest.id,

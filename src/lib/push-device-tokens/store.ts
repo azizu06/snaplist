@@ -1,6 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 
 export interface PushDeviceTokenRegistration {
+  /**
+   * The APNs host this token answers on, as the registering build reported it
+   * (#891). Stored rather than derived: the server has no way to see the
+   * `aps-environment` entitlement that decided it.
+   */
+  apnsEnvironment: "sandbox" | "production";
   bearerToken: string;
   platform: "ios";
   token: string;
@@ -18,6 +24,7 @@ interface DeviceTokenUpsertResult {
 interface DeviceTokenTable {
   upsert(
     values: {
+      apns_environment: string;
       last_seen_at: string;
       platform: string;
       token: string;
@@ -50,11 +57,16 @@ export function createSupabasePushDeviceTokenStore(
   now: () => Date = () => new Date(),
 ): PushDeviceTokenStore {
   return {
-    async register({ bearerToken, platform, token, userId }) {
+    async register({ apnsEnvironment, bearerToken, platform, token, userId }) {
       const { error } = await clientForBearer(bearerToken)
         .from("device_tokens")
         .upsert(
           {
+            // Re-sent on every registration, not just the first. A build
+            // reinstalled over another configuration keeps the same row under
+            // this key, and a stale environment on it is a working address
+            // pointed at the wrong host.
+            apns_environment: apnsEnvironment,
             last_seen_at: now().toISOString(),
             platform,
             token,

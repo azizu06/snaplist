@@ -21,6 +21,11 @@ package-lock.json
 .env.development.local
 .env.production.local
 
+# Apple credentials. The APNs auth key (#891) is downloadable exactly once and
+# authorises pushes for every app in the team; it must never reach a commit.
+*.p8
+*.mobileprovision
+
 # supabase local
 /supabase/.branches
 /supabase/.temp

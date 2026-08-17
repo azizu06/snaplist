@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EbayAdapter } from "./types";
+import type { SellerPushDispatcher } from "@/lib/push-notifications";
 import { effectivePrice } from "@/lib/pipeline";
 import { logEvent } from "@/lib/observability";
 import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
@@ -103,6 +104,12 @@ export function createMobileEbayPublishService(input: {
     userId: string,
     env: Record<string, string | undefined>,
   ) => Promise<EbayAdapter>;
+  /**
+   * Tells the seller a publish was confirmed (#891). Built from the same
+   * tenant-bound completion client the write goes through, and injected rather
+   * than constructed here so this service stays free of a credential.
+   */
+  pushFor?: (completionClient: SupabaseClient) => SellerPushDispatcher;
   env?: () => Record<string, string | undefined>;
 }): MobileEbayPublishGateway {
   return {
@@ -229,6 +236,7 @@ export function createMobileEbayPublishService(input: {
           env: () => env,
           expectedReviewRevision: operation.expectedReviewRevision,
           idempotencyKey: operation.idempotencyKey,
+          push: input.pushFor?.(completionClient),
         },
       );
       return mobilePublishStatus(outcome, ebayEnvironment(env));

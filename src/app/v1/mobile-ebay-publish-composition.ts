@@ -6,6 +6,10 @@ import {
   createMobileEbayPublishService,
 } from "@/lib/marketplace/ebay";
 import { createServerRpcClient } from "@/lib/supabase/server-rpc-auth";
+import {
+  createSellerPushDispatcherFor,
+  sellerPushRpcClient,
+} from "@/lib/push-notifications/composition";
 import { clerkPrincipal, unavailableWorker } from "./mobile-api-composition";
 
 function configuredClient(
@@ -61,6 +65,11 @@ function configuredEbayPublish() {
         credentialClient: completionClient,
         env: () => env,
       }),
+    // Same dispatcher the web route wires (#891). Both entry points reach the
+    // shared publish service, so the announcement is the same one or there is
+    // a seller who gets told on one path and not the other.
+    pushFor: (completionClient) =>
+      createSellerPushDispatcherFor(sellerPushRpcClient(completionClient)),
   });
 }
 
