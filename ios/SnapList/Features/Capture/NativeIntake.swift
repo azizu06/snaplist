@@ -63,6 +63,16 @@ actor NativeIntake {
         /// it derives from the path is a digest that hides the difference, and
         /// a bearer can never match an installation-scoped proof.
         let isPrincipalBound: Bool
+        /// The directory component this intake is filed under, or nil when it is
+        /// filed under the installation rather than under a seller.
+        ///
+        /// #871. The shell keys the wall's durable cover-photo home by it, and
+        /// takes it from the snapshot it is already processing rather than
+        /// asking the intake again: a second read, taken after an await, can
+        /// name a different seller than the cards the shell has in hand, and the
+        /// departing seller's photo would be written into the arriving seller's
+        /// directory.
+        let principalScopeComponent: String?
 
         init(
             version: Version,
@@ -73,13 +83,15 @@ actor NativeIntake {
             // this field existed, so fixtures keep describing a bound intake
             // unless they say otherwise. The one production construction site
             // below always passes the real answer.
-            isPrincipalBound: Bool = true
+            isPrincipalBound: Bool = true,
+            principalScopeComponent: String? = nil
         ) {
             self.version = version
             self.photos = photos
             self.voice = voice
             self.recovery = recovery
             self.isPrincipalBound = isPrincipalBound
+            self.principalScopeComponent = principalScopeComponent
         }
     }
 
@@ -227,7 +239,10 @@ actor NativeIntake {
             Snapshot(
                 version: version, photos: photos, voice: voice, recovery: recovery,
                 // A nil scope is the ephemeral root, which no principal owns.
-                isPrincipalBound: scope?.isPrincipalBound ?? false
+                isPrincipalBound: scope?.isPrincipalBound ?? false,
+                principalScopeComponent: scope.flatMap {
+                    $0.isPrincipalBound ? $0.directoryComponent : nil
+                }
             )
         }
         var assetsRoot: URL { root.appendingPathComponent("Current/Assets", isDirectory: true) }

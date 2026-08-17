@@ -97,6 +97,7 @@ describe("lean-MVP release retention contract", () => {
     expect(contract.data.map(({ id }) => id)).toEqual([
       "local-intake-photos",
       "local-intake-voice",
+      "local-trophy-wall-cover-photos",
       "private-storage-photos",
       "ebay-photo-access-tokens",
       "private-storage-raw-voice",

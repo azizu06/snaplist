@@ -258,6 +258,14 @@ struct SettingsLocalCachedDataStore {
         return [
             snapList.appendingPathComponent("CaptureDraft", isDirectory: true),
             snapList.appendingPathComponent("ListingReview", isDirectory: true),
+            // Every principal's Trophy Wall covers, not only the departing one.
+            // Sign-out and account erasure both run this, and both are the point
+            // at which no principal on this device has a claim left to make on a
+            // photo the seller staged here (#871).
+            snapList.appendingPathComponent(
+                FileTrophyWallLocalCoverPhotoStore.rootDirectoryName,
+                isDirectory: true
+            ),
         ]
     }
 }

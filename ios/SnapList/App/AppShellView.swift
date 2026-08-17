@@ -72,6 +72,11 @@ struct AppShellView: View {
     @State private var recoverableLocalPendingIdentity: TrophyWallLogicalIdentity?
     @State private var trophyWallCollectionRefreshState =
         TrophyWallCollectionRefreshState()
+    /// Which principal's durable cover-photo store the wall is currently on, and
+    /// whether it has adopted one at all. Both are needed: the scope can be nil
+    /// for a launch with no signed-in seller, and a transition can arrive
+    /// without the scope changing.
+    @State private var trophyWallCoverPhotoAdoption = TrophyWallCoverPhotoAdoption()
     @State private var activationCompletionChecked = false
     @State private var hasCompletedActivation = false
     @State private var activationAuthentication = ActivationAuthenticationState.unknown
@@ -450,8 +455,39 @@ struct AppShellView: View {
                         // tab-keyed refresh below does not re-run on its own, so a
                         // seller already sitting on the wall would watch it stay
                         // blank until they navigated away and back.
+                        //
+                        // It also reverts the wall to the unavailable cover
+                        // store, so the arriving principal has to adopt again
+                        // even when the intake resolves to the same directory.
+                        trophyWallCoverPhotoAdoption.principalDidTransition()
+                    }
+                    // The principal the wall stores under is the one this
+                    // snapshot carries — the same value the fence above was
+                    // decided from. Asking the intake again here would be a
+                    // second read across an await, and the two can disagree:
+                    // the fence would not fire, the wall would still hold the
+                    // departing seller's cards, and their photos would be
+                    // written into the arriving seller's directory.
+                    if case .adopt(let coverPhotoScope) =
+                        trophyWallCoverPhotoAdoption.scopeToAdopt(
+                            for: snapshot.principalScopeComponent
+                        ) {
+                        trophyWallStore.adoptLocalCoverPhotoStore(
+                            TrophyWallLocalCoverPhotoStoreFactory.make(
+                                scopeDirectoryComponent: coverPhotoScope
+                            )
+                        )
                     }
                     let recoveryScope = trophyWallStore.principalScope
+                    // `currentScope` cannot disagree with `recoveryScope` here:
+                    // `principalScope` is a `let`, and this loop captured one
+                    // store instance that is never replaced for its lifetime.
+                    // What actually keeps the load from landing on a departed
+                    // seller is the fence above, which runs before this line on
+                    // the same snapshot. The re-check stays because
+                    // `TrophyWallPendingCardRecovery` is a general seam with its
+                    // own `.stalePrincipal` coverage, but at this call site it
+                    // is a restatement, not the protection.
                     let localCardRecovery = await TrophyWallPendingCardRecovery
                         .resolve(
                             scopedTo: recoveryScope,

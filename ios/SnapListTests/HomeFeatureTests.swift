@@ -3052,6 +3052,566 @@ private struct TrophyWallConvergenceCase {
     let expectedCards: [TrophyWallCard]
 }
 
+/// #871. Everything here writes to a real directory and reads it back through a
+/// second store, because the defect this covers is invisible to any test that
+/// reuses one in-memory wall: the bytes were always there for the launch that
+/// staged them, and never for the next one.
+@MainActor
+final class TrophyWallLocalCoverPhotoPersistenceTests: XCTestCase {
+    /// Two principals, written the way the intake writes them: `v1-` and 64
+    /// lowercase hex digits. Nothing here derives a digest from an identity —
+    /// the digest is the intake's, and this asserts what the wall does with it.
+    private let sellerScope = "v1-" + String(repeating: "a", count: 64)
+    private let otherSellerScope = "v1-" + String(repeating: "b", count: 64)
+    private let fileManager = FileManager.default
+    private var applicationSupport = URL(fileURLWithPath: "/")
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        applicationSupport = fileManager.temporaryDirectory
+            .appendingPathComponent(
+                "trophy-wall-covers-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try fileManager.createDirectory(
+            at: applicationSupport,
+            withIntermediateDirectories: true
+        )
+    }
+
+    override func tearDownWithError() throws {
+        try? fileManager.removeItem(at: applicationSupport)
+        try super.tearDownWithError()
+    }
+
+    /// The issue's seam. A wall that persisted nothing, and a wall that only
+    /// remembers within one launch, both fail this: the second store is a
+    /// different object over the same directory, seeded with no cards, exactly
+    /// as release seeds it.
+    func testTheSellersOwnProcessingPhotoSurvivesARelaunch() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+
+        let firstLaunch = persistStagedPhoto(
+            stagedPhoto,
+            fixture: fixture,
+            scope: sellerScope
+        )
+        XCTAssertEqual(
+            firstLaunch.processingRows
+                .first { $0.id == .run(fixture.runID) }?
+                .localCoverPhotoData,
+            stagedPhoto,
+            "The launch that staged the photo must still be the #867 behaviour."
+        )
+
+        let relaunch = fixture.makeStore(cards: [])
+        relaunch.adoptLocalCoverPhotoStore(makeCoverPhotoStore(scope: sellerScope))
+        // What a relaunch actually shows: the wall rebuilt from server history,
+        // which has no photo of a run that has not been delivered yet.
+        relaunch.ingest(serverProjection(fixture: fixture))
+
+        let row = try XCTUnwrap(
+            relaunch.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(row.itemName, fixture.matchedItemName)
+        XCTAssertEqual(row.localCoverPhotoData, stagedPhoto)
+    }
+
+    /// The bytes are filed under the principal that staged them, so another
+    /// principal's session finds nothing — while the seller's own session still
+    /// finds it. Without the second half, a store that persists nothing at all
+    /// would pass.
+    func testOnePrincipalsBytesAreUnreadableFromAnotherPrincipalsSession() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        persistStagedPhoto(stagedPhoto, fixture: fixture, scope: sellerScope)
+
+        let otherSeller = fixture.makeStore(cards: [])
+        otherSeller.adoptLocalCoverPhotoStore(
+            makeCoverPhotoStore(scope: otherSellerScope)
+        )
+        otherSeller.ingest(serverProjection(fixture: fixture))
+
+        let otherRow = try XCTUnwrap(
+            otherSeller.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertNil(otherRow.localCoverPhotoData)
+        XCTAssertTrue(
+            makeCoverPhotoStore(scope: otherSellerScope).loadAll().isEmpty,
+            "Reading another principal's directory would show the run here."
+        )
+
+        let sameSeller = fixture.makeStore(cards: [])
+        sameSeller.adoptLocalCoverPhotoStore(makeCoverPhotoStore(scope: sellerScope))
+        sameSeller.ingest(serverProjection(fixture: fixture))
+        XCTAssertEqual(
+            sameSeller.processingRows.first?.localCoverPhotoData,
+            stagedPhoto,
+            "The nil above must be the fence, not an empty store."
+        )
+    }
+
+    /// A delivered run draws the server's cover photo, so the device's copy is
+    /// one the wall will never read again. Asserted on disk rather than on the
+    /// card, because a card that drops the bytes while the file stays is exactly
+    /// the accumulation the issue rules out.
+    func testTerminalDeliveryReleasesTheDeviceCopyOfThePhoto() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let store = persistStagedPhoto(stagedPhoto, fixture: fixture, scope: sellerScope)
+        XCTAssertEqual(
+            makeCoverPhotoStore(scope: sellerScope).loadAll()[fixture.runID],
+            stagedPhoto
+        )
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: nil,
+                state: .exportPrepared,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+                itemName: fixture.matchedItemName,
+                coverPhotoURL: URL(string: "https://cdn.example.com/cover.jpg")
+            )
+        )
+
+        XCTAssertTrue(store.processingRows.isEmpty)
+        XCTAssertTrue(
+            makeCoverPhotoStore(scope: sellerScope).loadAll().isEmpty,
+            "A settled row must leave no copy behind on the device."
+        )
+    }
+
+    /// The publish path settles a row without a history projection, and it is the
+    /// one that already dropped the bytes in memory. The file has to go with them.
+    func testConfirmedEbayPublicationReleasesTheDeviceCopyOfThePhoto() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let store = fixture.makeStore(cards: [])
+        store.adoptLocalCoverPhotoStore(makeCoverPhotoStore(scope: sellerScope))
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: nil,
+                state: .readyToReview,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+                itemName: fixture.matchedItemName,
+                listingID: fixture.listingID,
+                localCoverPhotoData: stagedPhoto
+            )
+        )
+        XCTAssertEqual(
+            makeCoverPhotoStore(scope: sellerScope).loadAll()[fixture.runID],
+            stagedPhoto
+        )
+
+        store.applyEbayPublishStatus(
+            EbayPublishStatus(
+                listingID: fixture.listingID,
+                outcome: .published,
+                ebayListingID: "123456789012",
+                ebayOfferID: "offer-871",
+                alreadyPublished: true
+            )
+        )
+
+        XCTAssertTrue(
+            makeCoverPhotoStore(scope: sellerScope).loadAll().isEmpty
+        )
+    }
+
+    /// The item left the seller's collection, so the copy of their photo goes
+    /// with it. This is the only per-item deletion the device can observe: the
+    /// app has no delete-one-item surface, so the server retiring the run is the
+    /// event that means the same thing.
+    func testARetiredRunTakesTheDeviceCopyOfThePhotoWithIt() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let store = persistStagedPhoto(stagedPhoto, fixture: fixture, scope: sellerScope)
+
+        store.ingest(
+            historyPage: try fixture.historyPage(
+                status: .failed,
+                stage: .pricing,
+                terminalOutcome: .failed,
+                retryTruth: (canRetry: false, workPreserved: false),
+                canStartNewCapture: true,
+                historyOrderAt: Date(timeIntervalSince1970: 60),
+                lastMeaningfulUpdateAt: "1970-01-01T00:01:00.000Z",
+                retentionCleanedAt: "1970-01-01T00:01:00.000Z"
+            ),
+            principalScope: fixture.principal
+        )
+
+        XCTAssertTrue(store.processingRows.isEmpty)
+        XCTAssertTrue(
+            makeCoverPhotoStore(scope: sellerScope).loadAll().isEmpty,
+            "A run the seller no longer has must not leave its photo behind."
+        )
+    }
+
+    /// A guest's claim on this device expires on the intake's recovery window,
+    /// and a photo that outlived the claim would be a copy nobody can claim.
+    func testAPhotoIsGoneOnceTheRetentionWindowHasPassed() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let stagedAt = Date(timeIntervalSince1970: 1_000_000)
+        let store = fixture.makeStore(cards: [])
+        store.adoptLocalCoverPhotoStore(
+            makeCoverPhotoStore(scope: sellerScope, now: { stagedAt })
+        )
+        store.ingestAcceptance(
+            AcceptedItemRunHandoff(
+                idempotencyKey: fixture.idempotencyKey,
+                acceptedRun: fixture.acceptedHandoff.acceptedRun,
+                localCoverPhotoData: stagedPhoto
+            )
+        )
+
+        let window = FileTrophyWallLocalCoverPhotoStore.retentionWindow
+        let justInside = makeCoverPhotoStore(
+            scope: sellerScope,
+            now: { stagedAt.addingTimeInterval(window - 1) }
+        )
+        XCTAssertEqual(justInside.loadAll()[fixture.runID], stagedPhoto)
+
+        let expired = makeCoverPhotoStore(
+            scope: sellerScope,
+            now: { stagedAt.addingTimeInterval(window + 1) }
+        )
+        XCTAssertTrue(expired.loadAll().isEmpty)
+        // Swept, not merely hidden. The reader is given a clock from before the
+        // record expired, so it would happily return the photo if it were still
+        // on disk — a reader past expiry would sweep it itself and pass either
+        // way.
+        XCTAssertTrue(
+            makeCoverPhotoStore(
+                scope: sellerScope,
+                now: { stagedAt.addingTimeInterval(window - 1) }
+            ).loadAll().isEmpty,
+            "The expired read must have deleted the record, not just hidden it."
+        )
+    }
+
+    /// Expiry is swept across every principal's directory, not only the one the
+    /// device currently belongs to, so a guest's expired photo is removed even
+    /// though the seller signed in afterwards. It is keyed on expiry rather than
+    /// on foreignness on purpose: at launch, before Clerk answers, the signed-in
+    /// seller's own directory looks foreign.
+    func testAnExpiredPhotoIsSweptFromAPrincipalTheDeviceNoLongerBelongsTo() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let stagedAt = Date(timeIntervalSince1970: 1_000_000)
+        let guestStore = fixture.makeStore(cards: [])
+        guestStore.adoptLocalCoverPhotoStore(
+            makeCoverPhotoStore(scope: otherSellerScope, now: { stagedAt })
+        )
+        guestStore.ingestAcceptance(
+            AcceptedItemRunHandoff(
+                idempotencyKey: fixture.idempotencyKey,
+                acceptedRun: fixture.acceptedHandoff.acceptedRun,
+                localCoverPhotoData: stagedPhoto
+            )
+        )
+
+        let window = FileTrophyWallLocalCoverPhotoStore.retentionWindow
+        _ = makeCoverPhotoStore(
+            scope: sellerScope,
+            now: { stagedAt.addingTimeInterval(window + 1) }
+        ).loadAll()
+
+        XCTAssertTrue(
+            makeCoverPhotoStore(scope: otherSellerScope, now: { stagedAt })
+                .loadAll()
+                .isEmpty,
+            "The expired record must be gone from disk, not just from the reader."
+        )
+    }
+
+    /// A principal transition empties the wall and takes the durable store away
+    /// with it, so nothing the departing seller's session does afterwards can be
+    /// written into a directory it no longer belongs to.
+    func testAPrincipalTransitionStopsTheWallWritingForTheDepartedSeller() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = persistStagedPhoto(
+            TrophyWallTestFixture.stagedCoverPhotoData(),
+            fixture: fixture,
+            scope: sellerScope
+        )
+
+        store.resetForPrincipalTransition()
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.thirdRunID,
+                linkedLogicalIdentity: nil,
+                state: .accepted,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+                itemName: fixture.unrelatedItemName,
+                localCoverPhotoData: TrophyWallTestFixture.stagedCoverPhotoData(
+                    sidePixels: 8
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            Set(makeCoverPhotoStore(scope: sellerScope).loadAll().keys),
+            [fixture.runID],
+            "Only what the seller's own session wrote may be in their directory."
+        )
+    }
+
+    /// The honest empty case. A relaunch with nothing persisted still renders the
+    /// slot the wall already draws, and claims no photo it does not have.
+    func testARelaunchWithNoPersistedBytesRendersTodaysSlot() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        store.adoptLocalCoverPhotoStore(makeCoverPhotoStore(scope: sellerScope))
+
+        store.ingest(serverProjection(fixture: fixture))
+
+        let row = try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertNil(row.localCoverPhotoData)
+        guard case .placeholder = TrophyWallProcessingRowPhoto.content(for: row) else {
+            return XCTFail("An absent photo must keep the existing slot.")
+        }
+    }
+
+    /// A launch that cannot name its principal — no signed-in seller and no
+    /// device key — has no durable home, so it writes nothing rather than filing
+    /// the seller's photo somewhere nobody can claim it.
+    func testAnUnprovedPrincipalPersistsNothing() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = makeWallCarryingTheStagedPhoto(
+            TrophyWallTestFixture.stagedCoverPhotoData(),
+            fixture: fixture,
+            coverPhotos: TrophyWallLocalCoverPhotoStoreFactory.make(
+                scopeDirectoryComponent: nil,
+                applicationSupportDirectory: applicationSupport
+            )
+        )
+
+        let coversRoot = applicationSupport
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent(
+                FileTrophyWallLocalCoverPhotoStore.rootDirectoryName,
+                isDirectory: true
+            )
+        XCTAssertFalse(fileManager.fileExists(atPath: coversRoot.path))
+        // The row itself is unaffected: this launch still shows the photo it is
+        // holding, it simply has nowhere to write it down.
+        XCTAssertNotNil(store.processingRows.first?.localCoverPhotoData)
+    }
+
+    /// An installation-scoped or ephemeral intake is not a principal, so it
+    /// resolves to no durable home at all.
+    func testOnlyAPrincipalScopedDirectoryComponentResolves() {
+        XCTAssertNotNil(
+            TrophyWallLocalCoverPhotoPrincipal(scopeDirectoryComponent: sellerScope)
+        )
+        for rejected in [
+            "",
+            "v1-",
+            "v2-" + String(repeating: "a", count: 64),
+            "v1-" + String(repeating: "A", count: 64),
+            "v1-" + String(repeating: "a", count: 63),
+            "v1-" + String(repeating: "z", count: 64),
+            "../" + String(repeating: "a", count: 64),
+        ] {
+            XCTAssertNil(
+                TrophyWallLocalCoverPhotoPrincipal(
+                    scopeDirectoryComponent: rejected
+                ),
+                "\(rejected) is not a principal directory."
+            )
+        }
+    }
+
+    /// A write that did not happen must not be remembered as one. `persist`
+    /// short-circuits on unchanged bytes, so a failure recorded as a success is
+    /// never retried for the rest of the launch, and the wall believes it has a
+    /// durable copy it does not have.
+    func testAPhotoThatCouldNotBeWrittenIsRetriedRatherThanRememberedAsSaved() {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let failing = FailingTrophyWallLocalCoverPhotoStore()
+
+        let store = makeWallCarryingTheStagedPhoto(
+            stagedPhoto,
+            fixture: fixture,
+            coverPhotos: failing
+        )
+        let attemptsAfterFirstCarry = failing.saveCount
+        XCTAssertGreaterThan(attemptsAfterFirstCarry, 0)
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: nil,
+                state: .workingIdentifying,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+                itemName: fixture.matchedItemName
+            )
+        )
+
+        XCTAssertGreaterThan(
+            failing.saveCount,
+            attemptsAfterFirstCarry,
+            "A failed write must not be recorded as persisted, or it is never retried."
+        )
+    }
+
+    // MARK: - Helpers
+
+    private func makeCoverPhotoStore(
+        scope: String,
+        now: @escaping () -> Date = Date.init
+    ) -> any TrophyWallLocalCoverPhotoStoring {
+        TrophyWallLocalCoverPhotoStoreFactory.make(
+            scopeDirectoryComponent: scope,
+            applicationSupportDirectory: applicationSupport,
+            now: now
+        )
+    }
+
+    /// The server's own view of the run: named, ordered, and photoless, which is
+    /// what every launch after the accepting one actually receives.
+    private func serverProjection(
+        fixture: TrophyWallTestFixture
+    ) -> TrophyWallCanonicalAcceptedRun {
+        TrophyWallCanonicalAcceptedRun(
+            principalScope: fixture.principal,
+            runID: fixture.runID,
+            linkedLogicalIdentity: nil,
+            state: .accepted,
+            lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+            itemName: fixture.matchedItemName
+        )
+    }
+
+    /// A wall in the state the seller is actually looking at, built the way the
+    /// product builds it: their own pending card, then the acceptance that
+    /// carries the photo off the device as the intake behind it is deleted.
+    @discardableResult
+    private func makeWallCarryingTheStagedPhoto(
+        _ stagedPhoto: Data,
+        fixture: TrophyWallTestFixture,
+        coverPhotos: any TrophyWallLocalCoverPhotoStoring
+    ) -> TrophyWallStore {
+        let store = fixture.makeStore(cards: [
+            .pending(
+                principalScope: fixture.principal,
+                logicalIdentity: fixture.logicalID,
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: stagedPhoto,
+                lastMeaningfulUpdateAt: fixture.pendingUpdate
+            ),
+        ])
+        store.adoptLocalCoverPhotoStore(coverPhotos)
+        store.ingestAcceptance(
+            AcceptedItemRunHandoff(
+                idempotencyKey: fixture.idempotencyKey,
+                acceptedRun: fixture.acceptedHandoff.acceptedRun,
+                localCoverPhotoData: stagedPhoto
+            )
+        )
+        return store
+    }
+
+    @discardableResult
+    private func persistStagedPhoto(
+        _ stagedPhoto: Data,
+        fixture: TrophyWallTestFixture,
+        scope: String
+    ) -> TrophyWallStore {
+        makeWallCarryingTheStagedPhoto(
+            stagedPhoto,
+            fixture: fixture,
+            coverPhotos: makeCoverPhotoStore(scope: scope)
+        )
+    }
+}
+
+/// A store whose disk is never writable — a full volume, a directory the seller
+/// cannot be given, a protected write behind a locked device.
+private final class FailingTrophyWallLocalCoverPhotoStore:
+    TrophyWallLocalCoverPhotoStoring {
+    private(set) var saveCount = 0
+
+    func loadAll() -> [UUID: Data] { [:] }
+
+    func save(_ photoData: Data, forRun runID: UUID) -> Bool {
+        saveCount += 1
+        return false
+    }
+
+    func remove(forRun runID: UUID) {}
+}
+
+/// The wiring seam one layer above the store: which durable home the shell hands
+/// the wall, and when it hands over a different one.
+///
+/// The defect this closes was never in the store. The shell read the principal
+/// twice — once from the snapshot it was processing, and again from the intake
+/// after an `await` — so a wall still holding one seller's cards could be handed
+/// the arriving seller's store and write the departing seller's photo into it.
+/// The decision now takes the snapshot's own scope and nothing else, so the two
+/// reads cannot disagree because there is only one.
+@MainActor
+final class TrophyWallCoverPhotoAdoptionTests: XCTestCase {
+    private let sellerScope = "v1-" + String(repeating: "a", count: 64)
+    private let arrivingScope = "v1-" + String(repeating: "b", count: 64)
+
+    func testTheScopeAdoptedIsTheOneTheSnapshotCarries() {
+        var adoption = TrophyWallCoverPhotoAdoption()
+
+        XCTAssertEqual(adoption.scopeToAdopt(for: sellerScope), .adopt(sellerScope))
+    }
+
+    func testOneScopeIsAdoptedOnceRatherThanOnEverySnapshot() {
+        var adoption = TrophyWallCoverPhotoAdoption()
+        _ = adoption.scopeToAdopt(for: sellerScope)
+
+        XCTAssertEqual(adoption.scopeToAdopt(for: sellerScope), .keepCurrent)
+    }
+
+    func testAnArrivingPrincipalReplacesTheDepartingOne() {
+        var adoption = TrophyWallCoverPhotoAdoption()
+        _ = adoption.scopeToAdopt(for: sellerScope)
+
+        XCTAssertEqual(
+            adoption.scopeToAdopt(for: arrivingScope),
+            .adopt(arrivingScope)
+        )
+    }
+
+    /// The principal fence reverts the wall to the store that writes nothing, so
+    /// the same scope has to be handed over again rather than treated as held.
+    func testAPrincipalTransitionForcesReadoptionOfTheSameScope() {
+        var adoption = TrophyWallCoverPhotoAdoption()
+        _ = adoption.scopeToAdopt(for: sellerScope)
+
+        adoption.principalDidTransition()
+
+        XCTAssertEqual(adoption.scopeToAdopt(for: sellerScope), .adopt(sellerScope))
+    }
+
+    /// A launch that cannot name its principal is a decision, not the absence of
+    /// one: the wall is handed the store that writes nothing, once.
+    func testAnUnprovedPrincipalIsAdoptedAsNoDurableHome() {
+        var adoption = TrophyWallCoverPhotoAdoption()
+
+        XCTAssertEqual(adoption.scopeToAdopt(for: nil), .adopt(nil))
+        XCTAssertEqual(adoption.scopeToAdopt(for: nil), .keepCurrent)
+    }
+}
+
 private struct TrophyWallRunDetailConvergenceCase {
     let name: String
     let principalScope: TrophyWallPrincipalScope
