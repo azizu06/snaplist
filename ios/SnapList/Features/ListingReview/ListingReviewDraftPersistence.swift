@@ -40,7 +40,10 @@ struct ListingReviewDraft: Codable, Equatable, Sendable {
             let value = specific.value.trimmingCharacters(
                 in: .whitespacesAndNewlines
             )
-            let key = Self.saveContractKey(for: name)
+            // The local `name` is trimmed for the length and empty checks
+            // below, which are a different question. The key comes off the
+            // raw name so it does not depend on this caller trimming first.
+            let key = Self.saveContractKey(for: specific.name)
             return !name.isEmpty
                 && name.utf16.count <= 65
                 && !value.isEmpty
@@ -50,23 +53,29 @@ struct ListingReviewDraft: Codable, Equatable, Sendable {
     }
 
     static func isIdentitySpecificName(_ name: String) -> Bool {
-        // `hasRequiredCopy` trims before it takes the key and this did not, so
-        // a name that arrived as " Brand" read as an ordinary specific. It
-        // decides both the edit route and the store's write guard, and a miss
-        // here writes an identity value without rerunning the price.
-        saveContractKey(
-            for: name.trimmingCharacters(in: .whitespacesAndNewlines)
-        ).hasPrefix("reserved:")
+        saveContractKey(for: name).hasPrefix("reserved:")
     }
 
-    private static func saveContractKey(for name: String) -> String {
-        switch name.lowercased() {
+    /// The one place a specific's name becomes its save-contract key.
+    ///
+    /// It owns the whole normalization, trim included. The trim used to sit at
+    /// the call sites, and only one of the two had it, so a name that arrived
+    /// as " Brand" took the `default` branch here and came back an ordinary
+    /// key. That decided both the edit route and the store's write guard, so
+    /// one leading space was enough to write a brand with no pricing rerun
+    /// behind it. Not internal for testing alone: the guarantee is that this
+    /// function is the rule, so the test has to be able to ask it directly.
+    static func saveContractKey(for name: String) -> String {
+        let name = name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch name {
         case "brand", "model", "condition", "isbn", "upc":
-            "reserved:\(name.lowercased())"
+            "reserved:\(name)"
         case "category", "type":
             "reserved:category"
         default:
-            name.lowercased()
+            name
         }
     }
 }

@@ -135,6 +135,28 @@ final class ListingReviewPresentationTests: XCTestCase {
         }
     }
 
+    func testTheSaveContractKeyNormalizesTheNameItself() {
+        // The function owns the rule, so it is asked directly. Testing only
+        // through the callers would make the guarantee true by inspection
+        // again, which is what let the two of them drift apart.
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: " Brand"),
+            "reserved:brand"
+        )
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: "BRAND "),
+            "reserved:brand"
+        )
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: "\tType\n"),
+            "reserved:category"
+        )
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: " Color "),
+            "color"
+        )
+    }
+
     func testAnIdentityNameWithStrayWhitespaceStillRoutesToGuidedCorrection() {
         // Generated specifics are not guaranteed to arrive tidy, and an
         // untrimmed " Brand" reading as an ordinary specific would put a typed
