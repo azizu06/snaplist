@@ -130,3 +130,68 @@ describe("building the seller push dispatcher with a credential", () => {
     );
   });
 });
+
+const FIXED_APNS_CONFIG = {
+  bundleId: "com.snaplist.app.test",
+  keyId: "TEST_KEY_ID",
+  privateKeyPem: "test-pem",
+  teamId: "TEST_TEAM_ID",
+};
+
+/**
+ * Issue #891 standards review. Every other test in this file proves the
+ * *keying* (recovery once the config changes). None of them proves the
+ * headline behavior of the commit: `createHttpApnsSender` runs once per
+ * process, not once per caller. A regression back to per-call construction,
+ * with keyed failure caching left intact, would pass every other test here.
+ */
+describe("building the sender once per process, not once per caller", () => {
+  afterEach(() => {
+    vi.doUnmock("./apns");
+    vi.resetModules();
+    configureApnsTestEnv();
+  });
+
+  it("calls createHttpApnsSender once across two calls with an unchanged environment", async () => {
+    vi.resetModules();
+    const createHttpApnsSender = vi.fn(() => ({ send: vi.fn() }));
+    vi.doMock("./apns", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./apns")>();
+      return {
+        ...actual,
+        createHttpApnsSender,
+        resolveApnsConfig: vi.fn(() => FIXED_APNS_CONFIG),
+        createApnsHttp2Transport: vi.fn(() => ({})),
+      };
+    });
+    const { createSellerPushDispatcherFor } = await import("./composition");
+    configureApnsTestEnv();
+
+    createSellerPushDispatcherFor(recordingClient());
+    createSellerPushDispatcherFor(recordingClient());
+
+    expect(createHttpApnsSender).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls createHttpApnsSender twice when the environment changes between calls", async () => {
+    vi.resetModules();
+    const createHttpApnsSender = vi.fn(() => ({ send: vi.fn() }));
+    vi.doMock("./apns", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./apns")>();
+      return {
+        ...actual,
+        createHttpApnsSender,
+        resolveApnsConfig: vi.fn(() => FIXED_APNS_CONFIG),
+        createApnsHttp2Transport: vi.fn(() => ({})),
+      };
+    });
+    const { createSellerPushDispatcherFor } = await import("./composition");
+    configureApnsTestEnv();
+
+    createSellerPushDispatcherFor(recordingClient());
+    process.env.APNS_TEAM_ID = "TEST_TEAM_ID_2";
+    createSellerPushDispatcherFor(recordingClient());
+
+    expect(createHttpApnsSender).toHaveBeenCalledTimes(2);
+  });
+});
