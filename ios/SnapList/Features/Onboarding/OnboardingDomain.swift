@@ -402,22 +402,106 @@ struct BackgroundExampleRow: Hashable {
     let state: String
 }
 
+/// One sold comp on ONB-03.
+///
+/// The photograph travels with the row for the same reason `BackgroundExampleRow` carries
+/// its own asset. These four rows were once one photograph drawn four times, separated by
+/// a per-row `.scaleEffect` and `.offset`, which read as a single listing zoomed four ways
+/// rather than four sellers who sold the same controller.
+struct SoldComparisonRow: Hashable {
+    let imageName: String
+    let condition: String
+    let soldAgo: String
+    let price: String
+}
+
+/// The three ONB-02 captions, one per crop of the seller's photograph.
+struct ContextCaptionSet: Hashable {
+    let whole: String
+    let flaw: String
+    let details: String
+
+    var all: [String] { [whole, flaw, details] }
+}
+
 enum FirstValueOnboardingCopy {
     static let backgroundExampleRows: [BackgroundExampleRow] = [
         .init(
-            imageName: "FirstValueJacket",
-            item: "Denim trucker jacket",
+            imageName: "FirstValueController",
+            item: "DualSense controller",
             state: "Writing the listing"
         ),
         .init(
-            imageName: "FirstValueLamp",
-            item: "Desk lamp",
+            imageName: "FirstValueHeadphones",
+            item: "AirPods Max",
             state: "Checking sold prices"
         ),
         .init(
-            imageName: "FirstValueSneaker",
-            item: "White sneakers",
+            imageName: "FirstValueTradingCard",
+            item: "Charizard card",
             state: "Reading your voice note"
+        ),
+    ]
+
+    /// The one item all six screens carry, from its photographs on ONB-02 to its comps
+    /// on ONB-03 to its finished listing on ONB-06. ONB-01, ONB-04 and ONB-06 each drew
+    /// their own copy of this title before #887, so the three could drift apart.
+    static let listingTitle = "Sony DualSense wireless controller, white"
+
+    /// ONB-01's projection row gives the title one line beside a 54pt thumbnail, which
+    /// the full title does not survive without shrinking to an unreadable size.
+    static let shortListingTitle = "DualSense controller, white"
+
+    /// The condition the voice note dictates. These two have to agree: the seller hears
+    /// themselves describe the scuff on ONB-02 and reads it back as a field on ONB-04.
+    static let listingCondition = "Good, small scuff on the left grip"
+    static let voiceNoteQuote = "Small scuff on the left grip. Bought it with the console in 2023."
+
+    /// ONB-06's reassurance. "Before anything leaves the app" promised a boundary
+    /// onboarding does not own; publishing is the moment the seller actually acts on.
+    ///
+    /// Length is load bearing, and the budget is smaller than it looks. The Scout mascot
+    /// takes most of the row, leaving this about 26 characters a line, so 68 characters
+    /// broke three ways and left "publish." alone on the last one. Two even lines need 52
+    /// or fewer, which costs a claim: "every field" went so that "before you publish" could
+    /// stay, since the timing is the part that reassures. "Yet" rather than "to start"
+    /// because publishing to eBay does need an account later.
+    static let includedScoutLine = "No account needed yet. You edit before you publish."
+
+    /// What each ONB-02 photograph is for. Keyed rather than indexed: the screen draws
+    /// these three in a two-column layout whose reading order is not the array order, so
+    /// `[0]`/`[1]`/`[2]` could be reshuffled into the wrong tiles without a test noticing.
+    static let contextCaptions = ContextCaptionSet(
+        whole: "Whole item",
+        flaw: "Any damage",
+        details: "Close details"
+    )
+
+    /// Four sellers who sold the same controller, each photographed on their own surface.
+    static let soldComparisonRows: [SoldComparisonRow] = [
+        .init(
+            imageName: "FirstValueControllerSold1",
+            condition: "Excellent, barely used",
+            soldAgo: "4 days ago",
+            price: "$66"
+        ),
+        .init(
+            imageName: "FirstValueControllerSold2",
+            condition: "Good, light wear",
+            soldAgo: "6 days ago",
+            price: "$62"
+        ),
+        .init(
+            imageName: "FirstValueControllerSold3",
+            condition: "Very good",
+            soldAgo: "2 weeks ago",
+            price: "$55"
+        ),
+        .init(
+            imageName: "FirstValueControllerSold4",
+            condition: "Good, small marks",
+            soldAgo: "3 weeks ago",
+            price: "$49"
         ),
     ]
 }

@@ -103,7 +103,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             Set(photos.map(\.assetName)),
-            ["FirstValueSneaker", "FirstValueJacket", "FirstValueLamp"]
+            ["FirstValueController", "FirstValueHeadphones", "FirstValueTradingCard"]
         )
     }
 
@@ -863,9 +863,9 @@ final class TrophyWallDomainTests: XCTestCase {
         let historyOrderAt = Date(timeIntervalSince1970: 1_753_015_200)
         let tile = TrophyWallSettledTile(
             id: .run(UUID()),
-            itemName: "White leather sneaker",
+            itemName: "DualSense controller",
             stateLabel: "Published to eBay",
-            coverPhotoAssetName: "FirstValueSneaker",
+            coverPhotoAssetName: "FirstValueController",
             historyOrderAt: historyOrderAt
         )
         let relevantDate = historyOrderAt.formatted(
@@ -874,7 +874,7 @@ final class TrophyWallDomainTests: XCTestCase {
 
         XCTAssertEqual(
             tile.accessibilityLabel,
-            "White leather sneaker, Published to eBay, \(relevantDate). "
+            "DualSense controller, Published to eBay, \(relevantDate). "
                 + "Completed item in your collection."
         )
     }

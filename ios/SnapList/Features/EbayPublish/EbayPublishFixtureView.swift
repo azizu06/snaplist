@@ -4,7 +4,7 @@ import SwiftUI
 
 enum EbayPublishFixtureData {
     static let listingTitle =
-        "Medium wash denim trucker jacket, size M"
+        "Sony DualSense wireless controller, white"
 }
 
 /// Fixed context carried by the DEBUG-only eBay v5 fixture adapter.
@@ -62,15 +62,15 @@ actor EbayPublishFixtureAdapter: EbayPublishFeatureServing {
         return EbayPublishPreflight(
             listingID: authority.listingID,
             title: EbayPublishFixtureData.listingTitle,
-            description: "A medium wash denim trucker jacket in good used condition. Clean seams and hardware. Review the photos for the exact wear shown.",
+            description: "A white Sony DualSense wireless controller in good used condition. Clean grips and buttons. Review the photos for the exact wear shown.",
             effectivePrice: .init(amount: 58, label: "Seller price"),
             photoCount: 4,
             marketplace: "EBAY_US",
             ebayCondition: "USED_GOOD",
             itemSpecifics: [
-                "Brand": ["Levi’s"],
-                "Size": ["M"],
-                "Color": ["Blue"],
+                "Brand": ["Sony"],
+                "Platform": ["PlayStation 5"],
+                "Color": ["White"],
             ],
             reviewRevision: authority.reviewRevision,
             connection: connectionStatus,
@@ -213,7 +213,7 @@ struct EbayPublishFixtureHostView: View {
                 forceReducedMotion: forceReducedMotion,
                 listingTitle: EbayPublishFixtureData.listingTitle,
                 resultThumbnailSource: .approvedFixtureAsset(
-                    "FirstValueJacket"
+                    "FirstValueController"
                 ),
                 backToListing: {},
                 goToTrophyWall: {}

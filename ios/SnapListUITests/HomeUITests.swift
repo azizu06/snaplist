@@ -24,7 +24,7 @@ final class HomeUITests: XCTestCase {
             settled.buttons.element(
                 matching: NSPredicate(
                     format: "label BEGINSWITH %@ AND NOT label CONTAINS %@",
-                    "White leather sneaker",
+                    "DualSense controller",
                     "photo unavailable"
                 )
             ).waitForExistence(timeout: 2)
@@ -883,7 +883,7 @@ final class HomeUITests: XCTestCase {
         let finalTile = app.buttons.element(
             matching: NSPredicate(
                 format: "label BEGINSWITH %@",
-                "White desk lamp, second item"
+                "Charizard card, second copy"
             )
         )
 

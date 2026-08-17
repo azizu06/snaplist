@@ -13,6 +13,34 @@ enum FirstValueOnboardingHeaderMetrics {
 
 enum FirstValueOnboardingLayoutMetrics {
     static let draftScoutTopPadding: CGFloat = 8
+
+    /// ONB-02 puts two stacked photos beside one tall photo. Each photo carries a caption
+    /// under it, so the tall one has to absorb the caption row the stacked column spends
+    /// between its two photos, or the bottom caption on each side sits at a different
+    /// height. The tall height is computed rather than written down: the previous literal
+    /// assumed a 24 point caption block against a real one nearer 26, and the two drifted
+    /// apart silently.
+    static let contextShortPhotoHeight: CGFloat = 174
+    static let contextColumnSpacing: CGFloat = 10
+    /// One caption row plus the gap between it and the photo it labels.
+    static let contextCaptionBlockHeight: CGFloat = 26
+    static let contextCaptionSpacing: CGFloat = 6
+
+    static var contextTallPhotoHeight: CGFloat {
+        contextShortPhotoHeight * 2 + contextColumnSpacing + contextCaptionBlockHeight
+    }
+
+    /// Both columns plus the caption under the last photo in each.
+    static var contextGridHeight: CGFloat {
+        contextTallPhotoHeight + contextCaptionBlockHeight
+    }
+
+    /// ONB-06's hero card sat its price row 12 points below the title and roughly 7 above
+    /// the card's own edge, so the band read as bottom-cropped. The band takes its height
+    /// from these two paddings now instead of a fixed 67, which means a title that wraps
+    /// grows the card rather than being clipped by it.
+    static let includedCardTextTopPadding: CGFloat = 12
+    static let includedCardTextBottomPadding: CGFloat = 12
 }
 
 @MainActor
@@ -179,7 +207,7 @@ struct FirstValueOnboardingView: View {
             case .onb02:
                 highlightedTitle("A few angles,\n", "then say the rest.")
             case .onb03:
-                highlightedTitle("Priced from jackets that\n", "actually sold.")
+                highlightedTitle("Priced from controllers\n", "that actually sold.")
             case .onb04:
                 highlightedTitle("Written for you.\n", "Yours to change.")
             case .onb05:
@@ -226,18 +254,18 @@ struct FirstValueOnboardingView: View {
                 let tileWidth = (proxy.size.width - 16) / 3
                 HStack(spacing: 8) {
                     photographTile(
-                        "FirstValueSneaker",
-                        label: "A worn sneaker photographed on a plain surface",
+                        "FirstValueHeadphones",
+                        label: "A pair of over-ear headphones on a plain surface",
                         width: tileWidth
                     )
                     photographTile(
-                        "FirstValueJacket",
-                        label: "A folded medium wash denim jacket",
+                        "FirstValueController",
+                        label: "A white game controller on a plain gray surface",
                         width: tileWidth
                     )
                     photographTile(
-                        "FirstValueLamp",
-                        label: "A desk lamp photographed on a plain surface",
+                        "FirstValueTradingCard",
+                        label: "A holographic trading card on gray cloth",
                         width: tileWidth
                     )
                 }
@@ -274,7 +302,7 @@ struct FirstValueOnboardingView: View {
 
     private var photographListingProjection: some View {
         HStack(spacing: 12) {
-            Image("FirstValueJacket")
+            Image("FirstValueController")
                 .resizable()
                 .scaledToFill()
                 .frame(width: 54, height: 54)
@@ -282,7 +310,7 @@ struct FirstValueOnboardingView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 11))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Denim trucker jacket, size M")
+                Text(FirstValueOnboardingCopy.shortListingTitle)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
@@ -315,34 +343,32 @@ struct FirstValueOnboardingView: View {
     private var contextScreen: some View {
         VStack(spacing: 0) {
             GeometryReader { proxy in
-                let columnWidth = (proxy.size.width - 10) / 2
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(spacing: 10) {
+                let metrics = FirstValueOnboardingLayoutMetrics.self
+                let columnWidth = (proxy.size.width - metrics.contextColumnSpacing) / 2
+                HStack(alignment: .top, spacing: metrics.contextColumnSpacing) {
+                    VStack(spacing: metrics.contextColumnSpacing) {
                         contextPhoto(
                             crop: .whole,
-                            caption: "The whole thing",
-                            height: 174,
+                            height: metrics.contextShortPhotoHeight,
                             width: columnWidth
                         )
                         .accessibilitySortPriority(3)
                         contextPhoto(
                             crop: .flaw,
-                            caption: "Any flaws",
-                            height: 174,
+                            height: metrics.contextShortPhotoHeight,
                             width: columnWidth
                         )
                         .accessibilitySortPriority(2)
                     }
                     contextPhoto(
                         crop: .details,
-                        caption: "The details",
-                        height: 382,
+                        height: metrics.contextTallPhotoHeight,
                         width: columnWidth
                     )
                     .accessibilitySortPriority(1)
                 }
             }
-            .frame(height: 410)
+            .frame(height: FirstValueOnboardingLayoutMetrics.contextGridHeight)
             Divider()
                 .padding(.top, 14)
                 .padding(.bottom, 16)
@@ -367,13 +393,13 @@ struct FirstValueOnboardingView: View {
                             .foregroundStyle(SnapListColorToken.textSecondary.color)
                             .fixedSize()
                     }
-                    Text("“Small mark on the left cuff. Bought it in Tokyo in 2019.”")
+                    Text("“\(FirstValueOnboardingCopy.voiceNoteQuote)”")
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Optional. Voice note, 9 seconds of a possible 15. Play. Small mark on the left cuff. Bought it in Tokyo in 2019.")
+            .accessibilityLabel("Optional. Voice note, 9 seconds of a possible 15. Play. \(FirstValueOnboardingCopy.voiceNoteQuote)")
         }
     }
 
@@ -416,10 +442,9 @@ struct FirstValueOnboardingView: View {
                 .padding(.leading, 34)
                 .padding(.bottom, 6)
                 VStack(spacing: 0) {
-                    soldRow("Excellent, barely worn", "4 days ago", "$66", scale: 1.5, offset: CGSize(width: 2, height: -2))
-                    soldRow("Good, light wear", "6 days ago", "$62", scale: 1.6, offset: CGSize(width: -2, height: -3))
-                    soldRow("Very good", "2 weeks ago", "$55", scale: 1.9, offset: CGSize(width: 3, height: 2))
-                    soldRow("Good, small marks", "3 weeks ago", "$49", scale: 1.4, offset: CGSize(width: -3, height: 3))
+                    ForEach(FirstValueOnboardingCopy.soldComparisonRows, id: \.self) { row in
+                        soldRow(row)
+                    }
                 }
             }
             Divider()
@@ -441,7 +466,7 @@ struct FirstValueOnboardingView: View {
     private var draftScreen: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                itemImage("FirstValueJacket", label: "The jacket in its finished listing")
+                itemImage("FirstValueController", label: "The controller in its finished listing")
                     .frame(width: 96, height: 96)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 4) {
@@ -459,12 +484,12 @@ struct FirstValueOnboardingView: View {
             VStack(spacing: 0) {
                 draftEditableRow(
                     "Title",
-                    "Medium wash denim trucker jacket, size M",
+                    FirstValueOnboardingCopy.listingTitle,
                     showsTopDivider: false
                 )
                 draftEditableRow(
                     "Condition",
-                    "Good, small mark on left cuff"
+                    FirstValueOnboardingCopy.listingCondition
                 )
                 draftPriceRow
                 draftEditableRow("Description", "Four paragraphs")
@@ -565,7 +590,7 @@ struct FirstValueOnboardingView: View {
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
-                Text("No account needed, and you edit every field before anything leaves the app.")
+                Text(FirstValueOnboardingCopy.includedScoutLine)
                     .font(.system(size: 13))
                     .foregroundStyle(SnapListColorToken.mutedHeadlineText.color)
                     .padding(.leading, 12)
@@ -577,7 +602,7 @@ struct FirstValueOnboardingView: View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
                 ZStack(alignment: .topLeading) {
-                    Image("FirstValueJacket")
+                    Image("FirstValueController")
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity)
@@ -598,7 +623,7 @@ struct FirstValueOnboardingView: View {
                     .frame(height: 254)
                     .contentShape(Rectangle())
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("The finished listing for the denim jacket")
+                    .accessibilityLabel("The finished listing for the DualSense controller")
                     .accessibilityIdentifier("first-value-onboarding.included-photo-preview")
             }
             .frame(maxWidth: .infinity)
@@ -606,7 +631,7 @@ struct FirstValueOnboardingView: View {
             .clipped()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Medium wash denim trucker jacket, size M")
+                Text(FirstValueOnboardingCopy.listingTitle)
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if dynamicTypeSize.isAccessibilitySize {
@@ -627,10 +652,9 @@ struct FirstValueOnboardingView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 14 : 0)
+            .padding(.top, FirstValueOnboardingLayoutMetrics.includedCardTextTopPadding)
+            .padding(.bottom, FirstValueOnboardingLayoutMetrics.includedCardTextBottomPadding)
             .frame(maxWidth: .infinity, alignment: .top)
-            .frame(height: dynamicTypeSize.isAccessibilitySize ? nil : 67, alignment: .top)
         }
         .background(SnapListColorToken.canvas.color)
         .clipShape(RoundedRectangle(cornerRadius: 18))
@@ -668,46 +692,77 @@ struct FirstValueOnboardingView: View {
         if let outcome = model.outcome { didFinish(outcome) }
     }
 
-    private enum JacketCrop: Equatable { case whole, flaw, details }
+    private enum ItemCrop: Equatable { case whole, flaw, details }
+
+    private func contextCaption(_ crop: ItemCrop) -> String {
+        let captions = FirstValueOnboardingCopy.contextCaptions
+        switch crop {
+        case .whole: return captions.whole
+        case .flaw: return captions.flaw
+        case .details: return captions.details
+        }
+    }
 
     private func contextPhoto(
-        crop: JacketCrop,
-        caption: String,
+        crop: ItemCrop,
         height: CGFloat,
         width: CGFloat
     ) -> some View {
-        VStack(spacing: 6) {
-            jacketImage(crop)
+        let caption = contextCaption(crop)
+        return VStack(spacing: FirstValueOnboardingLayoutMetrics.contextCaptionSpacing) {
+            itemCropImage(crop)
                 .frame(width: width, height: height)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             HStack(spacing: 5) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(SnapListColorToken.action.color)
-                Text(caption).font(.subheadline.weight(.semibold))
+                Text(caption)
             }
+            // Set on the row, not on the label alone. Left to the environment, the
+            // checkmark resolved a size larger than the caption beside it.
+            .font(.subheadline.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
         }
         .frame(width: width)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(caption). \(contextAlt(crop))")
     }
 
+    /// Three views of the seller's own item, which is one photograph. The scale and anchor
+    /// are what make them three different views rather than the same frame three times.
+    ///
+    /// The anchors belong to this photograph, not to the layout. They were carried over
+    /// from the jacket this asset replaced and broke twice: a corner anchor that framed a
+    /// jacket landed on empty background once the subject changed, and changed again when
+    /// the subject moved from a red field to a gray one. Re-derive them against the actual
+    /// file if the asset changes, and check that `contextAlt` still describes what is in
+    /// frame.
     @ViewBuilder
-    private func jacketImage(_ crop: JacketCrop) -> some View {
-        if crop == .flaw {
-            Image("FirstValueJacket")
+    private func itemCropImage(_ crop: ItemCrop) -> some View {
+        switch crop {
+        case .whole:
+            Image("FirstValueController").resizable().scaledToFill()
+        case .flaw:
+            Image("FirstValueController")
                 .resizable().scaledToFill()
-                .scaleEffect(3, anchor: .bottomLeading)
-        } else {
-            Image("FirstValueJacket").resizable().scaledToFill()
+                .scaleEffect(2.2, anchor: .bottomLeading)
+        case .details:
+            Image("FirstValueController")
+                .resizable().scaledToFill()
+                .scaleEffect(1.6, anchor: UnitPoint(x: 0.5, y: 0.72))
         }
     }
 
-    private func contextAlt(_ crop: JacketCrop) -> String {
+    /// Describes what the crop actually shows. The listing copy says the controller has a
+    /// scuff; this photograph does not show one, so the alternative text names the parts in
+    /// frame rather than sending a screen reader looking for a mark that is not there.
+    private func contextAlt(_ crop: ItemCrop) -> String {
         switch crop {
-        case .whole: "The whole jacket, folded and photographed on a plain surface"
-        case .flaw: "Close view of the mark on the left cuff"
-        case .details: "Close view of the collar, seams and buttons"
+        case .whole: "The whole controller photographed on a plain surface"
+        case .flaw: "Close view of the face buttons and the grip below them"
+        case .details: "Close view of the thumbstick, speaker holes and USB-C port"
         }
     }
 
@@ -715,22 +770,22 @@ struct FirstValueOnboardingView: View {
         Image(name).resizable().scaledToFit().accessibilityLabel(label)
     }
 
-    private func soldRow(_ title: String, _ subtitle: String, _ price: String, scale: CGFloat, offset: CGSize) -> some View {
+    private func soldRow(_ row: SoldComparisonRow) -> some View {
         HStack(spacing: 11) {
-            ZStack {
-                Image("FirstValueJacket").resizable().scaledToFill()
-                    .scaleEffect(scale).offset(offset)
-            }
-            .frame(width: 36, height: 36).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .accessibilityHidden(true)
+            Image(row.imageName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 36, height: 36)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text("Sold \(subtitle)").font(.caption)
+                Text(row.condition).font(.subheadline.weight(.semibold))
+                Text("Sold \(row.soldAgo)").font(.caption)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
             }
             Spacer()
-            Text(price).font(.body.bold())
+            Text(row.price).font(.body.bold())
         }
         .padding(.vertical, 7)
         .overlay(alignment: .top) { Divider() }
@@ -850,21 +905,68 @@ struct FirstValueOnboardingContinueButton: View {
     }
 }
 
-private struct FirstValueVoiceWaveform: View {
-    private let barHeights: [CGFloat] = [
+/// The ONB-02 voice-note example. The row shows a play control and a running
+/// time, so a frozen waveform reads as a clip that stopped rather than one that
+/// is playing. The bars ride a travelling wave whose phase comes from the
+/// timeline clock, which loops seamlessly because the phase is periodic.
+///
+/// Reduce Motion gets the resting bar heights and no timeline, so the example
+/// still reads as a voice note without any movement.
+struct FirstValueVoiceWaveform: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Seconds for one full pass of the wave across the bars.
+    static let cycleDuration: Double = 1.5
+
+    static let restingBarHeights: [CGFloat] = [
         14, 22, 30, 18, 34, 24, 16, 28, 20, 32, 18, 26, 38, 22, 30, 16,
     ]
 
     var body: some View {
-        HStack(alignment: .center, spacing: 2) {
-            ForEach(Array(barHeights.enumerated()), id: \.offset) { _, height in
-                Capsule()
-                    .fill(SnapListColorToken.action.color)
-                    .frame(width: 3, height: height)
+        Group {
+            if reduceMotion {
+                bars(phase: nil)
+            } else {
+                TimelineView(.animation) { context in
+                    bars(phase: Self.phase(at: context.date))
+                }
             }
         }
         .frame(height: 40)
         .accessibilityHidden(true)
+    }
+
+    private func bars(phase: Double?) -> some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(Array(Self.restingBarHeights.enumerated()), id: \.offset) { index, resting in
+                Capsule()
+                    .fill(SnapListColorToken.action.color)
+                    .frame(
+                        width: 3,
+                        height: Self.barHeight(resting: resting, index: index, phase: phase)
+                    )
+            }
+        }
+    }
+
+    /// Position within one loop, in `0..<1`.
+    static func phase(at date: Date) -> Double {
+        let elapsed = date.timeIntervalSinceReferenceDate
+        return elapsed.truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
+    }
+
+    /// A `nil` phase means Reduce Motion, which returns the resting height
+    /// untouched. Otherwise the bar is scaled by a sine offset by its own
+    /// position, which is what makes the wave travel instead of pulsing as one
+    /// block. The scale never reaches zero, so no bar disappears mid-loop.
+    static func barHeight(resting: CGFloat, index: Int, phase: Double?) -> CGFloat {
+        guard let phase else {
+            return resting
+        }
+        let offset = Double(index) / Double(restingBarHeights.count)
+        let angle = (phase + offset) * 2 * .pi
+        let scale = 0.55 + (0.45 * ((sin(angle) + 1) / 2))
+        return max(4, resting * CGFloat(scale))
     }
 }
 

@@ -203,15 +203,15 @@ enum ListingReviewLaunchFixture {
         )!
     ) -> ListingReviewResult {
         let title = usesLongText
-            ? "Levi's Trucker Jacket in medium-wash denim with classic button-front styling"
-            : "Levi's Trucker Jacket · Men's Denim"
+            ? "Sony DualSense Wireless Controller in white with textured grips and USB-C cable"
+            : "Sony DualSense Controller · PlayStation 5"
         let description = usesLongText
             ? String(
                 repeating:
-                    "Medium-wash denim trucker jacket with visible wear consistent with regular use. Review the photos for the exact color, hardware, and condition shown. ",
+                    "White DualSense controller with visible wear consistent with regular use. Review the photos for the exact color, hardware, and condition shown. ",
                 count: 12
             )
-            : "Medium-wash denim trucker jacket in good used condition. Review the photos for the exact wear shown."
+            : "White DualSense controller in good used condition. Review the photos for the exact wear shown."
         // Sold-comp facts rotate so one fixture proves all three shapes: a
         // free Buy It Now, a paid auction, and a record that simply lacks the
         // optional facts. The third case is the one that matters — an absent
@@ -230,13 +230,13 @@ enum ListingReviewLaunchFixture {
                 "sourceURL":
                     "https://example.com/sold/\(index + 1)",
                 "title":
-                    "Levi's denim trucker jacket sold listing \(index + 1)",
+                    "Sony DualSense controller sold listing \(index + 1)",
                 "soldPrice": soldPrices[index],
                 "currency": "USD",
                 "condition": "Used",
                 "soldAt": soldDates[index],
                 "photoURL":
-                    "https://example.com/photos/jacket-\(index + 1).jpg",
+                    "https://example.com/photos/controller-\(index + 1).jpg",
             ]
             switch index % 3 {
             case 0:
@@ -278,7 +278,7 @@ enum ListingReviewLaunchFixture {
                 ] as [String: Any]
             },
             "identity": [
-                "label": "Levi's Trucker Jacket · Men's Denim",
+                "label": "Sony DualSense Controller · PlayStation 5",
                 "confident": true,
             ],
             "listing": [
@@ -286,12 +286,11 @@ enum ListingReviewLaunchFixture {
                 "description": description,
                 "condition": "good",
                 "specifics": [
-                    ["name": "Brand", "value": "Levi's"],
-                    ["name": "Type", "value": "Trucker jacket"],
-                    ["name": "Department", "value": "Men"],
-                    ["name": "Color", "value": "Blue"],
-                    ["name": "Material", "value": "Denim"],
-                    ["name": "Size", "value": "M"],
+                    ["name": "Brand", "value": "Sony"],
+                    ["name": "Type", "value": "Wireless controller"],
+                    ["name": "Platform", "value": "PlayStation 5"],
+                    ["name": "Color", "value": "White"],
+                    ["name": "Connectivity", "value": "Wireless"],
                 ],
             ],
             "pricing": [
@@ -530,7 +529,7 @@ private struct ListingReviewImage: View {
     var body: some View {
 #if DEBUG
         if url?.host == "example.com" {
-            Image("FirstValueJacket")
+            Image("FirstValueController")
                 .resizable()
                 .scaledToFill()
         } else {

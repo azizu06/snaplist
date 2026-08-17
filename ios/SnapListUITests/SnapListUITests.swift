@@ -3304,15 +3304,17 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["first-value-onboarding.back"].exists)
     }
 
-    /// The live ONB-06 approval crop centers a 353-point photo-first listing,
-    /// with a 254-point photo and a 67-point metadata band beneath it. These ranges
-    /// inspect the preview container that owns the jacket's accessibility semantics.
+    /// The live ONB-06 approval crop centers a 353-point photo-first listing with a
+    /// 254-point photo above a metadata band. The band no longer has a fixed height, so
+    /// what is pinned is the spacing inside it: the title sits below the photo and the
+    /// price row below the title, both by the paddings #887 evened out. These ranges
+    /// inspect the preview container that owns the controller's accessibility semantics.
     func testFirstValueOnboardingONB06UsesApprovedPhotoFirstPreviewMetrics() {
         let app = launchFirstValueOnboarding(resetProgress: true)
         advanceFirstValueOnboarding(to: "ONB-06", in: app)
         let window = app.windows.firstMatch
         let photo = app.otherElements["first-value-onboarding.included-photo-preview"]
-        let title = app.staticTexts["Medium wash denim trucker jacket, size M"]
+        let title = app.staticTexts["Sony DualSense wireless controller, white"]
         let readyToReview = app.staticTexts["Ready to review"]
         let price = app.staticTexts["$58"]
 
@@ -3343,9 +3345,9 @@ final class SnapListUITests: XCTestCase {
             app.buttons["first-value-onboarding.continue"]
         ]
         let approvedRows = [
-            "Denim trucker jacket, Writing the listing",
-            "Desk lamp, Checking sold prices",
-            "White sneakers, Reading your voice note"
+            "DualSense controller, Writing the listing",
+            "AirPods Max, Checking sold prices",
+            "Charizard card, Reading your voice note"
         ]
 
         XCTAssertTrue(screen.waitForExistence(timeout: 3))
@@ -3452,7 +3454,7 @@ final class SnapListUITests: XCTestCase {
             "Your draft is ready. Four fields, written from your photos."
         ]
         let titleRow = app.descendants(matching: .any)[
-            "Title. Medium wash denim trucker jacket, size M."
+            "Title. Sony DualSense wireless controller, white."
         ]
         let lastDraftValue = app.staticTexts["Four paragraphs"]
         let draftScout = app.descendants(matching: .any)[
@@ -3508,7 +3510,7 @@ final class SnapListUITests: XCTestCase {
             extraArguments: ["--dynamic-type=accessibility5", "--reduced-motion"]
         )
         advanceFirstValueOnboarding(to: "ONB-06", in: app)
-        let title = app.staticTexts["Medium wash denim trucker jacket, size M"]
+        let title = app.staticTexts["Sony DualSense wireless controller, white"]
         let readyToReview = app.staticTexts["Ready to review"]
         let startScanning = app.buttons["first-value-onboarding.start-scanning"]
         let existingAccount = app.buttons["first-value-onboarding.sign-in"]

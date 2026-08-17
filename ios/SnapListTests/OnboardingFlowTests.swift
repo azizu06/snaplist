@@ -15,6 +15,92 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(trophyInset, scanInset)
     }
 
+    func testVoiceExampleWaveformMovesOverOneCycle() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        XCTAssertFalse(resting.isEmpty)
+
+        let quarter = (0..<resting.count).map { index in
+            FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 0.25
+            )
+        }
+        let threeQuarters = (0..<resting.count).map { index in
+            FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 0.75
+            )
+        }
+
+        XCTAssertNotEqual(
+            quarter,
+            threeQuarters,
+            "the bars are identical half a cycle apart, so the waveform reads as paused"
+        )
+    }
+
+    func testVoiceExampleWaveformLoopsSeamlessly() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        for index in resting.indices {
+            let start = FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 0
+            )
+            let end = FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 1
+            )
+            XCTAssertEqual(
+                start,
+                end,
+                accuracy: 0.001,
+                "bar \(index) jumps at the loop seam"
+            )
+        }
+    }
+
+    func testVoiceExampleWaveformKeepsEveryBarVisible() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        for step in 0..<24 {
+            let phase = Double(step) / 24
+            for index in resting.indices {
+                let height = FirstValueVoiceWaveform.barHeight(
+                    resting: resting[index],
+                    index: index,
+                    phase: phase
+                )
+                XCTAssertGreaterThanOrEqual(
+                    height,
+                    4,
+                    "bar \(index) collapses at phase \(phase)"
+                )
+                XCTAssertLessThanOrEqual(
+                    height,
+                    resting[index],
+                    "bar \(index) grows past its resting height at phase \(phase)"
+                )
+            }
+        }
+    }
+
+    func testVoiceExampleWaveformRestsWhenReduceMotionIsOn() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        for index in resting.indices {
+            XCTAssertEqual(
+                FirstValueVoiceWaveform.barHeight(
+                    resting: resting[index],
+                    index: index,
+                    phase: nil
+                ),
+                resting[index]
+            )
+        }
+    }
+
     func testFinalOnboardingStepReservesTheSkipControlSlot() {
         XCTAssertEqual(
             FirstValueOnboardingHeaderMetrics.trailingSlotWidth(for: .onb05),
@@ -1354,7 +1440,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(FirstValueOnboardingCopy.backgroundExampleRows.count, 3)
         XCTAssertEqual(
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.item),
-            ["Denim trucker jacket", "Desk lamp", "White sneakers"]
+            ["DualSense controller", "AirPods Max", "Charizard card"]
         )
         XCTAssertEqual(
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.state),
@@ -1362,9 +1448,129 @@ final class OnboardingFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.imageName),
-            ["FirstValueJacket", "FirstValueLamp", "FirstValueSneaker"],
+            ["FirstValueController", "FirstValueHeadphones", "FirstValueTradingCard"],
             "Each row carries its own asset, so a new row cannot outrun the image list."
         )
+    }
+
+    /// A seller recognizes the item onboarding is selling, or the screens are selling
+    /// nothing. The desk lamp, denim jacket, and plain white sneaker went with #887, and
+    /// nothing in the flow may name them again.
+    func testOnboardingItemCopyNamesTheBrandedItem() {
+        let strings = FirstValueOnboardingCopy.backgroundExampleRows.map(\.item)
+            + FirstValueOnboardingCopy.soldComparisonRows.map(\.condition)
+            + FirstValueOnboardingCopy.contextCaptions.all
+            + [FirstValueOnboardingCopy.includedScoutLine,
+               FirstValueOnboardingCopy.listingTitle,
+               FirstValueOnboardingCopy.shortListingTitle,
+               FirstValueOnboardingCopy.listingCondition,
+               FirstValueOnboardingCopy.voiceNoteQuote]
+
+        for retired in ["jacket", "lamp", "sneaker", "denim"] {
+            for string in strings {
+                XCTAssertFalse(
+                    string.lowercased().contains(retired),
+                    "\(string) still sells a \(retired)."
+                )
+            }
+        }
+    }
+
+    /// ONB-06's reassurance ran to one long line and one short one. It also promised
+    /// something onboarding cannot promise, so the wording moved with the break.
+    func testIncludedScoutLineStatesTheAccountTruthWithoutTheVagueWord() {
+        let line = FirstValueOnboardingCopy.includedScoutLine
+
+        XCTAssertEqual(
+            line,
+            "No account needed yet. You edit before you publish."
+        )
+        XCTAssertFalse(line.lowercased().contains("anything"))
+        XCTAssertLessThanOrEqual(
+            line.count,
+            52,
+            "The Scout row fits about 26 characters a line. Past 52 this breaks three "
+                + "ways and orphans the last word, which is what #887 asks to fix."
+        )
+    }
+
+    /// The item on ONB-04 and ONB-06 is the one the seller just watched get photographed
+    /// and priced, so its title and condition have to describe that same controller.
+    func testDraftCopyDescribesThePhotographedController() {
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.listingTitle,
+            "Sony DualSense wireless controller, white"
+        )
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.listingCondition,
+            "Good, small scuff on the left grip"
+        )
+    }
+
+    /// ONB-03 used to draw one jacket photograph four times, each row separated only by
+    /// its own `.scaleEffect` and `.offset`, so four sold listings were one photograph
+    /// zoomed four ways. Each comp now carries the asset it shows (#887).
+    func testSoldComparisonRowsShowFourSeparatePhotographs() {
+        let rows = FirstValueOnboardingCopy.soldComparisonRows
+
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertEqual(
+            Set(rows.map(\.imageName)).count,
+            4,
+            "Two comps share a photograph, so the row reads as one listing repeated."
+        )
+    }
+
+    /// "The whole thing" and "The details" named nothing a seller could act on, and
+    /// "thing" is the word the copy contract keeps out of product strings (#887).
+    func testContextCaptionsNameWhatThePhotographShows() {
+        let captions = FirstValueOnboardingCopy.contextCaptions
+
+        XCTAssertEqual(captions.whole, "Whole item")
+        XCTAssertEqual(captions.flaw, "Any damage")
+        XCTAssertEqual(captions.details, "Close details")
+        for caption in captions.all {
+            XCTAssertFalse(
+                caption.lowercased().contains("thing"),
+                "\(caption) still leans on \"thing\"."
+            )
+        }
+    }
+
+    /// The tall right-hand photo stands beside two stacked photos and their caption rows.
+    /// When its height stops matching that column, the bottom caption on each side lands
+    /// on a different baseline, which is what made the row look hand-placed. The heights
+    /// are derived, so what this pins is the result: the grid ONB-02 actually draws is
+    /// 410 points tall, and changing a photo height or the caption block has to be a
+    /// deliberate edit to this number rather than a silent shift on screen.
+    func testContextTallPhotoMatchesTheStackedColumnItStandsBeside() {
+        let metrics = FirstValueOnboardingLayoutMetrics.self
+
+        XCTAssertEqual(metrics.contextTallPhotoHeight, 384)
+        XCTAssertEqual(metrics.contextGridHeight, 410)
+        XCTAssertEqual(
+            metrics.contextGridHeight,
+            metrics.contextShortPhotoHeight * 2
+                + metrics.contextColumnSpacing
+                + metrics.contextCaptionBlockHeight * 2,
+            "The tall photo's column and the stacked column no longer end together."
+        )
+    }
+
+    /// An onboarding screen naming an asset the catalog does not carry draws an empty
+    /// tile, which the copy assertions above cannot see. Every asset #887 introduced is
+    /// checked here, not only the comps.
+    func testOnboardingScreensNameBundledAssets() {
+        let names = FirstValueOnboardingCopy.soldComparisonRows.map(\.imageName)
+            + FirstValueOnboardingCopy.backgroundExampleRows.map(\.imageName)
+
+        XCTAssertEqual(Set(names).count, 7)
+        for name in names {
+            XCTAssertNotNil(
+                UIImage(named: name),
+                "\(name) is not in the asset catalog."
+            )
+        }
     }
 
     @MainActor

@@ -1344,7 +1344,7 @@ enum TrophyWallProcessingLaunchFixture {
     /// staged photo. Without it no fixture route reaches a processing row that
     /// carries the seller's own photo, so the suite could not see this state.
     private static let stagedCoverPhoto: Data? = UIImage(
-        named: "FirstValueSneaker"
+        named: "FirstValueController"
     )?.jpegData(compressionQuality: 0.84)
 
     static let store = TrophyWallStore(
@@ -1408,7 +1408,7 @@ enum TrophyWallProcessingLaunchFixture {
                             uuidString: "37500000-0000-4000-8000-000000000011"
                         )!,
                         state: .accepted,
-                        itemName: "White leather sneaker",
+                        itemName: "DualSense controller",
                         localCoverPhotoData: stagedCoverPhoto,
                         lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5)
                     ),

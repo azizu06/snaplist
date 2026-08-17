@@ -53,11 +53,11 @@ final class EbayPublishUITests: XCTestCase {
         )
         XCTAssertEqual(
             listingThumbnail.label,
-            "Listing photo for Medium wash denim trucker jacket, size M"
+            "Listing photo for Sony DualSense wireless controller, white"
         )
         XCTAssertTrue(
             confirmation.staticTexts[
-                "Medium wash denim trucker jacket, size M"
+                "Sony DualSense wireless controller, white"
             ].exists
         )
         XCTAssertTrue(confirmation.staticTexts["Used, good"].exists)
@@ -604,7 +604,7 @@ final class EbayPublishUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let title = "Medium wash denim trucker jacket, size M"
+        let title = "Sony DualSense wireless controller, white"
         let headingElement = app.staticTexts[headingIdentifier]
         let titleElement = app.staticTexts[title]
         XCTAssertTrue(
