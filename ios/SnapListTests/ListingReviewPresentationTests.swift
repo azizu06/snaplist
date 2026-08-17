@@ -385,4 +385,42 @@ final class ListingReviewInlineTextViewTests: XCTestCase {
                 + "text has grown."
         )
     }
+
+    /// A cached glyph measurement from an earlier font must not survive a
+    /// font change. Dynamic Type and Bold Text both reassign `font` with
+    /// `text` and `bounds.width` held constant — the two inputs the cache
+    /// keyed on before this fix — so a cache that does not also key on font
+    /// cannot see the change: the clamp band keeps the old font's height and
+    /// a tap can resolve against the wrong line. Comparing against a fresh
+    /// view built directly with the new font is the fail-visible way to
+    /// catch that: under the stale cache, the subject keeps answering with
+    /// the small font's band and disagrees with the fresh view.
+    func testClampFollowsFontThatChangesAfterAnEarlierResolution() {
+        let value = "White\nSmall"
+        let smallFont = UIFont.systemFont(ofSize: 12)
+        let largeFont = UIFont.systemFont(ofSize: 40)
+        let point = CGPoint(x: 2, y: 120)
+
+        let subject = ListingReviewInlineTextView()
+        configure(subject, text: value, height: 132)
+        subject.font = smallFont
+        subject.layoutIfNeeded()
+        _ = subject.closestPosition(to: point)
+
+        subject.font = largeFont
+        subject.layoutIfNeeded()
+
+        let fresh = ListingReviewInlineTextView()
+        configure(fresh, text: value, height: 132)
+        fresh.font = largeFont
+        fresh.layoutIfNeeded()
+
+        XCTAssertEqual(
+            offset(of: subject.closestPosition(to: point), in: subject),
+            offset(of: fresh.closestPosition(to: point), in: fresh),
+            "A view whose glyph measurement was cached against the earlier, "
+                + "smaller font must resolve the same as a fresh view once "
+                + "the font has grown."
+        )
+    }
 }

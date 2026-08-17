@@ -4,10 +4,14 @@ import XCTest
 /// `43.99999999999994`, because the height is the sum of a scaled font
 /// metric and two paddings. Rounding to the nearest point keeps the
 /// comparison at the scale the floor is written in. A control that is
-/// genuinely short still fails: 43.4 rounds to 43. Shared across the UI test
-/// target so every touch-target assertion rounds the same way before
-/// comparing to 44 — a raw comparison here and a rounded one elsewhere could
-/// go red on one path and green on the other for the same control.
+/// genuinely short still fails: 43.4 rounds to 43. Shared by
+/// `ListingReviewUITests.assertMeetsTouchTargetFloor` and
+/// `EbayPublishUITests.assertHittableButton` so those two call sites round
+/// the same way before comparing to 44 — a raw comparison on one and a
+/// rounded one on the other could go red on one path and green on the other
+/// for the same control. Dozens of other `>= 44` comparisons remain
+/// unconverted across the UI test target; this type only guarantees
+/// agreement between the two call sites that already use it.
 enum TouchTargetFloor {
     static func isMet(_ measurement: CGFloat) -> Bool {
         measurement.rounded() >= 44
@@ -795,6 +799,11 @@ final class ListingReviewUITests: XCTestCase {
     func testTouchTargetFloorRoundsBeforeComparing() {
         XCTAssertTrue(TouchTargetFloor.isMet(43.99999999999994))
         XCTAssertFalse(TouchTargetFloor.isMet(43.4))
+        // The boundary rounding actually changes: `43.5.rounded()` is `44`
+        // under Swift's default away-from-zero rule, so this passes here and
+        // would fail a raw `>= 44` comparison — the exact case the floor
+        // exists to round through.
+        XCTAssertTrue(TouchTargetFloor.isMet(43.5))
     }
 
     /// `XCUIElement.value` is `Any?`, so `String(describing:)` on it renders
