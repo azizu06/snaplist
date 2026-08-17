@@ -86,6 +86,34 @@ describe("building the seller push dispatcher without a credential", () => {
 });
 
 describe("building the seller push dispatcher with a credential", () => {
+  it("stops reporting the misconfiguration once the credential is supplied", async () => {
+    // The sender is built once per process and kept, because Apple refuses a
+    // provider that re-signs too often and throttles a connection per push. It
+    // is keyed on the configuration so that keeping it cannot mean keeping a
+    // failure: a process that starts unconfigured and is then given the key
+    // must recover without a restart, and the test above leaves exactly that
+    // state behind.
+    clearApnsTestEnv();
+    const log = vi.fn();
+    await createSellerPushDispatcherFor(recordingClient(), log).listingReady({
+      userId: "user-1",
+      runId: "run-1",
+      itemName: "Lamp",
+    });
+    expect(log).toHaveBeenCalledOnce();
+
+    configureApnsTestEnv();
+    const client = recordingClient();
+    await createSellerPushDispatcherFor(client, log).listingReady({
+      userId: "user-1",
+      runId: "run-1",
+      itemName: "Lamp",
+    });
+
+    expect(log).toHaveBeenCalledOnce();
+    expect(client.rpc).toHaveBeenCalled();
+  });
+
   it("reaches the database for the claim, which is the configured path", async () => {
     configureApnsTestEnv();
     const client = recordingClient();
