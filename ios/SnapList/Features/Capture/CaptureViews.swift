@@ -623,10 +623,14 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     /// than assumed.
     private var framingCornersClearance: CGFloat {
         let isAccessibility = dynamicTypeSize.isAccessibilitySize
-        // The base inset reserves room for a dock, because the recovery
-        // surfaces it was tuned against still float one. A live preview never
-        // does, so this surface hands that height back and the framing box
-        // grows into it rather than leaving dead space above the controls.
+        // The base inset reserves room for a dock because this surface floated
+        // one when that inset was chosen. #885 takes the dock off the preview,
+        // so the reserved height is now empty and the framing box grows into it
+        // rather than leaving dead space above the controls.
+        //
+        // Not because of the recovery surfaces. They do not draw framing
+        // corners at all. The only other caller is `CameraFixtureSurface`, a
+        // DEBUG fixture, and it takes the base inset unmodified.
         var clearance = -FloatingDockMetrics.containerHeight(for: .scan)
         if !thumbnailURLs.isEmpty {
             // The review row's lead-in, control, and gap to the control row,
