@@ -2171,6 +2171,51 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(zoom.value as? String, "0.5x", switchReceipt)
     }
 
+    /// #914. #885 added a zoom row above the shutter row on hardware with an
+    /// ultra wide, and the ACT-01 coach mark's approved 112pt inset never
+    /// accounted for it, so the bubble docked over the row and took its taps.
+    /// `isHittable` has lied on this codebase before, so this asserts the two
+    /// frames directly: a bubble that merely abuts the chips without covering
+    /// them is fine, one that overlaps them by even a point is the defect.
+    ///
+    /// `--activation-onboarded-fixture` is what actually makes ACT-01
+    /// eligible to bootstrap under a `--visual-state` launch: it plants
+    /// onboarding on `.captureBoundary`, the one screen
+    /// `FirstValueActivationEligibilityPolicy` treats as already onboarded
+    /// regardless of shell routing. Without it the coach mark never
+    /// bootstraps on CAM-01, so this cannot reduce to `isHittable` alone.
+    func testIssue914ActivationGuidanceBubbleDoesNotCoverTheZoomChips() {
+        let app = launch(extraArguments: [
+            "--visual-state=CAM-01",
+            "--scan-zoom=dual-wide",
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance",
+        ])
+
+        let guidance = activationGuidance(in: app)
+        let ultraWide = app.buttons["scan.zoom.ultra-wide"]
+        let wide = app.buttons["scan.zoom.wide"]
+
+        XCTAssertTrue(guidance.waitForExistence(timeout: 3), app.debugDescription)
+        for chip in [ultraWide, wide] {
+            XCTAssertTrue(chip.waitForExistence(timeout: 3), chip.identifier)
+        }
+
+        let receipt = "guidance=\(guidance.frame) ultraWide=\(ultraWide.frame) wide=\(wide.frame)"
+        XCTAssertFalse(guidance.frame.intersects(ultraWide.frame), receipt)
+        XCTAssertFalse(guidance.frame.intersects(wide.frame), receipt)
+
+        let reachable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: ultraWide
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [reachable], timeout: 5),
+            .completed,
+            "The 0.5x chip must be hittable while ACT-01 is presented. \(receipt)"
+        )
+    }
+
     /// #885. Moving three controls onto one row and adding a fourth above it is
     /// exactly the change that breaks touch targets at large text, so every
     /// control the issue touches is measured at AX5 rather than at the default

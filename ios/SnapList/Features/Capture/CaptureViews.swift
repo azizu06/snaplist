@@ -287,6 +287,18 @@ private struct ScanLibraryLabel: View {
 /// The whole capsule is one accessibility container carrying the current
 /// factor as its value, and each option additionally announces its own factor
 /// and whether it is the selected one.
+/// The vertical band the zoom row reserves in the control stack when the
+/// hardware offers it: the gap `LiveScanCameraSurface` pads above the row
+/// plus the row's own rendered height. The framing corners' clearance and
+/// the ACT-01 / ACT-06 coach mark anchor (`AppShellView`) both read this
+/// single value instead of each carrying their own copy of it, so a future
+/// change to the row's spacing cannot leave one of them stale.
+enum ScanZoomRowMetrics {
+    static func reservedHeight(isAccessibility: Bool) -> CGFloat {
+        isAccessibility ? 22 + 52 : 18 + 44
+    }
+}
+
 struct ScanZoomControlView: View {
     let control: ScanZoomControl
     let selectedLens: ScanZoomLens
@@ -645,7 +657,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                 : (16 + 48 + 18) - 28 + 13
         }
         if zoomControl.isOffered {
-            clearance += isAccessibility ? 22 + 52 : 18 + 44
+            clearance += ScanZoomRowMetrics.reservedHeight(isAccessibility: isAccessibility)
         }
         return clearance
     }

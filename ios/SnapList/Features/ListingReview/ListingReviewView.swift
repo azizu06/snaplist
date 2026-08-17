@@ -1,9 +1,6 @@
 import SwiftUI
 
 private enum ListingReviewDestination: Identifiable, Hashable {
-    case title
-    case description
-    case condition
     case specifics
     case sold(Int)
     case correction
@@ -12,9 +9,6 @@ private enum ListingReviewDestination: Identifiable, Hashable {
 
     var id: String {
         switch self {
-        case .title: "title"
-        case .description: "description"
-        case .condition: "condition"
         case .specifics: "specifics"
         case .sold(let index): "sold-\(index)"
         case .correction: "correction"
@@ -22,6 +16,13 @@ private enum ListingReviewDestination: Identifiable, Hashable {
         case .assistedExport: "assisted-export"
         }
     }
+}
+
+/// The fields the seller types into directly on this screen.
+private enum ListingReviewInlineFocus: Hashable {
+    case price
+    case title
+    case description
 }
 
 @MainActor
@@ -41,10 +42,14 @@ struct ListingReviewView: View {
     @State private var destination: ListingReviewDestination?
     @State private var returnFocus: ListingReviewFocus = .back
     @State private var hasAppeared = false
-    @State private var priceEditing = false
     @State private var priceText = ""
     @State private var priceInvalid = false
-    @FocusState private var priceFieldFocused: Bool
+    @State private var conditionDrawerPresented = false
+    @State private var conditionSelection = ListingReviewCondition.good
+    // Owned here rather than by the fields, because Item specifics is pushed
+    // and its fields would otherwise take their pending text down with them.
+    @State private var inlineEdits = ListingReviewInlineEdits()
+    @FocusState private var focusedField: ListingReviewInlineFocus?
     @AccessibilityFocusState private var focusedElement:
         ListingReviewFocus?
 
@@ -64,7 +69,13 @@ struct ListingReviewView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    dismissReview()
+                    // Leaving is not discarding. Whatever is sitting in a
+                    // field goes to the draft before the screen goes away.
+                    Task {
+                        await inlineEdits.flush(into: store)
+                        await commitPrice()
+                        dismissReview()
+                    }
                 } label: {
                     Label("Back", systemImage: "chevron.left")
                 }
@@ -76,6 +87,17 @@ struct ListingReviewView: View {
                 .accessibilityFocused($focusedElement, equals: .back)
                 .accessibilityIdentifier("listing-review.back")
                 .buttonStyle(.plain)
+            }
+            // The price uses a decimal pad, which has no Return key, so
+            // dismissing the keyboard is the only way to commit by hand.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                }
+                .fontWeight(.bold)
+                .accessibilityLabel("Done editing, keeps it on this phone")
+                .accessibilityIdentifier("listing-review.keyboard-done")
             }
         }
         .navigationDestination(item: $destination) { destination in
@@ -117,15 +139,35 @@ struct ListingReviewView: View {
                 "The review is out of date and saving will need a reload first."
             )
         }
+        .sheet(isPresented: $conditionDrawerPresented) {
+            conditionDrawer
+                .presentationDetents([.medium, .large])
+        }
         .onAppear {
             if hasAppeared {
                 focusedElement = returnFocus
             } else {
                 hasAppeared = true
                 focusedElement = .back
-                priceText = store.draft?.sellerPriceOverride.map {
-                    ListingReviewCurrency.string($0, locale: locale)
-                } ?? ""
+                priceText = displayedPrice
+            }
+        }
+        .onChange(of: displayedPrice) { _, updated in
+            guard focusedField != .price else { return }
+            priceText = updated
+        }
+        .onChange(of: focusedField) { previous, current in
+            // Typing into any of these fields is a real interaction, and the
+            // fields are reached by focus rather than by a button now, so the
+            // activation hook has to hang off focus instead.
+            if current != nil { activationInteraction() }
+            // Losing focus is the ordinary commit point for every field, so
+            // the draft stays off the keystroke path. Done and Back run the
+            // same flush, so nothing depends on this having fired first.
+            guard previous != nil else { return }
+            Task {
+                await inlineEdits.flush(into: store)
+                if previous == .price { await commitPrice() }
             }
         }
         .onChange(of: destination?.id) { previous, current in
@@ -284,83 +326,18 @@ struct ListingReviewView: View {
         // `startingPriceCopy` and `ListingReviewResult`'s decoder still checks
         // the wire value against that exact string.
         VStack(alignment: .leading, spacing: 6) {
-            if priceEditing {
-                // A bare HStack squeezed the Apply button down to an
-                // unreadable sliver once the price field's title-weight text
-                // scaled up at an accessibility Dynamic Type size (#831).
-                // `footer` below already solves the same two-flexible-control
-                // problem by switching to a VStack at accessibility sizes;
-                // this copies that idiom rather than inventing a new one.
-                Group {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        VStack(alignment: .leading, spacing: 10) {
-                            priceField
-                            priceApplyButton
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            priceField
-                            priceApplyButton
-                        }
-                    }
-                }
-                // The seller already aimed at the price to change it, so the
-                // field takes the keyboard on arrival rather than waiting for
-                // a second tap. Focus is requested here rather than in the
-                // opening action because the field does not exist yet at the
-                // moment `priceEditing` flips.
-                .onAppear { priceFieldFocused = true }
-                if priceInvalid {
-                    Text(ListingReviewCopy.invalidPrice)
-                        .font(.callout)
-                        .foregroundStyle(
-                            ListingReviewPriceStyle.invalidMessage.color
-                        )
-                        .accessibilityIdentifier("listing-review.price.error")
-                }
-            } else {
-                Button {
-                    activationInteraction()
-                    priceText = draft.sellerPriceOverride.map {
-                        ListingReviewCurrency.string($0, locale: locale)
-                    } ?? ""
-                    priceInvalid = false
-                    priceEditing = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(
-                            ListingReviewCurrency.string(
-                                store.effectivePrice
-                                    ?? snapshot.pricing.effectivePrice,
-                                locale: locale
-                            )
-                        )
-                        .font(.title.weight(.bold).monospacedDigit())
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        Image(systemName: "pencil")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(SnapListColorToken.textTertiary.color)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    draft.sellerPriceOverride == nil
-                        ? "Suggested price"
-                        : "Your price"
-                )
-                .accessibilityValue(
-                    ListingReviewCurrency.string(
-                        store.effectivePrice
-                            ?? snapshot.pricing.effectivePrice,
-                        locale: locale
-                    )
-                )
-                .accessibilityHint("Edit")
+            // The box is the affordance now. The pencil it replaces was a
+            // 12pt glyph next to the number, which is not a touch target.
+            priceField(snapshot: snapshot, draft: draft)
                 .accessibilityFocused($focusedElement, equals: .price)
-                .accessibilityIdentifier("listing-review.price")
+
+            if priceInvalid {
+                Text(ListingReviewCopy.invalidPrice)
+                    .font(.callout)
+                    .foregroundStyle(
+                        ListingReviewPriceStyle.invalidMessage.color
+                    )
+                    .accessibilityIdentifier("listing-review.price.error")
             }
 
             if snapshot.verifiedSoldMatches.isEmpty {
@@ -377,39 +354,56 @@ struct ListingReviewView: View {
         }
     }
 
-    private var priceField: some View {
-        TextField("Price", text: $priceText)
-            .focused($priceFieldFocused)
-            .keyboardType(.decimalPad)
-            .font(.title.weight(.bold).monospacedDigit())
-            .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 48)
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(
-                        priceInvalid
-                            ? SnapListColorToken.priceErrorBorder.color
-                            : SnapListColorToken.hairline.color
-                    )
-            }
-            .accessibilityLabel("Price")
-            .accessibilityValue(priceText)
-            .accessibilityIdentifier("listing-review.price.field")
+    private var displayedPrice: String {
+        guard let price = store.effectivePrice
+            ?? store.snapshot?.pricing.effectivePrice else { return "" }
+        return ListingReviewCurrency.string(price, locale: locale)
     }
 
-    private var priceApplyButton: some View {
-        Button {
-            Task { await commitPrice() }
-        } label: {
-            Text("Apply")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(SnapListColorToken.action.color)
-                .padding(.horizontal, 12)
+    private func priceField(
+        snapshot: ListingReviewResult,
+        draft: ListingReviewDraft
+    ) -> some View {
+        ListingReviewInlineField(
+            label: "Price",
+            pending: draft.sellerPriceOverride
+                != snapshot.pricing.sellerPriceOverride
+        ) {
+            TextField("Price", text: $priceText)
+                .focused($focusedField, equals: .price)
+                .keyboardType(.decimalPad)
+                .font(.title2.weight(.bold).monospacedDigit())
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .multilineTextAlignment(.leading)
+                .textFieldStyle(.plain)
+                // The retired price button carried this floor and the
+                // replacement field did not, which no compiler and no
+                // identifier grep would have caught.
                 .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                .contentShape(Rectangle())
+                .accessibilityLabel(
+                    draft.sellerPriceOverride == nil
+                        ? "Suggested price"
+                        : "Your price"
+                )
+                .accessibilityValue(priceText)
+                .accessibilityIdentifier("listing-review.price")
         }
-        .accessibilityLabel("Apply price, keeps it on this phone")
-        .accessibilityIdentifier("listing-review.price.apply")
+        .overlay {
+            if priceInvalid {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(SnapListColorToken.priceErrorBorder.color)
+            }
+        }
+        // The field's own hit area is the glyphs; this makes the rest of the
+        // box focus it too, which is the point of drawing the box. It sits
+        // behind the field rather than over it, so a tap on the number still
+        // reaches the field and puts the caret under the finger.
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = .price }
+        }
     }
 
     private func soldMatches(
@@ -469,89 +463,132 @@ struct ListingReviewView: View {
         snapshot: ListingReviewResult,
         draft: ListingReviewDraft
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Bordered boxes rather than pushed rows. The card keeps its shape so
+        // the group still reads as one block, but it drops its own outline:
+        // a border around a stack of bordered fields is two frames deep.
+        VStack(alignment: .leading, spacing: 12) {
             Text("LISTING DETAILS")
                 .font(.caption2.weight(.bold))
                 .tracking(0.5)
                 .foregroundStyle(SnapListColorToken.textTertiary.color)
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-                // #896: 5pt put the card's own heading almost on top of the
-                // first row's TITLE label, two tertiary caps lines running
-                // together. The rows below now breathe, so this matches them.
-                .padding(.bottom, 9)
+                .padding(.top, 4)
 
-            detailRow(
-                title: "Title",
+            ListingReviewInlineTextField(
+                label: "Title",
                 value: draft.title,
-                focus: .title,
-                destination: .title,
-                pending: draft.title != snapshot.listing.title
+                pending: draft.title != snapshot.listing.title,
+                identifier: "listing-review.title",
+                field: .title,
+                edits: inlineEdits,
+                focusValue: ListingReviewInlineFocus.title,
+                focus: $focusedField,
+                lineLimit: 1...3
             )
-            Divider().padding(.leading, 14)
-            detailRow(
-                title: "Description",
+            .accessibilityFocused($focusedElement, equals: .title)
+
+            ListingReviewInlineTextField(
+                label: "Description",
                 value: draft.description,
-                focus: .description,
-                destination: .description,
-                pending: draft.description != snapshot.listing.description
+                pending: draft.description != snapshot.listing.description,
+                identifier: "listing-review.description",
+                field: .description,
+                edits: inlineEdits,
+                focusValue: ListingReviewInlineFocus.description,
+                focus: $focusedField,
+                lineLimit: 3...10
             )
-            Divider().padding(.leading, 14)
-            detailRow(
-                title: "Condition",
+            .accessibilityFocused($focusedElement, equals: .description)
+
+            ListingReviewChoiceField(
+                label: "Condition",
                 value: draft.condition.sellerLabel,
-                focus: .condition,
-                destination: .condition,
+                identifier: "listing-review.condition",
+                hint: "Opens the condition options",
+                accessory: .drawer,
                 pending: draft.condition != snapshot.listing.condition
-            )
-            Divider().padding(.leading, 14)
-            detailRow(
-                title: "Item specifics",
+            ) {
+                activationInteraction()
+                returnFocus = .condition
+                conditionSelection = draft.condition
+                conditionDrawerPresented = true
+            }
+            .accessibilityFocused($focusedElement, equals: .condition)
+
+            ListingReviewChoiceField(
+                label: "Item specifics",
                 value: specificsSummary(draft.specifics),
-                focus: .specifics,
-                destination: .specifics,
+                identifier: "listing-review.specifics",
+                hint: "Edit",
+                accessory: .push,
                 pending: draft.specifics != snapshot.listing.specifics
-            )
-        }
-        .background(SnapListColorToken.canvas.color)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(SnapListColorToken.hairline.color)
+            ) {
+                activationInteraction()
+                returnFocus = .specifics
+                destination = .specifics
+            }
+            .accessibilityFocused($focusedElement, equals: .specifics)
         }
     }
 
-    private func detailRow(
-        title: String,
-        value: String,
-        focus: ListingReviewFocus,
-        destination: ListingReviewDestination,
-        pending: Bool
-    ) -> some View {
-        ListingReviewDisclosureRow(
-            title: title,
-            value: value,
-            identifier: "listing-review.\(destination.id)",
-            pending: pending
+    private var conditionDrawer: some View {
+        ListingReviewDrawer(
+            title: "Condition",
+            commitLabel: "Save",
+            commitIdentifier: "listing-review.condition.save",
+            reset: {
+                conditionSelection = store.snapshot?.listing.condition
+                    ?? conditionSelection
+            },
+            close: { conditionDrawerPresented = false },
+            commit: {
+                let chosen = conditionSelection
+                conditionDrawerPresented = false
+                Task { await store.setCondition(chosen) }
+            }
         ) {
-            activationInteraction()
-            returnFocus = focus
-            self.destination = destination
+            VStack(spacing: 0) {
+                ForEach(ListingReviewCondition.allCases, id: \.self) {
+                    condition in
+                    ListingReviewDrawerOptionRow(
+                        label: condition.sellerLabel,
+                        selected: conditionSelection == condition,
+                        identifier:
+                            "listing-review.condition.\(condition.rawValue)"
+                    ) {
+                        conditionSelection = condition
+                    }
+                    if condition != ListingReviewCondition.allCases.last {
+                        Divider()
+                    }
+                }
+            }
         }
-        .accessibilityFocused($focusedElement, equals: focus)
     }
 
     private var assistedExportEntry: some View {
         Button {
-            guard !store.isDirty else {
-                ListingReviewAnnouncement.post(
-                    AssistedExportCopy.saveBeforeSharing,
-                    assertive: true
-                )
-                return
+            // A tap here does not resign a focused field, so what was typed is
+            // still uncommitted and `isDirty` would answer against the pre-edit
+            // draft. Two things hold typed text, not one: the holder owns
+            // title/description/specifics and `priceText` owns the price, so
+            // this runs the same pair Done and Back run, in their order, before
+            // the guard reads. `commitPrice` announces its own invalid-price
+            // refusal, so a false returns without posting a second one. If
+            // settling is what makes the screen dirty, this takes the
+            // already-dirty path.
+            Task {
+                await inlineEdits.flush(into: store)
+                guard await commitPrice() else { return }
+                guard !store.isDirty else {
+                    ListingReviewAnnouncement.post(
+                        AssistedExportCopy.saveBeforeSharing,
+                        assertive: true
+                    )
+                    return
+                }
+                returnFocus = .assistedExport
+                destination = .assistedExport
             }
-            returnFocus = .assistedExport
-            destination = .assistedExport
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "square.and.arrow.up")
@@ -591,15 +628,23 @@ struct ListingReviewView: View {
 
     private var ebayPublishEntry: some View {
         Button {
-            guard !store.isDirty else {
-                ListingReviewAnnouncement.post(
-                    "Save your changes before publishing to eBay.",
-                    assertive: true
-                )
-                return
+            // Same as the sharing row above, and this one reaches a real
+            // marketplace: without settling both holders the guard passed on a
+            // stale `isDirty` and eBay was handed the pre-edit draft as a value
+            // copy — including a price the seller had typed but not committed.
+            Task {
+                await inlineEdits.flush(into: store)
+                guard await commitPrice() else { return }
+                guard !store.isDirty else {
+                    ListingReviewAnnouncement.post(
+                        "Save your changes before publishing to eBay.",
+                        assertive: true
+                    )
+                    return
+                }
+                returnFocus = .ebayPublish
+                destination = .ebayPublish
             }
-            returnFocus = .ebayPublish
-            destination = .ebayPublish
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "shippingbox")
@@ -666,16 +711,11 @@ struct ListingReviewView: View {
         _ destination: ListingReviewDestination
     ) -> some View {
         switch destination {
-        case .title:
-            ListingReviewEditorView(store: store, field: .title)
-        case .description:
-            ListingReviewEditorView(store: store, field: .description)
-        case .condition:
-            ListingReviewConditionEditorView(store: store)
         case .specifics:
             ItemSpecificsEditorView(
                 store: store,
-                correctionAvailable: correctionAvailable
+                correctionAvailable: correctionAvailable,
+                inlineEdits: inlineEdits
             )
         case .sold(let index):
             if let matches = store.snapshot?.verifiedSoldMatches,
@@ -860,9 +900,12 @@ struct ListingReviewView: View {
     }
 
     private func finish(retry: Bool) async -> ListingReviewDoneOutcome {
-        if priceEditing {
-            guard await commitPrice() else { return .stayed }
-        }
+        // Every field is always live now, so Done flushes whatever is in them
+        // rather than relying on an editing flag being set, and it waits for
+        // the write before reading the draft. Focus is left alone: resigning
+        // it here would race this flush against the blur handler's.
+        await inlineEdits.flush(into: store)
+        guard await commitPrice() else { return .stayed }
         let outcome = retry
             ? await store.retrySave()
             : await store.done()
@@ -877,12 +920,18 @@ struct ListingReviewView: View {
 
     @discardableResult
     private func commitPrice() async -> Bool {
+        // `displayedPrice` is derived from the draft, so an untouched field
+        // matches it. Writing anyway would turn the suggested price into a
+        // seller override the seller never typed.
+        guard priceText != displayedPrice else {
+            priceInvalid = false
+            return true
+        }
         let trimmed = priceText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             await store.setSellerPriceOverride(nil)
+            priceText = displayedPrice
             priceInvalid = false
-            priceEditing = false
-            focusedElement = .price
             return true
         }
         let amount = ListingReviewCurrency.decimal(
@@ -903,8 +952,6 @@ struct ListingReviewView: View {
             locale: locale
         )
         priceInvalid = false
-        priceEditing = false
-        focusedElement = .price
         return true
     }
 

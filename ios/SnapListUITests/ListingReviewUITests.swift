@@ -42,7 +42,7 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(
             String(
                 describing:
-                    app.buttons["listing-review.title"].value as Any
+                    app.textFields["listing-review.title"].value as Any
             ).contains("seller edit")
         )
 
@@ -151,7 +151,7 @@ final class ListingReviewUITests: XCTestCase {
                 NSPredicate(format: "label BEGINSWITH %@", "5 sold")
             ).firstMatch.exists
         )
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         XCTAssertTrue(price.exists)
         XCTAssertTrue(String(describing: price.value as Any).contains("$58"))
 
@@ -248,9 +248,9 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(done.isHittable)
         XCTAssertGreaterThanOrEqual(secondary.frame.height, 44)
         XCTAssertGreaterThanOrEqual(done.frame.height, 44)
-        XCTAssertTrue(app.buttons["listing-review.title"].exists)
+        XCTAssertTrue(app.textFields["listing-review.title"].exists)
         secondary.tap()
-        XCTAssertTrue(app.buttons["listing-review.title"].exists)
+        XCTAssertTrue(app.textFields["listing-review.title"].exists)
         // XCUITest cannot inspect the VoiceOver cursor without assistive
         // technology running; ListingReviewFocus binds this action to Title.
 
@@ -280,10 +280,10 @@ final class ListingReviewUITests: XCTestCase {
             app.otherElements["listing-review.motion-reduced"]
                 .waitForExistence(timeout: 3)
         )
-        let longTitle = app.buttons["listing-review.title"]
+        let longTitle = app.textFields["listing-review.title"]
         XCTAssertTrue(longTitle.exists)
         XCTAssertGreaterThan(
-            String(describing: longTitle.value as Any).count,
+            stringValue(of: longTitle).count,
             60
         )
         XCTAssertTrue(app.buttons["listing-review.secondary"].isHittable)
@@ -371,26 +371,32 @@ final class ListingReviewUITests: XCTestCase {
         }
     }
 
-    func testEditorsStageConditionSpecificAndPriceWithoutLosingInvoker() {
+    func testInlineFieldsAndDrawersStageEveryValueWithoutLosingInvoker() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
 
-        app.buttons["listing-review.description"].tap()
-        XCTAssertTrue(
-            app.textViews["listing-review.editor.description"]
-                .waitForExistence(timeout: 3)
-        )
+        // Description is typed where it sits. Nothing is pushed, so the
+        // retired one-field editor must not exist to be reached at all.
+        let description = app.textFields["listing-review.description"]
+        XCTAssertTrue(description.waitForExistence(timeout: 3))
+        description.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        app.buttons["listing-review.editor.back"].tap()
+        XCTAssertFalse(
+            anyElement("listing-review.editor.description", in: app).exists
+        )
+        description.typeText(" Boxed.")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
-            app.buttons["listing-review.description"]
-                .waitForExistence(timeout: 3)
+            String(describing: description.value as Any).contains("Boxed.")
         )
 
+        // Condition has a fixed option set, so it opens the drawer and only
+        // commits on the drawer's own save.
         app.buttons["listing-review.condition"].tap()
         let acceptable = app.buttons["listing-review.condition.acceptable"]
         XCTAssertTrue(acceptable.waitForExistence(timeout: 3))
         acceptable.tap()
+        app.buttons["listing-review.condition.save"].tap()
         let condition = app.buttons["listing-review.condition"]
         XCTAssertTrue(condition.waitForExistence(timeout: 3))
         XCTAssertTrue(
@@ -399,21 +405,33 @@ final class ListingReviewUITests: XCTestCase {
         )
 
         app.buttons["listing-review.specifics"].tap()
-        let color = app.buttons["listing-review.specific.color"]
+        let color = app.textFields["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: 3))
         color.tap()
-        let specificField = app.textFields["listing-review.specific.field"]
-        XCTAssertTrue(specificField.waitForExistence(timeout: 3))
-        specificField.tap()
-        specificField.typeText(" Silver")
-        app.buttons["listing-review.specific.apply"].tap()
-        XCTAssertTrue(color.waitForExistence(timeout: 3))
+        color.typeText(" Silver")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
             String(describing: color.value as Any).contains("Silver")
         )
 
+        // Brand is a reserved identity key. It gets a drawer that states the
+        // consequence and routes to guided correction. It never becomes a
+        // field, so the value cannot be typed past the pricing rerun.
         let brand = app.buttons["listing-review.specific.brand"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.textFields["listing-review.specific.brand"].exists)
         brand.tap()
+        XCTAssertTrue(
+            app.staticTexts[
+                "Changing this reruns the price and rewrites the listing."
+            ].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.staticTexts[
+                "It uses the guided correction included with this item."
+            ].exists
+        )
+        app.buttons["listing-review.specific.correction"].tap()
         XCTAssertTrue(
             anyElement("listing-review.correction-boundary", in: app)
                 .waitForExistence(timeout: 3)
@@ -423,49 +441,201 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(brand.isHittable)
 
         app.navigationBars.buttons.firstMatch.tap()
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         XCTAssertTrue(price.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            anyElement("listing-review.price.apply", in: app).exists,
+            "The two-step price editor is retired; the box is the field."
+        )
         for _ in 0..<4 where !price.isHittable {
             app.scrollViews.firstMatch.swipeDown()
         }
         XCTAssertTrue(price.isHittable)
+        // The keyboard belongs to whatever had focus last, and Done gave it
+        // up two screens ago. Deleting without taking focus first types into
+        // nothing, which reads as a product failure and is not one.
         price.tap()
-        let priceField = app.textFields["listing-review.price.field"]
-        let apply = app.buttons["listing-review.price.apply"]
-        XCTAssertEqual(apply.label, "Apply price, keeps it on this phone")
-        XCTAssertTrue(
-            apply.frame.height >= 44,
-            "apply target measured \(apply.frame.height)pt"
-        )
-        priceField.typeText("0")
-        apply.tap()
+        clear(price, in: app)
+        price.typeText("0")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
             app.staticTexts["Must be above $0."].waitForExistence(timeout: 2)
         )
-        priceField.typeText("1")
-        apply.tap()
+        price.tap()
+        clear(price, in: app)
+        price.typeText("61")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertFalse(app.staticTexts["Must be above $0."].exists)
         XCTAssertTrue(
             anyElement("listing-review.unsaved", in: app).exists
         )
     }
 
+    /// Publishing is the one exit on this screen that reaches a real
+    /// marketplace, and the tap that starts it does not resign the field's
+    /// first responder. Nothing under `ios/` sets `scrollDismissesKeyboard`
+    /// either, so a seller can retitle, scroll down with the keyboard still up,
+    /// and tap Publish while the typed title is still sitting in
+    /// `ListingReviewInlineEdits`. `isDirty` is derived from the draft alone,
+    /// so the guard answered `false` against the pre-edit draft and eBay was
+    /// handed the old title as a value copy.
+    func testPublishToEbayFlushesTheTypedTitleBeforeItReadsIsDirty() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let title = app.textFields["listing-review.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: loadedTreeTimeout))
+        title.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        title.typeText(" Zephyr")
+
+        // No keyboard Done, no tap outside the field. Scrolling is how the
+        // seller reaches the entry and it leaves the field focused, which is
+        // the whole point: the typed text has not reached the draft yet.
+        let entry = app.buttons["listing-review.ebay-publish"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 3))
+        // A dragged scroll rather than `swipeUp()`. The scroll view fills the
+        // window, so its centre sits under the footer once the keyboard
+        // raises it and a swipe from there scrolls nothing. The drag stays in
+        // the band still visible above the keyboard, and away from the left
+        // edge, which is the interactive back gesture.
+        for _ in 0..<12 where !entryIsClearOfTheFooter(entry, in: app) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: app.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18)
+                    )
+                )
+        }
+        XCTAssertTrue(entryIsClearOfTheFooter(entry, in: app), app.debugDescription)
+        XCTAssertTrue(
+            keyboard.exists,
+            "The scroll must leave the field focused, or this proves nothing."
+        )
+        entry.tap()
+
+        // The flush lands before the guard reads the draft, so the guard sees
+        // a dirty screen and takes the refusal it already takes for any other
+        // unsaved edit. Nothing is pushed and the seller stays put.
+        //
+        // Two assertions carry the claim and neither is redundant, because the
+        // fix can fail in two different directions. The `listing-review.unsaved`
+        // assertion is the one that actually went red: once the guard passes,
+        // the strip is on the screen left behind and the tree shows only the
+        // pushed destination, so it is absent. `entry.isHittable` catches the
+        // other direction, where the seller ends up off this screen for a
+        // reason that has nothing to do with the guard. The remaining two are
+        // diagnosis only — the field's own State holds the typed title whether
+        // or not it reached the draft, and the `ebay-publish.back` negative
+        // races the late blur flush that lands after the push.
+        XCTAssertTrue(
+            anyElement("listing-review.unsaved", in: app)
+                .waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertFalse(
+            anyElement("ebay-publish.back", in: app)
+                .waitForExistence(timeout: 3),
+            "eBay must not open holding a title the seller has already replaced."
+        )
+        XCTAssertTrue(entry.isHittable, app.debugDescription)
+        XCTAssertTrue(
+            stringValue(of: title).contains("Zephyr"),
+            "The typed title must survive the refusal."
+        )
+    }
+
+    /// The price does not live in the inline-edit holder. It sits in the view's
+    /// own `priceText` and only reaches the draft through `commitPrice()`, so
+    /// flushing the holder settles the title and leaves the price behind. A
+    /// seller who types a price, never resigns the field, and taps Publish used
+    /// to get one of two wrong outcomes depending on which async step landed
+    /// first: eBay built from the old price, or a blank pushed screen once the
+    /// blur commit flipped `isDirty` under `destinationView`'s own guard.
+    func testPublishToEbayCommitsTheTypedPriceBeforeItReadsIsDirty() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let price = app.textFields["listing-review.price"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        let before = stringValue(of: price)
+        price.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        // Replace rather than append, so the committed amount cannot coincide
+        // with the suggested one. `commitPrice` compares against
+        // `displayedPrice` and no-ops when they match, so an edit that lands on
+        // the same value would prove nothing.
+        price.press(forDuration: 1.0)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) {
+            app.menuItems["Select All"].tap()
+        }
+        price.typeText("133.70")
+        XCTAssertNotEqual(
+            stringValue(of: price), before,
+            "The typed price has to differ from the suggested one."
+        )
+
+        let entry = app.buttons["listing-review.ebay-publish"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 3))
+        // The same dragged scroll the title test uses, and for the same two
+        // reasons. Do not swap it back to `swipeUp()`: the scroll view fills
+        // the window, so its centre sits under the footer once the keyboard
+        // raises it and a swipe from there scrolls nothing. And the drag has to
+        // stay off the left edge, which arms the interactive back gesture and
+        // dismisses the whole screen instead of scrolling it.
+        for _ in 0..<12 where !entryIsClearOfTheFooter(entry, in: app) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: app.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18)
+                    )
+                )
+        }
+        XCTAssertTrue(entryIsClearOfTheFooter(entry, in: app), app.debugDescription)
+        XCTAssertTrue(
+            keyboard.exists,
+            "The scroll must leave the price focused, or this proves nothing."
+        )
+        entry.tap()
+
+        // As above, and in the same two directions. The recorded RED for this
+        // selector failed at the `listing-review.unsaved` assertion below, not
+        // at `entry.isHittable`: without the commit the guard passes, the push
+        // happens, and the strip is no longer in the tree. `entry.isHittable`
+        // is the backstop for leaving this screen some other way — a tap that
+        // lands on the footer's Done, for instance, which saves and dismisses.
+        XCTAssertTrue(
+            anyElement("listing-review.unsaved", in: app)
+                .waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertFalse(
+            anyElement("ebay-publish.back", in: app)
+                .waitForExistence(timeout: 3),
+            "eBay must not open holding a price the seller has already replaced."
+        )
+        XCTAssertTrue(entry.isHittable, app.debugDescription)
+    }
+
     /// The price editor used to be a bare `HStack`, so the title-weight price
     /// field squeezed the Apply button down to an unreadable sliver once
     /// Dynamic Type scaled up to the largest accessibility size (#831). The
-    /// fix reuses `footer`'s existing `isAccessibilitySize` idiom to switch
-    /// to a `VStack` instead, which this test proves two ways: both controls
-    /// stay reachable and on-screen, and the field sits structurally above
-    /// the button rather than beside it, which a squeezed `HStack` could
-    /// never produce.
-    func testPriceEditorStacksInsteadOfSqueezingAtTheLargestAccessibilitySize() {
+    /// fix stacked the two controls. #899 removes the second control entirely:
+    /// the price is one bordered field that is typed in place, so the failure
+    /// this test guards is now the field itself reflowing off screen or
+    /// dropping below the touch-target floor at that size.
+    func testThePriceFieldStaysOnScreenAtTheLargestAccessibilitySize() {
         let app = launch(
             resetDraft: true,
             extraArguments: ["--dynamic-type=accessibility5"]
         )
         _ = openReview(in: app)
 
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         let secondary = app.buttons["listing-review.secondary"]
         XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
         XCTAssertTrue(secondary.waitForExistence(timeout: loadedTreeTimeout))
@@ -493,30 +663,20 @@ final class ListingReviewUITests: XCTestCase {
         )
         price.tap()
 
-        let priceField = app.textFields["listing-review.price.field"]
-        let apply = app.buttons["listing-review.price.apply"]
         let window = app.windows.firstMatch
-        // Accessibility-size layout and the accessibility-tree snapshot it
-        // forces are measurably slower than default size (this file already
-        // budgets `loadedTreeTimeout` for the same reason elsewhere), so this
-        // waits longer than the default-size price test does for the same
-        // field.
-        XCTAssertTrue(priceField.waitForExistence(timeout: loadedTreeTimeout))
-        XCTAssertTrue(apply.waitForExistence(timeout: loadedTreeTimeout))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        // The two-step editor is gone, so there is no second control left to
+        // squeeze. What has to hold is that the one field is still typable
+        // and still inside the window at this size.
+        XCTAssertFalse(anyElement("listing-review.price.field", in: app).exists)
+        XCTAssertFalse(anyElement("listing-review.price.apply", in: app).exists)
 
         let frameReceipt =
-            "priceField.frame=\(priceField.frame), apply.frame=\(apply.frame), window.frame=\(window.frame)"
-        XCTAssertTrue(priceField.isHittable, frameReceipt)
-        XCTAssertTrue(apply.isHittable, frameReceipt)
-        XCTAssertGreaterThanOrEqual(apply.frame.height, 44, frameReceipt)
-        XCTAssertGreaterThanOrEqual(priceField.frame.height, 44, frameReceipt)
-        XCTAssertLessThanOrEqual(priceField.frame.maxX, window.frame.maxX, frameReceipt)
-        XCTAssertLessThanOrEqual(apply.frame.maxX, window.frame.maxX, frameReceipt)
-        XCTAssertLessThanOrEqual(apply.frame.maxY, window.frame.maxY, frameReceipt)
-        // The structural proof: a `VStack` puts the field's bottom edge at or
-        // above the button's top edge. A bare `HStack` squeezed to this width
-        // would instead place them side by side, sharing a vertical range.
-        XCTAssertLessThanOrEqual(priceField.frame.maxY, apply.frame.minY, frameReceipt)
+            "price.frame=\(price.frame), window.frame=\(window.frame)"
+        XCTAssertTrue(price.isHittable, frameReceipt)
+        assertMeetsTouchTargetFloor(price.frame.height, frameReceipt)
+        XCTAssertGreaterThanOrEqual(price.frame.minX, window.frame.minX, frameReceipt)
+        XCTAssertLessThanOrEqual(price.frame.maxX, window.frame.maxX, frameReceipt)
     }
 
     /// The real OS-level Bold Text accessibility setting cannot be toggled
@@ -533,7 +693,7 @@ final class ListingReviewUITests: XCTestCase {
         let app = launch(resetDraft: true, extraArguments: ["--bold-text"])
         _ = openReview(in: app)
 
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         let secondary = app.buttons["listing-review.secondary"]
         let done = app.buttons["listing-review.done"]
         let window = app.windows.firstMatch
@@ -548,26 +708,147 @@ final class ListingReviewUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, frameReceipt)
             XCTAssertLessThanOrEqual(control.frame.maxX, window.frame.maxX, frameReceipt)
             XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, frameReceipt)
-            XCTAssertGreaterThanOrEqual(control.frame.height, 44, frameReceipt)
+            assertMeetsTouchTargetFloor(control.frame.height, frameReceipt)
         }
     }
 
     /// A touch target derived from padding around scaled text, rather than
     /// from the 44pt floor, is thinnest at the smallest Dynamic Type size,
     /// the opposite failure direction from the accessibility-size checks
-    /// above (#831). The price button carries an explicit
-    /// `.frame(minHeight: SnapListMetrics.minimumTouchTarget)` floor; this
-    /// proves that floor actually holds once the text inside it shrinks to
-    /// its smallest size, rather than assuming it does.
+    /// above (#831). The price is a single-line `TextField` now, not a
+    /// button, and it carries an explicit
+    /// `.frame(minHeight: SnapListMetrics.minimumTouchTarget)` floor. A
+    /// single-line field is backed by a `UITextField` that fills the frame it
+    /// is handed, so unlike the vertical-axis fields below, the floor moves
+    /// the element itself. This proves that floor actually holds once the
+    /// text inside it shrinks to its smallest size, rather than assuming it
+    /// does.
     func testPriceControlMeetsTouchTargetFloorAtSmallestDynamicTypeSize() {
         let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
         _ = openReview(in: app)
 
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
         let frameReceipt = "price.frame=\(price.frame)"
         XCTAssertTrue(price.isHittable, frameReceipt)
-        XCTAssertGreaterThanOrEqual(price.frame.height, 44, frameReceipt)
+        assertMeetsTouchTargetFloor(price.frame.height, frameReceipt)
+    }
+
+    /// A control laid out at exactly the floor comes back from XCUITest as
+    /// 43.99999999999994, because the height is the sum of a scaled font
+    /// metric and two paddings. Rounding to the nearest point keeps the
+    /// assertion at the scale the floor is written in. A control that is
+    /// genuinely short still fails: 43.4 rounds to 43.
+    private func assertMeetsTouchTargetFloor(
+        _ measurement: CGFloat,
+        _ receipt: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertGreaterThanOrEqual(
+            measurement.rounded(),
+            44,
+            receipt,
+            file: file,
+            line: line
+        )
+    }
+
+    /// `XCUIElement.value` is `Any?`, so `String(describing:)` on it renders
+    /// `Optional(White)` rather than `White`. That wrapper is enough to make a
+    /// suffix assertion pass forever, which is how the first version of the
+    /// caret test below reported green without checking anything. Reading the
+    /// value through a cast keeps the assertions operating on the text.
+    private func stringValue(of element: XCUIElement) -> String {
+        element.value as? String ?? ""
+    }
+
+    /// The price was the only inline control with a touch-target assertion.
+    /// Title, Description and every non-identity specific share
+    /// `ListingReviewInlineTextField`, and that one cannot make the same
+    /// claim the price does. Its control is a vertical-axis text view, which
+    /// hugs its content and reports 23pt at the smallest Dynamic Type size no
+    /// matter what frame it is given, so asserting a 44pt element height on
+    /// it would be asserting something false.
+    ///
+    /// What the seller actually gets is the box, and that is what the two
+    /// tests below measure between them.
+    ///
+    /// Reach and caret placement pull in opposite directions, and the first
+    /// version of the reach fix broke the caret without failing anything. A
+    /// tap gesture laid over the box wins the tap before the field sees it,
+    /// so focus is set in code and the caret lands at the end of the value
+    /// rather than under the finger. Tapping into the middle of a word to fix
+    /// it is the most ordinary thing anyone does in a text field, so it is
+    /// asserted here: a character typed after a tap near the start of the
+    /// value must not arrive at the end of it.
+    func testATapOnTheGlyphsPutsTheCaretWhereTheFingerIsAndNotAtTheEnd() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let color = app.textFields["listing-review.specific.color"]
+        XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
+        let before = stringValue(of: color)
+        color.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        color.typeText("Z")
+
+        // The tap is at the left edge of the value, so a caret that followed
+        // the finger puts the character first. Asserted positively, on the
+        // prefix. The first version of this asserted `!hasSuffix("Z")` and
+        // could not fail: `String(describing: element.value)` renders the
+        // optional as `Optional(WhiteZ)`, which never ends in the character
+        // typed, so it passed whether the caret followed the finger or not.
+        let after = stringValue(of: color)
+        let receipt = "before=\(before), after=\(after)"
+        XCTAssertTrue(after.hasPrefix("Z"), receipt)
+    }
+
+    /// The other half of the same claim: reach. The box is 62pt tall and
+    /// carries the `.contentShape`, so what answers a touch is 62pt even
+    /// where the element is 23pt. The two probes sit 10pt outside the glyphs
+    /// on each side, a 43pt span well inside the box and entirely outside the
+    /// element. Both taps are needed. One of them passing on its own would
+    /// not distinguish a box that takes taps from a text view that happens to
+    /// sit near the point tapped.
+    func testTheSharedInlineFieldTakesTapsAboveAndBelowItsGlyphs() {
+        let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let color = app.textFields["listing-review.specific.color"]
+        XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
+        let keyboard = app.keyboards.firstMatch
+
+        // The character has to be absent from the value before the tap or the
+        // probe cannot fail. The second one used to be "W", and the fixture
+        // value is already "White", so that assertion was true before the tap
+        // and stayed true whether the box took it or not.
+        for (above, typed) in [(true, "Q"), (false, "Z")] {
+            // Read the frame for each tap rather than once up front. The
+            // first tap raises the keyboard, and a layout that reflows around
+            // it leaves the second tap aimed at where the field used to be.
+            let frame = color.frame
+            let y = above ? frame.minY - 10 : frame.maxY + 10
+            let before = stringValue(of: color)
+            let receipt = "color.frame=\(frame), tapped y=\(y), before=\(before)"
+            XCTAssertFalse(before.contains(typed), receipt)
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: frame.midX, dy: y))
+                .tap()
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 3), receipt)
+
+            // A keyboard proves something took focus, not that this field
+            // did, and the claim is about this field. Typing settles it: the
+            // character has to arrive in this field's value.
+            color.typeText(typed)
+            let value = stringValue(of: color)
+            XCTAssertTrue(value.contains(typed), "\(receipt), value=\(value)")
+
+            app.buttons["listing-review.keyboard-done"].tap()
+            XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3), receipt)
+        }
     }
 
     /// Scrolls `element` into the band above `footerTopEdge` using small,
@@ -601,6 +882,62 @@ final class ListingReviewUITests: XCTestCase {
             let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
+    }
+
+    func testANonIdentitySpecificCommitsInPlaceWithoutAPushedEditor() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let color = app.textFields["listing-review.specific.color"]
+        XCTAssertTrue(color.waitForExistence(timeout: 3))
+        color.tap()
+        color.typeText(" Silver")
+
+        // Nothing pushed. The seller is still on Item specifics and the
+        // retired one-field screen and its helper paragraph are both gone.
+        XCTAssertTrue(app.navigationBars["Item specifics"].exists)
+        XCTAssertFalse(
+            anyElement("listing-review.specific.field", in: app).exists
+        )
+        XCTAssertFalse(
+            app.staticTexts[
+                "Saved on this phone when you tap Done. Editing a specific never spends another AI item."
+            ].exists
+        )
+
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(
+            String(describing: color.value as Any).contains("Silver")
+        )
+
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(
+            anyElement("listing-review.unsaved", in: app)
+                .waitForExistence(timeout: 3)
+        )
+    }
+
+    func testASpentCorrectionLeavesIdentitySpecificsUnavailableAndSaysWhy() {
+        let app = launch(fixture: "correction-unavailable", resetDraft: true)
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let brand = app.buttons["listing-review.specific.brand"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            brand.isEnabled,
+            "A spent correction leaves no route into an identity value."
+        )
+        XCTAssertFalse(app.textFields["listing-review.specific.brand"].exists)
+        XCTAssertEqual(
+            app.staticTexts["listing-review.specifics.correction-spent"].label,
+            "Brand and Type need guided correction, and you have used yours."
+        )
+
+        // Nothing about a spent correction stops a manual edit. Those never
+        // cost a credit, so they stay typable.
+        XCTAssertTrue(app.textFields["listing-review.specific.color"].exists)
     }
 
     private func launch(
@@ -660,7 +997,7 @@ final class ListingReviewUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let row = app.buttons["listing-review.title"]
+        let row = app.textFields["listing-review.title"]
         XCTAssertTrue(
             row.waitForExistence(timeout: 3),
             file: file,
@@ -686,20 +1023,26 @@ final class ListingReviewUITests: XCTestCase {
             line: line
         )
         row.tap()
-
-        let editor = app.textViews["listing-review.editor.title"]
+        row.typeText(suffix)
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
-            editor.waitForExistence(timeout: 3),
+            String(describing: row.value as Any).contains(suffix),
+            "The typed suffix must survive the field giving up focus.",
             file: file,
             line: line
         )
-        editor.tap()
-        editor.typeText(suffix)
-        app.buttons["listing-review.editor.back"].tap()
-        XCTAssertTrue(
-            row.waitForExistence(timeout: 3),
-            file: file,
-            line: line
+    }
+
+    /// Empties a field the seller would clear with the keyboard's delete key.
+    /// The price field is prefilled, so a test that only appends can never
+    /// produce the values the invalid-price path needs.
+    private func clear(_ field: XCUIElement, in app: XCUIApplication) {
+        let existing = stringValue(of: field)
+        field.typeText(
+            String(
+                repeating: XCUIKeyboardKey.delete.rawValue,
+                count: max(existing.count, 1)
+            )
         )
     }
 
@@ -708,6 +1051,22 @@ final class ListingReviewUITests: XCTestCase {
         in app: XCUIApplication
     ) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
+    }
+
+    /// `isHittable` is computed from the element's own frame, so it stays true
+    /// for a row that has scrolled underneath the footer. The footer lives in a
+    /// `safeAreaInset(edge: .bottom)` and paints over the scroll view, so a tap
+    /// synthesized at that row's centre lands on Done instead — which saves and
+    /// dismisses the screen, and looks exactly like the bug under test. Scroll
+    /// until the row is clear of the footer, not merely hittable.
+    private func entryIsClearOfTheFooter(
+        _ entry: XCUIElement,
+        in app: XCUIApplication
+    ) -> Bool {
+        guard entry.exists, entry.isHittable else { return false }
+        let done = app.buttons["listing-review.done"]
+        guard done.exists else { return true }
+        return entry.frame.maxY <= done.frame.minY
     }
 
     private func soldMatchButtons(
