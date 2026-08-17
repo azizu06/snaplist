@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 import XCTest
 @testable import SnapList
 
@@ -1487,4 +1488,89 @@ private final class SettingsSignOutURLProtocolRecorder: URLProtocol, @unchecked 
     }
 
     override func stopLoading() {}
+}
+
+/// Issue #891. What the Notifications row is allowed to claim and to do.
+///
+/// The row it replaces drew a hardcoded `On` for every seller, including one
+/// who had refused, and it did nothing when tapped. Both halves of that are the
+/// same defect: the row was decoration over a permission the app does not own.
+///
+/// iOS owns the answer, and the app can only ever do two things about it. It
+/// can show the system prompt exactly once, while the status is still
+/// undetermined, and after that it can send the seller to system Settings. It
+/// cannot grant, and it cannot revoke. A switch that appeared to do either
+/// would be the same lie in a more convincing shape.
+final class SettingsNotificationsRowTests: XCTestCase {
+    func testAnUnaskedSellerSeesTheSwitchOffAndTurningItOnShowsThePrompt() {
+        let permission = SettingsNotificationsPermission.notAsked
+
+        XCTAssertFalse(permission.isOn)
+        XCTAssertEqual(permission.intent(forRequestedState: true), .ask)
+    }
+
+    func testAnAllowedSellerSeesTheSwitchOn() {
+        XCTAssertTrue(SettingsNotificationsPermission.allowed.isOn)
+    }
+
+    func testTurningItOffSendsTheSellerToSystemSettings() {
+        // There is no API for an app to withdraw its own notification
+        // permission. A switch that moved and changed nothing would be worse
+        // than one that does not move.
+        XCTAssertEqual(
+            SettingsNotificationsPermission.allowed
+                .intent(forRequestedState: false),
+            .openSystemSettings
+        )
+    }
+
+    func testARefusedSellerIsSentToSystemSettingsRatherThanPromptedAgain() {
+        // iOS will not show the prompt a second time, so asking again would
+        // produce an immediate refusal and a switch that snapped back with no
+        // explanation. #890 settles that the app never re-asks; this is the way
+        // back it left open.
+        let permission = SettingsNotificationsPermission.refused
+
+        XCTAssertFalse(permission.isOn)
+        XCTAssertEqual(
+            permission.intent(forRequestedState: true),
+            .openSystemSettings
+        )
+    }
+
+    func testAskingForTheStateTheSellerIsAlreadyInDoesNothing() {
+        XCTAssertEqual(
+            SettingsNotificationsPermission.allowed.intent(forRequestedState: true),
+            .doNothing
+        )
+        XCTAssertEqual(
+            SettingsNotificationsPermission.refused.intent(forRequestedState: false),
+            .doNothing
+        )
+        XCTAssertEqual(
+            SettingsNotificationsPermission.notAsked.intent(forRequestedState: false),
+            .doNothing
+        )
+    }
+
+    func testTheRowReadsTheSystemStatusRatherThanWhatTheAppRemembers() {
+        let expected: [(UNAuthorizationStatus, SettingsNotificationsPermission)] = [
+            (.notDetermined, .notAsked),
+            (.denied, .refused),
+            (.authorized, .allowed),
+            // Quiet delivery is still delivery. The seller granted it, and the
+            // only thing the app could offer them here is the same trip to
+            // system Settings the allowed state already offers.
+            (.provisional, .allowed),
+            (.ephemeral, .allowed),
+        ]
+
+        for (status, permission) in expected {
+            XCTAssertEqual(
+                SettingsNotificationsPermission(authorizationStatus: status),
+                permission,
+                "status \(status.rawValue)"
+            )
+        }
+    }
 }

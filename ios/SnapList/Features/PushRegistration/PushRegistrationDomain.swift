@@ -20,6 +20,10 @@ enum PushRegistrationEvent: Equatable {
     /// moment that has earned the prompt: the app has already delivered value,
     /// and "we'll tell you when it's ready" is now a true sentence.
     case itemSubmitted
+    /// The seller turned the Settings switch on. The row produces this only
+    /// while iOS reports the question undetermined, so it is the one deliberate
+    /// way to reach the prompt without having submitted an item (#891).
+    case notificationsRequestedFromSettings
     case sellerAnswered(granted: Bool)
 }
 
@@ -49,6 +53,15 @@ struct PushRegistrationProgress: Codable, Equatable {
             return .registerWithAPNs
         case (.refused, .itemSubmitted):
             return .doNothing
+        case (_, .notificationsRequestedFromSettings):
+            // Reached only while iOS reports the question undetermined, and
+            // iOS is the authority on that. A stored answer that disagrees is
+            // stale, because something cleared the system's answer and left
+            // this one behind, and leaving it in place would let it discard the
+            // answer the seller is about to give. Clearing it here is what
+            // makes the answer land through the same guard as any other.
+            decision = .notYetAsked
+            return .askOnce
         case (_, .sellerAnswered(let granted)):
             guard decision == .notYetAsked else {
                 // A duplicate callback. Re-answering a settled question is how
@@ -59,6 +72,71 @@ struct PushRegistrationProgress: Codable, Equatable {
             return granted ? .registerWithAPNs : .doNothing
         }
     }
+}
+
+/// Which APNs host the tokens this build receives are reachable on (#891).
+///
+/// The server stores this alongside the token because one auth key serves both
+/// hosts and nothing about the token itself says which one it belongs to. A
+/// notification posted to the wrong host is accepted and then dropped, so the
+/// value has to travel with the registration or the failure is invisible.
+enum ApnsEnvironment: String, Equatable {
+    case sandbox
+    case production
+}
+
+/// Reads the `aps-environment` entitlement out of the profile the app was
+/// signed with.
+///
+/// The entitlement, not the build configuration, is the truth. `#if DEBUG` is
+/// the obvious shortcut and it is wrong twice over: a Release build signed with
+/// a development profile holds sandbox tokens, and a TestFlight build is the
+/// same trap. `SnapList.entitlements` sets the value from
+/// `$(SNAPLIST_APS_ENVIRONMENT)`, but what the app actually got is whatever the
+/// signing profile granted, and only the profile knows that at runtime.
+///
+/// A `.mobileprovision` is a CMS envelope, so the plist is embedded in binary
+/// signature bytes that contain NUL and values above 127. It is located by
+/// bytes rather than decoded as a string, because a string reader stops at the
+/// first NUL and would report production for a development build.
+///
+/// Anything that is not positively `development` is production: a missing,
+/// entitlement-less, or unparseable profile is the App Store case, which is
+/// production by definition. Guessing sandbox instead would silence every
+/// shipped seller's notifications, while guessing production can at worst cost
+/// a developer their own.
+func apnsEnvironment(
+    fromEmbeddedProvisioningProfile profile: Data?
+) -> ApnsEnvironment {
+    guard let profile,
+          let start = profile.range(of: Data("<plist".utf8)),
+          let end = profile.range(
+              of: Data("</plist>".utf8),
+              options: .backwards
+          ),
+          start.lowerBound < end.upperBound,
+          let plist = try? PropertyListSerialization.propertyList(
+              from: profile[start.lowerBound..<end.upperBound],
+              format: nil
+          ) as? [String: Any],
+          let entitlements = plist["Entitlements"] as? [String: Any],
+          entitlements["aps-environment"] as? String == "development"
+    else {
+        return .production
+    }
+    return .sandbox
+}
+
+/// The running app's own environment, read from its own bundle.
+func apnsEnvironmentForRunningApp(
+    bundle: Bundle = .main
+) -> ApnsEnvironment {
+    let path = (bundle.bundlePath as NSString)
+        .appendingPathComponent("embedded.mobileprovision")
+    return apnsEnvironment(
+        fromEmbeddedProvisioningProfile: FileManager.default
+            .contents(atPath: path)
+    )
 }
 
 protocol PushRegistrationPersisting: AnyObject {
@@ -142,6 +220,18 @@ final class PushRegistrationCoordinator {
             // Best effort by contract. The next submission re-registers, and
             // nothing the seller can see depends on this having landed.
         }
+    }
+
+    /// The seller turned the Settings switch on (#891).
+    ///
+    /// The same single prompt #890 defines, reached deliberately instead of
+    /// after a submission. The row only produces this while iOS still reports
+    /// the status undetermined, which is the only state in which the prompt can
+    /// appear at all, so this does not reopen the question for a seller who
+    /// already answered it. It goes through the state machine like every other
+    /// call site, so no command is ever issued past its guard.
+    func notificationsRequestedFromSettings() async {
+        await perform(progress.advance(for: .notificationsRequestedFromSettings))
     }
 
     private func perform(_ command: PushRegistrationCommand) async {

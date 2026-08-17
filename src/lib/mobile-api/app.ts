@@ -563,6 +563,7 @@ export function createMobileApiHandler(
           ? await principal.mintOperationToken()
           : token;
         await dependencies.deviceTokens.register({
+          apnsEnvironment: registration.data.apnsEnvironment,
           bearerToken: registrationToken,
           platform: registration.data.platform,
           token: registration.data.token,

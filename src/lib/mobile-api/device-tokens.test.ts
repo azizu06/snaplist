@@ -15,6 +15,20 @@ import { createMobileApiHandler, type MobileApiDependencies } from "./app";
 
 const VALID_APNS_TOKEN = "a1b2c3d4".repeat(8);
 
+/**
+ * A complete registration. The APNs environment is part of one (#891): a token
+ * is only addressable on the host the registering build was entitled to, and
+ * the server has no way to work out which that was.
+ */
+function validRegistration(overrides: Record<string, unknown> = {}) {
+  return {
+    apnsEnvironment: "production",
+    platform: "ios",
+    token: VALID_APNS_TOKEN,
+    ...overrides,
+  };
+}
+
 function handlerWith(overrides: Partial<MobileApiDependencies> = {}) {
   return createMobileApiHandler({
     authenticate: vi
@@ -42,7 +56,7 @@ describe("mobile device-tokens boundary", () => {
   it("registers the device against the identity the bearer proved", async () => {
     const register = vi.fn().mockResolvedValue(undefined);
     const response = await handlerWith({ deviceTokens: { register } })(
-      registration({ platform: "ios", token: VALID_APNS_TOKEN }),
+      registration(validRegistration()),
     );
 
     expect(response.status).toBe(200);
@@ -51,11 +65,51 @@ describe("mobile device-tokens boundary", () => {
       meta: { requestId: "device-token-request" },
     });
     expect(register).toHaveBeenCalledWith({
+      apnsEnvironment: "production",
       bearerToken: "signed-seller-token",
       platform: "ios",
       token: VALID_APNS_TOKEN,
       userId: "seller_123",
     });
+  });
+
+  it("stores the APNs environment the registering build reported", async () => {
+    // A development build's token is only reachable on the sandbox host, and
+    // the same handset running the App Store build is a different address. The
+    // server cannot infer which, so it records what the client said (#891).
+    const register = vi.fn().mockResolvedValue(undefined);
+    const response = await handlerWith({ deviceTokens: { register } })(
+      registration(validRegistration({ apnsEnvironment: "sandbox" })),
+    );
+
+    expect(response.status).toBe(200);
+    expect(register).toHaveBeenCalledWith(
+      expect.objectContaining({ apnsEnvironment: "sandbox" }),
+    );
+  });
+
+  it("refuses a registration that does not say which environment it is for", async () => {
+    // Accepting this would mean choosing a host on the client's behalf, and
+    // whichever way that guess went it would be wrong for half the builds.
+    const register = vi.fn();
+    const body = validRegistration() as Record<string, unknown>;
+    delete body.apnsEnvironment;
+    const response = await handlerWith({ deviceTokens: { register } })(
+      registration(body),
+    );
+
+    expect(response.status).toBe(400);
+    expect(register).not.toHaveBeenCalled();
+  });
+
+  it("refuses an environment no APNs host answers to", async () => {
+    const register = vi.fn();
+    const response = await handlerWith({ deviceTokens: { register } })(
+      registration(validRegistration({ apnsEnvironment: "staging" })),
+    );
+
+    expect(response.status).toBe(400);
+    expect(register).not.toHaveBeenCalled();
   });
 
   it("registers a verified guest with a freshly minted operation token", async () => {
@@ -67,12 +121,13 @@ describe("mobile device-tokens boundary", () => {
         userId: "guest_abc",
       }),
       deviceTokens: { register },
-    })(registration({ platform: "ios", token: VALID_APNS_TOKEN }));
+    })(registration(validRegistration()));
 
     expect(response.status).toBe(200);
     // A guest's bearer is an App Attest capability, not a project JWT, so
     // passing it through would be refused by every policy on the table.
     expect(register).toHaveBeenCalledWith({
+      apnsEnvironment: "production",
       bearerToken: "minted-guest-jwt",
       platform: "ios",
       token: VALID_APNS_TOKEN,
@@ -83,13 +138,11 @@ describe("mobile device-tokens boundary", () => {
   it("refuses a body that tries to name the owner", async () => {
     const register = vi.fn();
     const response = await handlerWith({ deviceTokens: { register } })(
-      registration({
-        platform: "ios",
-        token: VALID_APNS_TOKEN,
+      registration(
         // The client that sent this believed it was choosing the tenant.
         // Answering 200 would be agreeing with it.
-        userId: "seller_other",
-      }),
+        validRegistration({ userId: "seller_other" }),
+      ),
     );
 
     expect(response.status).toBe(400);
@@ -99,7 +152,7 @@ describe("mobile device-tokens boundary", () => {
   it("refuses a token that is not a device token", async () => {
     const register = vi.fn();
     const response = await handlerWith({ deviceTokens: { register } })(
-      registration({ platform: "ios", token: "not-a-device-token" }),
+      registration(validRegistration({ token: "not-a-device-token" })),
     );
 
     expect(response.status).toBe(400);
@@ -112,7 +165,7 @@ describe("mobile device-tokens boundary", () => {
   it("refuses a platform the table cannot store", async () => {
     const register = vi.fn();
     const response = await handlerWith({ deviceTokens: { register } })(
-      registration({ platform: "android", token: VALID_APNS_TOKEN }),
+      registration(validRegistration({ platform: "android" })),
     );
 
     expect(response.status).toBe(400);
@@ -123,7 +176,7 @@ describe("mobile device-tokens boundary", () => {
     const register = vi.fn();
     const response = await handlerWith({ deviceTokens: { register } })(
       new Request("https://snaplist.example/v1/device-tokens", {
-        body: JSON.stringify({ platform: "ios", token: VALID_APNS_TOKEN }),
+        body: JSON.stringify(validRegistration()),
         method: "POST",
       }),
     );
@@ -145,7 +198,7 @@ describe("mobile device-tokens boundary", () => {
         register: vi.fn().mockRejectedValue(new Error("policy refused")),
       },
       reportError,
-    })(registration({ platform: "ios", token: VALID_APNS_TOKEN }));
+    })(registration(validRegistration()));
 
     expect(response.status).toBe(503);
     // The client treats this as "ask again later"; nothing about the seller's
@@ -158,7 +211,7 @@ describe("mobile device-tokens boundary", () => {
 
   it("is unavailable rather than silent when the capability is unconfigured", async () => {
     const response = await handlerWith({ deviceTokens: undefined })(
-      registration({ platform: "ios", token: VALID_APNS_TOKEN }),
+      registration(validRegistration()),
     );
 
     expect(response.status).toBe(503);

@@ -12,6 +12,10 @@ import {
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
+import {
+  createSellerPushDispatcherFor,
+  sellerPushRpcClient,
+} from "@/lib/push-notifications/composition";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -58,7 +62,15 @@ export async function POST(request: NextRequest) {
       await createEbayAdapterForUser(supabase, userId, {
         credentialClient: completionClient,
       }),
-      { completionClient },
+      {
+        completionClient,
+        // Tells the seller the publish was confirmed (#891). The same
+        // tenant-bound client the completion writes go through, because the
+        // scoped read that finds their devices is bound to the same identity.
+        push: createSellerPushDispatcherFor(
+          sellerPushRpcClient(completionClient),
+        ),
+      },
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {

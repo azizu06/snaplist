@@ -20,6 +20,7 @@ import {
   EBAY_RECONNECT_MESSAGE,
 } from "./errors";
 import { createNotification } from "../../notifications";
+import type { SellerPushDispatcher } from "../../push-notifications";
 import { effectivePrice } from "../../pipeline";
 import {
   issueEbayPhotoUrls,
@@ -68,6 +69,13 @@ export interface PublishOptions {
    */
   photoUrlTtlSeconds?: number;
   completionClient?: SupabaseClient;
+  /**
+   * Tells the seller their publish was confirmed (#891). Both entry points
+   * supply it, which is the point of it living on the shared service: the
+   * server action and the API route cannot announce different things, or
+   * announce at different moments, without this argument disagreeing.
+   */
+  push?: SellerPushDispatcher;
   /** Client-observed review token. Mobile publish must supply this and fail closed when stale. */
   expectedReviewRevision?: string;
   /** Durable mobile confirmation key used to resume an ambiguous provider write. */
@@ -185,6 +193,22 @@ export async function publishListingToEbayAndNotify(
       itemId: (published?.item_id as string | null) ?? null,
       listingId,
     });
+    // Same gate as the activity row above, for the same reason: only a call
+    // that actually published is a new moment. The push is additionally keyed
+    // on the confirmed eBay listing id, so two publishes that resolve to one
+    // external result announce once even if they both reach here (#891). It
+    // never affects the outcome the seller is waiting on.
+    try {
+      await options.push?.listingPublished({
+        userId,
+        listingId,
+        externalListingId: outcome.ebayListingId,
+        itemName: (published?.title as string | null) ?? null,
+      });
+    } catch {
+      // The dispatcher already logs. A publish that succeeded must not be
+      // reported as a failure because SnapList could not announce it.
+    }
   }
   return outcome;
 }

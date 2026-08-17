@@ -488,3 +488,173 @@ describe("durable pipeline queue consumer provider usage", () => {
     expect(queue.ack).toHaveBeenCalledWith("41");
   });
 });
+
+/**
+ * Issue #891. The first of the two moments a seller is told about.
+ *
+ * The run is the only thing here that knows who owns the work. Deriving the
+ * identity from the queue envelope instead would make the announcement
+ * addressable by whoever wrote the message, which is the one input on this path
+ * SnapList does not control.
+ */
+describe("ready-listing push (#891)", () => {
+  function dispatcherSpy() {
+    return {
+      listingReady: vi.fn(async () => undefined),
+      listingPublished: vi.fn(async () => undefined),
+    };
+  }
+
+  it("tells the identity that owns the run, naming the item", async () => {
+    const push = dispatcherSpy();
+    const runs = storeWith();
+
+    await consumePipelineQueue({
+      queue: queueWith(),
+      runs,
+      processor: processor(),
+      push,
+    });
+
+    expect(push.listingReady).toHaveBeenCalledWith({
+      userId: "user_a",
+      runId: RUN_ID,
+      itemName: "Sony WH-1000XM4 Headphones",
+    });
+  });
+
+  it("tells a guest, because the guest owns the run", async () => {
+    const guest = context({
+      user_id: "guest_0123456789abcdef0123456789abcdef0123456789abcdef",
+    });
+    guest.item.user_id = guest.run.user_id;
+    const push = dispatcherSpy();
+
+    await consumePipelineQueue({
+      queue: queueWith(),
+      runs: storeWith({ kind: "acquired", context: guest }),
+      processor: processor(),
+      push,
+    });
+
+    expect(push.listingReady).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: guest.run.user_id }),
+    );
+  });
+
+  it("announces only after the completion is durable", async () => {
+    const push = dispatcherSpy();
+    const runs = storeWith();
+
+    await consumePipelineQueue({
+      queue: queueWith(),
+      runs,
+      processor: processor(),
+      push,
+    });
+
+    const completeMock = runs.complete as unknown as ReturnType<typeof vi.fn>;
+    expect(completeMock.mock.invocationCallOrder[0]).toBeLessThan(
+      push.listingReady.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("still tells the seller when acknowledging the finished message fails", async () => {
+    // The run is durably complete before either of these runs, so the listing
+    // exists and the seller is owed the announcement. Acknowledging is about the
+    // queue, not about them. If it went first and threw, redelivery would find a
+    // terminal run and skip, which is the one path that never announces, so the
+    // moment would be lost permanently and silently.
+    const push = dispatcherSpy();
+    const queue = queueWith();
+    queue.ack.mockRejectedValue(new Error("queue unreachable"));
+
+    await expect(
+      consumePipelineQueue({
+        queue,
+        runs: storeWith(),
+        processor: processor(),
+        push,
+      }),
+    ).rejects.toThrow();
+
+    expect(push.listingReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("says nothing when the attempt failed", async () => {
+    const push = dispatcherSpy();
+
+    await consumePipelineQueue({
+      queue: queueWith(),
+      runs: storeWith(),
+      processor: {
+        process: vi.fn(async () => {
+          throw new PipelineWorkerFailure({
+            code: "pipeline_temporarily_unavailable",
+            safeMessage: "SnapList could not finish this listing yet.",
+            retryable: true,
+          });
+        }),
+      },
+      push,
+    });
+
+    expect(push.listingReady).not.toHaveBeenCalled();
+  });
+
+  it("says nothing for a run that already reached a terminal state", async () => {
+    const push = dispatcherSpy();
+
+    for (const status of ["succeeded", "failed", "canceled"] as const) {
+      await consumePipelineQueue({
+        queue: queueWith(),
+        runs: storeWith({ kind: "terminal", status }),
+        processor: processor(),
+        push,
+      });
+    }
+
+    expect(push.listingReady).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the message was never claimed for this run", async () => {
+    const push = dispatcherSpy();
+
+    await consumePipelineQueue({
+      queue: queueWith(),
+      runs: storeWith({ kind: "mismatch" }),
+      processor: processor(),
+      push,
+    });
+
+    expect(push.listingReady).not.toHaveBeenCalled();
+  });
+
+  it("completes and acknowledges the run even when the announcement throws", async () => {
+    const queue = queueWith();
+    const runs = storeWith();
+    const push = dispatcherSpy();
+    push.listingReady.mockRejectedValue(new Error("push unavailable"));
+
+    const summary = await consumePipelineQueue({
+      queue,
+      runs,
+      processor: processor(),
+      push,
+    });
+
+    expect(summary).toMatchObject({ succeeded: 1, failed: 0, retrying: 0 });
+    expect(runs.failAttempt).not.toHaveBeenCalled();
+    expect(queue.ack).toHaveBeenCalledWith("41");
+  });
+
+  it("still completes runs when no announcement capability is wired at all", async () => {
+    const summary = await consumePipelineQueue({
+      queue: queueWith(),
+      runs: storeWith(),
+      processor: processor(),
+    });
+
+    expect(summary).toMatchObject({ succeeded: 1 });
+  });
+});

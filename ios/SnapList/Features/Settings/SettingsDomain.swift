@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 enum SettingsAuthenticationMethod: Equatable {
     case apple
@@ -741,4 +742,60 @@ enum SettingsDeletionSubscriptionTruth: Equatable {
             "SnapList cannot confirm whether a subscription exists. Check it in the App Store."
         }
     }
+}
+
+/// Issue #891. What iOS says about notifications for this install.
+///
+/// The Notifications row used to draw a hardcoded `On`. This is the real
+/// answer, and it comes from `UNUserNotificationCenter` every time the row
+/// appears, because the seller can change it in system Settings while the app
+/// is in the background and the app is never told.
+enum SettingsNotificationsPermission: Equatable {
+    case notAsked
+    case allowed
+    case refused
+
+    init(authorizationStatus: UNAuthorizationStatus) {
+        switch authorizationStatus {
+        case .notDetermined:
+            self = .notAsked
+        case .denied:
+            self = .refused
+        case .authorized, .provisional, .ephemeral:
+            self = .allowed
+        @unknown default:
+            // A status this build does not know about. Showing `On` would be a
+            // claim the app cannot support; showing it off costs one trip to
+            // system Settings, where the seller reads the truth from iOS.
+            self = .refused
+        }
+    }
+
+    var isOn: Bool { self == .allowed }
+
+    /// What the app may do when the seller moves the switch.
+    ///
+    /// An app can show the system prompt once, while the status is still
+    /// undetermined, and nothing after that. It cannot grant and it cannot
+    /// revoke, so every other move is a trip to system Settings rather than a
+    /// switch that appears to work and does not.
+    func intent(
+        forRequestedState requested: Bool
+    ) -> SettingsNotificationsIntent {
+        switch (self, requested) {
+        case (.notAsked, true):
+            .ask
+        case (.refused, true), (.allowed, false):
+            .openSystemSettings
+        default:
+            .doNothing
+        }
+    }
+}
+
+enum SettingsNotificationsIntent: Equatable {
+    /// Show the system prompt. Only reachable while iOS has never been asked.
+    case ask
+    case openSystemSettings
+    case doNothing
 }

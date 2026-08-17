@@ -17,6 +17,10 @@ const { createAdminClient } = vi.hoisted(() => ({
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient }));
 
 import { createInternalPipelineWorkerCapabilities } from "./internal";
+import {
+  clearApnsTestEnv,
+  configureApnsTestEnv,
+} from "@/test/apns-test-config";
 
 const RUN_ID = "63870000-0000-4000-8000-000000000001";
 const ITEM_ID = "63870000-0000-4000-8000-000000000002";
@@ -97,6 +101,7 @@ function guestContext(
 }
 
 afterEach(() => {
+  clearApnsTestEnv();
   delete process.env.GUEST_RECOVERY_ENCRYPTION_KEY;
   delete process.env.GUEST_RECOVERY_ENCRYPTION_KEY_ID;
   vi.clearAllMocks();
@@ -106,6 +111,7 @@ describe("production guest recovery worker composition", () => {
   it("uses the private photos bucket and carries the produced registration through completion", async () => {
     process.env.GUEST_RECOVERY_ENCRYPTION_KEY = Buffer.from(MASTER_KEY).toString("base64");
     process.env.GUEST_RECOVERY_ENCRYPTION_KEY_ID = "guest-recovery-key-v1";
+    configureApnsTestEnv();
     const objects = new Map<string, { bytes: Uint8Array; mediaType: string }>([
       [ORIGINAL_PATH, {
         bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
@@ -188,6 +194,7 @@ describe("production guest recovery worker composition", () => {
       process.env.GUEST_RECOVERY_ENCRYPTION_KEY = Buffer.from(MASTER_KEY)
         .toString("base64");
       process.env.GUEST_RECOVERY_ENCRYPTION_KEY_ID = "guest-recovery-key-v1";
+    configureApnsTestEnv();
       const storage = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!).storage;
       const bucket = storage.from("photos");
       const recoveryId = crypto.randomUUID();
@@ -278,6 +285,7 @@ describe("production guest recovery worker composition", () => {
       process.env.GUEST_RECOVERY_ENCRYPTION_KEY = Buffer.from(MASTER_KEY)
         .toString("base64");
       process.env.GUEST_RECOVERY_ENCRYPTION_KEY_ID = "guest-recovery-key-v1";
+    configureApnsTestEnv();
       const database = new Client({ connectionString: LOCAL_DATABASE_URL });
       await database.connect();
       await database.query("begin");

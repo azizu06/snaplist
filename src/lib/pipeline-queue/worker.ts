@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { GuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
 import type { PipelineResult } from "@/lib/pipeline";
+import type { SellerPushDispatcher } from "@/lib/push-notifications";
 import { PIPELINE_OPERATIONS_POLICY } from "@/lib/pipeline-operations/policy";
 import {
   captureProviderUsageRun,
@@ -202,6 +203,12 @@ export async function consumePipelineQueue(
     runs: PipelineWorkerStore;
     processor: DurablePipelineProcessor;
     guestRecovery?: GuestRecoveryRegistrationProducer;
+    /**
+     * Tells the seller their listing is ready (#891). Optional so every
+     * existing composition keeps working; absent means the run completes in
+     * silence, never that it fails.
+     */
+    push?: SellerPushDispatcher;
   },
   options: Partial<z.input<typeof optionsSchema>> = {},
 ): Promise<PipelineConsumerSummary> {
@@ -256,6 +263,7 @@ export async function consumePipelineQueue(
 
     const { context } = acquisition;
     let completed = false;
+    let readyItemName: string | null = null;
     try {
       let durableTranscriptionAttempt = checkpointTranscriptionAttempt(
         pipelineWorkerCheckpointSchema.parse(context.run.checkpoint),
@@ -389,6 +397,7 @@ export async function consumePipelineQueue(
         guestRecoveryRegistration,
       });
       completed = true;
+      readyItemName = result.listing.title;
     } catch (error) {
       // `classifyFailure` collapses every non-Zod error into one retryable
       // code, so the code alone cannot answer why an attempt failed. Describe
@@ -432,6 +441,29 @@ export async function consumePipelineQueue(
     }
 
     if (completed) {
+      // After the completion is durable, because the seller is being told about
+      // a listing that already exists, and BEFORE the acknowledgement, because
+      // acknowledging can fail and the announcement must not be downstream of
+      // that. A throwing ack leaves the message to be redelivered, and
+      // redelivery finds a terminal run and skips, which is the one path that
+      // never announces: the moment would be lost permanently and silently for
+      // a run that succeeded. The identity comes from the stored run, never
+      // from the envelope that arrived in the queue, and the dispatcher owns
+      // the once-only guard across redelivery, retry, and recovery. Guarded
+      // here as well: an announcement must not be able to turn a finished,
+      // paid-for run into a failure (#891).
+      try {
+        await dependencies.push?.listingReady({
+          userId: context.run.user_id,
+          runId: context.run.id,
+          itemName: readyItemName,
+        });
+      } catch (error) {
+        console.error(
+          `[pipeline.worker.push] run ${context.run.id}`,
+          describeErrorForLog(error),
+        );
+      }
       await dependencies.queue.ack(message.id);
       summary.succeeded += 1;
     }

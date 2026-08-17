@@ -2,6 +2,8 @@ import AuthenticationServices
 import ClerkKit
 import StoreKit
 import SwiftUI
+import UIKit
+import UserNotifications
 
 @MainActor
 struct SettingsView: View {
@@ -18,7 +20,13 @@ struct SettingsView: View {
     private let ebayPublishService: any EbayPublishFeatureServing
     private let navigate: (AppRoute) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var hasLocalData: Bool
+    /// Starts at the state that claims the least (#891). The real answer is
+    /// read from iOS before the row can be touched, and a row that guessed `on`
+    /// while it waited would be the hardcoded `On` this replaced.
+    @State private var notificationsPermission = SettingsNotificationsPermission.notAsked
     @State private var ebayConnection: EbayConnectionStatus?
     @State private var ebayConnectionLoadPhase =
         SettingsSellingPresentation.LoadPhase.loading
@@ -168,7 +176,7 @@ struct SettingsView: View {
                     }
                     settingsCardDivider
                     settingsCardRow {
-                        valueRow("Notifications", "On")
+                        Toggle("Notifications", isOn: notificationsBinding)
                             .accessibilityIdentifier("settings.selling.notifications")
                     }
                 }
@@ -295,6 +303,14 @@ struct SettingsView: View {
         .task {
             guard !profile.isGuest, !isSettingsHubProof else { return }
             await loadSubscription()
+        }
+        .task { await refreshNotificationsPermission() }
+        .onChange(of: scenePhase) { _, phase in
+            // The seller can change this in system Settings and come straight
+            // back, and iOS does not tell the app it happened. Without this the
+            // row keeps showing whatever was true when the screen opened.
+            guard phase == .active else { return }
+            Task { await refreshNotificationsPermission() }
         }
         .accessibilityIdentifier("settings.screen")
     }
@@ -451,6 +467,42 @@ struct SettingsView: View {
             },
             apply: subscriptionStore.applyServerVerification,
             setLoadPhase: { subscriptionLoadPhase = $0 }
+        )
+    }
+
+    /// The Notifications switch (#891). iOS owns the permission, so the switch
+    /// reports what iOS says and every move it cannot make itself becomes a
+    /// trip to system Settings.
+    private var notificationsBinding: Binding<Bool> {
+        Binding(
+            get: { notificationsPermission.isOn },
+            set: { requested in
+                switch notificationsPermission.intent(forRequestedState: requested) {
+                case .ask:
+                    Task {
+                        await PushRegistrationComposition
+                            .notificationsRequestedFromSettings()
+                        // Whatever the seller answered, iOS is the record of
+                        // it. A refusal here snaps the switch back, which is
+                        // the honest result.
+                        await refreshNotificationsPermission()
+                    }
+                case .openSystemSettings:
+                    guard let url = URL(string: UIApplication.openSettingsURLString)
+                    else { return }
+                    openURL(url)
+                case .doNothing:
+                    break
+                }
+            }
+        )
+    }
+
+    private func refreshNotificationsPermission() async {
+        notificationsPermission = SettingsNotificationsPermission(
+            authorizationStatus: await UNUserNotificationCenter.current()
+                .notificationSettings()
+                .authorizationStatus
         )
     }
 

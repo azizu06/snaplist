@@ -147,6 +147,7 @@ async function ownedTokens(user: ClerkTestUser): Promise<string[]> {
 describe("device_tokens tenancy under live RLS", () => {
   it("stores a seller's own registration and shows it to nobody else", async () => {
     const { error } = await owner.client.from("device_tokens").insert({
+      apns_environment: "production",
       platform: "ios",
       token: OWNER_ONLY_TOKEN,
       user_id: owner.id,
@@ -161,6 +162,7 @@ describe("device_tokens tenancy under live RLS", () => {
 
   it("refuses a write addressed to another seller's tenant", async () => {
     const { error } = await intruder.client.from("device_tokens").insert({
+      apns_environment: "production",
       platform: "ios",
       token: "c".repeat(64),
       user_id: owner.id,
@@ -186,6 +188,7 @@ describe("device_tokens tenancy under live RLS", () => {
 
   it("cannot push its own row into another seller's tenant", async () => {
     const { error } = await intruder.client.from("device_tokens").insert({
+      apns_environment: "production",
       platform: "ios",
       token: SHARED_DEVICE_TOKEN,
       user_id: intruder.id,
@@ -209,6 +212,7 @@ describe("device_tokens tenancy under live RLS", () => {
     // whoever registered last is the one actually holding the phone, and the
     // earlier row is a working address for a device its owner no longer has.
     const { error } = await owner.client.from("device_tokens").insert({
+      apns_environment: "production",
       platform: "ios",
       token: SHARED_DEVICE_TOKEN,
       user_id: owner.id,
@@ -240,6 +244,7 @@ describe("device_tokens tenancy under live RLS", () => {
     // target is the part that has to be right, and a test that spells it out
     // itself would still pass if the shipped code spelled it differently.
     await storeFor(owner).register({
+      apnsEnvironment: "production",
       bearerToken: "unused: the client is already bound to this seller",
       platform: "ios",
       token: OWNER_ONLY_TOKEN,
@@ -267,6 +272,7 @@ describe("device_tokens tenancy under live RLS", () => {
     const HANDSET = "c".repeat(64);
 
     await storeFor(owner).register({
+      apnsEnvironment: "production",
       bearerToken: "unused: the client is already bound to this seller",
       platform: "ios",
       token: HANDSET,
@@ -279,6 +285,7 @@ describe("device_tokens tenancy under live RLS", () => {
     // The handset is sold, wiped, or simply handed over; the next seller signs
     // in on it and submits an item.
     await storeFor(intruder).register({
+      apnsEnvironment: "production",
       bearerToken: "unused: the client is already bound to this seller",
       platform: "ios",
       token: HANDSET,
@@ -301,6 +308,7 @@ describe("device_tokens tenancy under live RLS", () => {
 describe("device_tokens under account erasure", () => {
   it("takes the seller's devices with the account and refuses late registrations", async () => {
     await storeFor(erased).register({
+      apnsEnvironment: "production",
       bearerToken: "unused: the client is already bound to this seller",
       platform: "ios",
       token: ERASED_DEVICE_TOKEN,
@@ -338,6 +346,7 @@ describe("device_tokens under account erasure", () => {
     // A registration already in flight when erasure began must not resurrect
     // the account's reachability behind it.
     const { error } = await erased.client.from("device_tokens").insert({
+      apns_environment: "production",
       platform: "ios",
       token: ERASED_DEVICE_TOKEN,
       user_id: erased.id,

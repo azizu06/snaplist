@@ -1,5 +1,9 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  createSellerPushDispatcherFor,
+  sellerPushRpcClient,
+} from "@/lib/push-notifications/composition";
 import { createGuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
 import { parseGuestRecoveryProducerEncryptionConfig } from "@/lib/guest-recovery/photo-encryption";
 import {
@@ -71,6 +75,9 @@ export function createInternalPipelineWorkerCapabilities(): PipelineWorkerCapabi
     photos,
     voice,
     guestRecovery,
+    // The ready moment (#891). Built from the same privileged client, because
+    // this path has no seller session: the tenant comes from the stored run.
+    push: createSellerPushDispatcherFor(sellerPushRpcClient(admin)),
   };
 }
 

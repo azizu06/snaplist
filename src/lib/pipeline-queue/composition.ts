@@ -5,6 +5,7 @@ import {
   type VisionPipelineStages,
 } from "@/lib/vision";
 import type { GuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
+import type { SellerPushDispatcher } from "@/lib/push-notifications";
 import {
   createRoleKeyedSellerContextTranscriptionModel,
   resolveSellerContextTranscriber,
@@ -27,6 +28,13 @@ export interface PipelineWorkerCapabilities {
   photos: DownloadClient;
   voice: PipelineVoiceStorage;
   guestRecovery: GuestRecoveryRegistrationProducer;
+  /**
+   * Tells the seller their listing is ready (#891). Optional at this seam
+   * because a runtime adapter under test composes its own capabilities; the
+   * server composition root always supplies one, and a missing credential
+   * fails there loudly rather than producing a dispatcher that sends nothing.
+   */
+  push?: SellerPushDispatcher;
 }
 
 export interface PipelineWorker {
@@ -74,6 +82,7 @@ export function createPipelineWorker(input: {
           runs: input.capabilities.runs,
           processor,
           guestRecovery: input.capabilities.guestRecovery,
+          push: input.capabilities.push,
         },
         input.consumerOptions,
       ),

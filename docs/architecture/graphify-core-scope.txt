@@ -108,6 +108,7 @@ ios/SnapList/Features/Onboarding/OnboardingDomain.swift
 ios/SnapList/Features/Onboarding/OnboardingFlowView.swift
 ios/SnapList/Features/ProGate/ProGateStore.swift
 ios/SnapList/Features/ProGate/ProGateView.swift
+ios/SnapList/Features/PushRegistration/PushForegroundNotification.swift
 ios/SnapList/Features/PushRegistration/PushRegistrationComposition.swift
 ios/SnapList/Features/PushRegistration/PushRegistrationDomain.swift
 ios/SnapList/Features/Runs/RunAPIClient.swift
@@ -382,6 +383,13 @@ src/lib/provider-usage/record.ts
 src/lib/provider-usage/schema.ts
 src/lib/public-origin.ts
 src/lib/push-device-tokens/store.ts
+src/lib/push-notifications/apns.ts
+src/lib/push-notifications/composition.ts
+src/lib/push-notifications/dispatch.ts
+src/lib/push-notifications/index.ts
+src/lib/push-notifications/message.ts
+src/lib/push-notifications/sender.ts
+src/lib/push-notifications/store.ts
 src/lib/rag/corpus-data.ts
 src/lib/rag/embedding.ts
 src/lib/rag/harvest.ts
@@ -532,6 +540,7 @@ supabase/migrations/20260811123000_reconcile_durable_seller_voice_context.sql
 supabase/migrations/20260812140000_guest_recovery_envelope_mime.sql
 supabase/migrations/20260813030000_post_completion_provider_usage.sql
 supabase/migrations/20260816180000_push_device_tokens.sql
+supabase/migrations/20260816200000_seller_push_delivery.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

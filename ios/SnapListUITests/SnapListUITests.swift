@@ -774,6 +774,11 @@ final class SnapListUITests: XCTestCase {
     /// value row here. Issue #865 makes that same row a real destination
     /// once connected — see `EbayPublishUITests` for that state, proved
     /// through `--settings-proof=SET-01`.
+    ///
+    /// `settings.selling.notifications` left this list in #891. It is a real
+    /// switch over the iOS permission now, so "not a button" stopped being the
+    /// thing worth asserting about it; `testSettingsNotificationsIsARealSwitch`
+    /// covers what it became.
     func testSettingsSellingValueRowsAreNotButtons() {
         let app = launch(extraArguments: ["--fixture=account"])
         let settingsScreen = app.descendants(matching: .any)["settings.screen"]
@@ -782,7 +787,6 @@ final class SnapListUITests: XCTestCase {
         for identifier in [
             "settings.selling.marketplaces",
             "settings.selling.photos",
-            "settings.selling.notifications",
         ] {
             let row = app.descendants(matching: .any)[identifier]
             for _ in 0..<4 where !row.exists {
@@ -791,6 +795,42 @@ final class SnapListUITests: XCTestCase {
             XCTAssertTrue(row.exists, "\(identifier): \(app.debugDescription)")
             XCTAssertFalse(app.buttons[identifier].exists, "\(identifier): \(app.debugDescription)")
         }
+    }
+
+    /// Issue #891. The row drew a hardcoded `On` for every seller, including
+    /// one who had refused, and it did nothing when tapped.
+    ///
+    /// A freshly installed simulator has never been asked, so the honest
+    /// reading is off. The switch is deliberately not tapped here: on this
+    /// state a tap raises the real iOS permission alert, which belongs to the
+    /// system and not to the app under test. What the switch does with each
+    /// permission state is proved in `SettingsNotificationsRowTests`; what this
+    /// adds is that the row on screen is that switch, reading iOS rather than a
+    /// literal.
+    func testSettingsNotificationsIsARealSwitch() {
+        let app = launch(extraArguments: ["--fixture=account"])
+        let settingsScreen = app.descendants(matching: .any)["settings.screen"]
+        XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+
+        let toggle = app.switches["settings.selling.notifications"]
+        let dock = app.buttons["dock.trophy-wall"]
+        XCTAssertTrue(dock.exists, app.debugDescription)
+
+        // Deliberately not the `where !element.exists` loop the sign-out and
+        // delete-account tests in this file still use. `exists` is true for a
+        // row that is scrolled off screen or sitting under the floating dock,
+        // so that loop stops swiping before the row is reachable and then
+        // asserts something it never actually brought into view.
+        for _ in 0..<10 where !(toggle.exists && toggle.frame.maxY <= dock.frame.minY) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertLessThanOrEqual(
+            toggle.frame.maxY,
+            dock.frame.minY,
+            "toggle=\(toggle.frame), dock=\(dock.frame)"
+        )
+        XCTAssertEqual(toggle.value as? String, "0", app.debugDescription)
     }
 
     /// Aziz found the subscription ownership note ("Apple bills and
