@@ -711,9 +711,13 @@ final class EbayPublishUITests: XCTestCase {
         // Both dimensions. Height alone accepted a 12x44 hit rect, which is
         // the exact shape a toolbar chevron fails in (#928), so the helper
         // that exists to catch a short target could not have caught it.
+        // Rounds through the shared `TouchTargetFloor` (see its doc comment)
+        // so a control laid out at exactly the floor does not go red here
+        // while `ListingReviewUITests.assertMeetsTouchTargetFloor` stays
+        // green on the same measurement.
         let frameReceipt = "\(identifier).frame=\(button.frame)"
-        XCTAssertGreaterThanOrEqual(button.frame.height, 44, frameReceipt, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(button.frame.width, 44, frameReceipt, file: file, line: line)
+        XCTAssertTrue(TouchTargetFloor.isMet(button.frame.height), frameReceipt, file: file, line: line)
+        XCTAssertTrue(TouchTargetFloor.isMet(button.frame.width), frameReceipt, file: file, line: line)
     }
 
     private func marker(

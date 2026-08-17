@@ -1,3 +1,5 @@
+import SwiftUI
+import UIKit
 import XCTest
 @testable import SnapList
 
@@ -228,17 +230,27 @@ final class ListingReviewInlineTextViewTests: XCTestCase {
     }
 
     func testATapOnTheGlyphsOfAScrolledValueResolvesWhereUITextViewResolvesIt() {
-        let oracle = UITextView()
-        configure(oracle, text: scrollingValue, height: 243)
-        let known = oracle.position(from: oracle.beginningOfDocument, offset: 900)!
-        let caret = oracle.caretRect(for: known)
+        let restOracle = UITextView()
+        configure(restOracle, text: scrollingValue, height: 243)
+        let known = restOracle.position(from: restOracle.beginningOfDocument, offset: 900)!
+        let caret = restOracle.caretRect(for: known)
         let onTheGlyphs = CGPoint(x: caret.midX, y: caret.midY)
         XCTAssertEqual(
-            offset(of: oracle.closestPosition(to: onTheGlyphs), in: oracle),
+            offset(of: restOracle.closestPosition(to: onTheGlyphs), in: restOracle),
             900,
             "The oracle has to resolve its own caret rect back to the same "
                 + "character, or this test is measuring nothing."
         )
+
+        // A second, independent oracle at the same scroll the subject is
+        // measured at, rather than the literal `900`. A plain `UITextView`
+        // is free to change how it resolves a scrolled point in some future
+        // UIKit release; a control row that tracks that behavior catches a
+        // real SnapList regression without also catching a platform change
+        // as a false one.
+        let scrolledOracle = UITextView()
+        configure(scrolledOracle, text: scrollingValue, height: 243)
+        scrolledOracle.contentOffset = CGPoint(x: 0, y: 200)
 
         let subject = ListingReviewInlineTextView()
         configure(subject, text: scrollingValue, height: 243)
@@ -248,7 +260,7 @@ final class ListingReviewInlineTextViewTests: XCTestCase {
 
         XCTAssertEqual(
             offset(of: subject.closestPosition(to: onTheGlyphs), in: subject),
-            900,
+            offset(of: scrolledOracle.closestPosition(to: onTheGlyphs), in: scrolledOracle),
             "A point already on the glyphs must come back untouched however "
                 + "far the value is scrolled. `bounds.origin` is `contentOffset` "
                 + "on a scroll view, so the point already carries the scroll."
@@ -275,6 +287,189 @@ final class ListingReviewInlineTextViewTests: XCTestCase {
             0,
             "The tap is at the left edge of the box, so it belongs before the "
                 + "first character, not after the last one."
+        )
+    }
+
+    /// `closestPosition(to:within:)` is the override drag-select and the
+    /// long-press magnifier actually call; `closestPosition(to:)` is not.
+    /// Both forward to the same `clampedIntoGlyphs`, so a tap under a short
+    /// value has to land the same place through either entry point — this
+    /// only proves that, it does not re-derive the clamp math the sibling
+    /// test above already covers.
+    func testClosestPositionWithinRangeAgreesWithThePlainOverrideUnderAShortValue() {
+        let value = "White"
+        let subject = ListingReviewInlineTextView()
+        configure(subject, text: value, height: 44)
+        let underTheGlyphs = CGPoint(x: 2, y: 40)
+        let fullRange = subject.textRange(
+            from: subject.beginningOfDocument,
+            to: subject.endOfDocument
+        )!
+
+        XCTAssertEqual(
+            offset(
+                of: subject.closestPosition(to: underTheGlyphs, within: fullRange),
+                in: subject
+            ),
+            offset(of: subject.closestPosition(to: underTheGlyphs), in: subject),
+            "If the `within:` override stops forwarding through the same "
+                + "clamp, drag-select and the plain single-tap caret would "
+                + "silently disagree with each other."
+        )
+    }
+
+    /// Decision for #932 item 5: the clamp only knows the y-band its
+    /// measured glyphs occupy, not how many lines are in it, so a tap in the
+    /// empty room below a value that wraps resolves by x on whatever the
+    /// last actual line is — the same rule #928 set for a single-line value,
+    /// generalized rather than special-cased. The alternative (falling back
+    /// to end-of-text whenever the value spans more than one line) would
+    /// need the clamp to count lines it currently has no reason to know
+    /// about, for a shape that is not more surprising to a seller than the
+    /// single-line one #928 already fixed. Chosen for consistency and
+    /// simplicity, not because "last line" is the only defensible answer.
+    func testATapInTheEmptyRoomBelowAMultiLineShortValueResolvesByXOnTheLastLine() {
+        let value = "White\nSmall"
+        let subject = ListingReviewInlineTextView()
+        configure(subject, text: value, height: 132)
+
+        let lastLineStart = subject.position(
+            from: subject.beginningOfDocument,
+            offset: "White\n".count
+        )!
+        let lastLineCaret = subject.caretRect(for: lastLineStart)
+
+        let inTheEmptyRoomBelow = CGPoint(x: lastLineCaret.midX, y: 120)
+        let onTheLastLine = CGPoint(x: lastLineCaret.midX, y: lastLineCaret.midY)
+
+        XCTAssertEqual(
+            offset(of: subject.closestPosition(to: inTheEmptyRoomBelow), in: subject),
+            offset(of: subject.closestPosition(to: onTheLastLine), in: subject),
+            "A tap below the text has to resolve to the same character a tap "
+                + "directly on the last line at the same x would, or the clamp "
+                + "is not actually resolving by x there."
+        )
+        XCTAssertNotEqual(
+            offset(of: subject.closestPosition(to: inTheEmptyRoomBelow), in: subject),
+            value.count,
+            "A tap in the empty room must not fall back to end-of-text once "
+                + "the value spans more than one line — that was the "
+                + "single-line-only guarantee #928 made, and this shape is "
+                + "wider than that."
+        )
+    }
+
+    /// A cached glyph measurement from a short value must not survive a text
+    /// change. Comparing against a fresh view built directly from the final
+    /// text is the fail-visible way to catch a stale cache: if the subject
+    /// kept measuring against the old, shorter text, its clamp band would
+    /// stay too low and this would resolve to a different character than the
+    /// fresh view does.
+    func testClampFollowsTextThatGrowsAfterAnEarlierResolution() {
+        let grown = "White, with a much longer description that wraps onto "
+            + "more than one line inside this box."
+
+        let subject = ListingReviewInlineTextView()
+        configure(subject, text: "White", height: 44)
+        _ = subject.closestPosition(to: CGPoint(x: 2, y: 40))
+
+        configure(subject, text: grown, height: 44)
+
+        let fresh = ListingReviewInlineTextView()
+        configure(fresh, text: grown, height: 44)
+
+        XCTAssertEqual(
+            offset(of: subject.closestPosition(to: CGPoint(x: 2, y: 40)), in: subject),
+            offset(of: fresh.closestPosition(to: CGPoint(x: 2, y: 40)), in: fresh),
+            "A view whose glyph measurement was cached against the earlier, "
+                + "shorter text must resolve the same as a fresh view once the "
+                + "text has grown."
+        )
+    }
+
+    /// A cached glyph measurement from an earlier font must not survive a
+    /// font change. Dynamic Type and Bold Text both reassign `font` with
+    /// `text` and `bounds.width` held constant — the two inputs the cache
+    /// keyed on before this fix — so a cache that does not also key on font
+    /// cannot see the change: the clamp band keeps the old font's height and
+    /// a tap can resolve against the wrong line. `fresh` is a second instance
+    /// of the same subject class, not an independent oracle: it shares
+    /// `clampedIntoGlyphs` and `glyphsHeight()`, so comparing against it
+    /// isolates cache staleness specifically — a defect in the clamp
+    /// arithmetic itself would move both views identically and this
+    /// assertion would still pass.
+    func testClampFollowsFontThatChangesAfterAnEarlierResolution() {
+        let value = "White\nSmall"
+        let smallFont = UIFont.systemFont(ofSize: 12)
+        let largeFont = UIFont.systemFont(ofSize: 40)
+        let point = CGPoint(x: 2, y: 120)
+
+        let subject = ListingReviewInlineTextView()
+        configure(subject, text: value, height: 132)
+        subject.font = smallFont
+        subject.layoutIfNeeded()
+        _ = subject.closestPosition(to: point)
+
+        subject.font = largeFont
+        subject.layoutIfNeeded()
+
+        let fresh = ListingReviewInlineTextView()
+        configure(fresh, text: value, height: 132)
+        fresh.font = largeFont
+        fresh.layoutIfNeeded()
+
+        XCTAssertEqual(
+            offset(of: subject.closestPosition(to: point), in: subject),
+            offset(of: fresh.closestPosition(to: point), in: fresh),
+            "A view whose glyph measurement was cached against the earlier, "
+                + "smaller font must resolve the same as a fresh view once "
+                + "the font has grown."
+        )
+    }
+
+    /// The test above only varies `pointSize` (12 to 40). Bold Text does not:
+    /// it reassigns `font` to a bold descriptor at the same `body.pointSize`
+    /// (`ListingReviewInlineTextEditor.font`), so a cache key that compared
+    /// fonts by `pointSize` alone — rather than the full `UIFont` — would
+    /// treat the two as identical and miss this exact trigger. This is the
+    /// fail-visible check for that: it is a direct assertion on the
+    /// `glyphsHeight()` doc comment's own claim that `UIFont`'s `==`
+    /// distinguishes these two fonts, built through the same production
+    /// helper Bold Text drives rather than two arbitrary system fonts.
+    ///
+    /// A geometry-based version of this test — cache against the regular
+    /// font, switch to bold, and compare `closestPosition` against a fresh
+    /// bold view, the same shape as the test above — was tried first and
+    /// could not be made to fail: verified by temporarily weakening the
+    /// cache key to `pointSize` alone and rerunning, it stayed green. SF's
+    /// line-height metrics do not change with weight, so `glyphsHeight()`
+    /// returns the same value whether or not the cache noticed the font
+    /// change, and the vertical clamp band a wrong cache would corrupt never
+    /// moves. That path cannot observe a trait-only cache defect on this
+    /// font family, so the direct equality assertion below is what actually
+    /// backs the doc comment's claim.
+    func testFontsUsedForRegularAndBoldTextAreNotEqualAtTheSamePointSize() {
+        let regularFont = ListingReviewInlineTextEditor.font(
+            dynamicTypeSize: .large,
+            legibilityWeight: nil
+        )
+        let boldFont = ListingReviewInlineTextEditor.font(
+            dynamicTypeSize: .large,
+            legibilityWeight: .bold
+        )
+        XCTAssertEqual(
+            regularFont.pointSize,
+            boldFont.pointSize,
+            "Bold Text must not change point size, or this test is exercising "
+                + "the already-covered size axis instead of the traits-only one."
+        )
+        XCTAssertNotEqual(
+            regularFont,
+            boldFont,
+            "glyphsHeight()'s cache key relies on UIFont's == distinguishing "
+                + "a bold descriptor from a regular one at the same point "
+                + "size; if it stopped doing so, the cache would go stale "
+                + "silently on every Bold Text toggle."
         )
     }
 }

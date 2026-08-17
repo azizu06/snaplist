@@ -852,6 +852,25 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
 /// scrolling view, and the first version of it was wrong in the one state a
 /// 44pt single-line field never reaches.
 final class ListingReviewInlineTextView: UITextView {
+    /// Keyed on the three inputs `sizeThatFits` actually depends on here.
+    /// Re-measuring on every `closestPosition` call made drag-select and the
+    /// long-press magnifier lay out the whole text on every touch-move; a
+    /// description field has no length cap, so that cost scales with it.
+    /// Comparing against these three cheap fields before re-measuring keeps
+    /// the result identical while making the common case (no edit between
+    /// two touch events) an equality check instead of a layout pass.
+    ///
+    /// Font has to be part of the key: `updateUIView` reassigns `font` on a
+    /// Dynamic Type or Bold Text change with `text` and `bounds.width` held
+    /// constant, and `UIFont`'s `==` compares traits, not identity — so a
+    /// cache keyed on only the other two fields would go on returning the
+    /// old font's height after that reassignment, and a tap could resolve
+    /// against the wrong line.
+    private var cachedGlyphsHeightForWidth: CGFloat?
+    private var cachedGlyphsHeightForText: String?
+    private var cachedGlyphsHeightForFont: UIFont?
+    private var cachedGlyphsHeight: CGFloat = 0
+
     override func closestPosition(to point: CGPoint) -> UITextPosition? {
         super.closestPosition(to: clampedIntoGlyphs(point))
     }
@@ -880,13 +899,27 @@ final class ListingReviewInlineTextView: UITextView {
     /// cancels out of.
     func clampedIntoGlyphs(_ point: CGPoint) -> CGPoint {
         guard bounds.width > 0 else { return point }
-        let glyphs = sizeThatFits(
-            CGSize(width: bounds.width, height: .greatestFiniteMagnitude)
-        ).height
+        let glyphs = glyphsHeight()
         let top = textContainerInset.top + 1
         let bottom = glyphs - textContainerInset.bottom - 1
         guard bottom > top else { return point }
         return CGPoint(x: point.x, y: min(max(point.y, top), bottom))
+    }
+
+    private func glyphsHeight() -> CGFloat {
+        if cachedGlyphsHeightForWidth == bounds.width,
+            cachedGlyphsHeightForText == text,
+            cachedGlyphsHeightForFont == font {
+            return cachedGlyphsHeight
+        }
+        let measured = sizeThatFits(
+            CGSize(width: bounds.width, height: .greatestFiniteMagnitude)
+        ).height
+        cachedGlyphsHeightForWidth = bounds.width
+        cachedGlyphsHeightForText = text
+        cachedGlyphsHeightForFont = font
+        cachedGlyphsHeight = measured
+        return measured
     }
 }
 
