@@ -198,11 +198,31 @@ function appleReason(body: string): string | undefined {
 }
 
 /**
+ * How long one notification may take before it is treated as failed.
+ *
+ * A refusal is easy. Silence is the dangerous case: a connection Apple accepts
+ * and then never answers on emits no error and no close, so without a deadline
+ * the send never settles. The dispatcher awaits the send, the pipeline worker
+ * awaits the dispatcher, and one stalled socket holds a whole tick until the
+ * platform kills the invocation. "A send that fails is logged and dropped, and
+ * never blocks the pipeline" is only true if not answering counts as failing.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
+
+/** Named, because the sender reports `error.name` as the reason it dropped. */
+class ApnsRequestTimeoutError extends Error {
+  override readonly name = "ApnsRequestTimeout";
+}
+
+/**
  * The real transport. APNs speaks HTTP/2 only, which `fetch` does not, so this
  * is `node:http2` directly. Sessions are kept per host and reopened when Apple
  * closes one, because a connection per notification is what Apple throttles.
  */
-export function createApnsHttp2Transport(): ApnsTransport {
+export function createApnsHttp2Transport(
+  options: { requestTimeoutMs?: number } = {},
+): ApnsTransport {
+  const timeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const sessions = new Map<string, ClientHttp2Session>();
 
   function sessionFor(origin: string): ClientHttp2Session {
@@ -219,13 +239,34 @@ export function createApnsHttp2Transport(): ApnsTransport {
     send(request) {
       const url = new URL(request.url);
       return new Promise((resolve, reject) => {
-        const stream = sessionFor(url.origin).request({
+        const session = sessionFor(url.origin);
+        const stream = session.request({
           ":method": "POST",
           ":path": url.pathname,
           ...request.headers,
         });
         let status = 0;
         let body = "";
+        let settled = false;
+        const settle = (finish: () => void) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          finish();
+        };
+        const timer = setTimeout(() => {
+          settle(() => {
+            // The session, not just the stream. A connection that accepted a
+            // request and went silent will do the same to the next one, and it
+            // is pooled: leaving it in place would stall every later push too.
+            // Destroying it emits `close`, which evicts it here.
+            session.destroy();
+            reject(new ApnsRequestTimeoutError("APNs did not answer in time."));
+          });
+        }, timeoutMs);
+        // Node keeps the process alive for a pending timer, and this one
+        // outlives nothing: the request settles first in every healthy case.
+        timer.unref?.();
         stream.setEncoding("utf8");
         stream.on("response", (headers) => {
           status = Number(headers[":status"] ?? 0);
@@ -233,8 +274,8 @@ export function createApnsHttp2Transport(): ApnsTransport {
         stream.on("data", (chunk: string) => {
           body += chunk;
         });
-        stream.on("end", () => resolve({ status, body }));
-        stream.on("error", reject);
+        stream.on("end", () => settle(() => resolve({ status, body })));
+        stream.on("error", (error) => settle(() => reject(error)));
         stream.end(request.body);
       });
     },

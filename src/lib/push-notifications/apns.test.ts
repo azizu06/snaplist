@@ -1,7 +1,15 @@
 import { generateKeyPairSync } from "node:crypto";
+import {
+  createServer,
+  type Http2Server,
+  type ServerHttp2Session,
+  type ServerHttp2Stream,
+} from "node:http2";
+import type { AddressInfo } from "node:net";
 import { beforeAll, describe, expect, it } from "vitest";
 import { decodeProtectedHeader, decodeJwt } from "jose";
 import {
+  createApnsHttp2Transport,
   createHttpApnsSender,
   resolveApnsConfig,
   type ApnsHttpRequest,
@@ -278,6 +286,88 @@ describe("reading Apple's answer", () => {
     await expect(sender.send(sendOf(PRODUCTION_DEVICE))).resolves.toMatchObject({
       outcome: "failed",
     });
+  });
+});
+
+describe("the transport that actually reaches Apple", () => {
+  /**
+   * A local HTTP/2 server, because the defect these cover lives in the real
+   * transport and an injected fake cannot express it. Plaintext h2c: what is
+   * under test is the request lifecycle, not TLS.
+   */
+  async function h2ServerThat(
+    handle: (stream: ServerHttp2Stream) => void,
+  ): Promise<{ origin: string; close: () => Promise<void> }> {
+    const sessions = new Set<ServerHttp2Session>();
+    const server: Http2Server = createServer();
+    server.on("session", (session) => {
+      sessions.add(session);
+      session.on("close", () => sessions.delete(session));
+    });
+    server.on("stream", handle);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    return {
+      origin: `http://127.0.0.1:${port}`,
+      close: () =>
+        new Promise<void>((resolve) => {
+          for (const session of sessions) session.destroy();
+          server.close(() => resolve());
+        }),
+    };
+  }
+
+  function requestTo(origin: string): ApnsHttpRequest {
+    return {
+      url: `${origin}/3/device/${PRODUCTION_DEVICE.token}`,
+      headers: { authorization: "bearer test" },
+      body: "{}",
+    };
+  }
+
+  it("gives up on a connection that accepts the request and never answers", async () => {
+    // The failure this exists for is not a refusal, it is silence. Apple's
+    // connection can be accepted and then black-holed, and without a deadline
+    // the send never settles: the dispatcher awaits it, the worker awaits the
+    // dispatcher, and one stalled socket holds the whole tick until the
+    // platform kills it. "A send that fails is logged and dropped, it never
+    // blocks" is only true if not answering counts as failing.
+    const server = await h2ServerThat(() => {
+      // Accepted, then nothing. No response, no error, no close.
+    });
+    try {
+      const transport = createApnsHttp2Transport({ requestTimeoutMs: 60 });
+
+      // Named, because the sender reports `error.name` as the reason a push was
+      // dropped. An unnamed error lands in the log as "Error" and is
+      // indistinguishable from every other failure.
+      await expect(transport.send(requestTo(server.origin))).rejects.toMatchObject({
+        name: "ApnsRequestTimeout",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("still reads an answer that arrives inside the deadline", async () => {
+    // The other half: a deadline that fires on a healthy request would drop
+    // every push rather than the stalled ones.
+    const server = await h2ServerThat((stream) => {
+      stream.respond({ ":status": 200 });
+      stream.end("");
+    });
+    try {
+      const transport = createApnsHttp2Transport({ requestTimeoutMs: 5_000 });
+
+      await expect(transport.send(requestTo(server.origin))).resolves.toEqual({
+        status: 200,
+        body: "",
+      });
+    } finally {
+      await server.close();
+    }
   });
 });
 
