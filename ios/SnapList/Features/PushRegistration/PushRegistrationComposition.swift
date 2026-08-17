@@ -37,7 +37,14 @@ enum PushRegistrationComposition {
                 UIApplication.shared.registerForRemoteNotifications()
             },
             submitDeviceToken: { token in
-                try await client.submitPushDeviceToken(token)
+                // Resolved once, from this build's own signing profile (#891).
+                // It cannot change while the process is alive, and it is read
+                // here rather than in the domain because the state machine has
+                // no use for a value it cannot act on.
+                try await client.submitPushDeviceToken(
+                    token,
+                    environment: apnsEnvironmentForRunningApp()
+                )
             }
         )
     }

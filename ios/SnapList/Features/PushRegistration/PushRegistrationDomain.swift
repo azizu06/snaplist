@@ -61,6 +61,71 @@ struct PushRegistrationProgress: Codable, Equatable {
     }
 }
 
+/// Which APNs host the tokens this build receives are reachable on (#891).
+///
+/// The server stores this alongside the token because one auth key serves both
+/// hosts and nothing about the token itself says which one it belongs to. A
+/// notification posted to the wrong host is accepted and then dropped, so the
+/// value has to travel with the registration or the failure is invisible.
+enum ApnsEnvironment: String, Equatable {
+    case sandbox
+    case production
+}
+
+/// Reads the `aps-environment` entitlement out of the profile the app was
+/// signed with.
+///
+/// The entitlement, not the build configuration, is the truth. `#if DEBUG` is
+/// the obvious shortcut and it is wrong twice over: a Release build signed with
+/// a development profile holds sandbox tokens, and a TestFlight build is the
+/// same trap. `SnapList.entitlements` sets the value from
+/// `$(SNAPLIST_APS_ENVIRONMENT)`, but what the app actually got is whatever the
+/// signing profile granted, and only the profile knows that at runtime.
+///
+/// A `.mobileprovision` is a CMS envelope, so the plist is embedded in binary
+/// signature bytes that contain NUL and values above 127. It is located by
+/// bytes rather than decoded as a string, because a string reader stops at the
+/// first NUL and would report production for a development build.
+///
+/// Anything that is not positively `development` is production: a missing,
+/// entitlement-less, or unparseable profile is the App Store case, which is
+/// production by definition. Guessing sandbox instead would silence every
+/// shipped seller's notifications, while guessing production can at worst cost
+/// a developer their own.
+func apnsEnvironment(
+    fromEmbeddedProvisioningProfile profile: Data?
+) -> ApnsEnvironment {
+    guard let profile,
+          let start = profile.range(of: Data("<plist".utf8)),
+          let end = profile.range(
+              of: Data("</plist>".utf8),
+              options: .backwards
+          ),
+          start.lowerBound < end.upperBound,
+          let plist = try? PropertyListSerialization.propertyList(
+              from: profile[start.lowerBound..<end.upperBound],
+              format: nil
+          ) as? [String: Any],
+          let entitlements = plist["Entitlements"] as? [String: Any],
+          entitlements["aps-environment"] as? String == "development"
+    else {
+        return .production
+    }
+    return .sandbox
+}
+
+/// The running app's own environment, read from its own bundle.
+func apnsEnvironmentForRunningApp(
+    bundle: Bundle = .main
+) -> ApnsEnvironment {
+    let path = (bundle.bundlePath as NSString)
+        .appendingPathComponent("embedded.mobileprovision")
+    return apnsEnvironment(
+        fromEmbeddedProvisioningProfile: FileManager.default
+            .contents(atPath: path)
+    )
+}
+
 protocol PushRegistrationPersisting: AnyObject {
     func load() -> PushRegistrationProgress
     func save(_ progress: PushRegistrationProgress)
