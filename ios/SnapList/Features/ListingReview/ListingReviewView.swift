@@ -49,7 +49,14 @@ struct ListingReviewView: View {
     // Owned here rather than by the fields, because Item specifics is pushed
     // and its fields would otherwise take their pending text down with them.
     @State private var inlineEdits = ListingReviewInlineEdits()
+    // The price is a SwiftUI control and keeps SwiftUI's focus system. Title
+    // and Description are `UITextView`s behind a representable since #918, and
+    // SwiftUI's focus system cannot move a responder it does not own — writing
+    // a `@FocusState` value nothing claims makes it resign whatever is
+    // editing. They get ordinary state, and UIKit's one-first-responder rule
+    // keeps the two channels from both believing they hold focus.
     @FocusState private var focusedField: ListingReviewInlineFocus?
+    @State private var inlineFocus: ListingReviewInlineFocus?
     @AccessibilityFocusState private var focusedElement:
         ListingReviewFocus?
 
@@ -94,6 +101,7 @@ struct ListingReviewView: View {
                 Spacer()
                 Button("Done") {
                     focusedField = nil
+                    inlineFocus = nil
                 }
                 .fontWeight(.bold)
                 .accessibilityLabel("Done editing, keeps it on this phone")
@@ -157,18 +165,10 @@ struct ListingReviewView: View {
             priceText = updated
         }
         .onChange(of: focusedField) { previous, current in
-            // Typing into any of these fields is a real interaction, and the
-            // fields are reached by focus rather than by a button now, so the
-            // activation hook has to hang off focus instead.
-            if current != nil { activationInteraction() }
-            // Losing focus is the ordinary commit point for every field, so
-            // the draft stays off the keystroke path. Done and Back run the
-            // same flush, so nothing depends on this having fired first.
-            guard previous != nil else { return }
-            Task {
-                await inlineEdits.flush(into: store)
-                if previous == .price { await commitPrice() }
-            }
+            reactToFocusChange(previous: previous, current: current)
+        }
+        .onChange(of: inlineFocus) { previous, current in
+            reactToFocusChange(previous: previous, current: current)
         }
         .onChange(of: destination?.id) { previous, current in
             guard previous != nil, current == nil else { return }
@@ -459,6 +459,26 @@ struct ListingReviewView: View {
         )
     }
 
+    /// One reaction for both focus channels, because losing focus means the
+    /// same thing whichever control held it.
+    private func reactToFocusChange(
+        previous: ListingReviewInlineFocus?,
+        current: ListingReviewInlineFocus?
+    ) {
+        // Typing into any of these fields is a real interaction, and the
+        // fields are reached by focus rather than by a button now, so the
+        // activation hook has to hang off focus instead.
+        if current != nil { activationInteraction() }
+        // Losing focus is the ordinary commit point for every field, so the
+        // draft stays off the keystroke path. Done and Back run the same
+        // flush, so nothing depends on this having fired first.
+        guard previous != nil else { return }
+        Task {
+            await inlineEdits.flush(into: store)
+            if previous == .price { await commitPrice() }
+        }
+    }
+
     private func details(
         snapshot: ListingReviewResult,
         draft: ListingReviewDraft
@@ -481,7 +501,7 @@ struct ListingReviewView: View {
                 field: .title,
                 edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.title,
-                focus: $focusedField,
+                focus: $inlineFocus,
                 lineLimit: 1...3
             )
             .accessibilityFocused($focusedElement, equals: .title)
@@ -494,7 +514,7 @@ struct ListingReviewView: View {
                 field: .description,
                 edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.description,
-                focus: $focusedField,
+                focus: $inlineFocus,
                 lineLimit: 3...10
             )
             .accessibilityFocused($focusedElement, equals: .description)

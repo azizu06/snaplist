@@ -739,7 +739,17 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
     let edits: ListingReviewInlineEdits
     let focusValue: Focus
     let lineLimit: ClosedRange<Int>
-    @FocusState.Binding var focus: Focus?
+    // Not `@FocusState`. The control is a `UITextView` now, and SwiftUI's
+    // focus system only moves SwiftUI's own responders: writing a value no
+    // `.focused` modifier claims makes SwiftUI resign whatever is editing,
+    // which here would be this field. The screen keeps its `@FocusState` for
+    // the price, which is still a SwiftUI control, and drives these through
+    // ordinary state instead. The two channels stay coherent because UIKit
+    // allows one first responder, so each one taking focus makes the other
+    // give it up and report that it did.
+    @Binding var focus: Focus?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.legibilityWeight) private var legibilityWeight
     @State private var text: String
 
     init(
@@ -750,7 +760,7 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
         field: ListingReviewInlineEdit,
         edits: ListingReviewInlineEdits,
         focusValue: Focus,
-        focus: FocusState<Focus?>.Binding,
+        focus: Binding<Focus?>,
         lineLimit: ClosedRange<Int> = 1...4
     ) {
         self.label = label
@@ -767,25 +777,29 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
 
     var body: some View {
         ListingReviewInlineField(label: label, pending: pending) {
-            TextField(label, text: $text, axis: .vertical)
-                .font(.body)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .multilineTextAlignment(.leading)
-                .textFieldStyle(.plain)
-                .lineLimit(lineLimit)
-                .focused($focus, equals: focusValue)
-                .accessibilityLabel(label)
-                .accessibilityValue(
-                    text + (pending ? ", edited, not saved yet" : "")
-                )
-                .accessibilityIdentifier(identifier)
+            ListingReviewInlineTextEditor(
+                text: $text,
+                accessibilityLabel: label,
+                announcedValue: text
+                    + (pending ? ", edited, not saved yet" : ""),
+                identifier: identifier,
+                font: ListingReviewInlineTextEditor.font(
+                    dynamicTypeSize: dynamicTypeSize,
+                    legibilityWeight: legibilityWeight
+                ),
+                lineLimit: lineLimit,
+                isFocused: focus == focusValue,
+                focusChanged: { editing in
+                    if editing {
+                        focus = focusValue
+                    } else if focus == focusValue {
+                        focus = nil
+                    }
+                }
+            )
         }
-        // A vertical-axis field is a text view that hugs its content, so at
-        // the smallest Dynamic Type size the part of the box that answers a
-        // touch is 23pt of glyphs. Giving that field a 44pt frame does not
-        // help: it takes the room without taking the height, and a tap in the
-        // space it left behind reaches nothing. The box is 62pt and is what
-        // the seller sees, so the rest of the box has to focus the field too.
+        // The control fills the box now, so what is left for this to pick up
+        // is the label band and the padding around the glyphs.
         //
         // Behind the content rather than over it, which is the whole point. A
         // tap gesture on the box wins the tap before the field sees it, so
@@ -807,6 +821,216 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
             guard focus != focusValue else { return }
             text = updated
             edits.typed[field] = nil
+        }
+    }
+}
+
+/// The control every inline text field publishes.
+///
+/// SwiftUI's vertical-axis `TextField` is backed by a text view that hugs its
+/// content, so the element it publishes is the glyphs — 23pt at the smallest
+/// Dynamic Type size — however large a frame it is given. A `contentShape` on
+/// the box widened what a finger reaches, but a finger is the only input that
+/// sees a content shape: Switch Control, Voice Control, Full Keyboard Access
+/// and VoiceOver direct-touch exploration all drive the accessibility element
+/// (#918). A `UITextView` fills the frame it is handed, so wrapping one
+/// directly is what makes the element the size the seller already sees.
+///
+/// Nothing here lays a gesture over the text view. Caret placement, drag
+/// select, double-tap select and the long-press magnifier are `UITextView`'s
+/// own behavior, and #899 lost caret placement once already by putting a tap
+/// gesture in front of the control.
+struct ListingReviewInlineTextEditor: UIViewRepresentable {
+    @Binding var text: String
+    let accessibilityLabel: String
+    let announcedValue: String
+    let identifier: String
+    let font: UIFont
+    let lineLimit: ClosedRange<Int>
+    let isFocused: Bool
+    let focusChanged: (Bool) -> Void
+
+    /// `--dynamic-type=` moves SwiftUI's `\.dynamicTypeSize` and nothing else.
+    /// `UIApplication.preferredContentSizeCategory` stays where the device
+    /// left it, so a UIKit control that asked for "body" itself would come
+    /// back at the wrong size on exactly the runs that measure the smallest
+    /// one. The size is resolved from the environment and handed down.
+    static func font(
+        dynamicTypeSize: DynamicTypeSize,
+        legibilityWeight: LegibilityWeight?
+    ) -> UIFont {
+        let body = UIFont.preferredFont(
+            forTextStyle: .body,
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory:
+                    dynamicTypeSize.contentSizeCategory
+            )
+        )
+        guard legibilityWeight == .bold else { return body }
+        let descriptor = body.fontDescriptor
+            .withSymbolicTraits(.traitBold) ?? body.fontDescriptor
+        return UIFont(descriptor: descriptor, size: body.pointSize)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        context.coordinator.textView = view
+        view.backgroundColor = .clear
+        // The box owns the padding, so the text view contributes none of its
+        // own; otherwise the glyphs sit inset from the caption above them.
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.textAlignment = .natural
+        // Scrolling is what a value longer than `lineLimit`'s upper bound does
+        // instead of growing, which is what the vertical-axis field did.
+        view.isScrollEnabled = true
+        view.alwaysBounceVertical = false
+        view.showsVerticalScrollIndicator = false
+        view.textColor = UIColor(SnapListColorToken.inkPrimary.color)
+        view.font = font
+        view.text = text
+        view.inputAccessoryView = context.coordinator.keyboardAccessory()
+        apply(accessibility: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.owner = self
+        // Assigning text unconditionally would move the caret to the end on
+        // every keystroke, because the binding this reads is the one the
+        // delegate below just wrote.
+        if uiView.text != text {
+            uiView.text = text
+        }
+        if uiView.font != font {
+            uiView.font = font
+        }
+        apply(accessibility: uiView)
+
+        if isFocused, !uiView.isFirstResponder {
+            uiView.becomeFirstResponder()
+        } else if !isFocused, uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+
+    /// The identifier, label and value go on the text view rather than on the
+    /// representable, so exactly one element carries them and the element an
+    /// assistive technology lands on is the one that was measured.
+    private func apply(accessibility view: UITextView) {
+        view.accessibilityIdentifier = identifier
+        view.accessibilityLabel = accessibilityLabel
+        view.accessibilityValue = announcedValue
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: UITextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0 else {
+            return nil
+        }
+        // The floor is applied here, once, because a text view fills what it
+        // is given. Asking for it with `.frame(minHeight:)` was the lever that
+        // did nothing: the vertical-axis field took the room without taking
+        // the height.
+        let lineHeight = (uiView.font ?? font).lineHeight
+        let lowerBound = max(
+            SnapListMetrics.minimumTouchTarget,
+            (lineHeight * CGFloat(lineLimit.lowerBound)).rounded(.up)
+        )
+        let upperBound = max(
+            lowerBound,
+            (lineHeight * CGFloat(lineLimit.upperBound)).rounded(.up)
+        )
+        let fitting = uiView
+            .sizeThatFits(
+                CGSize(width: width, height: .greatestFiniteMagnitude)
+            )
+            .height
+        return CGSize(
+            width: width,
+            height: min(max(fitting, lowerBound), upperBound)
+        )
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var owner: ListingReviewInlineTextEditor
+        weak var textView: UITextView?
+
+        init(_ owner: ListingReviewInlineTextEditor) {
+            self.owner = owner
+        }
+
+        /// SwiftUI's `.toolbar(placement: .keyboard)` reaches SwiftUI's own
+        /// responders, and this control is not one, so the same Done is built
+        /// here rather than left missing. Only one view is first responder at
+        /// a time, so this and the screen's own keyboard toolbar are never on
+        /// screen together.
+        func keyboardAccessory() -> UIToolbar {
+            let done = UIBarButtonItem(
+                title: ListingReviewCopy.done,
+                style: .done,
+                target: self,
+                action: #selector(dismissKeyboard)
+            )
+            done.accessibilityLabel = "Done editing, keeps it on this phone"
+            done.accessibilityIdentifier = "listing-review.keyboard-done"
+            let toolbar = UIToolbar()
+            toolbar.items = [
+                UIBarButtonItem(
+                    barButtonSystemItem: .flexibleSpace,
+                    target: nil,
+                    action: nil
+                ),
+                done,
+            ]
+            toolbar.sizeToFit()
+            return toolbar
+        }
+
+        @objc private func dismissKeyboard() {
+            // Resigning is the only step. Giving up first responder runs
+            // `textViewDidEndEditing`, which is where the screen is told.
+            textView?.resignFirstResponder()
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            owner.text = textView.text
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            owner.focusChanged(true)
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            owner.focusChanged(false)
+        }
+    }
+}
+
+private extension DynamicTypeSize {
+    var contentSizeCategory: UIContentSizeCategory {
+        switch self {
+        case .xSmall: .extraSmall
+        case .small: .small
+        case .medium: .medium
+        case .large: .large
+        case .xLarge: .extraLarge
+        case .xxLarge: .extraExtraLarge
+        case .xxxLarge: .extraExtraExtraLarge
+        case .accessibility1: .accessibilityMedium
+        case .accessibility2: .accessibilityLarge
+        case .accessibility3: .accessibilityExtraLarge
+        case .accessibility4: .accessibilityExtraExtraLarge
+        case .accessibility5: .accessibilityExtraExtraExtraLarge
+        @unknown default: .large
         }
     }
 }

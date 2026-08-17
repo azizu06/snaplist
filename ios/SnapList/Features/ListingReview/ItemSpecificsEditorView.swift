@@ -16,7 +16,10 @@ struct ItemSpecificsEditorView: View {
     @State private var drawer: ListingReviewIdentityDrawerTarget?
     @State private var correctionPresented = false
     @State private var returnFocusName: String?
-    @FocusState private var focusedField: String?
+    // Ordinary state, not `@FocusState`. Every typed row here is a
+    // `UITextView` behind a representable since #918, and SwiftUI's focus
+    // system cannot move a responder it does not own.
+    @State private var focusedField: String?
     @AccessibilityFocusState private var focusedName: String?
 
     var body: some View {
@@ -24,17 +27,11 @@ struct ItemSpecificsEditorView: View {
         .background(SnapListColorToken.canvas.color)
         .navigationTitle("Item specifics")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    focusedField = nil
-                }
-                .fontWeight(.bold)
-                .accessibilityLabel("Done editing, keeps it on this phone")
-                .accessibilityIdentifier("listing-review.keyboard-done")
-            }
-        }
+        // No keyboard toolbar here. Every control on this screen that raises a
+        // keyboard is a `UITextView` behind a representable, which carries its
+        // own Done as an input accessory; a SwiftUI keyboard toolbar reaches
+        // SwiftUI's own responders and would either never appear or publish a
+        // second control under the same identifier.
         .sheet(item: $drawer) { target in
             identityDrawer(target)
                 .presentationDetents([.height(340), .large])
