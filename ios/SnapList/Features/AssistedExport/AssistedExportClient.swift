@@ -187,7 +187,23 @@ struct AssistedExportAPIClient: AssistedExportServing {
 }
 
 actor AssistedExportFixtureService: AssistedExportServing {
-    private var receipts: [AssistedExportDestination: AssistedExportReceipt]
+    /// Receipts belong to the pack text they were written against, keyed the
+    /// way the server keys them. `loadExportHandoffs` filters on
+    /// `source_review_revision`, so a pack whose text was rebuilt carries a new
+    /// content revision and reads back no rows at all.
+    ///
+    /// One flat table per destination was the same shape as the server's
+    /// response and a different shape from its contract: it answered a rebuilt
+    /// pack with the handoff that belonged to the retired text, so the row went
+    /// on saying `Not shared` and went on offering `Mark as shared` for text
+    /// the seller never handed anyone (#928).
+    private var receiptsByContentRevision:
+        [UUID: [AssistedExportDestination: AssistedExportReceipt]] = [:]
+    /// The rows the server already holds, attributed to the first pack this
+    /// service is asked about. Nothing here knows a content revision until a
+    /// pack arrives, and the caller seeds the state of the pack it is mounting.
+    private var seededReceipts: [AssistedExportDestination: AssistedExportReceipt]
+    private var seedContentRevision: UUID?
     private let didPerform: (@Sendable (AssistedExportServerAction) async -> Void)?
     private let effectivePrice: Decimal?
     private let reviewRevision: UUID?
@@ -198,7 +214,7 @@ actor AssistedExportFixtureService: AssistedExportServing {
         reviewRevision: UUID? = nil,
         didPerform: (@Sendable (AssistedExportServerAction) async -> Void)? = nil
     ) {
-        self.receipts = Dictionary(uniqueKeysWithValues: receipts.map {
+        seededReceipts = Dictionary(uniqueKeysWithValues: receipts.map {
             ($0.destination, $0)
         })
         self.effectivePrice = effectivePrice
@@ -216,39 +232,55 @@ actor AssistedExportFixtureService: AssistedExportServing {
         pack: AssistedExportPack
     ) async throws -> AssistedExportServerPack {
         await didPerform?(action)
-        let existing = receipts[destination]
+        let revision = bindSeedIfNeeded(to: pack)
+        let existing = receiptsByContentRevision[revision]?[destination]
         switch action {
         case .handoff:
-            receipts[destination] = AssistedExportReceipt(
-                destination: destination,
-                handedOffAt: existing?.handedOffAt ?? Date(),
-                sharedAt: existing?.sharedAt
-            )
+            receiptsByContentRevision[revision, default: [:]][destination] =
+                AssistedExportReceipt(
+                    destination: destination,
+                    handedOffAt: existing?.handedOffAt ?? Date(),
+                    sharedAt: existing?.sharedAt
+                )
         case .shared:
             guard let handedOffAt = existing?.handedOffAt else {
                 throw AssistedExportClientError.invalidResponse
             }
-            receipts[destination] = AssistedExportReceipt(
-                destination: destination,
-                handedOffAt: handedOffAt,
-                sharedAt: existing?.sharedAt ?? Date()
-            )
+            receiptsByContentRevision[revision, default: [:]][destination] =
+                AssistedExportReceipt(
+                    destination: destination,
+                    handedOffAt: handedOffAt,
+                    sharedAt: existing?.sharedAt ?? Date()
+                )
         case .undo:
             guard let handedOffAt = existing?.handedOffAt else {
                 throw AssistedExportClientError.invalidResponse
             }
-            receipts[destination] = AssistedExportReceipt(
-                destination: destination,
-                handedOffAt: handedOffAt,
-                sharedAt: nil
-            )
+            receiptsByContentRevision[revision, default: [:]][destination] =
+                AssistedExportReceipt(
+                    destination: destination,
+                    handedOffAt: handedOffAt,
+                    sharedAt: nil
+                )
         }
         return response(for: pack)
     }
 
-    private var current: [AssistedExportReceipt] {
-        AssistedExportDestination.allCases.map { destination in
-            receipts[destination] ?? AssistedExportReceipt(
+    /// Attributes the seeded rows to the first pack asked about, which is the
+    /// pack they describe, and returns the revision this call reads and writes.
+    @discardableResult
+    private func bindSeedIfNeeded(to pack: AssistedExportPack) -> UUID {
+        if seedContentRevision == nil {
+            seedContentRevision = pack.contentRevision
+            receiptsByContentRevision[pack.contentRevision] = seededReceipts
+        }
+        return pack.contentRevision
+    }
+
+    private func current(for pack: AssistedExportPack) -> [AssistedExportReceipt] {
+        let stored = receiptsByContentRevision[bindSeedIfNeeded(to: pack)] ?? [:]
+        return AssistedExportDestination.allCases.map { destination in
+            stored[destination] ?? AssistedExportReceipt(
                 destination: destination,
                 handedOffAt: nil,
                 sharedAt: nil
@@ -258,7 +290,7 @@ actor AssistedExportFixtureService: AssistedExportServing {
 
     private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
         AssistedExportServerPack(
-            receipts: current,
+            receipts: current(for: pack),
             effectivePrice: effectivePrice ?? pack.effectivePrice,
             reviewRevision: reviewRevision ?? pack.reviewRevision
         )

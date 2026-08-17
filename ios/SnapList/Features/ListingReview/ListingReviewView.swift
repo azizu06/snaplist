@@ -84,12 +84,21 @@ struct ListingReviewView: View {
                         dismissReview()
                     }
                 } label: {
+                    // The minimum target has to sit inside the button's own
+                    // label to reach its hit rect. Wrapped around a
+                    // `ToolbarItem`'s button it does nothing at all: measured
+                    // here at 16.0 x 22.67, the bare chevron, which is what
+                    // that modifier was worth (#928, same rule and the same
+                    // four-arrangement measurement as #926/#929). This button
+                    // already carries `.buttonStyle(.plain)` below, so moving
+                    // the frame is the whole fix — 44.0 x 44.0 after.
                     Label("Back", systemImage: "chevron.left")
+                        .frame(
+                            minWidth: SnapListMetrics.minimumTouchTarget,
+                            minHeight: SnapListMetrics.minimumTouchTarget
+                        )
+                        .contentShape(.rect)
                 }
-                .frame(
-                    minWidth: SnapListMetrics.minimumTouchTarget,
-                    minHeight: SnapListMetrics.minimumTouchTarget
-                )
                 .accessibilityLabel("Back to Processing review")
                 .accessibilityFocused($focusedElement, equals: .back)
                 .accessibilityIdentifier("listing-review.back")

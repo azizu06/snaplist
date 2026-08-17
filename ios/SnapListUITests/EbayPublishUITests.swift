@@ -708,7 +708,12 @@ final class EbayPublishUITests: XCTestCase {
             line: line
         )
         XCTAssertTrue(button.isHittable, "\(identifier) is not hittable.", file: file, line: line)
-        XCTAssertGreaterThanOrEqual(button.frame.height, 44, file: file, line: line)
+        // Both dimensions. Height alone accepted a 12x44 hit rect, which is
+        // the exact shape a toolbar chevron fails in (#928), so the helper
+        // that exists to catch a short target could not have caught it.
+        let frameReceipt = "\(identifier).frame=\(button.frame)"
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44, frameReceipt, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(button.frame.width, 44, frameReceipt, file: file, line: line)
     }
 
     private func marker(
