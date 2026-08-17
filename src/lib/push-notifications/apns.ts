@@ -61,6 +61,16 @@ export interface ApnsTransport {
 }
 
 /**
+ * A missing or blank configuration variable. Distinct from any other failure
+ * `resolveApnsConfig` can throw (an unreadable or malformed key file) so a
+ * caller can cache the former and not the latter: a bad env var doesn't fix
+ * itself between calls, but an I/O error or a key caught mid-rotation does.
+ */
+export class ApnsMisconfiguredError extends Error {
+  override readonly name = "ApnsMisconfigured";
+}
+
+/**
  * Reads the provider configuration, or refuses to start.
  *
  * All four names are reported together. A sender that fails on the first
@@ -89,7 +99,7 @@ export function resolveApnsConfig(
     .filter(([, value]) => !value)
     .map(([name]) => name);
   if (missing.length > 0) {
-    throw new Error(
+    throw new ApnsMisconfiguredError(
       `Seller push is not configured. Missing: ${missing.join(", ")}.`,
     );
   }

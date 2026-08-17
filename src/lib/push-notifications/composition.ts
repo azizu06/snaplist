@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  ApnsMisconfiguredError,
   createApnsHttp2Transport,
   createHttpApnsSender,
   resolveApnsConfig,
@@ -60,13 +61,18 @@ function senderForCurrentEnvironment():
     } catch (error) {
       // The message names the missing variables and never the key material, so
       // it is safe to report and is the only thing that makes this diagnosable.
-      cachedSender = {
-        key,
-        failure:
-          error instanceof Error
-            ? error.message
-            : "Seller push is not configured.",
-      };
+      const failure =
+        error instanceof Error
+          ? error.message
+          : "Seller push is not configured.";
+      if (error instanceof ApnsMisconfiguredError) {
+        cachedSender = { key, failure };
+      } else {
+        // Not a configuration problem — an I/O error or a key caught mid-write
+        // is transient. Don't cache it: leave `cachedSender` as-is so the next
+        // call re-resolves instead of staying poisoned for the process's life.
+        return { failure };
+      }
     }
   }
   return "sender" in cachedSender
