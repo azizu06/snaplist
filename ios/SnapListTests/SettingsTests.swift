@@ -563,6 +563,63 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(readableAfter)
     }
 
+    /// #871. Sign-out and account erasure share this one removal, and it is the
+    /// executor for both of those retention triggers, so the Trophy Wall covers
+    /// root has to be one of the roots it owns — for every principal that has
+    /// filed a photo on this device, not only the one signing out.
+    func testSignOutRemovesEveryPrincipalsTrophyWallCoverPhotos() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "settings-covers-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let covers = root
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent(
+                FileTrophyWallLocalCoverPhotoStore.rootDirectoryName,
+                isDirectory: true
+            )
+        let principals = [
+            "v1-" + String(repeating: "a", count: 64),
+            "v1-" + String(repeating: "b", count: 64),
+        ]
+        for principal in principals {
+            let principalRoot = covers.appendingPathComponent(
+                principal,
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: principalRoot,
+                withIntermediateDirectories: true
+            )
+            try Data("staged photo".utf8).write(
+                to: principalRoot.appendingPathComponent(
+                    "run-\(UUID().uuidString.lowercased()).json"
+                )
+            )
+        }
+
+        let cachedData = SettingsLocalCachedDataStore(
+            applicationSupportDirectory: root
+        )
+        // Positive control: the photos are genuinely on this device first.
+        XCTAssertTrue(cachedData.hasData)
+
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: {
+                await SettingsLocalRemovalTransaction.perform(
+                    removeIntake: { true },
+                    removeCachedItems: { cachedData.removeAll() }
+                )
+            },
+            endSession: {}
+        )
+
+        XCTAssertEqual(outcome, .signedOut)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: covers.path))
+        XCTAssertFalse(cachedData.hasData)
+    }
+
     func testGuestSettingsStopsBeforeEntitlementsAndAccountManagement() {
         var flow = SettingsFlow(identity: .guest, hasLocalData: false)
 

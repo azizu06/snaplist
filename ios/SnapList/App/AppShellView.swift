@@ -71,6 +71,12 @@ struct AppShellView: View {
     @State private var recoverableLocalPendingIdentity: TrophyWallLogicalIdentity?
     @State private var trophyWallCollectionRefreshState =
         TrophyWallCollectionRefreshState()
+    /// Which principal's durable cover-photo store the wall is currently on, and
+    /// whether it has adopted one at all. Both are needed: the scope can be nil
+    /// for a launch with no signed-in seller, and a transition can arrive
+    /// without the scope changing.
+    @State private var adoptedTrophyWallCoverPhotoScope: String?
+    @State private var hasAdoptedTrophyWallCoverPhotos = false
     @State private var activationCompletionChecked = false
     @State private var hasCompletedActivation = false
     @State private var activationAuthentication = ActivationAuthenticationState.unknown
@@ -449,6 +455,28 @@ struct AppShellView: View {
                         // tab-keyed refresh below does not re-run on its own, so a
                         // seller already sitting on the wall would watch it stay
                         // blank until they navigated away and back.
+                        //
+                        // It also reverts the wall to the unavailable cover
+                        // store, so the arriving principal has to adopt again
+                        // even when the intake resolves to the same directory.
+                        hasAdoptedTrophyWallCoverPhotos = false
+                    }
+                    // One owner for the durable cover store, and it is this
+                    // loop, because this loop is already the one that observes
+                    // the intake's principal. A second observing task could
+                    // adopt for the arriving seller while this one is still
+                    // writing cards for the departing one.
+                    let coverPhotoScope = await dependencies.nativeIntake
+                        .currentPrincipalScopeComponent()
+                    if !hasAdoptedTrophyWallCoverPhotos
+                        || coverPhotoScope != adoptedTrophyWallCoverPhotoScope {
+                        hasAdoptedTrophyWallCoverPhotos = true
+                        adoptedTrophyWallCoverPhotoScope = coverPhotoScope
+                        trophyWallStore.adoptLocalCoverPhotoStore(
+                            TrophyWallLocalCoverPhotoStoreFactory.make(
+                                scopeDirectoryComponent: coverPhotoScope
+                            )
+                        )
                     }
                     let recoveryScope = trophyWallStore.principalScope
                     let localCardRecovery = await TrophyWallPendingCardRecovery

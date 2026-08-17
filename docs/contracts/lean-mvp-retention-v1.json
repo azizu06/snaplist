@@ -30,6 +30,19 @@
       }]
     },
     {
+      "id": "local-trophy-wall-cover-photos",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-local-client",
+        "deletionTriggers": ["run-reaches-a-terminal-delivery-that-supplies-a-server-cover-photo", "item-deletion", "guest-recovery-expires", "sign-out", "account-erasure"],
+        "maximumRetention": "24 hours from the last write of the local copy",
+        "executor": "trophy-wall-local-cover-photo-store for the per-run triggers and the retention sweep; settings local cached-data removal for sign-out and account erasure",
+        "completionProof": "the run's file under <Application Support>/SnapList/TrophyWallCovers/<principal digest>/ is absent, and after sign-out or account erasure the whole TrophyWallCovers root is absent for every principal",
+        "ownerDecision": "The seller's own first photo is the only photo of an item that exists before delivery, so the client keeps a copy of the bytes it already carries in memory in order to survive a relaunch (#871). It is filed under the same principal digest as the intake that staged it, so one principal's copy is never in another's directory. Item deletion is expressed as the device-observable event: nothing in the app deletes a single item, so the run leaving the seller's collection through the server's retention cleanup is the trigger the client can act on. The 24-hour ceiling matches the intake recovery window, so a copy can never outlive the guest claim that could have claimed it, and the sweep runs on every wall load rather than on a schedule because the wall is the only reader. Sign-out and account erasure both run the settings local removal, which owns the whole covers root rather than one principal's directory."
+      }]
+    },
+    {
       "id": "private-storage-photos",
       "releaseDatum": true,
       "dispositions": [{

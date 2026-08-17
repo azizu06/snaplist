@@ -204,6 +204,26 @@ struct TrophyWallCard: Hashable, Sendable {
             )
         )
     }
+
+    /// The same card with the seller's own photo restored from, or released to,
+    /// the durable cover store. Every other mutation rebuilds a card through one
+    /// of the two factories above; this one exists because adoption changes
+    /// nothing about a card except which bytes it is holding.
+    fileprivate func replacingLocalCoverPhotoData(
+        _ localCoverPhotoData: Data?
+    ) -> TrophyWallCard {
+        TrophyWallCard(
+            principalScope: principalScope,
+            identity: identity,
+            state: state,
+            itemName: itemName,
+            coverPhotoURL: coverPhotoURL,
+            coverPhotoAssetName: coverPhotoAssetName,
+            coverPhotoCrop: coverPhotoCrop,
+            localCoverPhotoData: localCoverPhotoData,
+            orderKey: orderKey
+        )
+    }
 }
 
 enum TrophyWallProcessingAction: Hashable {
@@ -567,6 +587,16 @@ final class TrophyWallStore {
     private var runIDsByListingID: [UUID: UUID]
     private var isRefreshingCollection = false
     private var collectionRequestGeneration = 0
+    /// Unavailable until the shell proves who the wall belongs to, and again the
+    /// moment that answer changes. A wall that cannot name its principal must
+    /// not write a photo, and must not read one back.
+    private var localCoverPhotos: any TrophyWallLocalCoverPhotoStoring =
+        UnavailableTrophyWallLocalCoverPhotoStore()
+    /// What the durable store is holding, as this store last left it. It is the
+    /// authority for release: a run whose bytes were written by an earlier
+    /// launch has no card carrying them, so nothing else here knows the file
+    /// exists.
+    private var persistedCoverPhotos: [UUID: Data] = [:]
 
     var processingRows: [TrophyWallProcessingRow] {
         cards.compactMap(TrophyWallProcessingRow.init(card:))
@@ -754,6 +784,68 @@ final class TrophyWallStore {
         }
     }
 
+    /// Takes the durable, principal-scoped home for the seller's own processing
+    /// photos and reconciles the wall with it in both directions: a row that
+    /// lost its bytes to a relaunch gets them back, and bytes this launch is
+    /// already carrying are written down so the next relaunch can restore them.
+    ///
+    /// The shell calls this once per resolved principal. Adopting again for the
+    /// same principal is idempotent; adopting for a different one is safe
+    /// because `resetForPrincipalTransition` has already emptied the wall, so
+    /// there is no card left to write into the arriving principal's directory.
+    ///
+    /// Local pending cards are deliberately not persisted here. Their photo is
+    /// still staged in the intake, which is durable and principal-scoped
+    /// already, and they have no run id to key a record by.
+    func adoptLocalCoverPhotoStore(_ store: any TrophyWallLocalCoverPhotoStoring) {
+        localCoverPhotos = store
+        persistedCoverPhotos = store.loadAll()
+        for index in cards.indices {
+            guard case .run(let runID) = cards[index].identity else {
+                continue
+            }
+            guard Self.readsLocalCoverPhoto(cards[index].state) else {
+                // A settled row draws the server's photo. A record for one is a
+                // copy the wall will never read again, whatever wrote it.
+                releasePersistedCoverPhoto(forRun: runID)
+                cards[index] = cards[index].replacingLocalCoverPhotoData(nil)
+                continue
+            }
+            if let carried = cards[index].localCoverPhotoData {
+                persist(carried, forRun: runID)
+            } else if let restored = persistedCoverPhotos[runID] {
+                cards[index] = cards[index].replacingLocalCoverPhotoData(restored)
+            }
+        }
+    }
+
+    /// Whether a card in this state is one the processing row draws the seller's
+    /// own photo into. The settled states are the terminal deliveries that
+    /// supply a server cover photo, and they release the device's copy.
+    private static func readsLocalCoverPhoto(_ state: TrophyWallCardState) -> Bool {
+        switch state {
+        case .publishedToEbay, .exportPrepared:
+            false
+        default:
+            true
+        }
+    }
+
+    private func persist(_ photoData: Data, forRun runID: UUID) {
+        guard persistedCoverPhotos[runID] != photoData else {
+            return
+        }
+        localCoverPhotos.save(photoData, forRun: runID)
+        persistedCoverPhotos[runID] = photoData
+    }
+
+    private func releasePersistedCoverPhoto(forRun runID: UUID) {
+        guard persistedCoverPhotos.removeValue(forKey: runID) != nil else {
+            return
+        }
+        localCoverPhotos.remove(forRun: runID)
+    }
+
     func resetForPrincipalTransition() {
         collectionRequestGeneration += 1
         isRefreshingCollection = false
@@ -762,6 +854,13 @@ final class TrophyWallStore {
         runIDsByListingID = [:]
         collectionOutcome = .unknown
         collectionRefreshRecovery = .idle
+        // The departing principal's directory is not deleted here. This runs on
+        // every transition, including the one back to the same seller after a
+        // relaunch, and a wall that erased on transition would be the defect
+        // #871 exists to fix. What it does do is stop this wall writing to, or
+        // reading from, a principal it no longer belongs to.
+        localCoverPhotos = UnavailableTrophyWallLocalCoverPhotoStore()
+        persistedCoverPhotos = [:]
     }
 
     /// A server that answered badly is not the same as a device that could not
@@ -824,29 +923,45 @@ final class TrophyWallStore {
             }
         }
 
+        let state = Self.preferredState(
+            current: existingCanonicalCard?.state,
+            incoming: acceptedRun.state
+        )
+        // Four sources, in the order they can be trusted: a local card still on
+        // the wall, the acceptance that carried the photo off the device,
+        // whatever this run already had, then the copy an earlier launch wrote
+        // down. A later server projection carries none, so it must not blank the
+        // slot. The persisted copy is last because it is the only one that can
+        // be stale — every other source is this launch's own bytes.
+        let carriedCoverPhotoData = linkedLocalCard?.localCoverPhotoData
+            ?? acceptedRun.localCoverPhotoData
+            ?? existingCanonicalCard?.localCoverPhotoData
+            ?? persistedCoverPhotos[acceptedRun.runID]
+        // A settled row draws the server's cover photo and never reads these
+        // bytes again, so reaching a terminal delivery is what releases them.
+        let localCoverPhotoData = Self.readsLocalCoverPhoto(state)
+            ? carriedCoverPhotoData
+            : nil
+
         let canonicalCard = TrophyWallCard.accepted(
             principalScope: principalScope,
             runID: acceptedRun.runID,
-            state: Self.preferredState(
-                current: existingCanonicalCard?.state,
-                incoming: acceptedRun.state
-            ),
+            state: state,
             itemName: linkedItemName ?? existingCanonicalCard?.itemName ?? acceptedRun.itemName,
             coverPhotoURL: acceptedRun.coverPhotoURL
                 ?? existingCanonicalCard?.coverPhotoURL,
-            // Three sources, in the order they can be trusted: a local card
-            // still on the wall, the acceptance that carried the photo off the
-            // device, then whatever this run already had. A later server
-            // projection carries none, so it must not blank the slot.
-            localCoverPhotoData: linkedLocalCard?.localCoverPhotoData
-                ?? acceptedRun.localCoverPhotoData
-                ?? existingCanonicalCard?.localCoverPhotoData,
+            localCoverPhotoData: localCoverPhotoData,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt,
             orderKey: acceptedRun.historyOrderKey
         )
         cards.removeAll { $0.identity == canonicalCard.identity }
         cards.append(canonicalCard)
         cards.sort { $0.orderKey > $1.orderKey }
+        if let localCoverPhotoData {
+            persist(localCoverPhotoData, forRun: acceptedRun.runID)
+        } else {
+            releasePersistedCoverPhoto(forRun: acceptedRun.runID)
+        }
         if let listingID = acceptedRun.listingID {
             runIDsByListingID[listingID] = acceptedRun.runID
         }
@@ -885,6 +1000,7 @@ final class TrophyWallStore {
             lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
             orderKey: card.orderKey
         )
+        releasePersistedCoverPhoto(forRun: runID)
     }
 
     func ingest(
@@ -916,6 +1032,11 @@ final class TrophyWallStore {
                 }
                 canonicalHistoryStates[runDetail.id] = .tombstone(entry.orderKey)
                 cards.removeAll { $0.identity == .run(runDetail.id) }
+                // The item is gone from the seller's collection, so the copy of
+                // their photo goes with it. This is the only deletion the device
+                // can observe: nothing in the app deletes a single item, so the
+                // server retiring the run is the event.
+                releasePersistedCoverPhoto(forRun: runDetail.id)
                 continue
             }
             ingest(

@@ -347,6 +347,21 @@ actor NativeIntake {
         return pair.stream
     }
 
+    /// The directory component of the principal this intake is currently filed
+    /// under, or nil when it is filed under no principal — the ephemeral root,
+    /// or the installation root that belongs to whoever holds the phone.
+    ///
+    /// Read-only, and derived from nothing but the scope the intake already
+    /// resolved. Trophy Wall's device-local photos file themselves under the
+    /// same component (#871), so one seller's staged bytes and the copy the wall
+    /// keeps of them live and die under the same principal.
+    func currentPrincipalScopeComponent() -> String? {
+        guard let scope = active?.scope, scope.isPrincipalBound else {
+            return nil
+        }
+        return scope.directoryComponent
+    }
+
     func perform(
         _ operation: Operation,
         expectedActivationID: UUID? = nil
