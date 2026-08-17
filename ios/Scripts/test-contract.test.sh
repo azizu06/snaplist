@@ -117,16 +117,17 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
         "platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5"
 
     validate_job = jobs.fetch("validate")
-    abort "PR validation guard changed" unless
-      validate_job.fetch("if") == "github.event_name == '\''pull_request'\''"
+    abort "PR/main validation guard changed" unless
+      validate_job.fetch("if") ==
+        "github.event_name == '\''pull_request'\'' || github.event_name == '\''push'\''"
     abort "PR validation must use the declared Apple runner" unless
       validate_job.fetch("runs-on") == "macos-26"
     validate_checkout_step = validate_job.fetch("steps").find do |step|
       step["uses"] == "actions/checkout@v4"
     end
-    abort "PR validation must check out the exact candidate head" unless
+    abort "validation must check out the exact candidate head on pull_request and the pushed commit on push" unless
       validate_checkout_step&.fetch("with")&.fetch("ref") ==
-        "${{ github.event.pull_request.head.sha }}"
+        "${{ github.event_name == '\''pull_request'\'' && github.event.pull_request.head.sha || github.sha }}"
 
     shard_job = jobs.fetch("shard")
     abort "PR shard guard changed" unless
