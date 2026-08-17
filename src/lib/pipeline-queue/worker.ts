@@ -441,14 +441,17 @@ export async function consumePipelineQueue(
     }
 
     if (completed) {
-      await dependencies.queue.ack(message.id);
-      summary.succeeded += 1;
-      // After the completion is durable and the message is gone, because the
-      // seller is being told about a listing that already exists. The identity
-      // comes from the stored run, never from the envelope that arrived in the
-      // queue, and the dispatcher owns the once-only guard across redelivery,
-      // retry, and recovery. Guarded here as well: an announcement must not be
-      // able to turn a finished, paid-for run into a failure (#891).
+      // After the completion is durable, because the seller is being told about
+      // a listing that already exists, and BEFORE the acknowledgement, because
+      // acknowledging can fail and the announcement must not be downstream of
+      // that. A throwing ack leaves the message to be redelivered, and
+      // redelivery finds a terminal run and skips, which is the one path that
+      // never announces: the moment would be lost permanently and silently for
+      // a run that succeeded. The identity comes from the stored run, never
+      // from the envelope that arrived in the queue, and the dispatcher owns
+      // the once-only guard across redelivery, retry, and recovery. Guarded
+      // here as well: an announcement must not be able to turn a finished,
+      // paid-for run into a failure (#891).
       try {
         await dependencies.push?.listingReady({
           userId: context.run.user_id,
@@ -461,6 +464,8 @@ export async function consumePipelineQueue(
           describeErrorForLog(error),
         );
       }
+      await dependencies.queue.ack(message.id);
+      summary.succeeded += 1;
     }
   }
 

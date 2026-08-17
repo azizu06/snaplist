@@ -7,10 +7,7 @@ import {
   EbayWriteAmbiguousError,
   type EbayPublishFallbackBinding,
 } from "./types";
-import {
-  fakePublishClient,
-  type FakeListing,
-} from "./publish.test-fixture";
+import { fakePublishClient } from "./publish.test-fixture";
 
 /**
  * Fully offline contract tests for the shared publish service used by BOTH

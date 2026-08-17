@@ -45,6 +45,28 @@ describe("confirmed-publish push (#891)", () => {
     });
   });
 
+  it("tells a guest, because the guest owns the listing", async () => {
+    // The criterion is that a guest is told at both moments, and the ready
+    // moment proves this separately in `worker.test.ts`. Nothing on this path
+    // reads the identity for anything but passing it on, and this is what
+    // fails if a signed-in-only check is ever added above the announcement.
+    const guestId = "guest_0123456789abcdef0123456789abcdef0123456789abcdef";
+    const { client, listing } = fakePublishClient(null);
+    const push = dispatcherSpy();
+
+    await publishListingToEbayAndNotify(
+      client,
+      guestId,
+      listing.id,
+      new MockEbayAdapter(),
+      { push },
+    );
+
+    expect(push.listingPublished).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: guestId }),
+    );
+  });
+
   it("says nothing when a retried publish resolves to the stored result", async () => {
     const { client, listing } = fakePublishClient(null);
     const adapter = new MockEbayAdapter();
@@ -91,17 +113,23 @@ describe("confirmed-publish push (#891)", () => {
   });
 
   it("announces only after the published outcome is persisted", async () => {
+    // Read at the moment of the announcement, not after the call returns.
+    // Inspecting the row afterwards reports the same "published" whichever
+    // order actually ran, so it cannot fail for the reason this test exists.
     const { client, listing } = fakePublishClient(null);
     const push = dispatcherSpy();
-    const persistedAt: number[] = [];
     const adapter = new MockEbayAdapter();
+    let statusWhenAnnounced: unknown;
+    push.listingPublished.mockImplementation(async () => {
+      statusWhenAnnounced = listing.ebay_status;
+    });
 
+    expect(listing.ebay_status).not.toBe("published");
     await publishListingToEbayAndNotify(client, "user-1", listing.id, adapter, {
       push,
     });
 
-    persistedAt.push(listing.ebay_status === "published" ? 1 : 0);
-    expect(persistedAt).toEqual([1]);
+    expect(statusWhenAnnounced).toBe("published");
     expect(push.listingPublished).toHaveBeenCalledTimes(1);
   });
 

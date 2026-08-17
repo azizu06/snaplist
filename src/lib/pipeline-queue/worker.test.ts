@@ -559,6 +559,28 @@ describe("ready-listing push (#891)", () => {
     );
   });
 
+  it("still tells the seller when acknowledging the finished message fails", async () => {
+    // The run is durably complete before either of these runs, so the listing
+    // exists and the seller is owed the announcement. Acknowledging is about the
+    // queue, not about them. If it went first and threw, redelivery would find a
+    // terminal run and skip, which is the one path that never announces, so the
+    // moment would be lost permanently and silently.
+    const push = dispatcherSpy();
+    const queue = queueWith();
+    queue.ack.mockRejectedValue(new Error("queue unreachable"));
+
+    await expect(
+      consumePipelineQueue({
+        queue,
+        runs: storeWith(),
+        processor: processor(),
+        push,
+      }),
+    ).rejects.toThrow();
+
+    expect(push.listingReady).toHaveBeenCalledTimes(1);
+  });
+
   it("says nothing when the attempt failed", async () => {
     const push = dispatcherSpy();
 

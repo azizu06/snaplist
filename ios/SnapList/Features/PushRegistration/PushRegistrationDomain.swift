@@ -20,6 +20,10 @@ enum PushRegistrationEvent: Equatable {
     /// moment that has earned the prompt: the app has already delivered value,
     /// and "we'll tell you when it's ready" is now a true sentence.
     case itemSubmitted
+    /// The seller turned the Settings switch on. The row produces this only
+    /// while iOS reports the question undetermined, so it is the one deliberate
+    /// way to reach the prompt without having submitted an item (#891).
+    case notificationsRequestedFromSettings
     case sellerAnswered(granted: Bool)
 }
 
@@ -49,6 +53,15 @@ struct PushRegistrationProgress: Codable, Equatable {
             return .registerWithAPNs
         case (.refused, .itemSubmitted):
             return .doNothing
+        case (_, .notificationsRequestedFromSettings):
+            // Reached only while iOS reports the question undetermined, and
+            // iOS is the authority on that. A stored answer that disagrees is
+            // stale, because something cleared the system's answer and left
+            // this one behind, and leaving it in place would let it discard the
+            // answer the seller is about to give. Clearing it here is what
+            // makes the answer land through the same guard as any other.
+            decision = .notYetAsked
+            return .askOnce
         case (_, .sellerAnswered(let granted)):
             guard decision == .notYetAsked else {
                 // A duplicate callback. Re-answering a settled question is how
@@ -215,9 +228,10 @@ final class PushRegistrationCoordinator {
     /// after a submission. The row only produces this while iOS still reports
     /// the status undetermined, which is the only state in which the prompt can
     /// appear at all, so this does not reopen the question for a seller who
-    /// already answered it.
+    /// already answered it. It goes through the state machine like every other
+    /// call site, so no command is ever issued past its guard.
     func notificationsRequestedFromSettings() async {
-        await perform(.askOnce)
+        await perform(progress.advance(for: .notificationsRequestedFromSettings))
     }
 
     private func perform(_ command: PushRegistrationCommand) async {

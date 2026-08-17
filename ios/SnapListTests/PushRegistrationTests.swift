@@ -170,6 +170,47 @@ final class PushRegistrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(store.progress.decision, .refused)
     }
 
+    func testTheSettingsRequestRecordsTheAnswerOverAStaleStoredRefusal() async {
+        // The row only reaches this while iOS reports the question
+        // undetermined, and iOS is the authority. A stored answer that
+        // disagrees survived something that cleared the system's own, so it
+        // must not be allowed to discard the answer the seller gives now.
+        let store = RecordingStore()
+        store.progress.decision = .refused
+        var registered = 0
+        let coordinator = makeCoordinator(
+            store: store,
+            register: { registered += 1 }
+        )
+
+        await coordinator.notificationsRequestedFromSettings()
+
+        XCTAssertEqual(store.progress.decision, .allowed)
+        XCTAssertEqual(registered, 1)
+    }
+
+    func testASubmissionStillNeverRepromptsAfterARefusal() async {
+        // The other half of the rule above: only the deliberate Settings tap
+        // reopens a settled question. A submission must not.
+        let store = RecordingStore()
+        store.progress.decision = .refused
+        var asked = 0
+        let coordinator = PushRegistrationCoordinator(
+            store: store,
+            requestAuthorization: {
+                asked += 1
+                return true
+            },
+            registerForRemoteNotifications: {},
+            submitDeviceToken: { _ in }
+        )
+
+        await coordinator.itemSubmitted()
+
+        XCTAssertEqual(asked, 0)
+        XCTAssertEqual(store.progress.decision, .refused)
+    }
+
     func testAFailedAuthorizationRequestLeavesTheQuestionOpen() async {
         let store = RecordingStore()
         let coordinator = makeCoordinator(
