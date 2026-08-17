@@ -97,6 +97,82 @@ final class ListingReviewPresentationTests: XCTestCase {
         XCTAssertTrue(SnapListPageDots.isVisible(pageCount: 2))
     }
 
+    func testTheEditingRouteSendsOnlyNonIdentitySpecificsToAnInPlaceField() {
+        // The route is the whole contract. A reserved identity key can never
+        // resolve to an in-place edit, because a typed value would bypass the
+        // pricing rerun, the composite confidence, and the generator.
+        XCTAssertEqual(
+            ListingReviewSpecificEditing.mode(
+                forSpecificNamed: "Color",
+                correctionAvailable: true
+            ),
+            .inPlace
+        )
+        XCTAssertEqual(
+            ListingReviewSpecificEditing.mode(
+                forSpecificNamed: "Color",
+                correctionAvailable: false
+            ),
+            .inPlace
+        )
+        for reserved in ["Brand", "model", "Condition", "ISBN", "upc", "Category", "Type"] {
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: reserved,
+                    correctionAvailable: true
+                ),
+                .guidedCorrection,
+                reserved
+            )
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: reserved,
+                    correctionAvailable: false
+                ),
+                .spent,
+                reserved
+            )
+        }
+    }
+
+    func testTheSaveContractKeyNormalizesTheNameItself() {
+        // The function owns the rule, so it is asked directly. Testing only
+        // through the callers would make the guarantee true by inspection
+        // again, which is what let the two of them drift apart.
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: " Brand"),
+            "reserved:brand"
+        )
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: "BRAND "),
+            "reserved:brand"
+        )
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: "\tType\n"),
+            "reserved:category"
+        )
+        XCTAssertEqual(
+            ListingReviewDraft.saveContractKey(for: " Color "),
+            "color"
+        )
+    }
+
+    func testAnIdentityNameWithStrayWhitespaceStillRoutesToGuidedCorrection() {
+        // Generated specifics are not guaranteed to arrive tidy, and an
+        // untrimmed " Brand" reading as an ordinary specific would put a typed
+        // brand straight into the draft with no pricing rerun behind it.
+        for padded in [" Brand", "Brand ", "\tISBN", "Type\n"] {
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: padded,
+                    correctionAvailable: true
+                ),
+                .guidedCorrection,
+                padded
+            )
+        }
+    }
+
     private func soldMatches(
         _ facts: [(Int, String)]
     ) throws -> [ListingReviewSoldMatch] {

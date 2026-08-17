@@ -1,61 +1,50 @@
 import SwiftUI
 
-private struct ListingReviewSpecificDestination: Hashable, Identifiable {
-    let id: String
+private struct ListingReviewIdentityDrawerTarget: Hashable, Identifiable {
+    let name: String
     let value: String
+
+    var id: String { name }
 }
 
 struct ItemSpecificsEditorView: View {
     @Bindable var store: ListingReviewStore
     let correctionAvailable: Bool
-    @State private var editor: ListingReviewSpecificDestination?
+    /// Owned by the review screen. This one is pushed, so anything it held
+    /// itself would be gone before the seller ever reached Done.
+    let inlineEdits: ListingReviewInlineEdits
+    @State private var drawer: ListingReviewIdentityDrawerTarget?
     @State private var correctionPresented = false
     @State private var returnFocusName: String?
+    @FocusState private var focusedField: String?
     @AccessibilityFocusState private var focusedName: String?
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                ForEach(store.draft?.specifics ?? [], id: \.name) { specific in
-                    specificRow(specific)
-                    if specific.name != store.draft?.specifics.last?.name {
-                        Divider().padding(.leading, 8)
-                    }
-                }
-            }
-            .padding(.horizontal, 10)
-
-            Text(
-                "Saved on this phone when you tap Done. Editing a specific never spends another AI item."
-            )
-            .font(.callout)
-            .foregroundStyle(SnapListColorToken.textTertiary.color)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(18)
-        }
+        ScrollView { fields }
+        .background(SnapListColorToken.canvas.color)
         .navigationTitle("Item specifics")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(item: $editor) { destination in
-            ListingReviewSpecificFieldView(
-                name: destination.id,
-                value: destination.value
-            ) { value in
-                Task {
-                    await store.setSpecific(
-                        name: destination.id,
-                        value: value
-                    )
-                    returnFocusName = destination.id
-                    editor = nil
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
                 }
+                .fontWeight(.bold)
+                .accessibilityLabel("Done editing, keeps it on this phone")
+                .accessibilityIdentifier("listing-review.keyboard-done")
             }
+        }
+        .sheet(item: $drawer) { target in
+            identityDrawer(target)
+                .presentationDetents([.height(340), .large])
         }
         .navigationDestination(isPresented: $correctionPresented) {
             ListingReviewCorrectionBoundaryView()
         }
-        .onChange(of: editor?.id) { previous, current in
-            guard previous != nil, current == nil else { return }
-            focusedName = returnFocusName
+        .onChange(of: focusedField) { previous, _ in
+            guard previous != nil else { return }
+            Task { await inlineEdits.flush(into: store) }
         }
         .onChange(of: correctionPresented) { previous, current in
             guard previous, !current else { return }
@@ -67,136 +56,122 @@ struct ItemSpecificsEditorView: View {
         .accessibilityIdentifier("listing-review.specifics")
     }
 
+    private var fields: some View {
+        VStack(spacing: 12) {
+            ForEach(store.draft?.specifics ?? [], id: \.name) { specific in
+                specificRow(specific)
+            }
+
+            if let spentIdentityLine {
+                Text(spentIdentityLine)
+                    .font(.callout)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier(
+                        "listing-review.specifics.correction-spent"
+                    )
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    @ViewBuilder
     private func specificRow(
         _ specific: ListingReviewSpecific
     ) -> some View {
-        let identity = store.isIdentitySpecific(specific.name)
-        let baseline = store.snapshot?.listing.specifics.first(where: {
-            $0.name.caseInsensitiveCompare(specific.name) == .orderedSame
-        })?.value
-        let edited = baseline != specific.value
-        return Button {
-            returnFocusName = specific.name
-            if identity, correctionAvailable {
+        let pending = baseline(for: specific.name) != specific.value
+        let identifier =
+            "listing-review.specific.\(specific.name.accessibilityKey)"
+
+        switch ListingReviewSpecificEditing.mode(
+            forSpecificNamed: specific.name,
+            correctionAvailable: correctionAvailable
+        ) {
+        case .inPlace:
+            ListingReviewInlineTextField(
+                label: specific.name,
+                value: specific.value,
+                pending: pending,
+                identifier: identifier,
+                field: .specific(specific.name),
+                edits: inlineEdits,
+                focusValue: specific.name,
+                focus: $focusedField
+            )
+            .accessibilityFocused($focusedName, equals: specific.name)
+        case .guidedCorrection, .spent:
+            ListingReviewChoiceField(
+                label: specific.name,
+                value: specific.value,
+                identifier: identifier,
+                hint: correctionAvailable
+                    ? "Opens guided correction"
+                    : "Guided correction unavailable",
+                accessory: .identity,
+                pending: pending,
+                enabled: correctionAvailable
+            ) {
+                returnFocusName = specific.name
+                drawer = ListingReviewIdentityDrawerTarget(
+                    name: specific.name,
+                    value: specific.value
+                )
+            }
+            .accessibilityFocused($focusedName, equals: specific.name)
+        }
+    }
+
+    private func identityDrawer(
+        _ target: ListingReviewIdentityDrawerTarget
+    ) -> some View {
+        ListingReviewDrawer(
+            title: target.name,
+            commitLabel: "Continue to guided correction",
+            commitIdentifier: "listing-review.specific.correction",
+            close: { drawer = nil },
+            commit: {
+                drawer = nil
                 ListingReviewAnnouncement.post(
                     "Opened guided correction. Your photos and edits are kept.",
                     assertive: false
                 )
                 correctionPresented = true
-            } else if !identity {
-                editor = ListingReviewSpecificDestination(
-                    id: specific.name,
-                    value: specific.value
-                )
             }
-        } label: {
-            HStack(spacing: 12) {
-                Text(specific.name)
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(target.value)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // The consequence is stated here, before the commit, because
+                // this is the last screen where backing out costs nothing.
+                Text(ListingReviewCopy.identityRerunWarning)
+                    .font(.callout)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                Text(ListingReviewCopy.identityCorrectionCost)
                     .font(.callout)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
-                Spacer(minLength: 12)
-                if edited {
-                    Circle()
-                        .fill(SnapListColorToken.action.color)
-                        .frame(width: 7, height: 7)
-                        .accessibilityHidden(true)
-                }
-                Text(specific.value)
-                    .font(.body)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .multilineTextAlignment(.trailing)
-                Image(systemName: identity ? "sparkles" : "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(
-                        identity
-                            ? SnapListColorToken.action.color
-                            : SnapListColorToken.textTertiary.color
-                    )
-                    .accessibilityHidden(true)
             }
-            .frame(minHeight: 56)
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("listing-review.specific.identity-drawer")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(specific.name)
-        .accessibilityValue(
-            specific.value + (edited ? ", edited, not saved yet" : "")
-        )
-        .accessibilityHint(
-            identity
-                ? (
-                    correctionAvailable
-                        ? "Opens guided correction"
-                        : "Guided correction unavailable"
-                )
-                : "Edit"
-        )
-        .disabled(identity && !correctionAvailable)
-        .accessibilityFocused($focusedName, equals: specific.name)
-        .accessibilityIdentifier(
-            "listing-review.specific.\(specific.name.accessibilityKey)"
-        )
-    }
-}
-
-private struct ListingReviewSpecificFieldView: View {
-    let name: String
-    let apply: (String) -> Void
-    @State private var value: String
-    @FocusState private var isFocused: Bool
-
-    init(
-        name: String,
-        value: String,
-        apply: @escaping (String) -> Void
-    ) {
-        self.name = name
-        self.apply = apply
-        _value = State(initialValue: value)
     }
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                TextField(name, text: $value)
-                    .focused($isFocused)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 48)
-                    .background(SnapListColorToken.canvas.color)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(SnapListColorToken.hairline.color)
-                    }
-                    .accessibilityIdentifier("listing-review.specific.field")
+    private var spentIdentityLine: String? {
+        guard !correctionAvailable else { return nil }
+        let names = (store.draft?.specifics ?? [])
+            .map(\.name)
+            .filter(store.isIdentitySpecific)
+        guard !names.isEmpty else { return nil }
+        return "\(names.sentenceList) \(names.count == 1 ? "needs" : "need") guided correction, and you have used yours."
+    }
 
-                Text(
-                    "Apply keeps this on your phone and returns to Item specifics; the review then shows Unsaved changes until you tap Done. Back keeps the previous value. Leave it blank to restore the suggested value."
-                )
-                .font(.callout)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-            }
-            .padding(18)
-        }
-        .navigationTitle(name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Apply") {
-                    apply(value)
-                }
-                .fontWeight(.bold)
-                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                .accessibilityLabel(
-                    "Apply, keeps it on this phone until Done"
-                )
-                .accessibilityIdentifier("listing-review.specific.apply")
-            }
-        }
-        .onAppear {
-            isFocused = true
-        }
+    private func baseline(for name: String) -> String? {
+        store.snapshot?.listing.specifics.first {
+            $0.name.caseInsensitiveCompare(name) == .orderedSame
+        }?.value
     }
 }
 
@@ -205,5 +180,18 @@ private extension String {
         lowercased()
             .replacingOccurrences(of: " ", with: "-")
             .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+    }
+}
+
+private extension [String] {
+    /// "Brand", "Brand and Type", "Brand, Type, and Model".
+    var sentenceList: String {
+        switch count {
+        case 0: ""
+        case 1: self[0]
+        case 2: "\(self[0]) and \(self[1])"
+        default: dropLast().joined(separator: ", ")
+            + ", and \(self[count - 1])"
+        }
     }
 }

@@ -10,6 +10,10 @@ extension ListingReviewCopy {
     static let reload = "Reload"
     static let keepEditing = "Keep editing"
     static let discardChangesAndReload = "Discard changes and reload"
+    static let identityRerunWarning =
+        "Changing this reruns the price and rewrites the listing."
+    static let identityCorrectionCost =
+        "It uses the guided correction included with this item."
 }
 
 extension ListingReviewCondition: CaseIterable {
@@ -23,6 +27,30 @@ extension ListingReviewCondition: CaseIterable {
         .poor,
         .forParts,
     ]
+}
+
+/// How a single item specific may be changed.
+///
+/// A reserved identity key never resolves to `inPlace`. Typing over brand,
+/// model, condition, ISBN, UPC, category, or type would change what the item is
+/// without rerunning the pricing router, the composite confidence, and the
+/// listing generator, which the coherent-correction contract requires to happen
+/// together. Those keys route to guided correction instead, and once the
+/// correction is spent they have no route at all.
+enum ListingReviewSpecificEditing: Equatable {
+    case inPlace
+    case guidedCorrection
+    case spent
+
+    static func mode(
+        forSpecificNamed name: String,
+        correctionAvailable: Bool
+    ) -> ListingReviewSpecificEditing {
+        guard ListingReviewDraft.isIdentitySpecificName(name) else {
+            return .inPlace
+        }
+        return correctionAvailable ? .guidedCorrection : .spent
+    }
 }
 
 extension ListingReviewStore {
@@ -597,63 +625,376 @@ struct ListingReviewStatusBanner: View {
     }
 }
 
-struct ListingReviewDisclosureRow: View {
-    let title: String
+/// The bordered box every editable value on the review now sits in.
+///
+/// The box is the affordance. It carries its own label so the value below it
+/// starts at the leading edge, which is what keeps the caret at the start of
+/// the text instead of against the right margin.
+struct ListingReviewInlineField<Content: View>: View {
+    let label: String
+    var pending = false
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                if pending {
+                    Circle()
+                        .fill(SnapListColorToken.action.color)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                }
+            }
+            // Every caller gives its own control an accessibility label, so
+            // the printed caption would otherwise be read twice.
+            .accessibilityHidden(true)
+            content()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: 62,
+            alignment: .leading
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(SnapListColorToken.inputBorder.color)
+        }
+    }
+}
+
+/// A free-text value the seller has typed but that has not reached the draft.
+enum ListingReviewInlineEdit: Hashable {
+    case title
+    case description
+    case specific(String)
+
+    /// Dictionaries have no order, and a flush that writes in a different
+    /// order each time is a flush that cannot be tested.
+    fileprivate var sortKey: String {
+        switch self {
+        case .title: "0"
+        case .description: "1"
+        case .specific(let name): "2\(name)"
+        }
+    }
+}
+
+/// Everything typed into an inline field and not yet committed.
+///
+/// This is deliberately not state inside the field. Item specifics is a pushed
+/// screen, so a field's own state dies with the pop, and a commit fired from a
+/// disappearing view is a commit nobody can wait for. The review screen owns
+/// this instead and hands it down, so Back, Done, and losing focus all reach
+/// the same pending text and can await the same write.
+@MainActor
+@Observable
+final class ListingReviewInlineEdits {
+    var typed: [ListingReviewInlineEdit: String] = [:]
+
+    /// Sends every pending value through the store's own write path.
+    ///
+    /// Identity specifics never appear here. They have no typed field, and
+    /// `setSpecific` refuses them regardless, so the coherent-correction seam
+    /// holds even if one ever did.
+    func flush(into store: ListingReviewStore) async {
+        for (field, text) in typed.sorted(by: { $0.key.sortKey < $1.key.sortKey }) {
+            switch field {
+            case .title:
+                await store.setTitle(text)
+            case .description:
+                await store.setDescription(text)
+            case .specific(let name):
+                await store.setSpecific(name: name, value: text)
+            }
+            // Each write suspends, and the field stays on screen and typable
+            // while it does. Clearing unconditionally would throw away
+            // whatever the seller typed during the await, and the field
+            // would then snap back to the value that was in flight. Clear
+            // only the value that was actually sent.
+            if typed[field] == text {
+                typed[field] = nil
+            }
+        }
+    }
+}
+
+/// A free-text value typed where it sits, with no pushed screen behind it.
+///
+/// The field only records what it holds. It never writes: the screen that owns
+/// the pending edits decides when they land, which is what keeps the draft off
+/// the keystroke path. Staging per keystroke would persist to disk once per
+/// character, and `setSpecific` restores the suggested value for an empty
+/// string, so it would also make clearing a field to retype it impossible.
+struct ListingReviewInlineTextField<Focus: Hashable>: View {
+    let label: String
+    let value: String
+    let pending: Bool
+    let identifier: String
+    let field: ListingReviewInlineEdit
+    let edits: ListingReviewInlineEdits
+    let focusValue: Focus
+    let lineLimit: ClosedRange<Int>
+    @FocusState.Binding var focus: Focus?
+    @State private var text: String
+
+    init(
+        label: String,
+        value: String,
+        pending: Bool = false,
+        identifier: String,
+        field: ListingReviewInlineEdit,
+        edits: ListingReviewInlineEdits,
+        focusValue: Focus,
+        focus: FocusState<Focus?>.Binding,
+        lineLimit: ClosedRange<Int> = 1...4
+    ) {
+        self.label = label
+        self.value = value
+        self.pending = pending
+        self.identifier = identifier
+        self.field = field
+        self.edits = edits
+        self.focusValue = focusValue
+        self.lineLimit = lineLimit
+        _focus = focus
+        _text = State(initialValue: value)
+    }
+
+    var body: some View {
+        ListingReviewInlineField(label: label, pending: pending) {
+            TextField(label, text: $text, axis: .vertical)
+                .font(.body)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .multilineTextAlignment(.leading)
+                .textFieldStyle(.plain)
+                .lineLimit(lineLimit)
+                .focused($focus, equals: focusValue)
+                .accessibilityLabel(label)
+                .accessibilityValue(
+                    text + (pending ? ", edited, not saved yet" : "")
+                )
+                .accessibilityIdentifier(identifier)
+        }
+        // A vertical-axis field is a text view that hugs its content, so at
+        // the smallest Dynamic Type size the part of the box that answers a
+        // touch is 23pt of glyphs. Giving that field a 44pt frame does not
+        // help: it takes the room without taking the height, and a tap in the
+        // space it left behind reaches nothing. The box is 62pt and is what
+        // the seller sees, so the rest of the box has to focus the field too.
+        //
+        // Behind the content rather than over it, which is the whole point. A
+        // tap gesture on the box wins the tap before the field sees it, so
+        // focus gets set programmatically and the caret goes to the end of
+        // the text instead of where the finger landed. Sitting behind, the
+        // field keeps its own taps and its own caret, and this only picks up
+        // what lands in the label band and the padding.
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { focus = focusValue }
+        }
+        .onChange(of: text) { _, typed in
+            edits.typed[field] = typed == value ? nil : typed
+        }
+        // The store can refuse or normalize what was committed, so the field
+        // takes the settled value back rather than keeping what was typed.
+        .onChange(of: value) { _, updated in
+            guard focus != focusValue else { return }
+            text = updated
+            edits.typed[field] = nil
+        }
+    }
+}
+
+/// What the trailing glyph on a non-typed field promises.
+enum ListingReviewFieldAccessory {
+    /// A fixed set of answers, chosen in a bottom drawer.
+    case drawer
+    /// A reserved identity key. Only guided correction can change it.
+    case identity
+    /// A group of values that has its own screen.
+    case push
+
+    fileprivate var symbol: String {
+        switch self {
+        case .drawer: "chevron.down"
+        case .identity: "sparkles"
+        case .push: "chevron.right"
+        }
+    }
+}
+
+/// A value that is not typed in place: a fixed option set, a reserved identity
+/// key, or a group with its own screen. It wears the same bordered box as the
+/// typed fields so the form reads as one grammar.
+struct ListingReviewChoiceField: View {
+    let label: String
     let value: String
     let identifier: String
+    let hint: String
+    var accessory = ListingReviewFieldAccessory.drawer
     var pending = false
+    var enabled = true
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                // #896: 4pt left the label sitting on its value. Measured in
-                // the simulator, the hairline below a two-line value landed
-                // about 9pt under the text while the next row's label started
-                // about 6pt below the same line, so the pair read as one block
-                // rather than two rows.
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .tracking(0.4)
-                        .foregroundStyle(SnapListColorToken.textTertiary.color)
-                    HStack(spacing: 7) {
-                        if pending {
-                            Circle()
-                                .fill(SnapListColorToken.action.color)
-                                .frame(width: 7, height: 7)
-                                .accessibilityHidden(true)
-                        }
-                        Text(value)
-                            .font(.body)
-                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
+            ListingReviewInlineField(label: label, pending: pending) {
+                HStack(spacing: 10) {
+                    Text(value)
+                        .font(.body)
+                        .foregroundStyle(
+                            enabled
+                                ? SnapListColorToken.inkPrimary.color
+                                : SnapListColorToken.textTertiary.color
+                        )
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: accessory.symbol)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(
+                            enabled && accessory == .identity
+                                ? SnapListColorToken.action.color
+                                : SnapListColorToken.textTertiary.color
+                        )
+                        .accessibilityHidden(true)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 14)
-            // #896: the row carried no vertical padding at all — `minHeight`
-            // was the only thing holding it open, so any value that wrapped
-            // grew the row by pushing its own text into the dividers. Real
-            // padding means the divider always has air on both sides, and the
-            // floor stays for the short single-line rows.
-            .padding(.vertical, 14)
-            .frame(minHeight: 60)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityValue(
-            value + (pending ? ", edited, not saved yet" : "")
-        )
-        .accessibilityHint("Edit")
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+        .accessibilityValue(value + (pending ? ", edited, not saved yet" : ""))
+        .accessibilityHint(hint)
+        .accessibilityIdentifier(identifier)
+    }
+}
+
+/// Bottom-sheet chrome shared by every drawer on the review: a close control,
+/// the field name, an optional reset, and one explicit commit at the bottom.
+struct ListingReviewDrawer<Content: View>: View {
+    let title: String
+    let commitLabel: String
+    let commitIdentifier: String
+    var commitEnabled = true
+    var reset: (() -> Void)?
+    let close: () -> Void
+    let commit: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .frame(
+                            minWidth: SnapListMetrics.minimumTouchTarget,
+                            minHeight: SnapListMetrics.minimumTouchTarget
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+                .accessibilityIdentifier("listing-review.drawer.close")
+
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .frame(maxWidth: .infinity)
+
+                if let reset {
+                    Button("Reset", action: reset)
+                        .font(.body)
+                        .foregroundStyle(SnapListColorToken.action.color)
+                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                        .accessibilityIdentifier("listing-review.drawer.reset")
+                } else {
+                    Color.clear
+                        .frame(
+                            width: SnapListMetrics.minimumTouchTarget,
+                            height: SnapListMetrics.minimumTouchTarget
+                        )
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+
+            Divider()
+
+            ScrollView {
+                content()
+                    .padding(.horizontal, 18)
+                    .padding(.top, 6)
+            }
+
+            Button(action: commit) {
+                Text(commitLabel)
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(SnapListColorToken.action.color)
+            .clipShape(RoundedRectangle(cornerRadius: 15))
+            .opacity(commitEnabled ? 1 : 0.4)
+            .disabled(!commitEnabled)
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+            .accessibilityIdentifier(commitIdentifier)
+        }
+        .background(SnapListColorToken.canvas.color)
+        .presentationDragIndicator(.visible)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("listing-review.drawer")
+    }
+}
+
+/// One selectable answer inside a drawer.
+struct ListingReviewDrawerOptionRow: View {
+    let label: String
+    let selected: Bool
+    let identifier: String
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 12) {
+                Text(label)
+                    .font(.body)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(
+                    systemName: selected
+                        ? "largecircle.fill.circle"
+                        : "circle"
+                )
+                .font(.title3)
+                .foregroundStyle(
+                    selected
+                        ? SnapListColorToken.action.color
+                        : SnapListColorToken.textTertiary.color
+                )
+                .accessibilityHidden(true)
+            }
+            .frame(minHeight: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityValue(selected ? "Selected" : "")
         .accessibilityIdentifier(identifier)
     }
 }
