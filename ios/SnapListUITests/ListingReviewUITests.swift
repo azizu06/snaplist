@@ -471,6 +471,71 @@ final class ListingReviewUITests: XCTestCase {
         )
     }
 
+    /// Publishing is the one exit on this screen that reaches a real
+    /// marketplace, and the tap that starts it does not resign the field's
+    /// first responder. Nothing under `ios/` sets `scrollDismissesKeyboard`
+    /// either, so a seller can retitle, scroll down with the keyboard still up,
+    /// and tap Publish while the typed title is still sitting in
+    /// `ListingReviewInlineEdits`. `isDirty` is derived from the draft alone,
+    /// so the guard answered `false` against the pre-edit draft and eBay was
+    /// handed the old title as a value copy.
+    func testPublishToEbayFlushesTheTypedTitleBeforeItReadsIsDirty() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let title = app.textFields["listing-review.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: loadedTreeTimeout))
+        title.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        title.typeText(" Zephyr")
+
+        // No keyboard Done, no tap outside the field. Scrolling is how the
+        // seller reaches the entry and it leaves the field focused, which is
+        // the whole point: the typed text has not reached the draft yet.
+        let entry = app.buttons["listing-review.ebay-publish"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 3))
+        // A dragged scroll rather than `swipeUp()`. The scroll view fills the
+        // window, so its centre sits under the footer once the keyboard
+        // raises it and a swipe from there scrolls nothing. The drag stays in
+        // the band still visible above the keyboard, and away from the left
+        // edge, which is the interactive back gesture.
+        for _ in 0..<10 where !entry.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: app.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18)
+                    )
+                )
+        }
+        XCTAssertTrue(entry.isHittable, app.debugDescription)
+        XCTAssertTrue(
+            keyboard.exists,
+            "The scroll must leave the field focused, or this proves nothing."
+        )
+        entry.tap()
+
+        // The flush lands before the guard reads the draft, so the guard sees
+        // a dirty screen and takes the refusal it already takes for any other
+        // unsaved edit. Nothing is pushed and the seller stays put.
+        XCTAssertTrue(
+            anyElement("listing-review.unsaved", in: app)
+                .waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertFalse(
+            anyElement("ebay-publish.back", in: app)
+                .waitForExistence(timeout: 3),
+            "eBay must not open holding a title the seller has already replaced."
+        )
+        XCTAssertTrue(entry.isHittable, app.debugDescription)
+        XCTAssertTrue(
+            stringValue(of: title).contains("Zephyr"),
+            "The typed title must survive the refusal."
+        )
+    }
+
     /// The price editor used to be a bare `HStack`, so the title-weight price
     /// field squeezed the Apply button down to an unreadable sliver once
     /// Dynamic Type scaled up to the largest accessibility size (#831). The
@@ -671,13 +736,19 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
         let keyboard = app.keyboards.firstMatch
 
-        for (above, typed) in [(true, "Q"), (false, "W")] {
+        // The character has to be absent from the value before the tap or the
+        // probe cannot fail. The second one used to be "W", and the fixture
+        // value is already "White", so that assertion was true before the tap
+        // and stayed true whether the box took it or not.
+        for (above, typed) in [(true, "Q"), (false, "Z")] {
             // Read the frame for each tap rather than once up front. The
             // first tap raises the keyboard, and a layout that reflows around
             // it leaves the second tap aimed at where the field used to be.
             let frame = color.frame
             let y = above ? frame.minY - 10 : frame.maxY + 10
-            let receipt = "color.frame=\(frame), tapped y=\(y)"
+            let before = stringValue(of: color)
+            let receipt = "color.frame=\(frame), tapped y=\(y), before=\(before)"
+            XCTAssertFalse(before.contains(typed), receipt)
             app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: frame.midX, dy: y))
                 .tap()

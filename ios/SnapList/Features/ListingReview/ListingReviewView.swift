@@ -567,15 +567,23 @@ struct ListingReviewView: View {
 
     private var assistedExportEntry: some View {
         Button {
-            guard !store.isDirty else {
-                ListingReviewAnnouncement.post(
-                    AssistedExportCopy.saveBeforeSharing,
-                    assertive: true
-                )
-                return
+            // A tap here does not resign a focused field, so what was typed is
+            // still in the holder and `isDirty` would answer against the
+            // pre-edit draft. Same flush Done and Back run, awaited before the
+            // guard, so the guard reads settled state. If the flush is what
+            // makes the screen dirty, this takes the already-dirty path.
+            Task {
+                await inlineEdits.flush(into: store)
+                guard !store.isDirty else {
+                    ListingReviewAnnouncement.post(
+                        AssistedExportCopy.saveBeforeSharing,
+                        assertive: true
+                    )
+                    return
+                }
+                returnFocus = .assistedExport
+                destination = .assistedExport
             }
-            returnFocus = .assistedExport
-            destination = .assistedExport
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "square.and.arrow.up")
@@ -615,15 +623,21 @@ struct ListingReviewView: View {
 
     private var ebayPublishEntry: some View {
         Button {
-            guard !store.isDirty else {
-                ListingReviewAnnouncement.post(
-                    "Save your changes before publishing to eBay.",
-                    assertive: true
-                )
-                return
+            // Same as the sharing row above, and this one reaches a real
+            // marketplace: without the flush the guard passed on a stale
+            // `isDirty` and eBay was handed the pre-edit draft as a value copy.
+            Task {
+                await inlineEdits.flush(into: store)
+                guard !store.isDirty else {
+                    ListingReviewAnnouncement.post(
+                        "Save your changes before publishing to eBay.",
+                        assertive: true
+                    )
+                    return
+                }
+                returnFocus = .ebayPublish
+                destination = .ebayPublish
             }
-            returnFocus = .ebayPublish
-            destination = .ebayPublish
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "shippingbox")
