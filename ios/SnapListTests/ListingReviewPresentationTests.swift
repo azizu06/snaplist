@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 import XCTest
 @testable import SnapList
@@ -391,10 +392,12 @@ final class ListingReviewInlineTextViewTests: XCTestCase {
     /// `text` and `bounds.width` held constant — the two inputs the cache
     /// keyed on before this fix — so a cache that does not also key on font
     /// cannot see the change: the clamp band keeps the old font's height and
-    /// a tap can resolve against the wrong line. Comparing against a fresh
-    /// view built directly with the new font is the fail-visible way to
-    /// catch that: under the stale cache, the subject keeps answering with
-    /// the small font's band and disagrees with the fresh view.
+    /// a tap can resolve against the wrong line. `fresh` is a second instance
+    /// of the same subject class, not an independent oracle: it shares
+    /// `clampedIntoGlyphs` and `glyphsHeight()`, so comparing against it
+    /// isolates cache staleness specifically — a defect in the clamp
+    /// arithmetic itself would move both views identically and this
+    /// assertion would still pass.
     func testClampFollowsFontThatChangesAfterAnEarlierResolution() {
         let value = "White\nSmall"
         let smallFont = UIFont.systemFont(ofSize: 12)
@@ -421,6 +424,52 @@ final class ListingReviewInlineTextViewTests: XCTestCase {
             "A view whose glyph measurement was cached against the earlier, "
                 + "smaller font must resolve the same as a fresh view once "
                 + "the font has grown."
+        )
+    }
+
+    /// The test above only varies `pointSize` (12 to 40). Bold Text does not:
+    /// it reassigns `font` to a bold descriptor at the same `body.pointSize`
+    /// (`ListingReviewInlineTextEditor.font`), so a cache key that compared
+    /// fonts by `pointSize` alone — rather than the full `UIFont` — would
+    /// treat the two as identical and miss this exact trigger. This is the
+    /// fail-visible check for that: it is a direct assertion on the
+    /// `glyphsHeight()` doc comment's own claim that `UIFont`'s `==`
+    /// distinguishes these two fonts, built through the same production
+    /// helper Bold Text drives rather than two arbitrary system fonts.
+    ///
+    /// A geometry-based version of this test — cache against the regular
+    /// font, switch to bold, and compare `closestPosition` against a fresh
+    /// bold view, the same shape as the test above — was tried first and
+    /// could not be made to fail: verified by temporarily weakening the
+    /// cache key to `pointSize` alone and rerunning, it stayed green. SF's
+    /// line-height metrics do not change with weight, so `glyphsHeight()`
+    /// returns the same value whether or not the cache noticed the font
+    /// change, and the vertical clamp band a wrong cache would corrupt never
+    /// moves. That path cannot observe a trait-only cache defect on this
+    /// font family, so the direct equality assertion below is what actually
+    /// backs the doc comment's claim.
+    func testFontsUsedForRegularAndBoldTextAreNotEqualAtTheSamePointSize() {
+        let regularFont = ListingReviewInlineTextEditor.font(
+            dynamicTypeSize: .large,
+            legibilityWeight: nil
+        )
+        let boldFont = ListingReviewInlineTextEditor.font(
+            dynamicTypeSize: .large,
+            legibilityWeight: .bold
+        )
+        XCTAssertEqual(
+            regularFont.pointSize,
+            boldFont.pointSize,
+            "Bold Text must not change point size, or this test is exercising "
+                + "the already-covered size axis instead of the traits-only one."
+        )
+        XCTAssertNotEqual(
+            regularFont,
+            boldFont,
+            "glyphsHeight()'s cache key relies on UIFont's == distinguishing "
+                + "a bold descriptor from a regular one at the same point "
+                + "size; if it stopped doing so, the cache would go stale "
+                + "silently on every Bold Text toggle."
         )
     }
 }
