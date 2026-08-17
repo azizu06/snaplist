@@ -179,15 +179,19 @@ struct EbayPublishView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     // A minimum target on a toolbar button has to be inside the
                     // button's own label, and the toolbar's own button style has
-                    // to be off. Measured on iPhone 17 Pro / iOS 26.5 (#926):
-                    // this button wrapped in `.frame(min…: 44)` reported a
-                    // 36x36 hit rect, because the toolbar's button style draws
-                    // its own 36pt capsule; adding `.buttonStyle(.plain)` while
-                    // the frame stayed outside dropped it to 22.67, the bare
-                    // chevron, because a frame around a `ToolbarItem`'s button
-                    // never reaches that button's hit rect at all. Sizing the
-                    // label from inside, with the toolbar style off, is the one
-                    // arrangement that actually produces 44x44.
+                    // to be off. All four arrangements were measured on
+                    // iPhone 17 Pro / iOS 26.5 (#926), reported hit rect:
+                    //   frame outside the button, toolbar style   36.0 x 36.0
+                    //   frame outside the button, `.plain`        22.67 x 22.67
+                    //   frame inside the label,   toolbar style   36.0 x 36.0
+                    //   frame inside the label,   `.plain`        44.0 x 44.0
+                    // Both halves are load-bearing. A frame wrapped around a
+                    // `ToolbarItem`'s button never reaches that button's hit
+                    // rect at all — 22.67 is the bare chevron, which is what
+                    // that modifier was actually worth. And the toolbar's own
+                    // button style publishes a capsule that tracks its label's
+                    // width but pins its height at 36, so moving the frame
+                    // inside is not enough on its own either.
                     Button(action: backToListing) {
                         Label("Back", systemImage: "chevron.left")
                             .frame(
@@ -245,7 +249,11 @@ struct EbayPublishView: View {
     }
 
     // Same toolbar hit-rect rule as the plain back button above: the minimum
-    // target only counts from inside the label (#926).
+    // target only counts from inside the label (#926). This button already
+    // carried `.buttonStyle(.plain)`, so only the frame had to move; measured
+    // 44.0 x 44.0 here, against 56.0 x 36.0 for the same inner frame with the
+    // toolbar's own button style left on — the capsule tracks its label's
+    // width and pins its height at 36.
     private var approvedConnectBackButton: some View {
         Button(action: backToListing) {
             Image(systemName: "chevron.left")
