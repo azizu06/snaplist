@@ -283,7 +283,7 @@ final class ListingReviewUITests: XCTestCase {
         let longTitle = app.textFields["listing-review.title"]
         XCTAssertTrue(longTitle.exists)
         XCTAssertGreaterThan(
-            String(describing: longTitle.value as Any).count,
+            stringValue(of: longTitle).count,
             60
         )
         XCTAssertTrue(app.buttons["listing-review.secondary"].isHittable)
@@ -524,7 +524,7 @@ final class ListingReviewUITests: XCTestCase {
         let frameReceipt =
             "price.frame=\(price.frame), window.frame=\(window.frame)"
         XCTAssertTrue(price.isHittable, frameReceipt)
-        XCTAssertGreaterThanOrEqual(price.frame.height, 44, frameReceipt)
+        assertMeetsTouchTargetFloor(price.frame.height, frameReceipt)
         XCTAssertGreaterThanOrEqual(price.frame.minX, window.frame.minX, frameReceipt)
         XCTAssertLessThanOrEqual(price.frame.maxX, window.frame.maxX, frameReceipt)
     }
@@ -565,10 +565,14 @@ final class ListingReviewUITests: XCTestCase {
     /// A touch target derived from padding around scaled text, rather than
     /// from the 44pt floor, is thinnest at the smallest Dynamic Type size,
     /// the opposite failure direction from the accessibility-size checks
-    /// above (#831). The price button carries an explicit
-    /// `.frame(minHeight: SnapListMetrics.minimumTouchTarget)` floor; this
-    /// proves that floor actually holds once the text inside it shrinks to
-    /// its smallest size, rather than assuming it does.
+    /// above (#831). The price is a single-line `TextField` now, not a
+    /// button, and it carries an explicit
+    /// `.frame(minHeight: SnapListMetrics.minimumTouchTarget)` floor. A
+    /// single-line field is backed by a `UITextField` that fills the frame it
+    /// is handed, so unlike the vertical-axis fields below, the floor moves
+    /// the element itself. This proves that floor actually holds once the
+    /// text inside it shrinks to its smallest size, rather than assuming it
+    /// does.
     func testPriceControlMeetsTouchTargetFloorAtSmallestDynamicTypeSize() {
         let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
         _ = openReview(in: app)
@@ -600,6 +604,15 @@ final class ListingReviewUITests: XCTestCase {
         )
     }
 
+    /// `XCUIElement.value` is `Any?`, so `String(describing:)` on it renders
+    /// `Optional(White)` rather than `White`. That wrapper is enough to make a
+    /// suffix assertion pass forever, which is how the first version of the
+    /// caret test below reported green without checking anything. Reading the
+    /// value through a cast keeps the assertions operating on the text.
+    private func stringValue(of element: XCUIElement) -> String {
+        element.value as? String ?? ""
+    }
+
     /// The price was the only inline control with a touch-target assertion.
     /// Title, Description and every non-identity specific share
     /// `ListingReviewInlineTextField`, and that one cannot make the same
@@ -608,12 +621,47 @@ final class ListingReviewUITests: XCTestCase {
     /// matter what frame it is given, so asserting a 44pt element height on
     /// it would be asserting something false.
     ///
-    /// What the seller actually gets is the box, and that is what is measured
-    /// here: a tap 10pt above the glyphs and a tap 10pt below them both reach
-    /// the field, which is 43pt of vertical reach around a 23pt element and
-    /// lands inside the border the seller can see. Both taps are needed. One
-    /// of them passing on its own would not distinguish a box that takes taps
-    /// from a text view that happens to sit near the point tapped.
+    /// What the seller actually gets is the box, and that is what the two
+    /// tests below measure between them.
+    ///
+    /// Reach and caret placement pull in opposite directions, and the first
+    /// version of the reach fix broke the caret without failing anything. A
+    /// tap gesture laid over the box wins the tap before the field sees it,
+    /// so focus is set in code and the caret lands at the end of the value
+    /// rather than under the finger. Tapping into the middle of a word to fix
+    /// it is the most ordinary thing anyone does in a text field, so it is
+    /// asserted here: a character typed after a tap near the start of the
+    /// value must not arrive at the end of it.
+    func testATapOnTheGlyphsPutsTheCaretWhereTheFingerIsAndNotAtTheEnd() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let color = app.textFields["listing-review.specific.color"]
+        XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
+        let before = stringValue(of: color)
+        color.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        color.typeText("Z")
+
+        // The tap is at the left edge of the value, so a caret that followed
+        // the finger puts the character first. Asserted positively, on the
+        // prefix. The first version of this asserted `!hasSuffix("Z")` and
+        // could not fail: `String(describing: element.value)` renders the
+        // optional as `Optional(WhiteZ)`, which never ends in the character
+        // typed, so it passed whether the caret followed the finger or not.
+        let after = stringValue(of: color)
+        let receipt = "before=\(before), after=\(after)"
+        XCTAssertTrue(after.hasPrefix("Z"), receipt)
+    }
+
+    /// The other half of the same claim: reach. The box is 62pt tall and
+    /// carries the `.contentShape`, so what answers a touch is 62pt even
+    /// where the element is 23pt. The two probes sit 10pt outside the glyphs
+    /// on each side, a 43pt span well inside the box and entirely outside the
+    /// element. Both taps are needed. One of them passing on its own would
+    /// not distinguish a box that takes taps from a text view that happens to
+    /// sit near the point tapped.
     func testTheSharedInlineFieldTakesTapsAboveAndBelowItsGlyphs() {
         let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
         _ = openReview(in: app)
@@ -621,15 +669,26 @@ final class ListingReviewUITests: XCTestCase {
 
         let color = app.textFields["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
-        let frame = color.frame
         let keyboard = app.keyboards.firstMatch
 
-        for y in [frame.minY - 10, frame.maxY + 10] {
+        for (above, typed) in [(true, "Q"), (false, "W")] {
+            // Read the frame for each tap rather than once up front. The
+            // first tap raises the keyboard, and a layout that reflows around
+            // it leaves the second tap aimed at where the field used to be.
+            let frame = color.frame
+            let y = above ? frame.minY - 10 : frame.maxY + 10
             let receipt = "color.frame=\(frame), tapped y=\(y)"
             app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: frame.midX, dy: y))
                 .tap()
             XCTAssertTrue(keyboard.waitForExistence(timeout: 3), receipt)
+
+            // A keyboard proves something took focus, not that this field
+            // did, and the claim is about this field. Typing settles it: the
+            // character has to arrive in this field's value.
+            color.typeText(typed)
+            let value = stringValue(of: color)
+            XCTAssertTrue(value.contains(typed), "\(receipt), value=\(value)")
 
             app.buttons["listing-review.keyboard-done"].tap()
             XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3), receipt)
@@ -822,7 +881,7 @@ final class ListingReviewUITests: XCTestCase {
     /// The price field is prefilled, so a test that only appends can never
     /// produce the values the invalid-price path needs.
     private func clear(_ field: XCUIElement, in app: XCUIApplication) {
-        let existing = String(describing: field.value as Any)
+        let existing = stringValue(of: field)
         field.typeText(
             String(
                 repeating: XCUIKeyboardKey.delete.rawValue,
