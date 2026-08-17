@@ -500,7 +500,7 @@ final class ListingReviewUITests: XCTestCase {
         // raises it and a swipe from there scrolls nothing. The drag stays in
         // the band still visible above the keyboard, and away from the left
         // edge, which is the interactive back gesture.
-        for _ in 0..<10 where !entry.isHittable {
+        for _ in 0..<12 where !entryIsClearOfTheFooter(entry, in: app) {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
                 .press(
                     forDuration: 0.05,
@@ -509,7 +509,7 @@ final class ListingReviewUITests: XCTestCase {
                     )
                 )
         }
-        XCTAssertTrue(entry.isHittable, app.debugDescription)
+        XCTAssertTrue(entryIsClearOfTheFooter(entry, in: app), app.debugDescription)
         XCTAssertTrue(
             keyboard.exists,
             "The scroll must leave the field focused, or this proves nothing."
@@ -519,6 +519,16 @@ final class ListingReviewUITests: XCTestCase {
         // The flush lands before the guard reads the draft, so the guard sees
         // a dirty screen and takes the refusal it already takes for any other
         // unsaved edit. Nothing is pushed and the seller stays put.
+        //
+        // `entry.isHittable` below is the assertion that carries the claim, so
+        // do not trim it as the redundant-looking one. The other three are true
+        // in both worlds and are kept only as diagnosis: pushing resigns focus,
+        // which fires the blur flush, so the unsaved strip appears either way;
+        // the field's own State holds the typed title whether or not it reached
+        // the draft; and the `ebay-publish.back` negative is a race with that
+        // same late flush. Only still being on the review screen, with the
+        // entry hittable, distinguishes the guard refusing from the guard
+        // passing and the pushed screen going blank.
         XCTAssertTrue(
             anyElement("listing-review.unsaved", in: app)
                 .waitForExistence(timeout: 5),
@@ -534,6 +544,77 @@ final class ListingReviewUITests: XCTestCase {
             stringValue(of: title).contains("Zephyr"),
             "The typed title must survive the refusal."
         )
+    }
+
+    /// The price does not live in the inline-edit holder. It sits in the view's
+    /// own `priceText` and only reaches the draft through `commitPrice()`, so
+    /// flushing the holder settles the title and leaves the price behind. A
+    /// seller who types a price, never resigns the field, and taps Publish used
+    /// to get one of two wrong outcomes depending on which async step landed
+    /// first: eBay built from the old price, or a blank pushed screen once the
+    /// blur commit flipped `isDirty` under `destinationView`'s own guard.
+    func testPublishToEbayCommitsTheTypedPriceBeforeItReadsIsDirty() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let price = app.textFields["listing-review.price"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        let before = stringValue(of: price)
+        price.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        // Replace rather than append, so the committed amount cannot coincide
+        // with the suggested one. `commitPrice` compares against
+        // `displayedPrice` and no-ops when they match, so an edit that lands on
+        // the same value would prove nothing.
+        price.press(forDuration: 1.0)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) {
+            app.menuItems["Select All"].tap()
+        }
+        price.typeText("133.70")
+        XCTAssertNotEqual(
+            stringValue(of: price), before,
+            "The typed price has to differ from the suggested one."
+        )
+
+        let entry = app.buttons["listing-review.ebay-publish"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 3))
+        // The same dragged scroll the title test uses, and for the same two
+        // reasons. Do not swap it back to `swipeUp()`: the scroll view fills
+        // the window, so its centre sits under the footer once the keyboard
+        // raises it and a swipe from there scrolls nothing. And the drag has to
+        // stay off the left edge, which arms the interactive back gesture and
+        // dismisses the whole screen instead of scrolling it.
+        for _ in 0..<12 where !entryIsClearOfTheFooter(entry, in: app) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: app.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18)
+                    )
+                )
+        }
+        XCTAssertTrue(entryIsClearOfTheFooter(entry, in: app), app.debugDescription)
+        XCTAssertTrue(
+            keyboard.exists,
+            "The scroll must leave the price focused, or this proves nothing."
+        )
+        entry.tap()
+
+        // As above, `entry.isHittable` is the discriminating assertion: the
+        // commit runs before the guard, the guard sees a dirty screen, and the
+        // seller stays on review instead of reaching eBay or a blank push.
+        XCTAssertTrue(
+            anyElement("listing-review.unsaved", in: app)
+                .waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertFalse(
+            anyElement("ebay-publish.back", in: app)
+                .waitForExistence(timeout: 3),
+            "eBay must not open holding a price the seller has already replaced."
+        )
+        XCTAssertTrue(entry.isHittable, app.debugDescription)
     }
 
     /// The price editor used to be a bare `HStack`, so the title-weight price
@@ -966,6 +1047,22 @@ final class ListingReviewUITests: XCTestCase {
         in app: XCUIApplication
     ) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
+    }
+
+    /// `isHittable` is computed from the element's own frame, so it stays true
+    /// for a row that has scrolled underneath the footer. The footer lives in a
+    /// `safeAreaInset(edge: .bottom)` and paints over the scroll view, so a tap
+    /// synthesized at that row's centre lands on Done instead — which saves and
+    /// dismisses the screen, and looks exactly like the bug under test. Scroll
+    /// until the row is clear of the footer, not merely hittable.
+    private func entryIsClearOfTheFooter(
+        _ entry: XCUIElement,
+        in app: XCUIApplication
+    ) -> Bool {
+        guard entry.exists, entry.isHittable else { return false }
+        let done = app.buttons["listing-review.done"]
+        guard done.exists else { return true }
+        return entry.frame.maxY <= done.frame.minY
     }
 
     private func soldMatchButtons(

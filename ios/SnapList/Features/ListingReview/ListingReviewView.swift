@@ -568,12 +568,17 @@ struct ListingReviewView: View {
     private var assistedExportEntry: some View {
         Button {
             // A tap here does not resign a focused field, so what was typed is
-            // still in the holder and `isDirty` would answer against the
-            // pre-edit draft. Same flush Done and Back run, awaited before the
-            // guard, so the guard reads settled state. If the flush is what
-            // makes the screen dirty, this takes the already-dirty path.
+            // still uncommitted and `isDirty` would answer against the pre-edit
+            // draft. Two things hold typed text, not one: the holder owns
+            // title/description/specifics and `priceText` owns the price, so
+            // this runs the same pair Done and Back run, in their order, before
+            // the guard reads. `commitPrice` announces its own invalid-price
+            // refusal, so a false returns without posting a second one. If
+            // settling is what makes the screen dirty, this takes the
+            // already-dirty path.
             Task {
                 await inlineEdits.flush(into: store)
+                guard await commitPrice() else { return }
                 guard !store.isDirty else {
                     ListingReviewAnnouncement.post(
                         AssistedExportCopy.saveBeforeSharing,
@@ -624,10 +629,12 @@ struct ListingReviewView: View {
     private var ebayPublishEntry: some View {
         Button {
             // Same as the sharing row above, and this one reaches a real
-            // marketplace: without the flush the guard passed on a stale
-            // `isDirty` and eBay was handed the pre-edit draft as a value copy.
+            // marketplace: without settling both holders the guard passed on a
+            // stale `isDirty` and eBay was handed the pre-edit draft as a value
+            // copy — including a price the seller had typed but not committed.
             Task {
                 await inlineEdits.flush(into: store)
+                guard await commitPrice() else { return }
                 guard !store.isDirty else {
                     ListingReviewAnnouncement.post(
                         "Save your changes before publishing to eBay.",
