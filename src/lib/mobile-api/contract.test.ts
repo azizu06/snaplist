@@ -6,6 +6,7 @@ import { listingReviewProjectionSchema } from "@/lib/listing-review";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import {
   apiErrorEnvelopeSchema,
+  deviceTokenRegistrationSchema,
   ebayConnectionSettingsSchema,
   ebayPolicySetupHintSchema,
   guidedCorrectionEnvelopeSchema,
@@ -640,6 +641,28 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(openApiRun.properties.status.enum).toEqual(mobileRunSchema.shape.status.options);
     expect(openApiRun.properties.stage.enum).toEqual(mobileRunSchema.shape.stage.options);
     expect(openApiRun.properties.allowance.enum).toEqual(mobileRunSchema.shape.allowance.options);
+  });
+
+  it("keeps the DeviceTokenRegistration OpenAPI schema aligned with runtime Zod (#891)", () => {
+    const openApiDeviceToken = contract.components.schemas
+      .DeviceTokenRegistration as {
+      additionalProperties: boolean;
+      required: string[];
+      properties: {
+        apnsEnvironment?: { type: string; enum: string[] };
+      };
+    };
+    const zodRequired = Object.entries(deviceTokenRegistrationSchema.shape)
+      .filter(([, schema]) => !schema.safeParse(undefined).success)
+      .map(([name]) => name)
+      .sort();
+
+    expect(openApiDeviceToken.additionalProperties).toBe(false);
+    expect([...openApiDeviceToken.required].sort()).toEqual(zodRequired);
+    expect(openApiDeviceToken.properties.apnsEnvironment).toEqual({
+      type: "string",
+      enum: deviceTokenRegistrationSchema.shape.apnsEnvironment.options,
+    });
   });
 
   it("assigns every contract-only operation to an explicit issue owner", () => {
