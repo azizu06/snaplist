@@ -711,7 +711,14 @@ final class ListingReviewInlineEdits {
             case .specific(let name):
                 await store.setSpecific(name: name, value: text)
             }
-            typed[field] = nil
+            // Each write suspends, and the field stays on screen and typable
+            // while it does. Clearing unconditionally would throw away
+            // whatever the seller typed during the await, and the field
+            // would then snap back to the value that was in flight. Clear
+            // only the value that was actually sent.
+            if typed[field] == text {
+                typed[field] = nil
+            }
         }
     }
 }
@@ -778,10 +785,19 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
         // touch is 23pt of glyphs. Giving that field a 44pt frame does not
         // help: it takes the room without taking the height, and a tap in the
         // space it left behind reaches nothing. The box is 62pt and is what
-        // the seller sees, so the box is what takes the tap, the same way the
-        // price field already worked.
-        .contentShape(Rectangle())
-        .onTapGesture { focus = focusValue }
+        // the seller sees, so the rest of the box has to focus the field too.
+        //
+        // Behind the content rather than over it, which is the whole point. A
+        // tap gesture on the box wins the tap before the field sees it, so
+        // focus gets set programmatically and the caret goes to the end of
+        // the text instead of where the finger landed. Sitting behind, the
+        // field keeps its own taps and its own caret, and this only picks up
+        // what lands in the label band and the padding.
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { focus = focusValue }
+        }
         .onChange(of: text) { _, typed in
             edits.typed[field] = typed == value ? nil : typed
         }

@@ -396,8 +396,14 @@ struct ListingReviewView: View {
             }
         }
         // The field's own hit area is the glyphs; this makes the rest of the
-        // box focus it too, which is the point of drawing the box.
-        .onTapGesture { focusedField = .price }
+        // box focus it too, which is the point of drawing the box. It sits
+        // behind the field rather than over it, so a tap on the number still
+        // reaches the field and puts the caret under the finger.
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = .price }
+        }
     }
 
     private func soldMatches(
