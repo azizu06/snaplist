@@ -1998,11 +1998,14 @@ final class SnapListUITests: XCTestCase {
     func testApprovedScanCameraZeroAndFivePhotoStatesExposeTheFrozenControls() {
         let zero = launch(extraArguments: ["--visual-state=CAM-01"])
 
-        for identifier in [
-            "scan.flash", "scan.library", "scan.shutter", "dock.scan", "dock.trophy-wall"
-        ] {
+        for identifier in ["scan.flash", "scan.library", "scan.shutter"] {
             XCTAssertTrue(zero.buttons[identifier].waitForExistence(timeout: 2), identifier)
         }
+        // #885: the owner removed the dock from the camera preview, since
+        // `scan.close` already returns the seller where they came from. The
+        // real shell has always hidden it here; this route now matches.
+        XCTAssertFalse(zero.buttons["dock.scan"].exists)
+        XCTAssertFalse(zero.buttons["dock.trophy-wall"].exists)
         XCTAssertFalse(zero.buttons["scan.review"].exists)
         XCTAssertFalse(zero.staticTexts["scan.photo-count"].exists)
         zero.terminate()
@@ -2016,6 +2019,179 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(capped.buttons["scan.library"].label, "Library")
     }
 
+    /// #885. The reference arranges the bottom row as flash, shutter, library,
+    /// and leaves the top row holding nothing but the close control.
+    ///
+    /// Review used to own the bottom-right slot the library now takes. It does
+    /// not disappear: it moves up beside the staged-photo strip it acts on,
+    /// which is the row directly above and still inside thumb reach.
+    func testIssue885ScanBottomRowIsFlashShutterLibraryWithReviewMovedAboveIt() {
+        let app = launch(extraArguments: ["--visual-state=CAM-03"])
+        let close = app.buttons["scan.close"]
+        let flash = app.buttons["scan.flash"]
+        let shutter = app.buttons["scan.shutter"]
+        let library = app.buttons["scan.library"]
+        let review = app.buttons["scan.review"]
+
+        for control in [close, flash, shutter, library, review] {
+            XCTAssertTrue(control.waitForExistence(timeout: 3), control.identifier)
+        }
+
+        let receipt = "close=\(close.frame) flash=\(flash.frame) " +
+            "shutter=\(shutter.frame) library=\(library.frame) review=\(review.frame)"
+
+        XCTAssertLessThan(flash.frame.midX, shutter.frame.midX, receipt)
+        XCTAssertLessThan(shutter.frame.midX, library.frame.midX, receipt)
+        XCTAssertEqual(flash.frame.midY, shutter.frame.midY, accuracy: 24, receipt)
+        XCTAssertEqual(library.frame.midY, shutter.frame.midY, accuracy: 24, receipt)
+
+        XCTAssertLessThan(review.frame.maxY, shutter.frame.minY, receipt)
+        XCTAssertGreaterThan(flash.frame.minY, close.frame.maxY, receipt)
+
+        for control in [flash, shutter, library] {
+            XCTAssertFalse(control.frame.intersects(review.frame), receipt)
+        }
+    }
+
+    /// #885. Zoom is offered only when the back camera actually pairs an ultra
+    /// wide with a wide lens. The simulator has no camera at all, so its honest
+    /// result is no control rather than a `.5x` the hardware would refuse.
+    /// `--scan-zoom=dual-wide` stands in for a device that does have one.
+    func testIssue885ZoomControlIsNotOfferedWithoutAnUltraWideCamera() {
+        let withoutUltraWide = launch(extraArguments: ["--visual-state=CAM-01"])
+        XCTAssertTrue(withoutUltraWide.buttons["scan.shutter"].waitForExistence(timeout: 3))
+        XCTAssertFalse(withoutUltraWide.otherElements["scan.zoom"].exists)
+        XCTAssertFalse(withoutUltraWide.buttons["scan.zoom.ultra-wide"].exists)
+        XCTAssertFalse(withoutUltraWide.buttons["scan.zoom.wide"].exists)
+    }
+
+    /// The other half of the gate, kept in its own test so each launch belongs
+    /// to one test rather than the second one being a relaunch inside the first.
+    ///
+    /// `1x` stays the default. The reference screenshot happens to show `.5x`
+    /// selected, but that is the state its user left it in, and defaulting to
+    /// the ultra wide would silently rewiden every seller's framing.
+    func testIssue885ZoomControlSwitchesToTheUltraWideWhenTheHardwareHasOne() {
+        // Park activation guidance on another surface. Left to whatever the
+        // preceding tests persisted, the ACT-01 coach mark docks over this band
+        // and takes the chip's taps, which is a real collision this issue found
+        // and did not fix. Pinning the state keeps this test measuring the zoom
+        // control rather than that overlap.
+        let app = launch(
+            extraArguments: [
+                "--visual-state=CAM-01",
+                "--scan-zoom=dual-wide",
+                "--activation-guidance-step=listingReview",
+            ]
+        )
+        let zoom = app.otherElements["scan.zoom"]
+        let ultraWide = app.buttons["scan.zoom.ultra-wide"]
+        let wide = app.buttons["scan.zoom.wide"]
+        let shutter = app.buttons["scan.shutter"]
+
+        for element in [zoom, ultraWide, wide, shutter] {
+            XCTAssertTrue(element.waitForExistence(timeout: 3), element.identifier)
+        }
+
+        XCTAssertEqual(ultraWide.label, "0.5x zoom")
+        XCTAssertEqual(wide.label, "1x zoom")
+        XCTAssertEqual(zoom.value as? String, "1x")
+        XCTAssertTrue(wide.isSelected)
+        XCTAssertFalse(ultraWide.isSelected)
+
+        let receipt = "zoom=\(zoom.frame) shutter=\(shutter.frame)"
+        XCTAssertLessThan(zoom.frame.maxY, shutter.frame.minY, receipt)
+        XCTAssertEqual(zoom.frame.midX, shutter.frame.midX, accuracy: 2, receipt)
+
+        // Existence is not reachability, and a tap on an element with no hit
+        // point is dropped without error, so it would surface below as the
+        // wrong selected lens rather than as the unreachable control it is.
+        // Keeping the wait means anything that covers this band in future
+        // fails here, by name, instead of somewhere further down.
+        let reachable = expectation(
+            for: NSPredicate(format: "isHittable == true"),
+            evaluatedWith: ultraWide
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [reachable], timeout: 5),
+            .completed,
+            "The 0.5x chip must become hittable before it is tapped."
+        )
+
+        ultraWide.tap()
+        // Frames and hittability, because the way this assertion fails in
+        // practice is a tap that never lands rather than a lens that switched
+        // to the wrong value.
+        let switchReceipt = """
+        ultraWide=\(ultraWide.frame) hittable=\(ultraWide.isHittable) \
+        wide=\(wide.frame) zoomContainer=\(zoom.frame) appState=\(app.state.rawValue)
+        """
+        XCTAssertTrue(ultraWide.isSelected, switchReceipt)
+        XCTAssertFalse(wide.isSelected, switchReceipt)
+        XCTAssertEqual(zoom.value as? String, "0.5x", switchReceipt)
+    }
+
+    /// #885. Moving three controls onto one row and adding a fourth above it is
+    /// exactly the change that breaks touch targets at large text, so every
+    /// control the issue touches is measured at AX5 rather than at the default
+    /// size: on screen, at least 44pt on both axes, and not overlapping anything
+    /// a seller could be aiming at instead.
+    ///
+    /// CAM-04 stages photos, so the review row and the thumbnail strip are both
+    /// present and competing for the same vertical space.
+    ///
+    /// Activation guidance is parked on another surface on purpose. Left where
+    /// the preceding tests put it, the ACT-01 coach mark docks over this band
+    /// and takes the zoom control's taps, which is a real defect this issue
+    /// found and did not fix. Pinning it means this test measures reach at AX5,
+    /// which #885 owns, rather than that overlap, which belongs to #914. So
+    /// this test cannot fail for #914 by construction, and that gap is recorded
+    /// in #916.
+    func testIssue885EveryMovedScanControlKeepsA44ptTargetAtAX5() {
+        let app = launch(extraArguments: [
+            "--visual-state=CAM-04",
+            "--scan-zoom=dual-wide",
+            "--dynamic-type=accessibility5",
+            "--activation-guidance-step=listingReview"
+        ])
+        let window = app.windows.firstMatch
+        let flash = app.buttons["scan.flash"]
+        let shutter = app.buttons["scan.shutter"]
+        let library = app.buttons["scan.library"]
+        let review = app.buttons["scan.review"]
+        let ultraWide = app.buttons["scan.zoom.ultra-wide"]
+        let wide = app.buttons["scan.zoom.wide"]
+        let controls = [flash, shutter, library, review, ultraWide, wide]
+
+        XCTAssertTrue(window.waitForExistence(timeout: 3), app.debugDescription)
+        for control in controls {
+            XCTAssertTrue(control.waitForExistence(timeout: 3), control.identifier)
+        }
+
+        let receipt = controls
+            .map { "\($0.identifier)=\($0.frame)" }
+            .joined(separator: " ") + " window=\(window.frame)"
+
+        for control in controls {
+            // A 44pt frame a seller cannot land a finger on is not a 44pt
+            // target, and XCUITest drops a tap on an unhittable element without
+            // erroring, so measuring only the rectangle would pass either way.
+            XCTAssertTrue(control.isHittable, "\(control.identifier) \(receipt)")
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44, receipt)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44, receipt)
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, receipt)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.frame.maxX, receipt)
+            XCTAssertGreaterThanOrEqual(control.frame.minY, window.frame.minY, receipt)
+            XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, receipt)
+        }
+
+        for (index, control) in controls.enumerated() {
+            for other in controls.dropFirst(index + 1) {
+                XCTAssertFalse(control.frame.intersects(other.frame), receipt)
+            }
+        }
+    }
+
     func testScanCameraCAM04MatchesLiveRenderedGeometryAt402x874() {
         let app = launch(extraArguments: ["--visual-state=CAM-04"])
         let window = app.windows.firstMatch
@@ -2023,22 +2199,41 @@ final class SnapListUITests: XCTestCase {
         let secondPhoto = app.descendants(matching: .any)["scan.photo-2"]
         let library = app.buttons["scan.library"]
         let shutter = app.buttons["scan.shutter"]
-        let dockScan = app.buttons["dock.scan"]
+        let review = app.buttons["scan.review"]
 
         XCTAssertTrue(window.waitForExistence(timeout: 3))
         XCTAssertEqual(window.frame.size.width, 402, accuracy: 0.5)
         XCTAssertEqual(window.frame.size.height, 874, accuracy: 0.5)
 
-        for element in [firstPhoto, secondPhoto, library, shutter, dockScan] {
+        for element in [firstPhoto, secondPhoto, library, shutter, review] {
             XCTAssertTrue(element.waitForExistence(timeout: 3), element.identifier)
         }
 
-        XCTAssertEqual(firstPhoto.frame.size.width, 35, accuracy: 0.5)
-        XCTAssertEqual(firstPhoto.frame.size.height, 44, accuracy: 0.5)
+        // #885: the preview no longer floats a dock, and the height that
+        // freed went to the two things the owner named. The thumbnails are the
+        // larger half of that spend.
+        XCTAssertEqual(firstPhoto.frame.size.width, 45, accuracy: 0.5)
+        XCTAssertEqual(firstPhoto.frame.size.height, 57, accuracy: 0.5)
         XCTAssertEqual(secondPhoto.frame.minX - firstPhoto.frame.maxX, 10, accuracy: 0.5)
-        XCTAssertEqual(library.frame.minY - firstPhoto.frame.maxY, 45, accuracy: 2)
-        XCTAssertEqual(dockScan.frame.minY - shutter.frame.maxY, 40, accuracy: 2)
-        XCTAssertEqual(dockScan.frame.height, 52, accuracy: 0.5)
+        // #885 moved review off the bottom row onto its own line between the
+        // strip and the controls, so the strip no longer sits directly above
+        // the library. What used to be one 45pt gap is now the review row.
+        XCTAssertEqual(review.frame.minY - firstPhoto.frame.maxY, 16, accuracy: 2)
+        XCTAssertEqual(library.frame.minY - review.frame.maxY, 29, accuracy: 2)
+        // #885: no dock on the camera preview, so the shutter row is the last
+        // thing above the home indicator rather than the second to last.
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
+        XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
+        // Absence of the dock buttons is not the same as the space they used to
+        // occupy being gone, so pin the gap the shutter row now leaves below
+        // itself. Asserting only that the shutter is above the window bottom
+        // would hold for any layout, dock or no dock.
+        XCTAssertEqual(
+            window.frame.maxY - shutter.frame.maxY,
+            66.5,
+            accuracy: 2,
+            "shutter=\(shutter.frame) window=\(window.frame)"
+        )
     }
 
     func testIssue775RealAppShellRemovesDockFromLiveCameraPreviewAt402x874() {
@@ -2116,27 +2311,33 @@ final class SnapListUITests: XCTestCase {
 
         let window = app.windows.firstMatch
         let closeButton = app.buttons["scan.close"]
+        let flash = app.buttons["scan.flash"]
         let library = app.buttons["scan.library"]
         let shutter = app.buttons["scan.shutter"]
         let review = app.buttons["scan.review"]
 
         XCTAssertTrue(window.waitForExistence(timeout: 3), app.debugDescription)
-        for control in [closeButton, library, shutter, review] {
+        for control in [closeButton, flash, library, shutter, review] {
             XCTAssertTrue(control.waitForExistence(timeout: 3), control.identifier)
         }
 
         let frameReceipt = "window=\(window.frame), close=\(closeButton.frame), " +
-            "library=\(library.frame), shutter=\(shutter.frame), review=\(review.frame)"
-        for control in [closeButton, library, shutter, review] {
+            "flash=\(flash.frame), library=\(library.frame), " +
+            "shutter=\(shutter.frame), review=\(review.frame)"
+        for control in [closeButton, flash, library, shutter, review] {
             XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, frameReceipt)
             XCTAssertLessThanOrEqual(control.frame.maxX, window.frame.maxX, frameReceipt)
             XCTAssertGreaterThanOrEqual(control.frame.minY, window.frame.minY, frameReceipt)
             XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, frameReceipt)
         }
 
-        XCTAssertFalse(shutter.frame.intersects(library.frame), frameReceipt)
-        XCTAssertFalse(shutter.frame.intersects(review.frame), frameReceipt)
-        XCTAssertFalse(library.frame.intersects(review.frame), frameReceipt)
+        // #885 put flash on this row, so it joins the pairs that must stay apart.
+        let bottomStack = [flash, shutter, library, review]
+        for (index, control) in bottomStack.enumerated() {
+            for other in bottomStack.dropFirst(index + 1) {
+                XCTAssertFalse(control.frame.intersects(other.frame), frameReceipt)
+            }
+        }
     }
 
     /// Issue #842: each camera-screen thumbnail carries a remove affordance. Removing
@@ -2905,14 +3106,17 @@ final class SnapListUITests: XCTestCase {
 
         XCTAssertTrue(app.otherElements["scan.motion-reduced"].waitForExistence(timeout: 2))
 
+        // #885: the live preview carries no dock, so the controls that must
+        // stay reachable are the camera's own.
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
+        XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
+
         for control in [
             app.buttons["scan.close"],
             app.buttons["scan.flash"],
             app.buttons["scan.library"],
             app.buttons["scan.shutter"],
-            app.buttons["scan.review"],
-            app.buttons["dock.scan"],
-            app.buttons["dock.trophy-wall"]
+            app.buttons["scan.review"]
         ] {
             XCTAssertTrue(control.waitForExistence(timeout: 2))
             XCTAssertGreaterThanOrEqual(

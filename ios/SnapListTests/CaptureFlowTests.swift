@@ -10026,6 +10026,44 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(store.selectPhotoForNavigation(id: photos[2].id))
         XCTAssertEqual(store.selectedPhotoID, photos[2].id)
     }
+
+    /// Sentry SNAPLIST-J, with SNAPLIST-H and SNAPLIST-G counting the same
+    /// window as an app hang and a watchdog termination.
+    ///
+    /// Assigning `AVCaptureVideoPreviewLayer.session` implicitly wraps a
+    /// `beginConfiguration`/`commitConfiguration` pair, and committing against
+    /// a running session rebuilds the capture graph and blocks the calling
+    /// thread until AVFoundation signals its run loop condition. SwiftUI runs
+    /// `dismantleUIView` on the main thread, so detaching inline hung the app
+    /// while the seller was leaving Scan.
+    ///
+    /// This test is written from the caller's side on purpose: it runs on the
+    /// main actor, so "still attached when the call returns" is exactly the
+    /// property that was violated. The paired expectation keeps it honest,
+    /// since simply never detaching would otherwise pass.
+    func testDismantlingTheCameraPreviewNeverDetachesItsSessionInlineOnTheMainThread() {
+        let session = AVCaptureSession()
+        let container = CameraPreviewContainer()
+        container.previewLayer.session = session
+
+        CameraPreviewView.dismantleUIView(
+            container,
+            coordinator: CameraPreviewView.Coordinator()
+        )
+
+        XCTAssertNotNil(
+            container.previewLayer.session,
+            "Detaching the preview layer inline is the main-thread hang itself."
+        )
+
+        let detached = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                MainActor.assumeIsolated { container.previewLayer.session == nil }
+            },
+            object: nil
+        )
+        wait(for: [detached], timeout: 5)
+    }
 }
 
 @MainActor

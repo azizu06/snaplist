@@ -15,8 +15,18 @@ enum AVFoundationCaptureError: Error {
 final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Sendable {
     let session = AVCaptureSession()
     private(set) var captureDevice: AVCaptureDevice?
+    private(set) var zoomControl: ScanZoomControl = .wideOnly
 
-    private let sessionQueue = DispatchQueue(label: "dev.snaplist.capture.session")
+    /// The one serial queue every `AVCaptureSession` mutation in the app runs
+    /// on: start, stop, zoom, and preview teardown.
+    ///
+    /// It is shared rather than per-instance because teardown is reached from
+    /// `CameraPreviewView.dismantleUIView`, which SwiftUI calls statically with
+    /// no camera in hand. Serializing all four through one queue is also what
+    /// keeps a preview detach from interleaving with a zoom write.
+    static let sessionQueue = DispatchQueue(label: "dev.snaplist.capture.session")
+
+    private var sessionQueue: DispatchQueue { Self.sessionQueue }
     private let frameQueue = DispatchQueue(label: "dev.snaplist.capture.frames")
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -30,13 +40,18 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
     private var interruptionEndedObserver: NSObjectProtocol?
     private var runtimeErrorObserver: NSObjectProtocol?
     private var flashMode: CaptureFlashMode = .off
+    /// The lens the seller has asked for, held the way `flashMode` is held so
+    /// the hardware can be pointed at it again whenever the session comes back.
+    ///
+    /// A dual wide device opens at the ultra wide's own field of view, which
+    /// would rewiden every seller's framing, so this starts at the lens they
+    /// already shoot with. Written and read on `sessionQueue` only.
+    private var zoomLens: ScanZoomLens = .wide
 
     override init() {
-        captureDevice = AVCaptureDevice.default(
-            .builtInWideAngleCamera,
-            for: .video,
-            position: .back
-        )
+        let selection = Self.selectBackCamera()
+        captureDevice = selection.device
+        zoomControl = selection.zoomControl
         super.init()
         interruptionEndedObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureSession.interruptionEndedNotification,
@@ -73,6 +88,79 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
         }
     }
 
+    func selectZoomLens(_ lens: ScanZoomLens) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.zoomControl.lenses.contains(lens) else { return }
+            self.zoomLens = lens
+            self.applyZoomLens(lens)
+        }
+    }
+
+    /// Picks the back camera Scan runs on, taking the virtual dual wide device
+    /// only when it can actually hand the seller a second lens.
+    ///
+    /// `AVCaptureDevice.DiscoverySession` over `.builtInUltraWideCamera` is the
+    /// supported way to ask whether this iPhone has an ultra wide at all.
+    /// `.builtInDualWideCamera` is then the device that makes switching free:
+    /// AVFoundation crosses from the ultra wide to the wide by itself once
+    /// `videoZoomFactor` reaches the first entry of
+    /// `virtualDeviceSwitchOverVideoZoomFactors`, so setting that one number is
+    /// the entire zoom implementation and no frame is ever cropped.
+    ///
+    /// Anything short of that keeps the plain wide angle device, which is
+    /// today's behavior unchanged. `ScanZoomControl.wideOnly` reports a single
+    /// lens, so the view offers no control rather than a factor the hardware
+    /// cannot reach. The simulator and an iPhone SE both land here.
+    private static func selectBackCamera() -> (device: AVCaptureDevice?, zoomControl: ScanZoomControl) {
+        let wideAngle = AVCaptureDevice.default(
+            .builtInWideAngleCamera,
+            for: .video,
+            position: .back
+        )
+        let hasUltraWideCamera = !AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInUltraWideCamera],
+            mediaType: .video,
+            position: .back
+        ).devices.isEmpty
+        guard hasUltraWideCamera,
+              let dualWide = AVCaptureDevice.default(
+                  .builtInDualWideCamera,
+                  for: .video,
+                  position: .back
+              ) else {
+            return (wideAngle, .wideOnly)
+        }
+
+        let control = ScanZoomControl.resolve(
+            hasUltraWideCamera: true,
+            switchOverVideoZoomFactors: dualWide.virtualDeviceSwitchOverVideoZoomFactors
+                .map { CGFloat(truncating: $0) }
+        )
+        guard control.isOffered else { return (wideAngle, .wideOnly) }
+        return (dualWide, control)
+    }
+
+    /// Runs on `sessionQueue` only. `lockForConfiguration` serializes against
+    /// AVFoundation's own use of the device, and the queue serializes it against
+    /// the preview detach in `CameraPreviewSessionDetachment`.
+    private func applyZoomLens(_ lens: ScanZoomLens) {
+        guard let captureDevice, zoomControl.lenses.contains(lens) else { return }
+        let requested = zoomControl.videoZoomFactor(for: lens)
+        let factor = min(
+            max(requested, captureDevice.minAvailableVideoZoomFactor),
+            captureDevice.maxAvailableVideoZoomFactor
+        )
+        do {
+            try captureDevice.lockForConfiguration()
+            defer { captureDevice.unlockForConfiguration() }
+            captureDevice.videoZoomFactor = factor
+        } catch {
+            // Another client holds the device. The preview keeps the factor it
+            // already has, which is honest; retrying here would fight whoever
+            // took the lock.
+        }
+    }
+
     func authorizationStatus() -> CaptureCameraAuthorization {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .notDetermined: .notDetermined
@@ -97,6 +185,17 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
                 }
                 do {
                     try self.configureIfNeeded()
+                    // Point the hardware at the lens after the configuration has
+                    // committed, not inside it. Setting `sessionPreset` hands the
+                    // session control of the device's `activeFormat`, and the
+                    // header is explicit that the new format is applied in
+                    // `commitConfiguration`. `applyZoomLens` clamps against
+                    // `min`/`maxAvailableVideoZoomFactor`, which `activeFormat`
+                    // determines, so a write before the commit is clamped against
+                    // a format that is about to be replaced. Doing it here also
+                    // means a stop/start reaches it, which the `configured`
+                    // guarded body does not because it runs once.
+                    self.applyZoomLens(self.zoomLens)
                     self.setFrameHandler(frameHandler)
                     self.wantsToRun = true
                     if !self.session.isRunning {
@@ -205,6 +304,11 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
         sessionQueue.async { [weak self] in
             guard let self, self.wantsToRun, !self.session.isRunning else { return }
             self.session.startRunning()
+            // Whatever took the camera away can have left the device on another
+            // factor, and this path does not go through `start()`, so point it
+            // back at the lens the seller chose rather than at whatever it
+            // came back on.
+            self.applyZoomLens(self.zoomLens)
         }
     }
 
@@ -307,7 +411,7 @@ struct CameraPreviewView: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: CameraPreviewContainer, coordinator: Coordinator) {
         coordinator.detach()
-        uiView.previewLayer.session = nil
+        CameraPreviewSessionDetachment.detach(uiView.previewLayer)
     }
 
     final class Coordinator {
@@ -338,6 +442,34 @@ struct CameraPreviewView: UIViewRepresentable {
             observation?.invalidate()
             observation = nil
             rotationCoordinator = nil
+        }
+    }
+}
+
+/// Releases a preview layer's capture session without hanging the main thread.
+///
+/// Assigning `AVCaptureVideoPreviewLayer.session` implicitly runs a
+/// `beginConfiguration`/`commitConfiguration` pair to drop the preview
+/// connection. Against a session that is still running, that commit rebuilds
+/// and restarts the capture graph synchronously, blocking whichever thread
+/// made the assignment. SwiftUI dismantles a `UIViewRepresentable` on the main
+/// thread, so doing it inline froze the app as the seller left Scan: Sentry
+/// SNAPLIST-J, counted again as SNAPLIST-H and SNAPLIST-G.
+///
+/// Stopping the session is the expensive half, so it runs on the shared serial
+/// session queue. Only the single line that touches the layer hops back to the
+/// main thread, and by then the session is stopped, so its commit has no graph
+/// left to rebuild and returns immediately.
+enum CameraPreviewSessionDetachment {
+    static func detach(_ previewLayer: AVCaptureVideoPreviewLayer) {
+        guard let session = previewLayer.session else { return }
+        AVFoundationCaptureCamera.sessionQueue.async {
+            if session.isRunning {
+                session.stopRunning()
+            }
+            DispatchQueue.main.async {
+                previewLayer.session = nil
+            }
         }
     }
 }

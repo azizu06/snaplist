@@ -88,6 +88,23 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+/// Back-camera hardware the Scan fixture route should pretend to have.
+///
+/// Only the case worth simulating is listed. The absence of the argument is
+/// the simulator's real answer, and it is also a real iPhone SE's answer.
+enum ScanZoomFixtureState: String, CaseIterable {
+    /// An ultra wide paired with a wide lens, handing over at 2x, which is
+    /// what every iPhone with a `.5x` option reports.
+    case dualWide = "dual-wide"
+
+    var control: ScanZoomControl {
+        switch self {
+        case .dualWide:
+            .resolve(hasUltraWideCamera: true, switchOverVideoZoomFactors: [2])
+        }
+    }
+}
+
 enum FoundationFixture: String, CaseIterable {
     case onboarding
     case scan
@@ -349,6 +366,15 @@ struct LaunchConfiguration: Equatable {
     var accountErasureFixture: AccountErasureFixtureState?
     var ebayPublishFixture: EbayPublishFixtureState?
     var guestClaimFixture: GuestClaimFixtureState?
+    /// Stands in for back-camera hardware the simulator does not have.
+    ///
+    /// A simulator reports no capture device at all, so the Scan fixture route
+    /// resolves to `ScanZoomControl.wideOnly` and shows no zoom control, which
+    /// is the honest no-ultra-wide case. Proving the two-lens control needs a
+    /// way to say "pretend this build is running on a dual wide device".
+    /// Defaulted rather than added to the memberwise initializers below,
+    /// because the absence of the argument is the real device-truth answer.
+    var scanZoomFixture: ScanZoomFixtureState? = nil
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -515,6 +541,9 @@ struct LaunchConfiguration: Equatable {
             } else if argument.hasPrefix("--camera-status=") {
                 let value = String(argument.dropFirst("--camera-status=".count))
                 configuration.cameraAuthorizationFixture = CameraAuthorizationStatus(rawValue: value)
+            } else if argument.hasPrefix("--scan-zoom=") {
+                let value = String(argument.dropFirst("--scan-zoom=".count))
+                configuration.scanZoomFixture = ScanZoomFixtureState(rawValue: value)
             } else if argument == "--dynamic-type=accessibility5" {
                 // The largest supported size. Photo Review's hero and thumbnail strip are
                 // fixed, so text is the only thing that lengthens the page; a scroll proof

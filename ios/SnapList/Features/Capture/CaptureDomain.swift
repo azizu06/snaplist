@@ -188,6 +188,74 @@ enum CaptureFlashMode: Equatable {
     case on
 }
 
+/// Which back-camera lens Scan is looking through.
+enum ScanZoomLens: Equatable {
+    case ultraWide
+    case wide
+}
+
+/// The zoom control Scan can honestly offer for one capture device.
+struct ScanZoomControl: Equatable {
+    let lenses: [ScanZoomLens]
+    private let switchOverFactor: CGFloat
+
+    var isOffered: Bool { lenses.count > 1 }
+
+    func videoZoomFactor(for lens: ScanZoomLens) -> CGFloat {
+        switch lens {
+        case .ultraWide: 1
+        case .wide: switchOverFactor
+        }
+    }
+
+    func displayedFactor(for lens: ScanZoomLens) -> CGFloat {
+        videoZoomFactor(for: lens) / switchOverFactor
+    }
+
+    /// What the option reads on screen, written the way the reference writes
+    /// it: `.5x`, `1x`.
+    func label(for lens: ScanZoomLens) -> String {
+        let spoken = spokenFactor(for: lens)
+        guard spoken.hasPrefix("0.") else { return spoken }
+        return String(spoken.dropFirst())
+    }
+
+    /// What VoiceOver reads. The leading zero the visual label drops comes
+    /// back, so `.5x` is not heard as "five x".
+    func spokenFactor(for lens: ScanZoomLens) -> String {
+        let factor = displayedFactor(for: lens)
+        if factor == factor.rounded() {
+            return "\(Int(factor))x"
+        }
+        return "\((factor * 10).rounded() / 10)x"
+    }
+
+    func accessibilityLabel(for lens: ScanZoomLens) -> String {
+        "\(spokenFactor(for: lens)) zoom"
+    }
+
+    /// The single lens every back camera has. `videoZoomFactor` 1 is that
+    /// lens' own native field of view, so it is both the factor to set and
+    /// the factor the seller would read, and there is no second option to
+    /// offer alongside it.
+    static let wideOnly = ScanZoomControl(lenses: [.wide], switchOverFactor: 1)
+
+    static func resolve(
+        hasUltraWideCamera: Bool,
+        switchOverVideoZoomFactors: [CGFloat]
+    ) -> ScanZoomControl {
+        guard hasUltraWideCamera,
+              let switchOver = switchOverVideoZoomFactors.first,
+              switchOver > 1 else {
+            return wideOnly
+        }
+        return ScanZoomControl(
+            lenses: [.ultraWide, .wide],
+            switchOverFactor: switchOver
+        )
+    }
+}
+
 enum CapturePhase: Equatable {
     case idle
     case requestingPermission
@@ -802,19 +870,25 @@ protocol CaptureCamera: AnyObject {
     var captureDevice: AVCaptureDevice? { get }
     var isAvailable: Bool { get }
     var isFlashAvailable: Bool { get }
+    var zoomControl: ScanZoomControl { get }
 
     func authorizationStatus() -> CaptureCameraAuthorization
     func requestAuthorization() async -> CaptureCameraAuthorization
     func start(frameHandler: @escaping (CaptureFrame) -> Void) async throws
     func stop()
     func setFlashMode(_ mode: CaptureFlashMode)
+    func selectZoomLens(_ lens: ScanZoomLens)
     func capturePhoto() async throws -> Data
 }
 
 extension CaptureCamera {
     var captureDevice: AVCaptureDevice? { nil }
     var isFlashAvailable: Bool { false }
+    /// A camera that does not say otherwise has one lens, so there is nothing
+    /// to switch between.
+    var zoomControl: ScanZoomControl { .wideOnly }
     func setFlashMode(_ mode: CaptureFlashMode) {}
+    func selectZoomLens(_ lens: ScanZoomLens) {}
 }
 
 #if DEBUG
@@ -1352,6 +1426,10 @@ final class CaptureFlowModel {
     private(set) var guidance: FramingGuidance = .coaching
     private(set) var stagedPhotos: [StagedCapturePhoto] = []
     private(set) var flashMode: CaptureFlashMode = .off
+    /// The lens Scan is pointed through. `.wide` is the lens every back camera
+    /// has, and it is the framing sellers already shoot with, so it stays the
+    /// starting point even on hardware that can also reach the ultra wide.
+    private(set) var zoomLens: ScanZoomLens = .wide
     private(set) var hasCompletedRestoration = false
     private(set) var intakeSnapshot: NativeIntake.Snapshot?
 
@@ -1398,6 +1476,7 @@ final class CaptureFlowModel {
     var previewSession: AVCaptureSession { camera.session }
     var captureDevice: AVCaptureDevice? { camera.captureDevice }
     var isFlashAvailable: Bool { camera.isFlashAvailable }
+    var zoomControl: ScanZoomControl { camera.zoomControl }
     var stagedPhoto: StagedCapturePhoto? { stagedPhotos.first }
     var isCapturingPhoto: Bool { activeCaptureID != nil }
     var isAddingPhotos: Bool { activeIntakeID != nil }
@@ -1435,6 +1514,14 @@ final class CaptureFlowModel {
         guard isFlashAvailable else { return }
         flashMode = flashMode == .off ? .on : .off
         camera.setFlashMode(flashMode)
+    }
+
+    /// Ignores a lens the camera in hand cannot actually reach, so a stale view
+    /// cannot leave the control reading a factor the preview is not at.
+    func selectZoomLens(_ lens: ScanZoomLens) {
+        guard camera.zoomControl.lenses.contains(lens) else { return }
+        zoomLens = lens
+        camera.selectZoomLens(lens)
     }
 
     func restore() async -> CaptureRestoration {
