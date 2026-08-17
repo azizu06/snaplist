@@ -42,7 +42,7 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(
             String(
                 describing:
-                    app.textFields["listing-review.title"].value as Any
+                    app.textViews["listing-review.title"].value as Any
             ).contains("seller edit")
         )
 
@@ -248,9 +248,9 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(done.isHittable)
         XCTAssertGreaterThanOrEqual(secondary.frame.height, 44)
         XCTAssertGreaterThanOrEqual(done.frame.height, 44)
-        XCTAssertTrue(app.textFields["listing-review.title"].exists)
+        XCTAssertTrue(app.textViews["listing-review.title"].exists)
         secondary.tap()
-        XCTAssertTrue(app.textFields["listing-review.title"].exists)
+        XCTAssertTrue(app.textViews["listing-review.title"].exists)
         // XCUITest cannot inspect the VoiceOver cursor without assistive
         // technology running; ListingReviewFocus binds this action to Title.
 
@@ -280,7 +280,7 @@ final class ListingReviewUITests: XCTestCase {
             app.otherElements["listing-review.motion-reduced"]
                 .waitForExistence(timeout: 3)
         )
-        let longTitle = app.textFields["listing-review.title"]
+        let longTitle = app.textViews["listing-review.title"]
         XCTAssertTrue(longTitle.exists)
         XCTAssertGreaterThan(
             stringValue(of: longTitle).count,
@@ -377,7 +377,7 @@ final class ListingReviewUITests: XCTestCase {
 
         // Description is typed where it sits. Nothing is pushed, so the
         // retired one-field editor must not exist to be reached at all.
-        let description = app.textFields["listing-review.description"]
+        let description = app.textViews["listing-review.description"]
         XCTAssertTrue(description.waitForExistence(timeout: 3))
         description.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
@@ -404,8 +404,8 @@ final class ListingReviewUITests: XCTestCase {
                 .contains("Acceptable")
         )
 
-        app.buttons["listing-review.specifics"].tap()
-        let color = app.textFields["listing-review.specific.color"]
+        openItemSpecifics(in: app)
+        let color = app.textViews["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: 3))
         color.tap()
         color.typeText(" Silver")
@@ -419,7 +419,7 @@ final class ListingReviewUITests: XCTestCase {
         // field, so the value cannot be typed past the pricing rerun.
         let brand = app.buttons["listing-review.specific.brand"]
         XCTAssertTrue(brand.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.textFields["listing-review.specific.brand"].exists)
+        XCTAssertFalse(app.textViews["listing-review.specific.brand"].exists)
         brand.tap()
         XCTAssertTrue(
             app.staticTexts[
@@ -483,7 +483,7 @@ final class ListingReviewUITests: XCTestCase {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
 
-        let title = app.textFields["listing-review.title"]
+        let title = app.textViews["listing-review.title"]
         XCTAssertTrue(title.waitForExistence(timeout: loadedTreeTimeout))
         title.tap()
         let keyboard = app.keyboards.firstMatch
@@ -763,16 +763,16 @@ final class ListingReviewUITests: XCTestCase {
         element.value as? String ?? ""
     }
 
-    /// The price was the only inline control with a touch-target assertion.
     /// Title, Description and every non-identity specific share
-    /// `ListingReviewInlineTextField`, and that one cannot make the same
-    /// claim the price does. Its control is a vertical-axis text view, which
-    /// hugs its content and reports 23pt at the smallest Dynamic Type size no
-    /// matter what frame it is given, so asserting a 44pt element height on
-    /// it would be asserting something false.
+    /// `ListingReviewInlineTextField`. It used to be the one inline control
+    /// that could not make the claim the price makes: a vertical-axis text
+    /// field hugs its content and reported 23pt at the smallest Dynamic Type
+    /// size whatever frame it was given, so a 44pt element assertion on it
+    /// would have been asserting something false. Since #918 it wraps a
+    /// `UITextView`, which fills its frame, and the element assertions live in
+    /// the two tests further down.
     ///
-    /// What the seller actually gets is the box, and that is what the two
-    /// tests below measure between them.
+    /// The two tests below are about the box, which is what a finger gets.
     ///
     /// Reach and caret placement pull in opposite directions, and the first
     /// version of the reach fix broke the caret without failing anything. A
@@ -785,9 +785,9 @@ final class ListingReviewUITests: XCTestCase {
     func testATapOnTheGlyphsPutsTheCaretWhereTheFingerIsAndNotAtTheEnd() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
-        app.buttons["listing-review.specifics"].tap()
+        openItemSpecifics(in: app)
 
-        let color = app.textFields["listing-review.specific.color"]
+        let color = app.textViews["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
         let before = stringValue(of: color)
         color.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
@@ -815,9 +815,9 @@ final class ListingReviewUITests: XCTestCase {
     func testTheSharedInlineFieldTakesTapsAboveAndBelowItsGlyphs() {
         let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
         _ = openReview(in: app)
-        app.buttons["listing-review.specifics"].tap()
+        openItemSpecifics(in: app)
 
-        let color = app.textFields["listing-review.specific.color"]
+        let color = app.textViews["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
         let keyboard = app.keyboards.firstMatch
 
@@ -848,6 +848,116 @@ final class ListingReviewUITests: XCTestCase {
 
             app.buttons["listing-review.keyboard-done"].tap()
             XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3), receipt)
+        }
+    }
+
+    /// `contentShape` is touch only. Switch Control, Voice Control, Full
+    /// Keyboard Access and VoiceOver direct-touch exploration all drive the
+    /// accessibility element, so the box taking taps is not enough: the
+    /// element itself has to clear the floor (#918).
+    ///
+    /// Both Dynamic Type sizes are asserted. They fail in opposite
+    /// directions — the accessibility sizes above catch a target that grew
+    /// past its container, and the smallest size catches one derived from
+    /// scaled glyphs rather than from the floor.
+    func testTheInlineTextFieldsPublishAFloorSizedElementAtDefaultDynamicType() {
+        assertInlineTextFieldsPublishFloorSizedElements(extraArguments: [])
+    }
+
+    func testTheInlineTextFieldsPublishAFloorSizedElementAtSmallestDynamicType() {
+        assertInlineTextFieldsPublishFloorSizedElements(
+            extraArguments: ["--dynamic-type=xSmall"]
+        )
+    }
+
+    /// Title, Description and the shared field every non-identity specific
+    /// uses are one component, so they are proved together.
+    private func assertInlineTextFieldsPublishFloorSizedElements(
+        extraArguments: [String],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // Six measurements, and the reason to take them all is that each one
+        // is a separate claim. Stopping at the first failure would prove one
+        // field and leave the other two unmeasured, which is not what the
+        // acceptance asks for.
+        continueAfterFailure = true
+        let app = launch(resetDraft: true, extraArguments: extraArguments)
+        _ = openReview(in: app)
+
+        assertPublishesFloorSizedElement(
+            "listing-review.title",
+            in: app,
+            file: file,
+            line: line
+        )
+
+        // Description is asserted because the acceptance names it, not
+        // because it was ever the thin one. Its `lineLimit` reserves three
+        // lines, and three lines clear the floor at every Dynamic Type size,
+        // so this one assertion also held on the plain `TextField`. Title and
+        // the shared specific field are where the regression lives, and they
+        // are the two that move. Every measurement is recorded as an activity
+        // either way, so a claim about any of them can be read off the run
+        // rather than assumed.
+        assertPublishesFloorSizedElement(
+            "listing-review.description",
+            in: app,
+            file: file,
+            line: line
+        )
+
+        openItemSpecifics(in: app)
+        assertPublishesFloorSizedElement(
+            "listing-review.specific.color",
+            in: app,
+            file: file,
+            line: line
+        )
+    }
+
+    /// Measures the element that carries `identifier` and nothing else.
+    ///
+    /// The count assertion is the point. A container that wraps the control
+    /// and republishes its name would let a 62pt box answer for a 23pt
+    /// element, and the measurement would be of a view no assistive
+    /// technology ever lands on.
+    private func assertPublishesFloorSizedElement(
+        _ identifier: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let matches = app.descendants(matching: .any)
+            .matching(identifier: identifier)
+        XCTAssertTrue(
+            matches.element(boundBy: 0)
+                .waitForExistence(timeout: loadedTreeTimeout),
+            identifier,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            matches.count,
+            1,
+            "Exactly one element may carry \(identifier).",
+            file: file,
+            line: line
+        )
+
+        let element = matches.element(boundBy: 0)
+        let receipt =
+            "\(identifier).frame=\(element.frame), elementType=\(element.elementType.rawValue)"
+        // Named as an activity so a measurement that passes is still on the
+        // run. A receipt that only appears on failure cannot answer "what did
+        // the one that passed actually measure?".
+        XCTContext.runActivity(named: receipt) { _ in
+            assertMeetsTouchTargetFloor(
+                element.frame.height,
+                receipt,
+                file: file,
+                line: line
+            )
         }
     }
 
@@ -887,9 +997,9 @@ final class ListingReviewUITests: XCTestCase {
     func testANonIdentitySpecificCommitsInPlaceWithoutAPushedEditor() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
-        app.buttons["listing-review.specifics"].tap()
+        openItemSpecifics(in: app)
 
-        let color = app.textFields["listing-review.specific.color"]
+        let color = app.textViews["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: 3))
         color.tap()
         color.typeText(" Silver")
@@ -921,7 +1031,7 @@ final class ListingReviewUITests: XCTestCase {
     func testASpentCorrectionLeavesIdentitySpecificsUnavailableAndSaysWhy() {
         let app = launch(fixture: "correction-unavailable", resetDraft: true)
         _ = openReview(in: app)
-        app.buttons["listing-review.specifics"].tap()
+        openItemSpecifics(in: app)
 
         let brand = app.buttons["listing-review.specific.brand"]
         XCTAssertTrue(brand.waitForExistence(timeout: 3))
@@ -929,7 +1039,7 @@ final class ListingReviewUITests: XCTestCase {
             brand.isEnabled,
             "A spent correction leaves no route into an identity value."
         )
-        XCTAssertFalse(app.textFields["listing-review.specific.brand"].exists)
+        XCTAssertFalse(app.textViews["listing-review.specific.brand"].exists)
         XCTAssertEqual(
             app.staticTexts["listing-review.specifics.correction-spent"].label,
             "Brand and Type need guided correction, and you have used yours."
@@ -937,7 +1047,7 @@ final class ListingReviewUITests: XCTestCase {
 
         // Nothing about a spent correction stops a manual edit. Those never
         // cost a credit, so they stay typable.
-        XCTAssertTrue(app.textFields["listing-review.specific.color"].exists)
+        XCTAssertTrue(app.textViews["listing-review.specific.color"].exists)
     }
 
     private func launch(
@@ -997,7 +1107,7 @@ final class ListingReviewUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let row = app.textFields["listing-review.title"]
+        let row = app.textViews["listing-review.title"]
         XCTAssertTrue(
             row.waitForExistence(timeout: 3),
             file: file,
@@ -1051,6 +1161,52 @@ final class ListingReviewUITests: XCTestCase {
         in app: XCUIApplication
     ) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
+    }
+
+    /// Taps the Item specifics row, having first put it clear of the footer.
+    ///
+    /// #918 makes every typed box at least 44pt, which grows the review screen
+    /// and can leave this row underneath the persistent Done footer. A tap
+    /// there lands on Done, which saves and leaves the screen — and then the
+    /// failure surfaces as a missing field twenty lines later, pointing at the
+    /// wrong thing. The scroll and the receipt belong next to the gesture.
+    private func openItemSpecifics(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let entry = app.buttons["listing-review.specifics"]
+        XCTAssertTrue(
+            entry.waitForExistence(timeout: loadedTreeTimeout),
+            file: file,
+            line: line
+        )
+        // Short momentum-free drags, for the reason `scrollUntilClearOfFooter`
+        // documents: a flick overshoots by whole sections on a tall layout.
+        for _ in 0..<12 where !entryIsClearOfTheFooter(entry, in: app) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.60))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: app.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: 0.50)
+                    )
+                )
+        }
+        XCTAssertTrue(
+            entryIsClearOfTheFooter(entry, in: app),
+            "Item specifics never cleared the Done footer.\n"
+                + app.debugDescription,
+            file: file,
+            line: line
+        )
+        entry.tap()
+        XCTAssertTrue(
+            app.navigationBars["Item specifics"]
+                .waitForExistence(timeout: loadedTreeTimeout),
+            "The tap has to push Item specifics, not save and leave.",
+            file: file,
+            line: line
+        )
     }
 
     /// `isHittable` is computed from the element's own frame, so it stays true
