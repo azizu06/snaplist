@@ -773,6 +773,15 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
                 )
                 .accessibilityIdentifier(identifier)
         }
+        // A vertical-axis field is a text view that hugs its content, so at
+        // the smallest Dynamic Type size the part of the box that answers a
+        // touch is 23pt of glyphs. Giving that field a 44pt frame does not
+        // help: it takes the room without taking the height, and a tap in the
+        // space it left behind reaches nothing. The box is 62pt and is what
+        // the seller sees, so the box is what takes the tap, the same way the
+        // price field already worked.
+        .contentShape(Rectangle())
+        .onTapGesture { focus = focusValue }
         .onChange(of: text) { _, typed in
             edits.typed[field] = typed == value ? nil : typed
         }

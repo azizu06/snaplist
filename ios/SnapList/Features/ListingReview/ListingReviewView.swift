@@ -376,6 +376,11 @@ struct ListingReviewView: View {
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .multilineTextAlignment(.leading)
                 .textFieldStyle(.plain)
+                // The retired price button carried this floor and the
+                // replacement field did not, which no compiler and no
+                // identifier grep would have caught.
+                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                .contentShape(Rectangle())
                 .accessibilityLabel(
                     draft.sellerPriceOverride == nil
                         ? "Suggested price"

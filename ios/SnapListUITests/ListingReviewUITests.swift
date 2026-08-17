@@ -451,6 +451,10 @@ final class ListingReviewUITests: XCTestCase {
             app.scrollViews.firstMatch.swipeDown()
         }
         XCTAssertTrue(price.isHittable)
+        // The keyboard belongs to whatever had focus last, and Done gave it
+        // up two screens ago. Deleting without taking focus first types into
+        // nothing, which reads as a product failure and is not one.
+        price.tap()
         clear(price, in: app)
         price.typeText("0")
         app.buttons["listing-review.keyboard-done"].tap()
@@ -554,7 +558,7 @@ final class ListingReviewUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, frameReceipt)
             XCTAssertLessThanOrEqual(control.frame.maxX, window.frame.maxX, frameReceipt)
             XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, frameReceipt)
-            XCTAssertGreaterThanOrEqual(control.frame.height, 44, frameReceipt)
+            assertMeetsTouchTargetFloor(control.frame.height, frameReceipt)
         }
     }
 
@@ -573,7 +577,63 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
         let frameReceipt = "price.frame=\(price.frame)"
         XCTAssertTrue(price.isHittable, frameReceipt)
-        XCTAssertGreaterThanOrEqual(price.frame.height, 44, frameReceipt)
+        assertMeetsTouchTargetFloor(price.frame.height, frameReceipt)
+    }
+
+    /// A control laid out at exactly the floor comes back from XCUITest as
+    /// 43.99999999999994, because the height is the sum of a scaled font
+    /// metric and two paddings. Rounding to the nearest point keeps the
+    /// assertion at the scale the floor is written in. A control that is
+    /// genuinely short still fails: 43.4 rounds to 43.
+    private func assertMeetsTouchTargetFloor(
+        _ measurement: CGFloat,
+        _ receipt: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertGreaterThanOrEqual(
+            measurement.rounded(),
+            44,
+            receipt,
+            file: file,
+            line: line
+        )
+    }
+
+    /// The price was the only inline control with a touch-target assertion.
+    /// Title, Description and every non-identity specific share
+    /// `ListingReviewInlineTextField`, and that one cannot make the same
+    /// claim the price does. Its control is a vertical-axis text view, which
+    /// hugs its content and reports 23pt at the smallest Dynamic Type size no
+    /// matter what frame it is given, so asserting a 44pt element height on
+    /// it would be asserting something false.
+    ///
+    /// What the seller actually gets is the box, and that is what is measured
+    /// here: a tap 10pt above the glyphs and a tap 10pt below them both reach
+    /// the field, which is 43pt of vertical reach around a 23pt element and
+    /// lands inside the border the seller can see. Both taps are needed. One
+    /// of them passing on its own would not distinguish a box that takes taps
+    /// from a text view that happens to sit near the point tapped.
+    func testTheSharedInlineFieldTakesTapsAboveAndBelowItsGlyphs() {
+        let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let color = app.textFields["listing-review.specific.color"]
+        XCTAssertTrue(color.waitForExistence(timeout: loadedTreeTimeout))
+        let frame = color.frame
+        let keyboard = app.keyboards.firstMatch
+
+        for y in [frame.minY - 10, frame.maxY + 10] {
+            let receipt = "color.frame=\(frame), tapped y=\(y)"
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: frame.midX, dy: y))
+                .tap()
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 3), receipt)
+
+            app.buttons["listing-review.keyboard-done"].tap()
+            XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3), receipt)
+        }
     }
 
     /// Scrolls `element` into the band above `footerTopEdge` using small,
