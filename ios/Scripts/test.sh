@@ -71,7 +71,20 @@ snaplist_release_build_lock() {
   fi
 }
 
+snaplist_release_build_lock_after_signal() {
+  snaplist_release_build_lock
+  exit $(( 128 + $1 ))
+}
+
+# EXIT alone does not cover the way these runs actually end. zsh does not run
+# TRAPEXIT when an untrapped SIGTERM kills the shell, and an agent that has
+# decided a build is hung sends exactly that. Without these the owner file
+# outlives the run and the next waiter reads out a pid that is already gone,
+# which is the one diagnostic the waiter exists to provide.
 trap snaplist_release_build_lock EXIT
+trap 'snaplist_release_build_lock_after_signal 1' HUP
+trap 'snaplist_release_build_lock_after_signal 2' INT
+trap 'snaplist_release_build_lock_after_signal 15' TERM
 
 if (( ${#snaplist_test_arguments} )); then
   snaplist_lock_scope=${(j: :)snaplist_test_arguments}
