@@ -805,13 +805,15 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(after.hasPrefix("Z"), receipt)
     }
 
-    /// The other half of the same claim: reach. The box is 62pt tall and
-    /// carries the `.contentShape`, so what answers a touch is 62pt even
-    /// where the element is 23pt. The two probes sit 10pt outside the glyphs
-    /// on each side, a 43pt span well inside the box and entirely outside the
-    /// element. Both taps are needed. One of them passing on its own would
-    /// not distinguish a box that takes taps from a text view that happens to
-    /// sit near the point tapped.
+    /// The other half of the same claim: reach. `color`'s own accessibility
+    /// frame is the `UITextView` itself, floored to 44pt by #918
+    /// (`SnapListMetrics.minimumTouchTarget`) — not the small hugging frame
+    /// this comment used to describe. The two probes sit 10pt outside that
+    /// frame on each side: outside the element, but still inside the label
+    /// band and padding that the field's background `.onTapGesture` picks up
+    /// (`ListingReviewComponents.swift`). Both taps are needed. One of them
+    /// passing on its own would not distinguish a box that takes taps from a
+    /// text view that happens to sit near the point tapped.
     func testTheSharedInlineFieldTakesTapsAboveAndBelowItsGlyphs() {
         let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
         _ = openReview(in: app)

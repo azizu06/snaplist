@@ -20,10 +20,13 @@ import {
  */
 
 const {
+  adminRpc,
   createEbayAdapterForUser,
   createMobileEbayPublishService,
   publishListingToEbayAndNotify,
+  tenantRpc,
 } = vi.hoisted(() => ({
+  adminRpc: vi.fn(async (..._args: unknown[]) => ({ data: false, error: null })),
   createEbayAdapterForUser: vi.fn(async (..._args: unknown[]) => ({
     kind: "adapter",
   })),
@@ -33,6 +36,7 @@ const {
   publishListingToEbayAndNotify: vi.fn(async (..._args: unknown[]) => ({
     ebayStatus: "published",
   })),
+  tenantRpc: vi.fn(async (..._args: unknown[]) => ({ data: false, error: null })),
 }));
 
 vi.mock("@/lib/marketplace/ebay", async (importOriginal) => ({
@@ -45,7 +49,18 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: vi.fn() }),
 }));
 vi.mock("@/lib/supabase/tenant-server", () => ({
-  createTenantServerClient: async () => ({ rpc: vi.fn() }),
+  createTenantServerClient: async () => ({ rpc: tenantRpc }),
+}));
+// The pipeline worker builds its push dispatcher from the privileged admin
+// client (`createInternalPipelineWorkerCapabilities`, called directly below,
+// unmocked). Faked here so exercising its dispatcher never reaches a real
+// database, the same way the tenant client above is faked for the other two
+// entry points.
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    rpc: adminRpc,
+    storage: { from: () => ({ download: vi.fn(), upload: vi.fn() }) },
+  }),
 }));
 vi.mock("@/lib/auth", () => ({ getUserId: async () => "user_seller" }));
 vi.mock("@/lib/abuse", () => ({ enforceRateLimit: async () => undefined }));
@@ -85,8 +100,10 @@ afterAll(() => {
 });
 
 beforeEach(() => {
-  publishListingToEbayAndNotify.mockClear();
+  adminRpc.mockClear();
   createMobileEbayPublishService.mockClear();
+  publishListingToEbayAndNotify.mockClear();
+  tenantRpc.mockClear();
 });
 
 function isDispatcher(value: unknown): boolean {
@@ -97,8 +114,29 @@ function isDispatcher(value: unknown): boolean {
   );
 }
 
+/**
+ * `isDispatcher` checks shape alone, and the no-op fallback
+ * (`unconfiguredSellerPushDispatcher` in composition.ts) has the identical
+ * shape — it exists precisely to satisfy this interface while sending
+ * nothing. So the shape check can't tell a wired dispatcher from a silently
+ * unconfigured one; only firing it and watching whether it reaches the store
+ * can. A real dispatcher's `claimDelivery` calls `rpc("claim_seller_push_delivery", …)`
+ * before it can send anything; the no-op only logs and never touches `rpc`.
+ */
+async function firesThroughToTheStore(
+  push: unknown,
+  rpc: ReturnType<typeof vi.fn>,
+  moment: "listingPublished" | "listingReady" = "listingPublished",
+): Promise<boolean> {
+  const event = moment === "listingPublished"
+    ? { userId: "user_seller", listingId: "listing-1", externalListingId: "ext-1", itemName: null }
+    : { userId: "user_seller", runId: "run-1", itemName: null };
+  await (push as Record<typeof moment, (event: unknown) => Promise<void>>)[moment](event);
+  return rpc.mock.calls.some(([functionName]) => functionName === "claim_seller_push_delivery");
+}
+
 describe("publish entry points", () => {
-  it("hands the web route's publish a dispatcher", async () => {
+  it("hands the web route's publish a dispatcher wired to the store, not the no-op fallback", async () => {
     const response = await POST(
       new Request("https://snaplist.example/api/ebay/publish", {
         method: "POST",
@@ -109,12 +147,12 @@ describe("publish entry points", () => {
 
     expect(response.status).toBe(200);
     const options = publishListingToEbayAndNotify.mock.calls[0]?.[4];
-    expect(isDispatcher((options as { push?: unknown } | undefined)?.push)).toBe(
-      true,
-    );
+    const push = (options as { push?: unknown } | undefined)?.push;
+    expect(isDispatcher(push)).toBe(true);
+    expect(await firesThroughToTheStore(push, tenantRpc)).toBe(true);
   });
 
-  it("hands the mobile composition's publish service a dispatcher", async () => {
+  it("hands the mobile composition's publish service a dispatcher wired to the store, not the no-op fallback", async () => {
     await handleMobileEbayPublishRequest(
       new Request(
         "https://snaplist.example/v1/listings/11111111-1111-4111-8111-111111111111/ebay/publish",
@@ -126,14 +164,18 @@ describe("publish entry points", () => {
       | { pushFor?: (client: unknown) => unknown }
       | undefined;
     expect(typeof dependencies?.pushFor).toBe("function");
-    expect(isDispatcher(dependencies!.pushFor!({ rpc: vi.fn() }))).toBe(true);
+    const clientRpc = vi.fn(async (..._args: unknown[]) => ({ data: false, error: null }));
+    const push = dependencies!.pushFor!({ rpc: clientRpc });
+    expect(isDispatcher(push)).toBe(true);
+    expect(await firesThroughToTheStore(push, clientRpc)).toBe(true);
   });
 
-  it("hands the pipeline worker a dispatcher for the ready moment", async () => {
+  it("hands the pipeline worker a dispatcher for the ready moment wired to the store, not the no-op fallback", async () => {
     // The third fire point, and the only one with no seller session behind it.
     // If this root forgets, a listing finishes and nobody is told.
     const capabilities = createInternalPipelineWorkerCapabilities();
 
     expect(isDispatcher(capabilities.push)).toBe(true);
+    expect(await firesThroughToTheStore(capabilities.push, adminRpc, "listingReady")).toBe(true);
   });
 });

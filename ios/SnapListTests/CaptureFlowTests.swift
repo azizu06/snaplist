@@ -7886,6 +7886,48 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(unsupported.flashMode, .off)
     }
 
+    /// #916: `isDispatcher`-shaped coverage isn't the concern here — this is the
+    /// camera-forwarding half of `selectZoomLens`. Wiping the body to a no-op
+    /// (or dropping the `camera.selectZoomLens` forward while keeping the state
+    /// write) previously left the suite green with nothing exercising either.
+    func testZoomLensSelectionForwardsToTheCameraWhenOffered() {
+        let dualLens = ScanZoomControl.resolve(
+            hasUltraWideCamera: true,
+            switchOverVideoZoomFactors: [2]
+        )
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized,
+            zoomControl: dualLens
+        )
+        let model = makeModel(camera: camera)
+
+        XCTAssertEqual(model.zoomLens, .wide)
+
+        model.selectZoomLens(.ultraWide)
+
+        XCTAssertEqual(model.zoomLens, .ultraWide)
+        XCTAssertEqual(camera.requestedZoomLenses, [.ultraWide])
+    }
+
+    func testZoomLensSelectionIsIgnoredWhenTheCameraCannotReachIt() {
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized,
+            zoomControl: .wideOnly
+        )
+        let model = makeModel(camera: camera)
+
+        model.selectZoomLens(.ultraWide)
+
+        XCTAssertEqual(
+            model.zoomLens,
+            .wide,
+            "wideOnly has no ultra wide lens to switch to."
+        )
+        XCTAssertTrue(camera.requestedZoomLenses.isEmpty)
+    }
+
     func testUnavailableAndDeniedCameraStatesOfferHonestRecovery() async {
         let unavailableCamera = TestCaptureCamera(isAvailable: false, authorization: .authorized)
         let unavailable = makeModel(camera: unavailableCamera)
@@ -11157,11 +11199,13 @@ private final class TestCaptureCamera: CaptureCamera {
     let session = AVCaptureSession()
     let isAvailable: Bool
     let isFlashAvailable: Bool
+    var zoomControl: ScanZoomControl
     var authorization: CaptureCameraAuthorization
     var startCount = 0
     var stopCount = 0
     var captureCount = 0
     var requestedFlashModes: [CaptureFlashMode] = []
+    var requestedZoomLenses: [ScanZoomLens] = []
     private(set) var isSessionActive = false
     var frameHandler: ((CaptureFrame) -> Void)?
     private let suspendsCapture: Bool
@@ -11174,11 +11218,13 @@ private final class TestCaptureCamera: CaptureCamera {
         isAvailable: Bool,
         authorization: CaptureCameraAuthorization,
         isFlashAvailable: Bool = false,
+        zoomControl: ScanZoomControl = .wideOnly,
         suspendsCapture: Bool = false,
         captureError: Error? = nil
     ) {
         self.isAvailable = isAvailable
         self.isFlashAvailable = isFlashAvailable
+        self.zoomControl = zoomControl
         self.authorization = authorization
         self.suspendsCapture = suspendsCapture
         self.captureError = captureError
@@ -11200,6 +11246,10 @@ private final class TestCaptureCamera: CaptureCamera {
 
     func setFlashMode(_ mode: CaptureFlashMode) {
         requestedFlashModes.append(mode)
+    }
+
+    func selectZoomLens(_ lens: ScanZoomLens) {
+        requestedZoomLenses.append(lens)
     }
 
     func capturePhoto() async throws -> Data {
