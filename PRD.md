@@ -112,14 +112,16 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
   guided correction; the full request fingerprint also covers ordered inputs and voice identity.
 - Raw voice is temporary processing input. A bounded transcript may persist as seller context and
   follows item/account deletion. It cannot override image, catalog, sold-evidence, or marketplace
-  truth. Issue #351 owns the behavior contract; this PRD does not implement it.
+  truth. Issue #351 owns the behavior contract; #774 implements the accepted voice-to-listing path
+  with photos-only fallback for every terminal non-transcribed outcome.
 - The existing durable Pipeline remains the only analysis path. Supabase Queues carry the strict
   `{ run_id, schema_version }` wake-up envelope; the tenant-owned `pipeline_runs` record is product
   truth. Queue authority is not tenant-domain authority.
 - Seller-facing clients map durable truth to plain-language Trophy Wall states. They do not display
   queue terms or fabricate progress.
-- Issue #352 owns the mobile one-to-five submission behavior. Until it lands, older API limits are an
-  implementation gap, not product authority.
+- Issue #352 implements mobile one-to-five submission across verified upload, durable acceptance,
+  worker recovery, and review projection. Older four-photo contracts are historical records, not
+  current product authority.
 
 ### Tenancy, guest authority, and credits
 
@@ -188,8 +190,9 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 
 - Test external behavior at the highest stable seam; do not assert implementation details.
 - Documentation and design contracts must parse, link correctly, and agree on the locked decisions.
-- Intake behavior tests owned by #351/#352 cover one and five photos, zero/six rejection, ordering,
-  optional voice limits/fallback, relaunch recovery, ambiguous retry, and exact replay.
+- Intake behavior tests established by #351/#352 and extended by #774 cover one and five photos,
+  zero/six rejection, ordering, optional voice limits/fallback, relaunch recovery, ambiguous retry,
+  exact replay, and durable voice-context reuse.
 - Pipeline tests preserve RLS tenancy, durable recovery, credit settlement/restoration, and coherent
   completion without garment-measurement composition.
 - Pricing tests cover conditional retrieval expansion, maximum five verified matches, deterministic
