@@ -68,10 +68,13 @@ interfaces:
 - A valid seller price override is the effective price for eBay publish and every export pack.
 - The eBay adapter is the only direct marketplace mutation seam and remains mockable offline.
 
-Issue [#351](https://github.com/azizu06/snaplist/issues/351) owns the optional voice-context behavior
-contract. Issue [#352](https://github.com/azizu06/snaplist/issues/352) owns the mobile one-to-five
-photo submission behavior. This documentation describes the approved destination without claiming
-those implementation gaps are already complete.
+One-to-five photo submission is implemented across the native client, verified upload, durable
+acceptance, worker recovery, and review projection under
+[#352](https://github.com/azizu06/snaplist/issues/352). Optional voice capture and upload follow the
+contract from [#351](https://github.com/azizu06/snaplist/issues/351), and
+[#774](https://github.com/azizu06/snaplist/issues/774) carries accepted voice context through the
+durable listing pipeline. Hosted transcription remains explicitly environment-controlled, and every
+terminal voice failure continues through the photos-only path.
 
 ## Stack
 
