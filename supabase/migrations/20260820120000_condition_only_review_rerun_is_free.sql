@@ -31,6 +31,52 @@ alter table private.mobile_listing_review_saves
 alter table private.guided_correction_completion_capabilities
   add column if not exists condition_only boolean not null default false;
 
+-- #919 review round 1. `guided_correction_completed_at is not null` used to be
+-- the ONLY cap on regeneration: a settled reservation got exactly one guided
+-- rerun, ever. The exemption above skips both that pre-check and that write, and
+-- the capability upsert re-arms `consumed_at`, so without this counter a seller
+-- toggling condition back and forth would run the pricing router and a grounded
+-- generation against the paid provider without bound, on one item, leaving no
+-- accounting row behind. The route is the wrong place to bound it — the cap
+-- belongs next to the reservation that does the accounting.
+--
+-- The counter also closes the ledger blind spot the same column created: an
+-- unspent included correction with zero reruns and one with forty were
+-- previously indistinguishable.
+alter table public.ai_item_credit_reservations
+  add column if not exists condition_only_reruns integer not null default 0;
+
+alter table public.ai_item_credit_reservations
+  drop constraint if exists ai_item_credit_reservation_condition_reruns_check;
+
+alter table public.ai_item_credit_reservations
+  add constraint ai_item_credit_reservation_condition_reruns_check
+  check (condition_only_reruns >= 0);
+
+-- Free condition-only reruns allowed per settled reservation, i.e. per item.
+--
+-- Three. Condition is one enum field, and the seller's job is to move the
+-- model's photo guess to the grade they are holding. That lands in one save;
+-- two more absorb genuine second thoughts after re-reading the photos or eBay's
+-- condition guidance. Past that the seller is sampling the price surface, which
+-- is the unbounded provider spend this cap exists to stop.
+--
+-- Exceeding it is NOT a new refusal. The save simply stops being exempt and
+-- falls back to the pre-#919 accounting, so it spends the included correction if
+-- one is unspent and is refused by the existing guard if it is not. Worst case
+-- per item is therefore four regenerations (three free condition reruns plus the
+-- one included identity correction) — a bounded, small multiple of the single
+-- run the seller already paid for, and never worse than before this issue.
+create or replace function private.condition_only_rerun_allowance()
+returns integer
+language sql
+immutable
+set search_path = ''
+as $$ select 3 $$;
+
+revoke all on function private.condition_only_rerun_allowance()
+  from public, anon, authenticated, service_role;
+
 create or replace function public.claim_mobile_listing_review_save(
   p_action text,
   p_run_id uuid,
@@ -64,6 +110,7 @@ declare
   v_mode text;
   v_condition_changed boolean;
   v_specifics_changed boolean;
+  v_identity_specifics_changed boolean;
   v_scope text;
   v_receipt jsonb;
 begin
@@ -269,6 +316,21 @@ begin
   v_condition_changed := v_item.condition is distinct from p_condition;
   v_specifics_changed :=
     v_normalized_current_specifics is distinct from v_requested_specifics;
+  -- #919 review round 1. Condition is MIRRORED into the specifics array:
+  -- `coreSpecifics` (src/lib/listing/generate.ts) emits the fixed `Condition`
+  -- literal whenever the item core carries a condition, the review projection
+  -- hands every specific to the client, and the client echoes them back. The
+  -- save intent schema then rewrites that reserved entry to `p_condition`. So a
+  -- condition-only save ALWAYS arrives with a changed `Condition` specific, and
+  -- diffing the mirror as identity made the exemption below unreachable.
+  --
+  -- The mirror is dropped from the SCOPE diff only. `v_specifics_changed` above
+  -- still sees the whole array, so a `Condition` specific that disagrees with
+  -- `p_condition` keeps forcing coherent regeneration rather than being
+  -- persisted as-is on an outbound path.
+  v_identity_specifics_changed :=
+    (v_normalized_current_specifics - 'condition')
+      is distinct from (v_requested_specifics - 'condition');
   v_mode := case
     when v_condition_changed or v_specifics_changed
     then 'regeneration'
@@ -282,7 +344,7 @@ begin
   -- the same save makes it an identity correction again, and it pays.
   v_scope := case
     when v_mode <> 'regeneration' then null
-    when v_specifics_changed then 'identity'
+    when v_identity_specifics_changed then 'identity'
     else 'condition'
   end;
 
@@ -472,6 +534,15 @@ begin
     raise exception using
       errcode = 'P0001',
       message = 'The included guided correction is unavailable.';
+  end if;
+  -- #919 review round 1. Spend the exemption, not the seller's trust: once the
+  -- free condition reruns for this reservation are used up the save is treated
+  -- as an ordinary guided correction again, so the guard below applies to it
+  -- exactly as it did before this issue.
+  if v_condition_only
+    and v_reservation.condition_only_reruns
+        >= private.condition_only_rerun_allowance() then
+    v_condition_only := false;
   end if;
   if not v_condition_only
     and v_reservation.guided_correction_completed_at is not null then
@@ -723,7 +794,24 @@ begin
     v_snapshot->'item', v_snapshot->'price_result', v_evidence, v_now
   );
 
-  if not v_cap.condition_only then
+  if v_cap.condition_only then
+    -- #919 review round 1. A free rerun still costs a pricing-router pass and a
+    -- grounded generation, so it is recorded. Gated on the capability still
+    -- being unconsumed for the same reason the branch below is gated on
+    -- `guided_correction_completed_at`: a replay must not count twice.
+    update public.ai_item_credit_reservations
+    set condition_only_reruns = condition_only_reruns + 1, updated_at = v_now
+    where id = v_cap.reservation_id
+      and exists (
+        select 1
+        from private.guided_correction_completion_capabilities capability
+        where capability.reservation_id = v_cap.reservation_id
+          and capability.consumed_at is null
+      );
+    if not found then
+      raise exception using errcode = '55000', message = 'Guided correction completion was already recorded.';
+    end if;
+  else
     update public.ai_item_credit_reservations
     set guided_correction_completed_at = v_now, updated_at = v_now
     where id = v_cap.reservation_id and guided_correction_completed_at is null;

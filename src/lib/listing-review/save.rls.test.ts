@@ -64,6 +64,43 @@ interface ReviewFixture {
   userId: string;
 }
 
+/**
+ * What the pipeline actually writes into `copy.itemSpecifics`. `coreSpecifics` in
+ * `src/lib/listing/generate.ts` emits the fixed literals Brand/Model/Type/Condition
+ * whenever the item core carries them, so a listing that reaches Listing Review
+ * ALWAYS mirrors the item condition into the specifics array.
+ *
+ * A fixture that omits Type/Condition cannot exercise the #919 scope gate at all:
+ * condition would be the only field that moves, and the gate's specifics diff could
+ * never disagree with it. Keep this production-shaped (#919 review round 1).
+ */
+function pipelineSpecifics(
+  model: string,
+  condition: string,
+): Record<string, string> {
+  return {
+    Brand: "Sony",
+    Model: model,
+    Type: "electronics",
+    Condition: condition,
+  };
+}
+
+/**
+ * What the seller's client hands back. `read.ts` projects every `copy.itemSpecifics`
+ * entry into the draft and `ListingReviewClient.swift` echoes `draft.specifics`
+ * verbatim, so a real save intent carries the mirrored Condition too — the intent
+ * schema then rewrites that reserved entry to `intent.condition`.
+ */
+function sellerSpecifics(
+  model: string,
+  condition: string,
+): Array<{ name: string; value: string }> {
+  return Object.entries(pipelineSpecifics(model, condition)).map(
+    ([name, value]) => ({ name, value }),
+  );
+}
+
 const BASE_RESULT: PipelineResult = {
   attributes: {
     brand: "Sony",
@@ -94,10 +131,7 @@ const BASE_RESULT: PipelineResult = {
     title: "Sony WH-1000XM4 Noise-Canceling Headphones",
     description: "Clean, fully working headphones with case and charging cable.",
     fields: {
-      itemSpecifics: {
-        Brand: "Sony",
-        Model: "WH-1000XM4",
-      },
+      itemSpecifics: pipelineSpecifics("WH-1000XM4", "very-good"),
     },
   },
   model: "test-vision",
@@ -291,8 +325,28 @@ async function durableState(
   return result.rows[0]?.state;
 }
 
-const UNSPENT_INCLUDED_CORRECTION = [
-  { correction_spent: false, correction_started: false, state: "settled" },
+/**
+ * `reruns` is the free condition-only regeneration count. Stating it on every
+ * ledger assertion is the point: before #919 review round 1 the ledger could not
+ * tell an unspent included correction with zero reruns from one with forty, and
+ * the exemption removed the only cap those reruns had.
+ */
+const unspentIncludedCorrection = (reruns = 0) => [
+  {
+    condition_only_reruns: reruns,
+    correction_spent: false,
+    correction_started: false,
+    state: "settled",
+  },
+];
+
+const spentIncludedCorrection = (reruns = 0) => [
+  {
+    condition_only_reruns: reruns,
+    correction_spent: true,
+    correction_started: true,
+    state: "settled",
+  },
 ];
 
 /**
@@ -305,6 +359,7 @@ async function correctionLedger(
 ): Promise<unknown[]> {
   const result = await database.query(
     `select reservation.state,
+            reservation.condition_only_reruns,
             reservation.guided_correction_started_at is not null
               as correction_started,
             reservation.guided_correction_completed_at is not null
@@ -420,10 +475,7 @@ async function completeMockedCorrection(input: {
         title: `Generated Sony ${model}`,
         description: "Generated coherent correction copy.",
         fields: {
-          itemSpecifics: {
-            Brand: "Sony",
-            Model: model,
-          },
+          itemSpecifics: pipelineSpecifics(model, condition),
         },
       },
     },
@@ -717,6 +769,8 @@ describe("mobile Listing Review save RLS authority", () => {
           specifics: [
             { name: " Brand ", value: " Sony " },
             { name: "Model", value: " WH-1000XM4 " },
+            { name: " Type ", value: " electronics " },
+            { name: "Condition", value: " very-good " },
           ],
           sellerPriceOverride: 179.995,
         };
@@ -875,10 +929,7 @@ describe("mobile Listing Review save RLS authority", () => {
           title: BASE_RESULT.listing.title,
           description: BASE_RESULT.listing.description,
           condition: "good",
-          specifics: [
-            { name: "Brand", value: "Sony" },
-            { name: "Model", value: "WH-1000XM5" },
-          ],
+          specifics: sellerSpecifics("WH-1000XM5", "good"),
           sellerPriceOverride: 220,
         };
         const unchangedProviderWork = vi.fn(async () => {
@@ -1017,8 +1068,7 @@ describe("mobile Listing Review save RLS authority", () => {
           description: "Staged seller copy wins after coherent regeneration.",
           condition: "good",
           specifics: [
-            { name: "Brand", value: "Sony" },
-            { name: "Model", value: "WH-1000XM5" },
+            ...sellerSpecifics("WH-1000XM5", "good"),
             { name: "Color", value: "Black" },
           ],
           sellerPriceOverride: 210,
@@ -1322,12 +1372,15 @@ describe("mobile Listing Review save RLS authority", () => {
       const conditionUserId = `user_test_review_condition_${crypto.randomUUID()}`;
       const identityUserId = `user_test_review_identity_${crypto.randomUUID()}`;
       const copyUserId = `user_test_review_copy_${crypto.randomUUID()}`;
-      userIds.push(conditionUserId, identityUserId, copyUserId);
-      const [conditionToken, identityToken, copyToken] = await Promise.all([
-        mintUserJwt(conditionUserId),
-        mintUserJwt(identityUserId),
-        mintUserJwt(copyUserId),
-      ]);
+      const desyncUserId = `user_test_review_desync_${crypto.randomUUID()}`;
+      userIds.push(conditionUserId, identityUserId, copyUserId, desyncUserId);
+      const [conditionToken, identityToken, copyToken, desyncToken] =
+        await Promise.all([
+          mintUserJwt(conditionUserId),
+          mintUserJwt(identityUserId),
+          mintUserJwt(copyUserId),
+          mintUserJwt(desyncUserId),
+        ]);
 
       // A declared-condition change is the seller supplying ground truth the
       // model guessed from photos. It reruns everything and spends nothing.
@@ -1342,7 +1395,7 @@ describe("mobile Listing Review save RLS authority", () => {
         () => conditionOwner,
       );
       expect(await correctionLedger(database, conditionUserId)).toEqual(
-        UNSPENT_INCLUDED_CORRECTION,
+        unspentIncludedCorrection(0),
       );
 
       const conditionKey = crypto.randomUUID();
@@ -1351,11 +1404,11 @@ describe("mobile Listing Review save RLS authority", () => {
         title: BASE_RESULT.listing.title,
         description: BASE_RESULT.listing.description,
         condition: "good",
-        specifics: [
-          { name: "Brand", value: "Sony" },
-          { name: "Model", value: "WH-1000XM4" },
-        ],
-        sellerPriceOverride: 149.99,
+        specifics: sellerSpecifics("WH-1000XM4", "good"),
+        // Deliberately NOT the seeded 149.99. A probe that reads the same number
+        // either way cannot tell "the correction commit preserved the seller's
+        // price" from "it rewrote it to the same value" (#919 review round 1).
+        sellerPriceOverride: 139.49,
       };
       let overrideDuringRerun: string | null = null;
       const conditionRegenerate = vi.fn(async () => {
@@ -1388,15 +1441,17 @@ describe("mobile Listing Review save RLS authority", () => {
       expect(conditionStates[0]).toBe("regeneration");
       expect(conditionRegenerate).toHaveBeenCalledOnce();
       expect(conditionReceipt.reviewRevision).toBe(conditionKey);
-      // The correction commit itself must leave the seller's price alone.
+      // The correction commit itself must leave the seller's price alone: mid-rerun
+      // the item still carries the SEEDED override, not the one this save stages.
       expect(overrideDuringRerun).toBe("149.99");
       expect(await correctionLedger(database, conditionUserId)).toEqual(
-        UNSPENT_INCLUDED_CORRECTION,
+        unspentIncludedCorrection(1),
       );
+      // …and the staged override is what the finished save leaves behind.
       expect(await reviewState(database, conditionFixture.itemId)).toEqual({
         condition: "good",
         model: "WH-1000XM4",
-        price_override: "149.99",
+        price_override: "139.49",
         review_revision: conditionKey,
       });
 
@@ -1429,7 +1484,109 @@ describe("mobile Listing Review save RLS authority", () => {
       });
       expect(secondConditionRegenerate).toHaveBeenCalledOnce();
       expect(await correctionLedger(database, conditionUserId)).toEqual(
-        UNSPENT_INCLUDED_CORRECTION,
+        unspentIncludedCorrection(2),
+      );
+
+      // The exemption is bounded. Every free rerun is a real pricing-router pass
+      // and a real grounded generation against the paid provider, and skipping
+      // `guided_correction_completed_at` removed the only cap those reruns used
+      // to have. The third is the last free one (#919 review round 1).
+      const thirdConditionKey = crypto.randomUUID();
+      const thirdConditionRegenerate = vi.fn(async () => {
+        await completeMockedCorrection({
+          admin,
+          fixture: conditionFixture,
+          owner: conditionOwner,
+          key: thirdConditionKey,
+          expectedReviewRevision: secondConditionKey,
+          expectedRunId: secondConditionKey,
+          correctedModel: "WH-1000XM4",
+          correctedCondition: "good",
+        });
+      });
+      await createListingReviewSaver(conditionData, {
+        regenerate: thirdConditionRegenerate,
+      }).save({
+        runId: conditionFixture.runId,
+        idempotencyKey: thirdConditionKey,
+        intent: {
+          ...conditionIntent,
+          condition: "good",
+          expectedReviewRevision: secondConditionKey,
+        },
+        userId: conditionUserId,
+        bearerToken: conditionToken,
+      });
+      expect(thirdConditionRegenerate).toHaveBeenCalledOnce();
+      expect(await correctionLedger(database, conditionUserId)).toEqual(
+        unspentIncludedCorrection(3),
+      );
+
+      // Past the cap the save is NOT refused — it stops being exempt and falls
+      // back to the accounting it had before #919, so this one spends the
+      // included correction. The counter stops moving because this rerun is no
+      // longer a free one.
+      const cappedConditionKey = crypto.randomUUID();
+      const cappedConditionRegenerate = vi.fn(async () => {
+        await completeMockedCorrection({
+          admin,
+          fixture: conditionFixture,
+          owner: conditionOwner,
+          key: cappedConditionKey,
+          expectedReviewRevision: thirdConditionKey,
+          expectedRunId: thirdConditionKey,
+          correctedModel: "WH-1000XM4",
+          correctedCondition: "very-good",
+        });
+      });
+      await createListingReviewSaver(conditionData, {
+        regenerate: cappedConditionRegenerate,
+      }).save({
+        runId: conditionFixture.runId,
+        idempotencyKey: cappedConditionKey,
+        intent: {
+          ...conditionIntent,
+          condition: "very-good",
+          expectedReviewRevision: thirdConditionKey,
+        },
+        userId: conditionUserId,
+        bearerToken: conditionToken,
+      });
+      expect(cappedConditionRegenerate).toHaveBeenCalledOnce();
+      expect(await correctionLedger(database, conditionUserId)).toEqual(
+        spentIncludedCorrection(3),
+      );
+
+      // …and with both the free reruns and the included correction gone, the
+      // next one fails closed on the guard that was already there.
+      const exhaustedConditionKey = crypto.randomUUID();
+      await expect(
+        createListingReviewSaver(conditionData, {
+          regenerate: () =>
+            completeMockedCorrection({
+              admin,
+              fixture: conditionFixture,
+              owner: conditionOwner,
+              key: exhaustedConditionKey,
+              expectedReviewRevision: cappedConditionKey,
+              expectedRunId: cappedConditionKey,
+              correctedModel: "WH-1000XM4",
+              correctedCondition: "good",
+            }),
+        }).save({
+          runId: conditionFixture.runId,
+          idempotencyKey: exhaustedConditionKey,
+          intent: {
+            ...conditionIntent,
+            condition: "good",
+            expectedReviewRevision: cappedConditionKey,
+          },
+          userId: conditionUserId,
+          bearerToken: conditionToken,
+        }),
+      ).rejects.toThrow(/included guided correction is unavailable/i);
+      expect(await correctionLedger(database, conditionUserId)).toEqual(
+        spentIncludedCorrection(3),
       );
 
       // A save that also corrects identity is still an identity correction and
@@ -1463,19 +1620,16 @@ describe("mobile Listing Review save RLS authority", () => {
           title: BASE_RESULT.listing.title,
           description: BASE_RESULT.listing.description,
           condition: "good",
-          specifics: [
-            { name: "Brand", value: "Sony" },
-            { name: "Model", value: "WH-1000XM5" },
-          ],
+          specifics: sellerSpecifics("WH-1000XM5", "good"),
           sellerPriceOverride: 149.99,
         },
         userId: identityUserId,
         bearerToken: identityToken,
       });
       expect(identityRegenerate).toHaveBeenCalledOnce();
-      expect(await correctionLedger(database, identityUserId)).toEqual([
-        { correction_spent: true, correction_started: true, state: "settled" },
-      ]);
+      expect(await correctionLedger(database, identityUserId)).toEqual(
+        spentIncludedCorrection(0),
+      );
 
       // Spending the included correction on an identity edit cannot take the
       // seller's condition away. Condition is a different field on a different
@@ -1508,10 +1662,7 @@ describe("mobile Listing Review save RLS authority", () => {
           title: BASE_RESULT.listing.title,
           description: BASE_RESULT.listing.description,
           condition: "very-good",
-          specifics: [
-            { name: "Brand", value: "Sony" },
-            { name: "Model", value: "WH-1000XM5" },
-          ],
+          specifics: sellerSpecifics("WH-1000XM5", "very-good"),
           sellerPriceOverride: 149.99,
         },
         userId: identityUserId,
@@ -1519,9 +1670,9 @@ describe("mobile Listing Review save RLS authority", () => {
       });
       expect(spentConditionStates[0]).toBe("regeneration");
       expect(spentConditionRegenerate).toHaveBeenCalledOnce();
-      expect(await correctionLedger(database, identityUserId)).toEqual([
-        { correction_spent: true, correction_started: true, state: "settled" },
-      ]);
+      expect(await correctionLedger(database, identityUserId)).toEqual(
+        spentIncludedCorrection(1),
+      );
       expect(await reviewState(database, identityFixture.itemId)).toEqual({
         condition: "very-good",
         model: "WH-1000XM5",
@@ -1553,10 +1704,7 @@ describe("mobile Listing Review save RLS authority", () => {
           title: "Seller-tightened title",
           description: "Seller-tightened description.",
           condition: "very-good",
-          specifics: [
-            { name: "Brand", value: "Sony" },
-            { name: "Model", value: "WH-1000XM4" },
-          ],
+          specifics: sellerSpecifics("WH-1000XM4", "very-good"),
           sellerPriceOverride: 159.99,
         },
         userId: copyUserId,
@@ -1565,8 +1713,34 @@ describe("mobile Listing Review save RLS authority", () => {
       expect(copyStates).toEqual(["completed"]);
       expect(copyReceipt.reviewRevision).toBe(copyKey);
       expect(await correctionLedger(database, copyUserId)).toEqual(
-        UNSPENT_INCLUDED_CORRECTION,
+        unspentIncludedCorrection(0),
       );
+
+      // Dropping the mirrored Condition specific is a SCOPE decision, not a
+      // regeneration one. A caller that reaches the RPC directly can send a
+      // `Condition` specific that disagrees with `p_condition` — the intent
+      // schema would have rewritten it, this path has no schema — and that
+      // still has to regenerate, or the incoherent value would be persisted
+      // straight onto an outbound eBay path (#919 review round 1).
+      const desyncFixture = await seedReview(admin, desyncUserId, "desync");
+      fixtures.push(desyncFixture);
+      const desyncProbe = await rlsClient(desyncToken).rpc(
+        "claim_mobile_listing_review_save",
+        {
+          p_action: "prepare",
+          p_run_id: desyncFixture.runId,
+          p_idempotency_key: crypto.randomUUID(),
+          p_expected_review_revision: desyncFixture.reviewRevision,
+          p_title: BASE_RESULT.listing.title,
+          p_description: BASE_RESULT.listing.description,
+          // Unchanged. Only the mirror moves.
+          p_condition: BASE_RESULT.attributes.condition,
+          p_specifics: sellerSpecifics("WH-1000XM4", "poor"),
+          p_price_override: 149.99,
+        },
+      );
+      expect(desyncProbe.error).toBeNull();
+      expect(desyncProbe.data).toMatchObject({ state: "regeneration" });
     } finally {
       await Promise.all(
         fixtures.map((fixture) =>
