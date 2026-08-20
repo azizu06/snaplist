@@ -34,7 +34,7 @@ final class AssistedExportUITests: XCTestCase {
 
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.tap()
+        openRow(row)
 
         // Opening the row is navigation, so assert it separately from the
         // action inside it. A failure here means the row did not toggle; a
@@ -109,7 +109,7 @@ final class AssistedExportUITests: XCTestCase {
         let app = launch(fixture: "destination-open-failure")
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.tap()
+        openRow(row)
 
         let open = app.buttons["button.primary.open-facebook-marketplace"]
         XCTAssertTrue(open.waitForExistence(timeout: loadedTreeTimeout))
@@ -129,7 +129,7 @@ final class AssistedExportUITests: XCTestCase {
         let app = launch(fixture: "save-deduplication")
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.tap()
+        openRow(row)
 
         let save = app.buttons["assisted-export.save.facebook"]
         XCTAssertTrue(save.waitForExistence(timeout: loadedTreeTimeout))
@@ -167,7 +167,7 @@ final class AssistedExportUITests: XCTestCase {
         )
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.tap()
+        openRow(row)
         app.buttons["button.primary.open-facebook-marketplace"].tap()
         let mark = app.buttons["assisted-export.mark-as-shared.facebook"]
         XCTAssertTrue(mark.waitForExistence(timeout: loadedTreeTimeout))
@@ -200,7 +200,7 @@ final class AssistedExportUITests: XCTestCase {
         // off, so the row says nothing about sharing yet, not "not shared".
         XCTAssertFalse(depop.label.localizedCaseInsensitiveContains("not shared"))
 
-        mercari.tap()
+        openRow(mercari)
         XCTAssertTrue(
             app.buttons["assisted-export.mark-as-shared.mercari"]
                 .waitForExistence(timeout: loadedTreeTimeout),
@@ -265,6 +265,75 @@ final class AssistedExportUITests: XCTestCase {
             app.buttons["assisted-export.row.facebook"]
                 .waitForExistence(timeout: loadedTreeTimeout)
         )
+    }
+
+    /// Opens a destination row and does not return until the row itself says
+    /// it is open.
+    ///
+    /// A tap the system accepts is not a tap the app acted on. In job
+    /// 95336686008 of run 32012821535 (`ui-1`, head `7408e4c26`) the activity
+    /// log for this screen reads `Tap` at t=8.61s, `Synthesize event` at
+    /// 8.68s, and `Wait for dev.snaplist.ios to idle` satisfied by 8.98s —
+    /// then thirty one-second existence checks, each answered in about 0.1s,
+    /// against a row whose own dump still read
+    /// `label: 'Facebook Marketplace, closed'`. The app was answering queries
+    /// the whole time, so the event was acknowledged and dropped rather than
+    /// delayed. Waiting longer on that tap buys nothing. Only another tap can
+    /// recover it, which is why the budget above stays where it is.
+    ///
+    /// The state is re-read before every attempt and a tap is sent only while
+    /// the row is still shut, so a row that opens slowly is never toggled back
+    /// closed. Each retry is recorded as its own activity, so a green run that
+    /// needed one still says so in the log instead of looking clean.
+    private func openRow(
+        _ row: XCUIElement,
+        attempts: Int = 2,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for attempt in 1...attempts {
+            if isDisclosed("open", row) { return }
+
+            if attempt > 1 {
+                XCTContext.runActivity(
+                    named: "Re-tapping a row that ignored tap \(attempt - 1)"
+                ) { _ in }
+            }
+
+            row.tap()
+
+            if waitForDisclosedState("open", on: row, timeout: loadedTreeTimeout) {
+                return
+            }
+        }
+
+        XCTFail(
+            "The row stayed shut through \(attempts) taps, each given "
+                + "\(Int(loadedTreeTimeout))s to take. A row that ignores every "
+                + "tap is refusing them, not dropping one. Was: \"\(row.label)\"",
+            file: file,
+            line: line
+        )
+    }
+
+    /// The disclosure word is the last comma-separated component of the row's
+    /// label; `AssistedExportDomain.accessibilityLabel(for:)` appends it after
+    /// the optional status. Matching the suffix therefore cannot be satisfied
+    /// by a status that happens to contain the word.
+    private func isDisclosed(_ state: String, _ row: XCUIElement) -> Bool {
+        row.label.hasSuffix(", \(state)")
+    }
+
+    private func waitForDisclosedState(
+        _ state: String,
+        on row: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        let disclosed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label ENDSWITH %@", ", \(state)"),
+            object: row
+        )
+        return XCTWaiter().wait(for: [disclosed], timeout: timeout) == .completed
     }
 
     private func launch(
