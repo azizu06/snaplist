@@ -432,6 +432,14 @@ begin
   -- #919. The exemption is never a caller flag. It is read back from the
   -- Listing Review gate's own server-derived classification of the pending
   -- save, so a client that calls this directly gets today's paid behaviour.
+  --
+  -- The lookup is bound to one row, not to "some pending save at this
+  -- revision". The regenerator mints its completion run id from the save's
+  -- idempotency key (src/lib/listing-review/save.ts, randomUUID override), so
+  -- p_completion_run_id names the exact pending save that asked for this
+  -- rerun, and (user_id, idempotency_key) is that table's primary key. Any
+  -- other caller, or any save that is no longer pending, finds nothing and
+  -- pays.
   select save.regeneration_scope = 'condition'
   into v_condition_only
   from private.mobile_listing_review_saves save
@@ -439,12 +447,11 @@ begin
     on run.id = save.run_id
    and run.user_id = save.user_id
   where save.user_id = v_user_id
+    and save.idempotency_key = p_completion_run_id
     and run.item_id = p_item_id
     and save.expected_review_revision = p_expected_review_revision
     and save.state = 'pending'
-    and save.lease_expires_at > v_now
-  order by save.lease_expires_at desc
-  limit 1;
+    and save.lease_expires_at > v_now;
   v_condition_only := coalesce(v_condition_only, false);
 
   select reservation.* into v_reservation
