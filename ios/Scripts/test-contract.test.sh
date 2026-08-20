@@ -820,6 +820,199 @@ assert_a_failing_build_leaves_no_lock_behind() {
   ! grep -Fq -- "Waiting for the iOS build lock" "$waiter_diagnostics_file"
 }
 
+assert_a_waiting_invocation_keeps_reporting_while_it_waits() {
+  local holder_job holder_status waiter_status reported
+  local previous=-1
+  local polls=0
+  typeset -a reported_waits
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$holder_diagnostics_file"
+  : > "$waiter_diagnostics_file"
+
+  run_serialized_test_script "$holder_selector" "$holder_diagnostics_file" 5 &
+  holder_job=$!
+
+  while [[ ! -d $serialized_active_marker ]]; do
+    sleep 0.1
+    polls=$((polls + 1))
+
+    if (( polls > 200 )); then
+      kill "$holder_job" 2>/dev/null
+      wait "$holder_job" 2>/dev/null
+      return 1
+    fi
+  done
+
+  run_serialized_test_script \
+    "SnapListTests/LockReportingProbeTests/testKeepsReportingWhileItWaits" \
+    "$waiter_diagnostics_file" \
+    0
+  waiter_status=$?
+
+  wait "$holder_job"
+  holder_status=$?
+
+  if (( holder_status != 0 || waiter_status != 0 )); then
+    return 1
+  fi
+
+  reported_waits=(
+    "${(@f)$(
+      sed -n 's/.*Waiting for the iOS build lock .*waited \([0-9][0-9]*\)s\./\1/p' \
+        "$waiter_diagnostics_file"
+    )}"
+  )
+
+  # Three lines rather than one. A run that announces the wait once and then
+  # goes quiet for the rest of a build reads exactly like a run that hung,
+  # and that is the one an agent kills.
+  if (( ${#reported_waits} < 3 )); then
+    return 1
+  fi
+
+  # Strictly increasing, so the same line repeated forever cannot satisfy the
+  # count. The elapsed figure is the part that proves the run is still alive.
+  for reported in "${reported_waits[@]}"; do
+    if (( reported <= previous )); then
+      return 1
+    fi
+
+    previous=$reported
+  done
+
+  # Every line names the holder, not just the first one. A waiter that starts
+  # reporting an anonymous lock halfway through is back to being unactionable.
+  (( $(grep -c -- "held by pid [0-9]" "$waiter_diagnostics_file") \
+    >= ${#reported_waits} ))
+}
+
+assert_the_first_wait_report_names_a_holder_that_records_itself_late() {
+  local holder_job waiter_status first_report
+  local polls=0
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$waiter_diagnostics_file"
+  rm -f "${lock_file}.holder-ready"
+
+  # The other lock cases start their waiter only after the holder is already
+  # deep inside xcodebuild, so the owner file is always there to read. Two
+  # agents that start in the same second do not get that courtesy: the waiter's
+  # first poll can beat the holder's write by microseconds. This holder makes
+  # that window explicit and holds it open for a second, which is why it takes
+  # the flock itself instead of going through the script under test.
+  (
+    zmodload zsh/system
+    : >> "$lock_file"
+    zsystem flock -f late_recorder_descriptor "$lock_file"
+    : > "${lock_file}.holder-ready"
+    sleep 1
+    print -r -- \
+      "held by pid $$ in /late/recorder running ${holder_selector} since 2026-01-01T00:00:00Z" \
+      > "${lock_file}.owner"
+    sleep 2
+    rm -f "${lock_file}.owner"
+    zsystem flock -u "$late_recorder_descriptor"
+  ) &
+  holder_job=$!
+
+  while [[ ! -e ${lock_file}.holder-ready ]]; do
+    sleep 0.1
+    polls=$((polls + 1))
+
+    if (( polls > 200 )); then
+      kill "$holder_job" 2>/dev/null
+      wait "$holder_job" 2>/dev/null
+      return 1
+    fi
+  done
+
+  run_serialized_test_script \
+    "SnapListTests/LockWaiterProbeTests/testWaitsForTheBuildLock" \
+    "$waiter_diagnostics_file" \
+    1
+  waiter_status=$?
+
+  wait "$holder_job" 2>/dev/null
+  rm -f "${lock_file}.holder-ready"
+
+  if (( waiter_status != 0 )); then
+    return 1
+  fi
+
+  first_report=$(
+    grep -F -- "Waiting for the iOS build lock" "$waiter_diagnostics_file" \
+      | head -n 1
+  )
+
+  # Naming the holder one poll later is not the same thing. The first line is
+  # the one an agent reads before deciding whether the run is stuck.
+  [[ $first_report == *"held by pid "* && $first_report == *"${holder_selector}"* ]]
+}
+
+assert_a_terminated_holder_leaves_no_stale_owner_behind() {
+  local holder_job recorded_owner holder_pid
+  local polls=0
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$holder_diagnostics_file"
+
+  run_serialized_test_script "$holder_selector" "$holder_diagnostics_file" 3 &
+  holder_job=$!
+
+  while [[ ! -d $serialized_active_marker ]]; do
+    sleep 0.1
+    polls=$((polls + 1))
+
+    if (( polls > 200 )); then
+      kill "$holder_job" 2>/dev/null
+      wait "$holder_job" 2>/dev/null
+      return 1
+    fi
+  done
+
+  recorded_owner=$(<"${lock_file}.owner")
+  holder_pid=${${(z)recorded_owner}[4]}
+
+  if [[ $holder_pid != <-> ]]; then
+    kill "$holder_job" 2>/dev/null
+    wait "$holder_job" 2>/dev/null
+    return 1
+  fi
+
+  # An agent that decides a build has hung sends SIGTERM, and zsh does not run
+  # TRAPEXIT for an untrapped one. That is the path that leaves a pid nobody
+  # can reach in the file the next waiter reads out loud.
+  kill -TERM "$holder_pid"
+  wait "$holder_job" 2>/dev/null
+
+  if [[ -e ${lock_file}.owner ]]; then
+    return 1
+  fi
+
+  # The build the dead run started outlives it and clears the marker on its
+  # own. Wait for that rather than removing it here, so this case cannot hand
+  # the next one a marker that a stray process is about to delete underneath it.
+  polls=0
+
+  while [[ -d $serialized_active_marker ]]; do
+    sleep 0.1
+    polls=$((polls + 1))
+
+    if (( polls > 200 )); then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 failures=0
 
 for contract_case in \
@@ -846,7 +1039,10 @@ for contract_case in \
   assert_a_misspelled_job_context_is_still_rejected \
   assert_a_job_group_unique_to_every_run_is_accepted \
   assert_a_concurrent_invocation_waits_for_the_holder_instead_of_colliding \
-  assert_a_failing_build_leaves_no_lock_behind
+  assert_a_waiting_invocation_keeps_reporting_while_it_waits \
+  assert_a_failing_build_leaves_no_lock_behind \
+  assert_a_terminated_holder_leaves_no_stale_owner_behind \
+  assert_the_first_wait_report_names_a_holder_that_records_itself_late
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"
