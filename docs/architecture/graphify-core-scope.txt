@@ -542,6 +542,7 @@ supabase/migrations/20260812140000_guest_recovery_envelope_mime.sql
 supabase/migrations/20260813030000_post_completion_provider_usage.sql
 supabase/migrations/20260816180000_push_device_tokens.sql
 supabase/migrations/20260816200000_seller_push_delivery.sql
+supabase/migrations/20260820120000_condition_only_review_rerun_is_free.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

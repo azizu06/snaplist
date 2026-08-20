@@ -34,6 +34,7 @@ import {
   ListingReviewNotEditableError,
   ListingReviewSaveInProgressError,
   ListingReviewStaleError,
+  type ListingReviewSaveDataClient,
   type ListingReviewSaveIntent,
   type ListingReviewSaveOperation,
 } from "./save";
@@ -290,13 +291,87 @@ async function durableState(
   return result.rows[0]?.state;
 }
 
+const UNSPENT_INCLUDED_CORRECTION = [
+  { correction_spent: false, correction_started: false, state: "settled" },
+];
+
+/**
+ * The ledger row itself, not a convenience flag above it: #919 turns on whether
+ * the seller's one included guided correction is still there afterwards.
+ */
+async function correctionLedger(
+  database: Client,
+  userId: string,
+): Promise<unknown[]> {
+  const result = await database.query(
+    `select reservation.state,
+            reservation.guided_correction_started_at is not null
+              as correction_started,
+            reservation.guided_correction_completed_at is not null
+              as correction_spent
+     from public.ai_item_credit_reservations reservation
+     where reservation.user_id = $1
+     order by reservation.reserved_at`,
+    [userId],
+  );
+  return result.rows;
+}
+
+async function savedPriceOverride(
+  database: Client,
+  itemId: string,
+): Promise<string | null> {
+  const result = await database.query<{ price_override: string | null }>(
+    "select price_override::text from public.items where id = $1::uuid",
+    [itemId],
+  );
+  return result.rows[0]?.price_override ?? null;
+}
+
+async function reviewState(
+  database: Client,
+  itemId: string,
+): Promise<unknown> {
+  const result = await database.query(
+    `select item.attributes->>'model' as model,
+            item.condition,
+            item.price_override::text,
+            item.review_revision::text
+     from public.items item
+     where item.id = $1::uuid`,
+    [itemId],
+  );
+  return result.rows[0];
+}
+
+/** Records the state the database gate actually returned for each attempt. */
+function observedDataClient(
+  dataClient: ListingReviewSaveDataClient,
+  states: string[],
+): ListingReviewSaveDataClient {
+  return {
+    async execute(operation) {
+      const result = await dataClient.execute(operation);
+      states.push(result.state);
+      return result;
+    },
+    release: (operation) => dataClient.release(operation),
+  };
+}
+
 async function completeMockedCorrection(input: {
   admin: SupabaseClient;
   fixture: ReviewFixture;
   owner: SupabaseClient;
   key: string;
   expectedReviewRevision: string;
+  expectedRunId?: string;
+  correctedCondition?: string;
+  correctedModel?: string;
 }): Promise<void> {
+  const condition = input.correctedCondition ?? "good";
+  const model = input.correctedModel ?? "WH-1000XM5";
+  const expectedRunId = input.expectedRunId ?? input.fixture.runId;
   const gateway = createSupabaseGuidedCorrectionCompletionGateway(
     input.owner,
     input.admin as unknown as GuidedCorrectionCompletionRpcClient,
@@ -305,7 +380,7 @@ async function completeMockedCorrection(input: {
     itemId: input.fixture.itemId,
     listingId: input.fixture.listingId,
     runId: input.key,
-    expectedRunId: input.fixture.runId,
+    expectedRunId,
     expectedReviewRevision: input.expectedReviewRevision,
   });
   await gateway.complete({
@@ -313,18 +388,18 @@ async function completeMockedCorrection(input: {
     itemId: input.fixture.itemId,
     listingId: input.fixture.listingId,
     runId: input.key,
-    expectedRunId: input.fixture.runId,
+    expectedRunId,
     expectedReviewRevision: input.expectedReviewRevision,
     result: {
       ...BASE_RESULT,
       attributes: {
         ...BASE_RESULT.attributes,
-        model: "WH-1000XM5",
-        condition: "good",
-        title: "Sony WH-1000XM5",
+        model,
+        condition,
+        title: `Sony ${model}`,
       },
       identification: {
-        label: "Sony WH-1000XM5",
+        label: `Sony ${model}`,
         confident: true,
         evidence: 1,
       },
@@ -342,12 +417,12 @@ async function completeMockedCorrection(input: {
       },
       listing: {
         ...BASE_RESULT.listing,
-        title: "Generated Sony WH-1000XM5",
+        title: `Generated Sony ${model}`,
         description: "Generated coherent correction copy.",
         fields: {
           itemSpecifics: {
             Brand: "Sony",
-            Model: "WH-1000XM5",
+            Model: model,
           },
         },
       },
@@ -1213,6 +1288,286 @@ describe("mobile Listing Review save RLS authority", () => {
           [recoveryIds],
         );
       }
+      await Promise.all(
+        fixtures.map((fixture) =>
+          admin.rpc("ack_pipeline_message", {
+            p_message_id: fixture.queueMessageId,
+          }),
+        ),
+      ).catch(() => undefined);
+      await cleanupClerkTestUsers(admin, userIds);
+      await database.end();
+      await lease.release();
+    }
+  }, 60_000);
+
+  it("reruns a condition-only correction free and still charges an identity edit", async (context) => {
+    const reachable = await stackReachable({
+      url: SUPABASE_URL,
+      apiKey: PUBLISHABLE_KEY,
+      requiredValues: [PUBLISHABLE_KEY, SECRET_KEY],
+    });
+    if (!reachable) context.skip();
+    const lease = await acquireExclusiveTestResource(
+      "snaplist-local-supabase-listing-review-save",
+    );
+    const admin = createClient(SUPABASE_URL, SECRET_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const database = new Client({ connectionString: DATABASE_URL });
+    const userIds: string[] = [];
+    const fixtures: ReviewFixture[] = [];
+    await database.connect();
+    try {
+      const conditionUserId = `user_test_review_condition_${crypto.randomUUID()}`;
+      const identityUserId = `user_test_review_identity_${crypto.randomUUID()}`;
+      const copyUserId = `user_test_review_copy_${crypto.randomUUID()}`;
+      userIds.push(conditionUserId, identityUserId, copyUserId);
+      const [conditionToken, identityToken, copyToken] = await Promise.all([
+        mintUserJwt(conditionUserId),
+        mintUserJwt(identityUserId),
+        mintUserJwt(copyUserId),
+      ]);
+
+      // A declared-condition change is the seller supplying ground truth the
+      // model guessed from photos. It reruns everything and spends nothing.
+      const conditionFixture = await seedReview(
+        admin,
+        conditionUserId,
+        "condition-only",
+      );
+      fixtures.push(conditionFixture);
+      const conditionOwner = rlsClient(conditionToken);
+      const conditionData = createListingReviewSaveDataClient(
+        () => conditionOwner,
+      );
+      expect(await correctionLedger(database, conditionUserId)).toEqual(
+        UNSPENT_INCLUDED_CORRECTION,
+      );
+
+      const conditionKey = crypto.randomUUID();
+      const conditionIntent: ListingReviewSaveIntent = {
+        expectedReviewRevision: conditionFixture.reviewRevision,
+        title: BASE_RESULT.listing.title,
+        description: BASE_RESULT.listing.description,
+        condition: "good",
+        specifics: [
+          { name: "Brand", value: "Sony" },
+          { name: "Model", value: "WH-1000XM4" },
+        ],
+        sellerPriceOverride: 149.99,
+      };
+      let overrideDuringRerun: string | null = null;
+      const conditionRegenerate = vi.fn(async () => {
+        await completeMockedCorrection({
+          admin,
+          fixture: conditionFixture,
+          owner: conditionOwner,
+          key: conditionKey,
+          expectedReviewRevision: conditionFixture.reviewRevision,
+          correctedModel: "WH-1000XM4",
+          correctedCondition: "good",
+        });
+        overrideDuringRerun = await savedPriceOverride(
+          database,
+          conditionFixture.itemId,
+        );
+      });
+      const conditionStates: string[] = [];
+      const conditionReceipt = await createListingReviewSaver(
+        observedDataClient(conditionData, conditionStates),
+        { regenerate: conditionRegenerate },
+      ).save({
+        runId: conditionFixture.runId,
+        idempotencyKey: conditionKey,
+        intent: conditionIntent,
+        userId: conditionUserId,
+        bearerToken: conditionToken,
+      });
+
+      expect(conditionStates[0]).toBe("regeneration");
+      expect(conditionRegenerate).toHaveBeenCalledOnce();
+      expect(conditionReceipt.reviewRevision).toBe(conditionKey);
+      // The correction commit itself must leave the seller's price alone.
+      expect(overrideDuringRerun).toBe("149.99");
+      expect(await correctionLedger(database, conditionUserId)).toEqual(
+        UNSPENT_INCLUDED_CORRECTION,
+      );
+      expect(await reviewState(database, conditionFixture.itemId)).toEqual({
+        condition: "good",
+        model: "WH-1000XM4",
+        price_override: "149.99",
+        review_revision: conditionKey,
+      });
+
+      // The included correction is still there, so a second one also runs.
+      const secondConditionKey = crypto.randomUUID();
+      const secondConditionRegenerate = vi.fn(async () => {
+        await completeMockedCorrection({
+          admin,
+          fixture: conditionFixture,
+          owner: conditionOwner,
+          key: secondConditionKey,
+          expectedReviewRevision: conditionKey,
+          expectedRunId: conditionKey,
+          correctedModel: "WH-1000XM4",
+          correctedCondition: "very-good",
+        });
+      });
+      await createListingReviewSaver(conditionData, {
+        regenerate: secondConditionRegenerate,
+      }).save({
+        runId: conditionFixture.runId,
+        idempotencyKey: secondConditionKey,
+        intent: {
+          ...conditionIntent,
+          condition: "very-good",
+          expectedReviewRevision: conditionKey,
+        },
+        userId: conditionUserId,
+        bearerToken: conditionToken,
+      });
+      expect(secondConditionRegenerate).toHaveBeenCalledOnce();
+      expect(await correctionLedger(database, conditionUserId)).toEqual(
+        UNSPENT_INCLUDED_CORRECTION,
+      );
+
+      // A save that also corrects identity is still an identity correction and
+      // still spends the included one. This is the guard against widening the
+      // exemption to "any save that touches condition".
+      const identityFixture = await seedReview(
+        admin,
+        identityUserId,
+        "condition-and-identity",
+      );
+      fixtures.push(identityFixture);
+      const identityOwner = rlsClient(identityToken);
+      const identityKey = crypto.randomUUID();
+      const identityRegenerate = vi.fn(async () => {
+        await completeMockedCorrection({
+          admin,
+          fixture: identityFixture,
+          owner: identityOwner,
+          key: identityKey,
+          expectedReviewRevision: identityFixture.reviewRevision,
+        });
+      });
+      await createListingReviewSaver(
+        createListingReviewSaveDataClient(() => identityOwner),
+        { regenerate: identityRegenerate },
+      ).save({
+        runId: identityFixture.runId,
+        idempotencyKey: identityKey,
+        intent: {
+          expectedReviewRevision: identityFixture.reviewRevision,
+          title: BASE_RESULT.listing.title,
+          description: BASE_RESULT.listing.description,
+          condition: "good",
+          specifics: [
+            { name: "Brand", value: "Sony" },
+            { name: "Model", value: "WH-1000XM5" },
+          ],
+          sellerPriceOverride: 149.99,
+        },
+        userId: identityUserId,
+        bearerToken: identityToken,
+      });
+      expect(identityRegenerate).toHaveBeenCalledOnce();
+      expect(await correctionLedger(database, identityUserId)).toEqual([
+        { correction_spent: true, correction_started: true, state: "settled" },
+      ]);
+
+      // Spending the included correction on an identity edit cannot take the
+      // seller's condition away. Condition is a different field on a different
+      // decision, so it still reruns free afterwards.
+      const spentConditionKey = crypto.randomUUID();
+      const spentConditionRegenerate = vi.fn(async () => {
+        await completeMockedCorrection({
+          admin,
+          fixture: identityFixture,
+          owner: identityOwner,
+          key: spentConditionKey,
+          expectedReviewRevision: identityKey,
+          expectedRunId: identityKey,
+          correctedModel: "WH-1000XM5",
+          correctedCondition: "very-good",
+        });
+      });
+      const spentConditionStates: string[] = [];
+      await createListingReviewSaver(
+        observedDataClient(
+          createListingReviewSaveDataClient(() => identityOwner),
+          spentConditionStates,
+        ),
+        { regenerate: spentConditionRegenerate },
+      ).save({
+        runId: identityFixture.runId,
+        idempotencyKey: spentConditionKey,
+        intent: {
+          expectedReviewRevision: identityKey,
+          title: BASE_RESULT.listing.title,
+          description: BASE_RESULT.listing.description,
+          condition: "very-good",
+          specifics: [
+            { name: "Brand", value: "Sony" },
+            { name: "Model", value: "WH-1000XM5" },
+          ],
+          sellerPriceOverride: 149.99,
+        },
+        userId: identityUserId,
+        bearerToken: identityToken,
+      });
+      expect(spentConditionStates[0]).toBe("regeneration");
+      expect(spentConditionRegenerate).toHaveBeenCalledOnce();
+      expect(await correctionLedger(database, identityUserId)).toEqual([
+        { correction_spent: true, correction_started: true, state: "settled" },
+      ]);
+      expect(await reviewState(database, identityFixture.itemId)).toEqual({
+        condition: "very-good",
+        model: "WH-1000XM5",
+        price_override: "149.99",
+        review_revision: spentConditionKey,
+      });
+
+      // Free text the seller writes stays theirs and triggers nothing.
+      const copyFixture = await seedReview(admin, copyUserId, "copy-only");
+      fixtures.push(copyFixture);
+      const copyOwner = rlsClient(copyToken);
+      const copyKey = crypto.randomUUID();
+      const copyStates: string[] = [];
+      const copyReceipt = await createListingReviewSaver(
+        observedDataClient(
+          createListingReviewSaveDataClient(() => copyOwner),
+          copyStates,
+        ),
+        {
+          async regenerate() {
+            throw new Error("A copy-only save must not rerun pricing.");
+          },
+        },
+      ).save({
+        runId: copyFixture.runId,
+        idempotencyKey: copyKey,
+        intent: {
+          expectedReviewRevision: copyFixture.reviewRevision,
+          title: "Seller-tightened title",
+          description: "Seller-tightened description.",
+          condition: "very-good",
+          specifics: [
+            { name: "Brand", value: "Sony" },
+            { name: "Model", value: "WH-1000XM4" },
+          ],
+          sellerPriceOverride: 159.99,
+        },
+        userId: copyUserId,
+        bearerToken: copyToken,
+      });
+      expect(copyStates).toEqual(["completed"]);
+      expect(copyReceipt.reviewRevision).toBe(copyKey);
+      expect(await correctionLedger(database, copyUserId)).toEqual(
+        UNSPENT_INCLUDED_CORRECTION,
+      );
+    } finally {
       await Promise.all(
         fixtures.map((fixture) =>
           admin.rpc("ack_pipeline_message", {
