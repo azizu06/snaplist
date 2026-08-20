@@ -889,6 +889,71 @@ assert_a_waiting_invocation_keeps_reporting_while_it_waits() {
     >= ${#reported_waits} ))
 }
 
+assert_the_first_wait_report_names_a_holder_that_records_itself_late() {
+  local holder_job waiter_status first_report
+  local polls=0
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$waiter_diagnostics_file"
+  rm -f "${lock_file}.holder-ready"
+
+  # The other lock cases start their waiter only after the holder is already
+  # deep inside xcodebuild, so the owner file is always there to read. Two
+  # agents that start in the same second do not get that courtesy: the waiter's
+  # first poll can beat the holder's write by microseconds. This holder makes
+  # that window explicit and holds it open for a second, which is why it takes
+  # the flock itself instead of going through the script under test.
+  (
+    zmodload zsh/system
+    : >> "$lock_file"
+    zsystem flock -f late_recorder_descriptor "$lock_file"
+    : > "${lock_file}.holder-ready"
+    sleep 1
+    print -r -- \
+      "held by pid $$ in /late/recorder running ${holder_selector} since 2026-01-01T00:00:00Z" \
+      > "${lock_file}.owner"
+    sleep 2
+    rm -f "${lock_file}.owner"
+    zsystem flock -u "$late_recorder_descriptor"
+  ) &
+  holder_job=$!
+
+  while [[ ! -e ${lock_file}.holder-ready ]]; do
+    sleep 0.1
+    polls=$((polls + 1))
+
+    if (( polls > 200 )); then
+      kill "$holder_job" 2>/dev/null
+      wait "$holder_job" 2>/dev/null
+      return 1
+    fi
+  done
+
+  run_serialized_test_script \
+    "SnapListTests/LockWaiterProbeTests/testWaitsForTheBuildLock" \
+    "$waiter_diagnostics_file" \
+    1
+  waiter_status=$?
+
+  wait "$holder_job" 2>/dev/null
+  rm -f "${lock_file}.holder-ready"
+
+  if (( waiter_status != 0 )); then
+    return 1
+  fi
+
+  first_report=$(
+    grep -F -- "Waiting for the iOS build lock" "$waiter_diagnostics_file" \
+      | head -n 1
+  )
+
+  # Naming the holder one poll later is not the same thing. The first line is
+  # the one an agent reads before deciding whether the run is stuck.
+  [[ $first_report == *"held by pid "* && $first_report == *"${holder_selector}"* ]]
+}
+
 assert_a_terminated_holder_leaves_no_stale_owner_behind() {
   local holder_job recorded_owner holder_pid
   local polls=0
@@ -976,7 +1041,8 @@ for contract_case in \
   assert_a_concurrent_invocation_waits_for_the_holder_instead_of_colliding \
   assert_a_waiting_invocation_keeps_reporting_while_it_waits \
   assert_a_failing_build_leaves_no_lock_behind \
-  assert_a_terminated_holder_leaves_no_stale_owner_behind
+  assert_a_terminated_holder_leaves_no_stale_owner_behind \
+  assert_the_first_wait_report_names_a_holder_that_records_itself_late
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"

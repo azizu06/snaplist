@@ -16,6 +16,7 @@ snaplist_lock_file=${SNAPLIST_IOS_LOCK_FILE:-${TMPDIR:-/tmp}/snaplist-ios-xcodeb
 snaplist_lock_owner_file=${snaplist_lock_file}.owner
 snaplist_lock_poll_seconds=${SNAPLIST_IOS_LOCK_POLL_SECONDS:-15}
 snaplist_lock_timeout_seconds=${SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS:-7200}
+snaplist_lock_owner_grace_seconds=${SNAPLIST_IOS_LOCK_OWNER_GRACE_SECONDS:-2}
 snaplist_lock_descriptor=
 typeset -a snaplist_test_arguments=()
 typeset -a snaplist_shard_selectors=()
@@ -63,6 +64,29 @@ if (( ${+SNAPLIST_IOS_SHARD} )); then
   done
 fi
 
+# The holder records itself in the sidecar file immediately after it takes the
+# flock, but "immediately after" is still after. A waiter that started in the
+# same instant loses that race and would otherwise announce an anonymous lock
+# and then say nothing else for a whole poll interval, which is precisely the
+# moment two agents collide and precisely when the name is worth having. So
+# give the sidecar a bounded grace to appear before falling back.
+snaplist_read_lock_holder() {
+  local deadline=$(( SECONDS + $1 ))
+
+  while :; do
+    if [[ -s $snaplist_lock_owner_file ]]; then
+      print -r -- "$(<"$snaplist_lock_owner_file")"
+      return 0
+    fi
+
+    (( SECONDS >= deadline )) && break
+
+    sleep 0.05
+  done
+
+  print -r -- "held by an iOS build that has not recorded itself yet"
+}
+
 snaplist_release_build_lock() {
   if [[ -n $snaplist_lock_descriptor ]]; then
     rm -f "$snaplist_lock_owner_file"
@@ -95,13 +119,10 @@ fi
 : >> "$snaplist_lock_file"
 
 if ! zsystem flock -t 0 -f snaplist_lock_descriptor "$snaplist_lock_file" 2>/dev/null; then
-  snaplist_lock_holder="held by an iOS build that has not recorded itself yet"
-
-  if [[ -s $snaplist_lock_owner_file ]]; then
-    snaplist_lock_holder=$(<"$snaplist_lock_owner_file")
-  fi
-
   snaplist_lock_wait_started=$SECONDS
+  snaplist_lock_holder=$(
+    snaplist_read_lock_holder "$snaplist_lock_owner_grace_seconds"
+  )
 
   print -u2 -r -- \
     "Waiting for the iOS build lock at ${snaplist_lock_file}; ${snaplist_lock_holder}; waited 0s."
@@ -119,9 +140,7 @@ if ! zsystem flock -t 0 -f snaplist_lock_descriptor "$snaplist_lock_file" 2>/dev
       exit 75
     fi
 
-    if [[ -s $snaplist_lock_owner_file ]]; then
-      snaplist_lock_holder=$(<"$snaplist_lock_owner_file")
-    fi
+    snaplist_lock_holder=$(snaplist_read_lock_holder 0)
 
     print -u2 -r -- \
       "Waiting for the iOS build lock at ${snaplist_lock_file}; ${snaplist_lock_holder}; waited ${snaplist_lock_waited}s."
