@@ -596,6 +596,33 @@ describe("marketing in-page navigation", () => {
     expect($('a[href="/#faq"]').length).toBeGreaterThan(0);
   });
 
+  it("draws the nav rule as an animatable box and suppresses the global underline", () => {
+    // Comments are stripped first. The rules below name `text-decoration` and
+    // the wipe they replaced in prose, so a negative assertion over the raw text
+    // matches the explanation rather than a declaration.
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    );
+
+    const after = css.match(/\.mkt-navlink::after\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(after).not.toBe("");
+
+    // `text-decoration` has no animatable value between `none` and `underline`,
+    // so the hover state can only pop. A pseudo-element is a box and can move.
+    expect(after).toMatch(/transition:[^;]*transform/);
+
+    // It grows from the middle. A left-to-right wipe is the default reading of
+    // "animated underline" and is the one shape this must not be.
+    expect(after).toMatch(/transform-origin:\s*center/);
+    expect(after).not.toMatch(/transform-origin:\s*(left|right)/);
+
+    // The global `.mkt a:hover` underline outranks a bare `.mkt-navlink:hover`,
+    // so the suppression has to name the element too or a second blue line is
+    // drawn underneath the first.
+    expect(css).toMatch(/\.mkt\s+a\.mkt-navlink:hover\s*\{[^}]*text-decoration:\s*none/);
+  });
+
   it("points every in-page anchor at an element that exists", () => {
     const markup = [
       renderToStaticMarkup(<SiteHeader />),
