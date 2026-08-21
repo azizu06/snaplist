@@ -313,17 +313,26 @@ struct AssistedExportView: View {
         .accessibilityIdentifier("assisted-export.row.\(destination.rawValue)")
     }
 
-    /// The destination's own wordmark, in place of a generic glyph and a
-    /// plain text name. All three destinations render at their natural
-    /// wordmark aspect ratio. See `docs/demo-asset-provenance.md`.
+    /// The destination's own mark, in place of a generic glyph and a plain
+    /// text name. Facebook Marketplace has no wordmark of its own that also
+    /// carries Facebook's identity, so its mark is a composite lockup of the
+    /// Facebook icon asset and the Marketplace wordmark asset, both sized to
+    /// this row's 20pt convention; Mercari and Depop render their own single
+    /// wordmark asset at that same height. See `docs/demo-asset-provenance.md`.
     @ViewBuilder
     private func destinationMark(_ destination: AssistedExportDestination) -> some View {
         switch destination {
         case .facebookMarketplace:
-            Image("MarketplaceMarkFacebook")
-                .resizable()
-                .scaledToFit()
-                .frame(height: 20)
+            HStack(spacing: 6) {
+                Image("MarketplaceMarkFacebookIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                Image("MarketplaceMarkFacebook")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 20)
+            }
         case .mercari:
             Image("MarketplaceMarkMercari")
                 .resizable()

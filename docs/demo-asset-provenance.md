@@ -75,21 +75,24 @@ format conversion and resizing.
 
 | Local asset | Destination row | Source | License / rationale |
 | --- | --- | --- | --- |
-| `Assets.xcassets/MarketplaceMarkFacebook.imageset/facebook-marketplace.png` | Facebook Marketplace | [marketplace-facebook](https://worldvectorlogo.com/logo/marketplace-facebook), WorldVectorLogo — same vendored file already used for the storefront glyph at `public/marketplaces/facebook-marketplace.svg`, re-cropped to its "MarketPlace" wordmark text path instead of the storefront icon path | WorldVectorLogo-hosted vector mark, used here under nominative fair use (identifies the destination only); Facebook and Facebook Marketplace are trademarks of Meta Platforms, Inc. This crop was chosen over the storefront-icon crop so the mark visibly reads "Marketplace" rather than plain Facebook, since Marketplace is a tab inside the Facebook app rather than its own icon. |
+| `Assets.xcassets/MarketplaceMarkFacebookIcon.imageset/facebook-icon.png` | Facebook Marketplace (icon half of the composite lockup) | [marketplace-facebook](https://worldvectorlogo.com/logo/marketplace-facebook), WorldVectorLogo — the storefront-icon path of the same vendored file described below, unchanged from the crop this catalog carried before this row grew a wordmark | WorldVectorLogo-hosted vector mark, used here under nominative fair use (identifies the destination only); Facebook and Facebook Marketplace are trademarks of Meta Platforms, Inc. Kept alongside the wordmark below because Meta publishes no standalone "Marketplace" text mark of its own — the wordmark alone has no recognizable brand anchor, so the row pairs it with the Facebook icon it has always used. |
+| `Assets.xcassets/MarketplaceMarkFacebook.imageset/facebook-marketplace.png` | Facebook Marketplace (wordmark half of the composite lockup) | [marketplace-facebook](https://worldvectorlogo.com/logo/marketplace-facebook), WorldVectorLogo — same vendored file as the icon above, re-cropped to its "MarketPlace" wordmark text path instead of the storefront icon path | WorldVectorLogo-hosted vector mark, used here under nominative fair use (identifies the destination only); Facebook and Facebook Marketplace are trademarks of Meta Platforms, Inc. This crop sits beside the icon above, rather than replacing it, so the row still reads as Facebook while also visibly saying "Marketplace". |
 | `Assets.xcassets/MarketplaceMarkMercari.imageset/mercari.png` | Mercari | [Mercari logo 2018.svg](https://commons.wikimedia.org/wiki/File:Mercari_logo_2018.svg), Wikimedia Commons | Commons-listed public domain (simple wordmark); Mercari is a trademark of Mercari, Inc. |
 | `Assets.xcassets/MarketplaceMarkDepop.imageset/depop.png` | Depop | [Depop logo.svg](https://commons.wikimedia.org/wiki/File:Depop_logo.svg), Wikimedia Commons | Commons-listed public domain (simple wordmark); Depop is a trademark of Depop Ltd. |
 
 Local transform: downloaded as SVG, rasterized with `rsvg-convert` at the
-source viewBox's aspect ratio (800×120 for the Facebook wordmark, 800×175 for the
-Mercari wordmark, 800×206 for the Depop wordmark), and stored as a single
-`universal` 1x PNG in the asset catalog, matching the single-scale convention
-used by this catalog's other mark image sets (e.g. `MarketplaceMarkDepop.imageset`).
-No color or wordmark text was altered; the Facebook mark's viewBox was narrowed
-to the "MarketPlace" text path already present in the vendored file (the same
-file's storefront-icon path is unchanged and still backs the marketing site's
-crop). This sentence named `FirstValueJacket.imageset` until #887 deleted it;
-the marks are the remaining single-scale sets, and the onboarding photographs
-below ship real 1x, 2x, and 3x.
+source viewBox's aspect ratio (240×240 for the Facebook icon, 800×120 for the
+Facebook wordmark, 800×175 for the Mercari wordmark, 800×206 for the Depop
+wordmark), and stored as a single `universal` 1x PNG in the asset catalog,
+matching the single-scale convention used by this catalog's other mark image
+sets (e.g. `MarketplaceMarkDepop.imageset`). No color or wordmark text was
+altered; the Facebook wordmark's viewBox was narrowed to the "MarketPlace"
+text path already present in the vendored file, and the Facebook icon is that
+same file's storefront-icon path, unchanged — the two are rendered side by
+side in the row rather than one replacing the other. This sentence named
+`FirstValueJacket.imageset` until #887 deleted it; the marks are the
+remaining single-scale sets, and the onboarding photographs below ship real
+1x, 2x, and 3x.
 
 ## Native onboarding item set
 
