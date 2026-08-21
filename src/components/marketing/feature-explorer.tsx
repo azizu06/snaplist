@@ -97,26 +97,31 @@ function useScoutMount(ref: React.RefObject<HTMLElement | null>) {
  * remove content rather than remove motion, and a `<video>` ignores the CSS
  * media query, so the pause has to happen here.
  *
- * Which source clip fills each slot, and why the liveliest ones do not:
+ * Which source clip fills each slot:
  *
- *   scan            048 welcome-wave
+ *   scan            032 barcode-scan
  *   photo-review    034 coaching-photo
  *   listing-review  007 magnifier-inspection
- *   publish         046 listing-ready
- *   trophy-wall     042 reassurance
+ *   publish         030 box-lower-lift
+ *   trophy-wall     029 tape-retract
  *
- * Three clips in the set are held out on product truth rather than looks, and
- * they happen to be three of the four most animated: 030 (tape gun and
- * cardboard box) implies fulfillment, 032 (barcode scanner) implies a capture
- * mode that does not exist, and 029 (tape measure) implies measurement. All
- * three are named out of scope in the PRD, and a mascot beside a claim is read
- * as part of the claim. 041 is unusable for a second reason: its frame is
- * 1112px rather than 960 and the figure's feet sit at 67% of it, so it would
- * float rather than stand.
+ * The set was picked for motion, on the owner's decision. An earlier pass held
+ * 030 (tape gun and cardboard box), 032 (barcode scanner) and 029 (tape
+ * measure) out because each gestures at something the PRD puts out of scope:
+ * fulfillment, a barcode capture mode, and garment measurement. Those three
+ * are also three of the four most animated clips in the library, which is why
+ * the shipped set read as flat. The owner lifted the hold and asked for them
+ * directly: the mascot is decoration on a marketing page and is not read as a
+ * product claim. If that ever stops being true, the previous set was 048
+ * welcome-wave, 046 listing-ready and 042 reassurance, in that order.
+ *
+ * 041 uncertainty-shrug stays out for a different, still-live reason: its
+ * frame is 1112px rather than 960 and the figure's feet sit at 67% of it, so
+ * it would float rather than stand.
  *
  * Slot geometry depends on where the figure sits inside its square frame. The
- * five above put the top of the head between 8.3% and 12.9% down, and the feet
- * between 86.9% and 90.5%, which is why the CSS can pin one box and have every
+ * five above put the top of the head between 7.1% and 11.0% down, and the feet
+ * between 87.6% and 91.8%, which is why the CSS can pin one box and have every
  * pose land on the phone. Measure a replacement's alpha bounds before swapping
  * it in.
  */

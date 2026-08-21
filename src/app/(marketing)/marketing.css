@@ -1283,12 +1283,24 @@ html:has(.mkt) {
    He is not hidden below 760 by CSS. `display: none` would still mount the
    element and still fetch the clip, so the breakpoint is enforced at the mount
    instead — see `useScoutMount`. */
+/* Scout sits below the section headline, not level with it. The old box was
+   208px tall and stood 20px into the device, which put the top of his camera
+   head within a couple of pixels of the headline's cap line at 1440 and 900,
+   so two things of very different weight competed for the same tier. Two
+   changes fix it together, because neither is enough alone: the ceiling drops
+   to 180px, and the box stands 52px into the device instead of 20px. Since
+   the box is pinned by its bottom edge, both push the figure down. Measured
+   against the headline cap line, his head moves from 2px above to 37px below
+   at 1440, and from level to 33px below at 900. His feet then overlap the top
+   bezel rather than balancing on its edge, which reads as standing on the
+   phone. Padding the section instead would have reopened the gap the Cal AI
+   pass closed. */
 .mkt-explorer__scout {
   position: absolute;
   left: 0;
-  bottom: calc(100% - 20px);
-  width: clamp(168px, 14vw, 208px);
-  height: clamp(168px, 14vw, 208px);
+  bottom: calc(100% - 52px);
+  width: clamp(168px, 14vw, 180px);
+  height: clamp(168px, 14vw, 180px);
   pointer-events: none;
   z-index: 2;
 }
