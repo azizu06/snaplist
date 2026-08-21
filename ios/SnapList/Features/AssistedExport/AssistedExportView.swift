@@ -314,19 +314,25 @@ struct AssistedExportView: View {
     }
 
     /// The destination's own mark, in place of a generic glyph and a plain
-    /// text name. Facebook Marketplace has no icon of its own — Marketplace
-    /// is a tab inside the Facebook app — so its mark is a square badge in
-    /// Facebook's own icon; Mercari and Depop are recognized by their own
-    /// wordmarks, so those render at their natural aspect ratio instead of
-    /// being forced into a square. See `docs/demo-asset-provenance.md`.
+    /// text name. Facebook Marketplace has no wordmark of its own that also
+    /// carries Facebook's identity, so its mark is a composite lockup of the
+    /// Facebook icon asset and the Marketplace wordmark asset, both sized to
+    /// this row's 20pt convention; Mercari and Depop render their own single
+    /// wordmark asset at that same height. See `docs/demo-asset-provenance.md`.
     @ViewBuilder
     private func destinationMark(_ destination: AssistedExportDestination) -> some View {
         switch destination {
         case .facebookMarketplace:
-            Image("MarketplaceMarkFacebook")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 34, height: 34)
+            HStack(spacing: 6) {
+                Image("MarketplaceMarkFacebookIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                Image("MarketplaceMarkFacebook")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 20)
+            }
         case .mercari:
             Image("MarketplaceMarkMercari")
                 .resizable()
