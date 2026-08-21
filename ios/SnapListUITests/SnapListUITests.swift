@@ -3559,6 +3559,35 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "pro-gate-accessibility3")
     }
 
+    /// #961: the paywall is one of the sheets the owner named directly ("the
+    /// paywall and everything"). `pro-gate.primary` sits outside the sheet's
+    /// own `ScrollView` (it is pinned below it at this, non-accessibility,
+    /// Dynamic Type size), so a drag started there reaches the sheet's
+    /// drag-to-dismiss recognizer instead of just scrolling the offer copy.
+    func testProGatePaywallSlidesDownToDismissWhenDismissible() {
+        let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
+
+        let title = app.staticTexts["pro-gate.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["pro-gate.primary"].waitForExistence(timeout: 3))
+
+        // Drag from the title text, not a button — starting the touch on a
+        // Button hands the gesture to its own tap/highlight tracking before
+        // the sheet's interactive-dismiss pan ever sees it, the same reason
+        // ListingReviewDrawer's dismiss test drags from the drawer container
+        // rather than one of its controls.
+        let start = title.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0)
+        )
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertFalse(
+            title.waitForExistence(timeout: 3),
+            "A swipe-down must dismiss the paywall when it is dismissible."
+        )
+    }
+
     func testProGatePurchasePendingHasNoDismissOrRestoreAction() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-03"])
 
