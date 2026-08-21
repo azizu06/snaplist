@@ -34,6 +34,7 @@ empty_shard_inventory_file=${temporary_directory}/empty-test-shards.json
 stale_timing_inventory_file=${temporary_directory}/stale-timing-test-shards.json
 unlabelled_layout_inventory_file=${temporary_directory}/unlabelled-layout-test-shards.json
 restated_budget_inventory_file=${temporary_directory}/restated-budget-test-shards.json
+mislabelled_layout_inventory_file=${temporary_directory}/mislabelled-layout-test-shards.json
 nested_test_repository=${temporary_directory}/nested-test-repository
 lock_file=${temporary_directory}/xcodebuild.lock
 serialized_bin=${temporary_directory}/serialized-bin
@@ -404,7 +405,22 @@ assert_shard_inventory_baseline_names_the_layout_it_was_measured_under() {
     File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
   ' "$shard_inventory_file" "$restated_budget_inventory_file"
 
-  ! "$shard_inventory_validator" "$restated_budget_inventory_file" 2>/dev/null
+  if "$shard_inventory_validator" "$restated_budget_inventory_file" 2>/dev/null; then
+    return 1
+  fi
+
+  # A label nothing contradicts is a label nobody has to get right, and the
+  # first value written here was wrong. The per-shard suite seconds came from
+  # the same run, so they name its shards and can catch it.
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    baseline = inventory.fetch("baseline")
+    baseline["measured_layout_ui_shard_count"] =
+      baseline.fetch("measured_layout_ui_shard_count") + 1
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$mislabelled_layout_inventory_file"
+
+  ! "$shard_inventory_validator" "$mislabelled_layout_inventory_file" 2>/dev/null
 }
 
 assert_shard_inventory_fails_closed_on_empty_declared_shard() {
