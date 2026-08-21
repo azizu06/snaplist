@@ -55,8 +55,8 @@ function validateEntry(entry: PendingUploadEntry): void {
   if (entry.photos.length < 1) {
     throw new Error("Choose at least one photo for each item.");
   }
-  if (entry.photos.length > 4) {
-    throw new Error("Up to 4 photos per item.");
+  if (entry.photos.length > 5) {
+    throw new Error("Up to 5 photos per item.");
   }
   for (const photo of entry.photos) {
     if (!(photo instanceof File) || !ACCEPTED_PHOTO_TYPES.has(photo.type)) {

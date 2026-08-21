@@ -262,6 +262,97 @@ describe("durable upload staging", () => {
     expect(resolveCleanupIntent).not.toHaveBeenCalled();
   });
 
+  it("accepts a valid five-photo entry (#960 — product contract is one to five)", async () => {
+    const stageAndEnqueue = vi.fn(async (input) => {
+      return input.entries.map((entry: { idempotencyKey: string }, index: number) => ({
+        batch_id: input.batchId,
+        batch_position: index,
+        idempotency_key: entry.idempotencyKey,
+        item_id: `00000000-0000-4000-8000-00000000000${index + 1}`,
+        run_id: `10000000-0000-4000-8000-00000000000${index + 1}`,
+        queue_message_id: String(index + 1),
+        listing_id: null,
+        status: "queued" as const,
+        stage: "queued" as const,
+        attempt_count: 0,
+        max_attempts: 3,
+        safe_failure_message: null,
+        updated_at: "2026-07-15T12:00:00.000Z",
+      }));
+    });
+
+    const result = await stageUploadEntries(
+      {
+        batchId: "11111111-1111-4111-8111-111111111111",
+        userId: "user_123",
+        dailyLimit: 15,
+        perMinuteLimit: 20,
+        entries: [
+          {
+            idempotencyKey: "five-photos",
+            source: "single",
+            autopilotEnabled: false,
+            costBasis: null,
+            photos: [
+              photo("1.jpg"),
+              photo("2.jpg"),
+              photo("3.jpg"),
+              photo("4.jpg"),
+              photo("5.jpg"),
+            ],
+          },
+        ],
+      },
+      {
+        upload: vi.fn(async () => undefined),
+        remove: vi.fn(),
+        recordCleanupIntent: vi.fn(async () => undefined),
+        resolveCleanupIntent: vi.fn(async () => undefined),
+        findReplay: vi.fn(),
+        stageAndEnqueue,
+      },
+    );
+
+    expect(result).toHaveLength(1);
+  });
+
+  it("rejects a six-photo entry with the current five-photo cap", async () => {
+    await expect(
+      stageUploadEntries(
+        {
+          batchId: "11111111-1111-4111-8111-111111111111",
+          userId: "user_123",
+          dailyLimit: 15,
+          perMinuteLimit: 20,
+          entries: [
+            {
+              idempotencyKey: "six-photos",
+              source: "single",
+              autopilotEnabled: false,
+              costBasis: null,
+              photos: [
+                photo("1.jpg"),
+                photo("2.jpg"),
+                photo("3.jpg"),
+                photo("4.jpg"),
+                photo("5.jpg"),
+                photo("6.jpg"),
+              ],
+            },
+          ],
+        },
+        {
+          upload: vi.fn(),
+          remove: vi.fn(),
+          recordCleanupIntent: vi.fn(async () => undefined),
+          resolveCleanupIntent: vi.fn(async () => undefined),
+          findReplay: vi.fn(),
+          stageAndEnqueue: vi.fn(),
+        },
+      ),
+    ).rejects.toThrow("Up to 5 photos per item.");
+  });
+
   it("never accepts signed URLs or unsupported photos into staging", async () => {
     await expect(
       stageUploadEntries(
