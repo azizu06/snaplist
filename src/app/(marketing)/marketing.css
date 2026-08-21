@@ -241,6 +241,7 @@ html:has(.mkt) {
 }
 
 .mkt-navlink {
+  position: relative;
   display: inline-flex;
   align-items: center;
   min-height: 44px;
@@ -253,8 +254,63 @@ html:has(.mkt) {
   white-space: nowrap;
 }
 
-.mkt-navlink:hover {
+/* The nav rule is drawn, not decorated. `text-decoration` cannot be animated
+   between `none` and `underline`, so the global `.mkt a:hover` rule can only pop
+   the blue line into existence in one frame, which is what it did here. A
+   pseudo-element is a real box, so it can move.
+
+   It rises rather than wipes. A left-to-right wipe is the default reading of
+   "animated underline" and Aziz ruled it out by name, so this grows from the
+   centre outwards while lifting the last few pixels into place and fading in:
+   three properties on two axes, which reads as the rule settling under the word
+   rather than being drawn across it. The easing overshoots slightly past 1 so it
+   arrives with a small snap instead of decelerating into place.
+
+   `right` and `left` inset by the link's own 4px padding so the rule matches the
+   text, not the 44px touch target. */
+.mkt-navlink::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 9px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--action);
+  opacity: 0;
+  transform: scaleX(0.25) translateY(4px);
+  transform-origin: center;
+  transition:
+    transform 260ms cubic-bezier(0.34, 1.42, 0.5, 1),
+    opacity 160ms ease-out;
+}
+
+.mkt-navlink:hover::after,
+.mkt-navlink:focus-visible::after {
+  opacity: 1;
+  transform: scaleX(1) translateY(0);
+}
+
+/* The global link rule underlines every `.mkt a` on hover, and it draws a second
+   blue line here, under the drawn one and offset from it. `.mkt-navlink:hover`
+   does not suppress it: that selector scores (0,2,0) against the global rule's
+   (0,2,1), so the element type in `.mkt a:hover` wins the cascade. Naming the
+   element as well takes it to (0,3,1). Confirmed by reading computed
+   `textDecorationLine` while hovered, which still said `underline` until this
+   selector carried the tag. */
+.mkt a.mkt-navlink:hover {
   color: var(--ink);
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mkt-navlink::after {
+    transition: none;
+  }
+  .mkt-navlink:hover::after,
+  .mkt-navlink:focus-visible::after {
+    transform: scaleX(1) translateY(0);
+  }
 }
 
 /* ------------------------------------------------------------- mobile menu */
@@ -592,21 +648,37 @@ html:has(.mkt) {
    to the page: it used to sit at -3deg, but the screen is now a capture of the
    shipping chrome, and rotating the frame shears that chrome along with it.
 
-   It is deliberately larger than the explorer device at 384. The hero phone is
-   the lead visual and the only animated one on the page, so it should outweigh a
-   phone that sits beside step copy. It used to be 360, which inverted that.
+   It is deliberately larger than the explorer device, whose widest step is now
+   400. The hero phone is the lead visual and the only animated one on the page,
+   so it should outweigh a phone that sits beside step copy. It used to be 360,
+   which inverted that.
 
    400 / 831 rather than 400 / 840: the frame is 15px a side now rather than 10,
    so the screen is 370 wide and 370 / 0.46216 is 801, and 801 + 30 is 831. The
    old pair left the screen at 0.4634 and `cover` trimming a couple of pixels. */
 .mkt-hero__minimal-phone {
-  /* The declared number is not the number that renders at every width. The art
-     column is 544 at 1440 and 447 at 1030, and the phone cannot exceed it, so
-     this clamps to the column well before it clamps to 86vw. Raising it past
-     the column is not a mistake: it lifts the wide end while the narrow end
-     keeps taking the column's width. Measured actuals are 468 at 1440 and 447
-     at 1030, both still ahead of the explorer's 440 and 420 there. */
-  --phone-body: min(468px, 86vw);
+  /* 428 rather than 468. At 468 the phone rendered 972 tall into a 900 viewport,
+     so the bottom 250 was always below the fold with nothing legible there, and
+     the hero copy was pushed down to 504 to stay centred against it. Aziz called
+     it "maybe just a bit too big". 428 renders 889, which lifts the headline to
+     463 and brings the shutter button just inside the fold, so the cut edge now
+     reads as more-below rather than as a phone running off the page. It cannot
+     shrink much further: the whole phone only fits above the fold at about 349
+     wide, which is narrower than the explorer and would invert the hero-leads
+     rule Aziz chose.
+
+     Which term governs also changed, and the old comment here no longer
+     described the code. At 468 the art column clamped the phone first (544 at
+     1440, but only 447 at 1030). 428 fits inside the column at every desktop
+     width, so the declared number is now the rendered number down to about a 498
+     viewport, below which 86vw takes over. Measured: 428 from 1440 to 740, then
+     370 at 430, 336 at 390, 322 at 375.
+
+     That lower half is untouched by this change, since 86vw was already the
+     governing term there, so the sub-760 ordering against the explorer that was
+     tuned in #937 still holds. Verified across fourteen widths: the hero leads
+     the explorer at every one. */
+  --phone-body: min(428px, 86vw);
   width: var(--phone-body, 400px);
   /* Scale-free, so it holds at every width the clamp above can produce. */
   aspect-ratio: 400 / 831;
