@@ -350,12 +350,12 @@ struct ScanZoomControlView: View {
         }
     }
 
-    /// The small painted pill, purely decorative. VoiceOver reads the
-    /// matching `tapTarget` instead.
-    private func visualChip(_ lens: ScanZoomLens) -> some View {
-        let isSelected = lens == selectedLens
-
-        return Text(control.label(for: lens))
+    /// The shared shape both `visualChip` and `tapTarget` size themselves
+    /// from, so the invisible tap layer's footprint can never drift smaller
+    /// than the painted chip's at large Dynamic Type sizes (#987 round 2) —
+    /// they run the exact same layout, not two hand-matched constants.
+    private func chipShape(_ lens: ScanZoomLens) -> some View {
+        Text(control.label(for: lens))
             .font(.footnote.weight(.semibold))
             // ".5x" is two glyph groups, so a squeezed chip wraps into a
             // stack rather than truncating, and the capsule grows taller
@@ -363,13 +363,21 @@ struct ScanZoomControlView: View {
             // the count capsule and once with this one.
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 32, minHeight: 26)
+    }
+
+    /// The small painted pill, purely decorative. VoiceOver reads the
+    /// matching `tapTarget` instead.
+    private func visualChip(_ lens: ScanZoomLens) -> some View {
+        let isSelected = lens == selectedLens
+
+        return chipShape(lens)
             .foregroundStyle(
                 isSelected
                     ? SnapListColorToken.inkPrimary.color
                     : SnapListColorToken.onDarkSurface.color
             )
-            .padding(.horizontal, 8)
-            .frame(minWidth: 32, minHeight: 26)
             .background {
                 if isSelected {
                     Capsule().fill(SnapListColorToken.onDarkSurface.color)
@@ -377,8 +385,11 @@ struct ScanZoomControlView: View {
             }
     }
 
-    /// The real 44pt target for one lens. Its label carries no visible
-    /// content — `visualChip` paints what the seller sees underneath it.
+    /// The real touch target for one lens. Sized from the same `chipShape`
+    /// the painted pill uses, floored at 44pt, so it always CONTAINS the
+    /// visible chip instead of a fixed 44x44 square that a large Dynamic
+    /// Type chip could grow past. Its label carries no visible content —
+    /// `visualChip` paints what the seller sees underneath it.
     private func tapTarget(_ lens: ScanZoomLens) -> some View {
         let isSelected = lens == selectedLens
 
@@ -392,10 +403,9 @@ struct ScanZoomControlView: View {
             // delivery regardless of `.contentShape`, so this target went
             // genuinely untappable until given a non-zero, imperceptible
             // fill instead.
-            Rectangle()
-                .fill(SnapListColorToken.onDarkSurface.color)
+            chipShape(lens)
+                .frame(minWidth: 44, minHeight: 44)
                 .opacity(0.001)
-                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())

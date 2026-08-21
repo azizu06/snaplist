@@ -2323,6 +2323,21 @@ final class SnapListUITests: XCTestCase {
                 XCTAssertFalse(control.frame.intersects(other.frame), receipt)
             }
         }
+
+        // #987 round 2. The zoom tap targets size themselves from the same
+        // shared shape the painted chip uses, floored at 44pt rather than
+        // fixed at it, so they grow to CONTAIN a chip that outgrows 44pt at
+        // accessibility sizes instead of leaving untappable strips around a
+        // pinned 44x44 square. The decorative chip itself is
+        // `accessibilityHidden` and not independently queryable here, so
+        // this asserts the tap layer visibly tracks Dynamic Type growth
+        // (frame > 44) rather than the floor alone (frame >= 44, already
+        // covered above) — a regression back to a fixed-size tap frame would
+        // pin these at exactly 44 regardless of type size and fail here.
+        for control in [ultraWide, wide] {
+            XCTAssertGreaterThan(control.frame.height, 44, "\(control.identifier) \(receipt)")
+            XCTAssertGreaterThan(control.frame.width, 44, "\(control.identifier) \(receipt)")
+        }
     }
 
     /// #954. The bottom control area is three compact rows with photos staged:
