@@ -16,6 +16,7 @@ docs/adr/0010-evaluation-gated-listing-example-retrieval.md
 docs/adr/0011-optional-short-seller-voice-context.md
 docs/adr/0012-lean-mvp-retention-and-deletion-matrix.md
 docs/adr/0013-debug-builds-use-the-production-clerk-instance.md
+docs/adr/0014-del-03-fact-line-order-and-apostrophe.md
 docs/agents/domain.md
 docs/agents/issue-tracker.md
 docs/agents/triage-labels.md
