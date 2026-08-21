@@ -25,4 +25,20 @@ describe("offline representative durable-pipeline benchmark", () => {
     expect(result.cpuMs.p95).toBeGreaterThan(0);
     expect(result.peakRssBytes).toBeGreaterThan(0);
   });
+
+  it("measures a five-photo run matching the shipped one-to-five capture maximum", async () => {
+    const result = await runOfflinePipelineBenchmark({
+      fixturePhotos: [
+        new Uint8Array([0xff, 0xd8, 0xff, 0x01]),
+        new Uint8Array([0xff, 0xd8, 0xff, 0x02]),
+        new Uint8Array([0xff, 0xd8, 0xff, 0x03]),
+        new Uint8Array([0xff, 0xd8, 0xff, 0x04]),
+        new Uint8Array([0xff, 0xd8, 0xff, 0x05]),
+      ],
+      iterations: 3,
+      warmupIterations: 1,
+    });
+
+    expect(result.photoCount).toBe(5);
+  });
 });

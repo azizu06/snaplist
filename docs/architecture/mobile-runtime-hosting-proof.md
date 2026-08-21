@@ -262,7 +262,7 @@ must be measured independently of the host's response-egress price.
 
 ## Pre-cutover evidence required from the migration owner
 
-1. Production-built Node image peak RSS at idle and while processing 1–4 photos.
+1. Production-built Node image peak RSS at idle and while processing 1–5 photos.
 2. Repeat the checked-in offline profile with a production bundle, then run at least 30 sandbox
    provider stages reporting p50/p95 wall time, active CPU, peak RSS, bytes read from Supabase, and
    bytes returned.

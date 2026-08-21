@@ -197,10 +197,9 @@ describe("lean native design authority contract", () => {
         status: "retained_runtime_contract_with_lean_mvp_gaps",
         leanMvpAuthority: "PRD.md and ADR-0008",
         legacyHomeProjectionIsPrimaryNavigationAuthority: false,
-        photoMaximumImplementationGap: {
-          current: 4,
-          target: 5,
-          ownerIssue: 352,
+        photoMaximumImplementation: {
+          current: 5,
+          shippedByIssue: 352,
         },
         voiceContextProductionGateOwnerIssue: 386,
       });

@@ -37,7 +37,8 @@ package must supply new state IDs and visual acceptance references before implem
 ## Current product boundary
 
 - **Scan** owns recoverable intake for one to five ordered photos and optional voice context capped
-  at fifteen seconds. Issue #352 owns the photo-count behavior gap; #351 owns voice behavior.
+  at fifteen seconds. The one-to-five photo path shipped through #352; durable voice intake and
+  photos-only fallback shipped through #351 and #774.
 - Processing continues asynchronously after durable server acceptance. Seller UI uses plain-language
   states and never exposes queue, worker, lease, or provider terminology.
 - **Trophy Wall** is the compact local/server chronological projection; it is not Home, Listings,
@@ -46,9 +47,9 @@ package must supply new state IDs and visual acceptance references before implem
 - eBay is the only direct-publish destination and requires explicit seller confirmation through the
   adapter. Facebook Marketplace, Mercari, and Depop receive prepared/shared export packs only.
 
-The retained OpenAPI still exposes `/v1/home` and a four-photo maximum as current runtime
-compatibility. Its `x-snaplist-product-authority` metadata marks those as legacy/#352-owned gaps, not
-lean navigation authority or evidence that the one-to-five target is already shipped.
+The retained OpenAPI still exposes `/v1/home` for runtime compatibility. Its
+`x-snaplist-product-authority` metadata marks that projection as legacy, while its five-photo maximum
+matches the shipped intake contract.
 
 ## Architecture boundary
 

@@ -57,9 +57,9 @@ cleanup contracts. ADR-0012 and `docs/contracts/lean-mvp-retention-v1.json` are 
 row-level authority for those deletion and retention dispositions.
 
 Adding, replacing, or removing a photo changes the photo set and requires a new run. Reordering is a
-request-affecting change and participates in request identity. Issue #352 owns the one-to-five mobile
-submission implementation. Optional voice is separately versioned request input; issue #351 owns its
-behavior, provider-neutral transcription, retention, and photos-only fallback.
+request-affecting change and participates in request identity. The one-to-five mobile submission
+implementation shipped through #352. Optional voice is separately versioned request input; its
+intake and durable pipeline behavior shipped through #351 and #774, including photos-only fallback.
 
 ### 3. Usable draft and AI-item credit accounting
 
@@ -170,8 +170,8 @@ replacement is green.
 - The expensive safety foundations survive unchanged: RLS tenancy, App Attest guest authority,
   durable recovery, exact credit settlement, coherent review, evidence honesty, effective-price
   precedence, eBay adapter authority, and explicit seller confirmation.
-- Product documentation may lead implementation while #351/#352 close voice and photo-count gaps;
-  docs must name those gaps rather than claim behavior already shipped.
+- Product documentation must distinguish shipped intake behavior from any remaining follow-up work;
+  it must not retain closed photo-count or voice implementation-gap claims.
 - Existing broad modules may remain temporarily, but persistence does not make them launch scope.
 - The redirected high-fidelity design package, not the superseded V1 package, will own future SwiftUI
   composition.

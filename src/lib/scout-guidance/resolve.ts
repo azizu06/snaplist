@@ -58,7 +58,7 @@ const uuidSchema = z.string().uuid();
 const captureSessionProjectionSchema = z
   .object({
     id: uuidSchema,
-    photos: z.array(z.object({ id: uuidSchema }).strict()).min(1).max(4),
+    photos: z.array(z.object({ id: uuidSchema }).strict()).min(1).max(5),
   })
   .strict()
   .refine(
@@ -101,7 +101,7 @@ const durableRunProjectionSchema = z
           })
           .strict(),
       )
-      .max(4),
+      .max(5),
   })
   .strict()
   .refine(
