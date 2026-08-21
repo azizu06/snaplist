@@ -596,33 +596,52 @@ describe("marketing in-page navigation", () => {
     expect($('a[href="/#faq"]').length).toBeGreaterThan(0);
   });
 
-  it("draws the nav rule as an animatable box and suppresses the global underline", () => {
+  it("wipes one hover rule left to right across every link that shows one", () => {
     // Comments are stripped first. The rules below name `text-decoration` and
-    // the wipe they replaced in prose, so a negative assertion over the raw text
-    // matches the explanation rather than a declaration.
+    // the shape they replaced in prose, so a negative assertion over the raw
+    // text would match the explanation rather than a declaration.
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8").replace(
       /\/\*[\s\S]*?\*\//g,
       "",
     );
 
-    const after = css.match(/\.mkt-navlink::after\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(after).not.toBe("");
+    // Every link that shows a rule shares one treatment. Leaving a surface out
+    // is the defect this pins: the header animated while the footer popped.
+    const surfaces = [
+      "\\.mkt-navlink",
+      "\\.mkt-menu__link",
+      "\\.mkt-footer__legal-links a",
+      "\\.mkt-doc a",
+    ];
 
-    // `text-decoration` has no animatable value between `none` and `underline`,
-    // so the hover state can only pop. A pseudo-element is a box and can move.
-    expect(after).toMatch(/transition:[^;]*transform/);
+    const rest = css.match(/([^{}]+)\{([^}]*transform:\s*scaleX\(0\)[^}]*)\}/);
+    const hover = css.match(/([^{}]+)\{([^}]*transform:\s*scaleX\(1\)[^}]*)\}/);
+    expect(rest).not.toBeNull();
+    expect(hover).not.toBeNull();
 
-    // It grows from the middle. A left-to-right wipe is the default reading of
-    // "animated underline" and is the one shape this must not be.
-    expect(after).toMatch(/transform-origin:\s*center/);
-    expect(after).not.toMatch(/transform-origin:\s*(left|right)/);
+    // Drawn, not decorated. `text-decoration` has no animatable value between
+    // `none` and `underline`, so only a real box can be swept.
+    expect(rest![2]).toMatch(/transition:[^;]*transform/);
+
+    // In from the left, out to the right. The resting origin is the half that
+    // makes it retract the way it arrived instead of collapsing to the start.
+    expect(hover![2]).toMatch(/transform-origin:\s*left/);
+    expect(rest![2]).toMatch(/transform-origin:\s*right/);
+    expect(rest![2]).not.toMatch(/transform-origin:\s*center/);
 
     // The global `.mkt a:hover` underline outranks a bare `.mkt-navlink:hover`,
-    // so the suppression has to name the element too or a second blue line is
-    // drawn underneath the first.
-    expect(css).toMatch(/\.mkt\s+a\.mkt-navlink:hover\s*\{[^}]*text-decoration:\s*none/);
-  });
+    // so each suppression has to name the element too or a second blue line is
+    // drawn underneath the swept one.
+    const suppressed = css.match(/([^{}]*a\.mkt-navlink:hover[^{}]*)\{([^}]*)\}/);
+    expect(suppressed).not.toBeNull();
+    expect(suppressed![2]).toMatch(/text-decoration:\s*none/);
 
+    for (const surface of surfaces) {
+      expect(rest![1]).toMatch(new RegExp(`${surface}::after`));
+      expect(hover![1]).toMatch(new RegExp(`${surface}:hover::after`));
+      expect(suppressed![1]).toMatch(new RegExp(`${surface}:hover`));
+    }
+  });
   it("points every in-page anchor at an element that exists", () => {
     const markup = [
       renderToStaticMarkup(<SiteHeader />),

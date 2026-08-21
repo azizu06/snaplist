@@ -41,6 +41,13 @@
   --quint: cubic-bezier(0.22, 1, 0.36, 1);
   --decel: cubic-bezier(0, 0, 0.2, 1);
 
+  /* The hover rule's sweep. `--decel` starts at full speed, which is right for
+     something arriving from off-screen and wrong for a line being drawn: it
+     put the rule 58% across in the first 40ms and read as a pop. This one has
+     a nose on it, so the sweep starts from rest, crosses the middle around
+     90ms, and lands at 280ms. */
+  --sweep: cubic-bezier(0.4, 0, 0.2, 1);
+
   /* Header height plus breathing room, so an in-page anchor never lands under
      the sticky header. */
   --scroll-margin: 92px;
@@ -254,62 +261,102 @@ html:has(.mkt) {
   white-space: nowrap;
 }
 
-/* The nav rule is drawn, not decorated. `text-decoration` cannot be animated
-   between `none` and `underline`, so the global `.mkt a:hover` rule can only pop
-   the blue line into existence in one frame, which is what it did here. A
-   pseudo-element is a real box, so it can move.
+/* One hover rule, drawn once and shared by every link that shows one.
 
-   It rises rather than wipes. A left-to-right wipe is the default reading of
-   "animated underline" and Aziz ruled it out by name, so this grows from the
-   centre outwards while lifting the last few pixels into place and fading in:
-   three properties on two axes, which reads as the rule settling under the word
-   rather than being drawn across it. The easing overshoots slightly past 1 so it
-   arrives with a small snap instead of decelerating into place.
+   `text-decoration` has no animatable value between `none` and `underline`, so
+   the global `.mkt a:hover` rule further up can only pop the blue line into
+   existence in a single frame. A pseudo-element is a real box, so it can be
+   swept.
 
-   `right` and `left` inset by the link's own 4px padding so the rule matches the
-   text, not the 44px touch target. */
-.mkt-navlink::after {
+   The sweep is a highlight rather than a slide. The bar scales from zero width
+   with its origin on the left, so it is drawn under the word from left to
+   right the way a marker crosses it. Leaving flips the origin to the right, so
+   it retracts the way it arrived instead of collapsing back toward the start.
+   That second origin is the whole difference between a highlight and a bar
+   that snaps home.
+
+   Every surface shares the treatment and supplies `--rule-y`, the distance
+   from its own box bottom up to the bar, because the boxes are not alike: the
+   header and menu links are tall touch targets with their text centred inside,
+   while the footer and prose links are plain text whose descender already sits
+   near the bottom edge. `--rule-x` inserts the link's own horizontal padding so
+   the rule matches the word and not the tap area. Both numbers were read off
+   the rendered page. */
+.mkt-navlink,
+.mkt-menu__link,
+.mkt-footer__legal-links a,
+.mkt-doc a {
+  position: relative;
+}
+
+.mkt-navlink {
+  --rule-x: 4px;
+  --rule-y: 9px;
+}
+
+.mkt-menu__link {
+  --rule-x: 4px;
+  --rule-y: 11px;
+}
+
+.mkt-footer__legal-links a {
+  --rule-y: -1px;
+}
+
+.mkt-doc a {
+  --rule-y: -4px;
+}
+
+.mkt-navlink::after,
+.mkt-menu__link::after,
+.mkt-footer__legal-links a::after,
+.mkt-doc a::after {
   content: "";
   position: absolute;
-  left: 4px;
-  right: 4px;
-  bottom: 9px;
+  left: var(--rule-x, 0px);
+  right: var(--rule-x, 0px);
+  bottom: var(--rule-y, 0px);
   height: 2px;
   border-radius: 1px;
   background: var(--action);
-  opacity: 0;
-  transform: scaleX(0.25) translateY(4px);
-  transform-origin: center;
-  transition:
-    transform 260ms cubic-bezier(0.34, 1.42, 0.5, 1),
-    opacity 160ms ease-out;
+  transform: scaleX(0);
+  transform-origin: right center;
+  transition: transform 280ms var(--sweep);
 }
 
 .mkt-navlink:hover::after,
-.mkt-navlink:focus-visible::after {
-  opacity: 1;
-  transform: scaleX(1) translateY(0);
+.mkt-navlink:focus-visible::after,
+.mkt-menu__link:hover::after,
+.mkt-menu__link:focus-visible::after,
+.mkt-footer__legal-links a:hover::after,
+.mkt-footer__legal-links a:focus-visible::after,
+.mkt-doc a:hover::after,
+.mkt-doc a:focus-visible::after {
+  transform: scaleX(1);
+  transform-origin: left center;
 }
 
-/* The global link rule underlines every `.mkt a` on hover, and it draws a second
-   blue line here, under the drawn one and offset from it. `.mkt-navlink:hover`
+/* The global rule underlines every `.mkt a` on hover, and left alone it draws a
+   second blue line under the drawn one, offset from it. A bare `.mkt-navlink:hover`
    does not suppress it: that selector scores (0,2,0) against the global rule's
-   (0,2,1), so the element type in `.mkt a:hover` wins the cascade. Naming the
-   element as well takes it to (0,3,1). Confirmed by reading computed
-   `textDecorationLine` while hovered, which still said `underline` until this
+   (0,2,1), because the element type in `.mkt a:hover` counts. Naming the element
+   here as well takes each of these to (0,3,1). Confirmed by reading computed
+   `textDecorationLine` while hovered, which still said `underline` until the
    selector carried the tag. */
-.mkt a.mkt-navlink:hover {
+.mkt a.mkt-navlink:hover,
+.mkt a.mkt-menu__link:hover,
+.mkt .mkt-footer__legal-links a:hover,
+.mkt .mkt-doc a:hover {
   color: var(--ink);
   text-decoration: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mkt-navlink::after {
+  .mkt-navlink::after,
+  .mkt-menu__link::after,
+  .mkt-footer__legal-links a::after,
+  .mkt-doc a::after {
     transition: none;
-  }
-  .mkt-navlink:hover::after,
-  .mkt-navlink:focus-visible::after {
-    transform: scaleX(1) translateY(0);
   }
 }
 
