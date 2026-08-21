@@ -121,6 +121,34 @@ end
 baseline = inventory.fetch("baseline") do
   abort "test shard inventory must define baseline timing evidence"
 end
+# Selector time is a property of the test, not of how the tests were divided,
+# so a measurement taken under one layout stays valid under another. The
+# layout it was taken under does not, and a baseline that records a wall clock
+# without recording which split produced it invites reading a stale number as
+# a claim about the current one. Name the split instead; the wall clock the
+# current split has to meet lives once, in shard-wall-clock-budget-minutes.
+measured_layout_ui_shard_count = baseline.fetch("measured_layout_ui_shard_count") do
+  abort "test shard inventory baseline must name the UI shard count it was measured under"
+end
+unless measured_layout_ui_shard_count.is_a?(Integer) && measured_layout_ui_shard_count.positive?
+  abort "baseline measured_layout_ui_shard_count must be a positive integer"
+end
+# A label nothing can contradict is a label nobody has to get right. The
+# per-shard suite times recorded alongside it came from that same run, so they
+# name its shards, and the two have to agree.
+source_ui_shard_suite_seconds = baseline.fetch("source_ui_shard_suite_seconds") do
+  abort "test shard inventory baseline must record the source run's per-shard suite seconds"
+end
+expected_measured_shards = (1..measured_layout_ui_shard_count).map { |index| "ui-#{index}" }
+unless source_ui_shard_suite_seconds.is_a?(Hash) &&
+  source_ui_shard_suite_seconds.keys.sort == expected_measured_shards.sort
+  abort "baseline measured_layout_ui_shard_count does not match the shards it recorded: " \
+    "#{source_ui_shard_suite_seconds.keys.sort.join(", ")}"
+end
+if baseline.key?("required_pr_wall_clock")
+  abort "baseline must not restate a wall-clock budget; shard-wall-clock-budget-minutes owns it"
+end
+
 selector_observed_seconds = baseline.fetch("selector_observed_seconds") do
   abort "test shard inventory baseline must define selector_observed_seconds"
 end

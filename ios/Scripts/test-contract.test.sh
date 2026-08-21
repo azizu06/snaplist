@@ -9,6 +9,7 @@ workflow_file=${script_directory:h:h}/.github/workflows/ios.yml
 workflow_contract_parser=${script_directory}/validate-workflow-concurrency.rb
 shard_inventory_file=${script_directory}/test-shards.json
 shard_inventory_validator=${script_directory}/validate-test-shards.rb
+shard_wall_clock_budget_file=${script_directory}/shard-wall-clock-budget-minutes
 temporary_parent=${TMPDIR:-/tmp}
 temporary_directory=$(mktemp -d "${temporary_parent%/}/snaplist-ios-test-contract.XXXXXX")
 fake_bin=${temporary_directory}/bin
@@ -31,6 +32,9 @@ omitted_shard_inventory_file=${temporary_directory}/omitted-test-shards.json
 duplicated_shard_inventory_file=${temporary_directory}/duplicated-test-shards.json
 empty_shard_inventory_file=${temporary_directory}/empty-test-shards.json
 stale_timing_inventory_file=${temporary_directory}/stale-timing-test-shards.json
+unlabelled_layout_inventory_file=${temporary_directory}/unlabelled-layout-test-shards.json
+restated_budget_inventory_file=${temporary_directory}/restated-budget-test-shards.json
+mislabelled_layout_inventory_file=${temporary_directory}/mislabelled-layout-test-shards.json
 nested_test_repository=${temporary_directory}/nested-test-repository
 lock_file=${temporary_directory}/xcodebuild.lock
 serialized_bin=${temporary_directory}/serialized-bin
@@ -38,6 +42,9 @@ serialized_active_marker=${temporary_directory}/xcodebuild-active
 serialized_overlap_log=${temporary_directory}/xcodebuild-overlap
 serialized_started_log=${temporary_directory}/xcodebuild-started
 holder_diagnostics_file=${temporary_directory}/holder-diagnostics
+shard_timeout_diagnostics_file=${temporary_directory}/shard-timeout-diagnostics
+serialized_descendant_log=${temporary_directory}/xcodebuild-descendants
+substitute_shard_wall_clock_budget_file=${temporary_directory}/substitute-shard-wall-clock-budget-minutes
 waiter_diagnostics_file=${temporary_directory}/waiter-diagnostics
 holder_selector="SnapListTests/LockHolderProbeTests/testHoldsTheBuildLock"
 
@@ -46,14 +53,52 @@ mkdir -p "$fake_bin" "$target_repository" "$serialized_bin"
 cat > "${serialized_bin}/xcodebuild" <<'EOF'
 #!/bin/zsh
 
+# The real xcodebuild is a parent, not a leaf: it runs xctest, which drives a
+# booted simulator. Signalling only the direct child leaves those behind. So
+# this stand-in sleeps in a descendant and records it, which is the only way a
+# test can tell "the child died" from "the process tree died".
+# A build that dies the instant it is asked to leaves no window in which to
+# observe whether the lock was released before or after it went. This mode
+# swallows SIGTERM in both the stand-in and its descendant, so the reap takes
+# its full grace and the ordering becomes visible. SIGKILL still ends it.
+snaplist_outlast_a_term() {
+  integer remaining=$(( SNAPLIST_XCODEBUILD_SLEEP_SECONDS * 10 ))
+
+  TRAPTERM() { : }
+
+  while (( remaining > 0 )); do
+    sleep 0.1
+    (( remaining -= 1 ))
+  done
+}
+
+snaplist_sleep_in_a_descendant() {
+  if [[ -n ${SNAPLIST_XCODEBUILD_OUTLAST_TERM-} ]]; then
+    "$0" --outlast-a-term &
+    print -r -- "$!" >> "${SNAPLIST_XCODEBUILD_DESCENDANT_LOG:-/dev/null}"
+    snaplist_outlast_a_term
+
+    return 0
+  fi
+
+  sleep "$SNAPLIST_XCODEBUILD_SLEEP_SECONDS" &
+  print -r -- "$!" >> "${SNAPLIST_XCODEBUILD_DESCENDANT_LOG:-/dev/null}"
+  wait $!
+}
+
+if [[ ${1-} == --outlast-a-term ]]; then
+  snaplist_outlast_a_term
+  exit 0
+fi
+
 if mkdir "$SNAPLIST_XCODEBUILD_ACTIVE_MARKER" 2>/dev/null; then
   print -r -- "$$" >> "$SNAPLIST_XCODEBUILD_STARTED_LOG"
-  sleep "$SNAPLIST_XCODEBUILD_SLEEP_SECONDS"
+  snaplist_sleep_in_a_descendant
   rmdir "$SNAPLIST_XCODEBUILD_ACTIVE_MARKER"
 else
   print -r -- "$$" >> "$SNAPLIST_XCODEBUILD_OVERLAP_LOG"
   print -r -- "$$" >> "$SNAPLIST_XCODEBUILD_STARTED_LOG"
-  sleep "$SNAPLIST_XCODEBUILD_SLEEP_SECONDS"
+  snaplist_sleep_in_a_descendant
 fi
 
 exit "${SNAPLIST_XCODEBUILD_EXIT_STATUS:-0}"
@@ -335,6 +380,47 @@ assert_shard_inventory_fails_closed_on_omission_and_duplication() {
   ' "$shard_inventory_file" "$duplicated_shard_inventory_file"
 
   ! "$shard_inventory_validator" "$duplicated_shard_inventory_file" 2>/dev/null
+}
+
+# Selector timings survive a reshard; the layout they were measured under does
+# not. A baseline that carries a wall clock from an older split reads as a
+# claim about the current one, which is how "32m00s" outlived the three-shard
+# run that produced it. So the baseline has to name its own split, and it may
+# not keep a second copy of the budget that shard-wall-clock-budget-minutes
+# already owns.
+assert_shard_inventory_baseline_names_the_layout_it_was_measured_under() {
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    inventory.fetch("baseline").delete("measured_layout_ui_shard_count")
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$unlabelled_layout_inventory_file"
+
+  if "$shard_inventory_validator" "$unlabelled_layout_inventory_file" 2>/dev/null; then
+    return 1
+  fi
+
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    inventory.fetch("baseline")["required_pr_wall_clock"] = "32m00s"
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$restated_budget_inventory_file"
+
+  if "$shard_inventory_validator" "$restated_budget_inventory_file" 2>/dev/null; then
+    return 1
+  fi
+
+  # A label nothing contradicts is a label nobody has to get right, and the
+  # first value written here was wrong. The per-shard suite seconds came from
+  # the same run, so they name its shards and can catch it.
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    baseline = inventory.fetch("baseline")
+    baseline["measured_layout_ui_shard_count"] =
+      baseline.fetch("measured_layout_ui_shard_count") + 1
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$mislabelled_layout_inventory_file"
+
+  ! "$shard_inventory_validator" "$mislabelled_layout_inventory_file" 2>/dev/null
 }
 
 assert_shard_inventory_fails_closed_on_empty_declared_shard() {
@@ -706,8 +792,85 @@ run_serialized_test_script() {
     export SNAPLIST_XCODEBUILD_ACTIVE_MARKER=$serialized_active_marker
     export SNAPLIST_XCODEBUILD_OVERLAP_LOG=$serialized_overlap_log
     export SNAPLIST_XCODEBUILD_STARTED_LOG=$serialized_started_log
+    export SNAPLIST_XCODEBUILD_DESCENDANT_LOG=$serialized_descendant_log
     export SNAPLIST_XCODEBUILD_SLEEP_SECONDS=$sleep_seconds
     export SNAPLIST_XCODEBUILD_EXIT_STATUS=${4:-0}
+
+    unset SNAPLIST_IOS_SHARD
+    unset SNAPLIST_IOS_REPOSITORY_ROOT
+
+    "$test_script"
+  ) >/dev/null 2>"$diagnostics_file"
+}
+
+run_shard_timeout_test_script() {
+  local shard=$1
+  local sleep_seconds=$2
+  local warn_seconds=$3
+  local kill_seconds=$4
+  local diagnostics_file=$5
+
+  (
+    export PATH="${serialized_bin}:${PATH}"
+    export SNAPLIST_IOS_LOCK_FILE=$lock_file
+    export SNAPLIST_IOS_LOCK_POLL_SECONDS=1
+    export SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS=30
+    export SNAPLIST_XCODEBUILD_ACTIVE_MARKER=$serialized_active_marker
+    export SNAPLIST_XCODEBUILD_OVERLAP_LOG=$serialized_overlap_log
+    export SNAPLIST_XCODEBUILD_STARTED_LOG=$serialized_started_log
+    export SNAPLIST_XCODEBUILD_DESCENDANT_LOG=$serialized_descendant_log
+    export SNAPLIST_XCODEBUILD_SLEEP_SECONDS=$sleep_seconds
+    export SNAPLIST_XCODEBUILD_EXIT_STATUS=0
+    export SNAPLIST_IOS_SHARD_TIMEOUT_POLL_SECONDS=1
+    export SNAPLIST_IOS_SHARD_TIMEOUT_KILL_GRACE_SECONDS=1
+
+    # Only the thresholds a case actually names are overridden. Leaving one
+    # unset keeps the real budget file in the path, which is the point of
+    # `assert_a_shard_warns_at_the_declared_budget_before_it_kills`.
+    if [[ -n $warn_seconds ]]; then
+      export SNAPLIST_IOS_SHARD_WARN_SECONDS=$warn_seconds
+    else
+      unset SNAPLIST_IOS_SHARD_WARN_SECONDS
+    fi
+
+    if [[ -n $kill_seconds ]]; then
+      export SNAPLIST_IOS_SHARD_KILL_SECONDS=$kill_seconds
+    else
+      unset SNAPLIST_IOS_SHARD_KILL_SECONDS
+    fi
+
+    unset SNAPLIST_IOS_ONLY_TESTING
+    unset SNAPLIST_IOS_REPOSITORY_ROOT
+
+    if [[ -n $shard ]]; then
+      export SNAPLIST_IOS_SHARD=$shard
+    else
+      unset SNAPLIST_IOS_SHARD
+    fi
+
+    "$test_script"
+  ) >/dev/null 2>"$diagnostics_file"
+}
+
+run_stubborn_serialized_test_script() {
+  local sleep_seconds=$1
+  local kill_grace_seconds=$2
+  local diagnostics_file=$3
+
+  (
+    export PATH="${serialized_bin}:${PATH}"
+    export SNAPLIST_IOS_LOCK_FILE=$lock_file
+    export SNAPLIST_IOS_LOCK_POLL_SECONDS=1
+    export SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS=30
+    export SNAPLIST_XCODEBUILD_ACTIVE_MARKER=$serialized_active_marker
+    export SNAPLIST_XCODEBUILD_OVERLAP_LOG=$serialized_overlap_log
+    export SNAPLIST_XCODEBUILD_STARTED_LOG=$serialized_started_log
+    export SNAPLIST_XCODEBUILD_DESCENDANT_LOG=$serialized_descendant_log
+    export SNAPLIST_XCODEBUILD_SLEEP_SECONDS=$sleep_seconds
+    export SNAPLIST_XCODEBUILD_EXIT_STATUS=0
+    export SNAPLIST_XCODEBUILD_OUTLAST_TERM=1
+    export SNAPLIST_IOS_ONLY_TESTING=$holder_selector
+    export SNAPLIST_IOS_SHARD_TIMEOUT_KILL_GRACE_SECONDS=$kill_grace_seconds
 
     unset SNAPLIST_IOS_SHARD
     unset SNAPLIST_IOS_REPOSITORY_ROOT
@@ -996,21 +1159,308 @@ assert_a_terminated_holder_leaves_no_stale_owner_behind() {
     return 1
   fi
 
-  # The build the dead run started outlives it and clears the marker on its
-  # own. Wait for that rather than removing it here, so this case cannot hand
-  # the next one a marker that a stray process is about to delete underneath it.
-  polls=0
+  # The build no longer outlives the run that started it, so nothing is left to
+  # clear the marker. Whether it was actually reaped is the next case's claim;
+  # this one only owns the owner file.
+  rm -rf "$serialized_active_marker"
 
-  while [[ -d $serialized_active_marker ]]; do
+  return 0
+}
+
+# A backgrounded child does not defer trap delivery the way a foreground one
+# does, so these handlers now run while xcodebuild is still alive. Releasing
+# the lock there is worse than never releasing it: `test.sh` reports the lock
+# free while its build still holds the simulator and DerivedData, and the next
+# invocation in another worktree takes the flock and starts a second one.
+assert_a_terminated_holder_reaps_its_build_before_releasing_the_lock() {
+  local holder_job recorded_owner holder_pid build_pid descendant_pid
+  local verdict=0
+  local polls=0
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$serialized_descendant_log"
+  : > "$holder_diagnostics_file"
+
+  # A six second grace against a build that ignores SIGTERM. Eventual death is
+  # not the claim and cannot separate the two orderings, because the EXIT trap
+  # reaps too: a handler that released the lock first would still leave a dead
+  # build behind by the time anything asked. The claim is that the lock is
+  # never free while the build it stands for is alive, and this window is where
+  # that is visible.
+  run_stubborn_serialized_test_script 60 6 "$holder_diagnostics_file" &
+  holder_job=$!
+
+  while [[ ! -d $serialized_active_marker ]] ||
+    [[ ! -s $serialized_started_log ]] ||
+    [[ ! -s $serialized_descendant_log ]]
+  do
     sleep 0.1
     polls=$((polls + 1))
 
-    if (( polls > 200 )); then
+    if (( polls > 300 )); then
+      kill "$holder_job" 2>/dev/null
+      wait "$holder_job" 2>/dev/null
       return 1
     fi
   done
 
-  return 0
+  recorded_owner=$(<"${lock_file}.owner")
+  holder_pid=${${(z)recorded_owner}[4]}
+  build_pid=$(head -n 1 "$serialized_started_log")
+  descendant_pid=$(head -n 1 "$serialized_descendant_log")
+
+  if [[ $holder_pid != <-> || $build_pid != <-> || $descendant_pid != <-> ]]; then
+    kill "$holder_job" 2>/dev/null
+    wait "$holder_job" 2>/dev/null
+    return 1
+  fi
+
+  kill -TERM "$holder_pid"
+
+  # Two seconds in, the reap is still working through its grace. The owner file
+  # has to still be there, or the next invocation in another worktree would
+  # take the flock right now and start a second xcodebuild against the same
+  # simulator and DerivedData.
+  sleep 2
+
+  if [[ ! -e ${lock_file}.owner ]] && kill -0 "$build_pid" 2>/dev/null; then
+    verdict=1
+  fi
+
+  polls=0
+
+  while kill -0 "$holder_pid" 2>/dev/null; do
+    sleep 0.2
+    polls=$((polls + 1))
+
+    if (( polls > 150 )); then
+      verdict=1
+      break
+    fi
+  done
+
+  polls=0
+
+  while kill -0 "$build_pid" 2>/dev/null || kill -0 "$descendant_pid" 2>/dev/null; do
+    sleep 0.2
+    polls=$((polls + 1))
+
+    if (( polls > 75 )); then
+      verdict=1
+      break
+    fi
+  done
+
+  kill -KILL "$holder_pid" "$build_pid" "$descendant_pid" 2>/dev/null
+  wait "$holder_job" 2>/dev/null
+  rm -rf "$serialized_active_marker"
+
+  if [[ -e ${lock_file}.owner ]]; then
+    verdict=1
+    rm -f "${lock_file}.owner"
+  fi
+
+  return $verdict
+}
+
+assert_a_hung_shard_is_killed_with_a_named_annotation() {
+  local exit_status
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$serialized_descendant_log"
+  : > "$shard_timeout_diagnostics_file"
+
+  run_shard_timeout_test_script "ui-1" 30 1 1 "$shard_timeout_diagnostics_file"
+  exit_status=$?
+
+  rm -rf "$serialized_active_marker"
+
+  if [[ $exit_status -ne 124 ]]; then
+    return 1
+  fi
+
+  grep -q -- "::error::iOS shard ui-1" "$shard_timeout_diagnostics_file" &&
+    grep -q -- "exceeded its wall-clock budget" "$shard_timeout_diagnostics_file"
+}
+
+# The kill threshold sits above the acceptance budget on purpose. A shard that
+# drifts past #936's 30 minute acceptance criterion has broken the criterion,
+# not the build, and killing it would turn a slow runner into a red check. So
+# the budget annotates and the margin above it kills. Without the warning the
+# criterion is unobservable: a 31 minute shard is green and silent.
+assert_a_shard_warns_at_the_declared_budget_before_it_kills() {
+  local exit_status
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$serialized_descendant_log"
+  : > "$shard_timeout_diagnostics_file"
+
+  run_shard_timeout_test_script "ui-1" 6 1 30 "$shard_timeout_diagnostics_file"
+  exit_status=$?
+
+  rm -rf "$serialized_active_marker"
+
+  # The build outlives the warning and then succeeds. A warning that only
+  # appears on the way to a kill would prove nothing about the split.
+  if [[ $exit_status -ne 0 ]]; then
+    return 1
+  fi
+
+  grep -q -- "::warning::iOS shard ui-1" "$shard_timeout_diagnostics_file" &&
+    ! grep -q -- "::error::" "$shard_timeout_diagnostics_file"
+}
+
+# `${+SNAPLIST_IOS_SHARD}` at ios/Scripts/test.sh is the whole reason `serial`,
+# `focused` and every local invocation are untouched by this budget. Overriding
+# a threshold here would let the override branch decide the outcome and leave
+# that guard unexercised, so this case sets neither.
+assert_the_wall_clock_budget_does_not_apply_without_a_declared_shard() {
+  local exit_status
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$serialized_descendant_log"
+  : > "$shard_timeout_diagnostics_file"
+
+  run_shard_timeout_test_script "" 1 "" "" "$shard_timeout_diagnostics_file"
+  exit_status=$?
+
+  rm -rf "$serialized_active_marker"
+
+  if [[ $exit_status -ne 0 || -s $shard_timeout_diagnostics_file ]]; then
+    return 1
+  fi
+
+  # The run above cannot tell the two cases apart on its own: a one second
+  # build finishes inside a real thirty minute budget whether the guard fired
+  # or not. Replacing the guard with `if true` has to be visible, so read the
+  # derivation out directly and require no budget at all.
+  [[ $(print_shard_wall_clock_plan "") == "warn=0 kill=0" ]]
+}
+
+# The deadline is anchored at the start of this script, not at the moment
+# xcodebuild launched, because a wall-clock budget that excludes the lock wait
+# is not a wall-clock budget. Anchored at launch, a contended run could spend
+# SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS waiting and then still claim a full budget
+# on top of it.
+assert_the_budget_counts_time_spent_waiting_for_the_build_lock() {
+  local holder_job waiter_status
+  local polls=0
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$serialized_descendant_log"
+  : > "$holder_diagnostics_file"
+  : > "$shard_timeout_diagnostics_file"
+
+  run_serialized_test_script "$holder_selector" "$holder_diagnostics_file" 8 &
+  holder_job=$!
+
+  while [[ ! -d $serialized_active_marker ]]; do
+    sleep 0.1
+    polls=$((polls + 1))
+
+    if (( polls > 200 )); then
+      kill "$holder_job" 2>/dev/null
+      wait "$holder_job" 2>/dev/null
+      return 1
+    fi
+  done
+
+  # Its whole budget is gone before it ever holds the lock, and the build it
+  # then starts is short enough to finish inside a budget measured from launch.
+  run_shard_timeout_test_script "ui-1" 2 2 3 "$shard_timeout_diagnostics_file"
+  waiter_status=$?
+
+  wait "$holder_job" 2>/dev/null
+  rm -rf "$serialized_active_marker"
+
+  [[ $waiter_status -eq 124 ]] &&
+    grep -q -- "::error::iOS shard ui-1" "$shard_timeout_diagnostics_file"
+}
+
+print_shard_wall_clock_plan() {
+  local shard=$1
+  local budget_file=${2:-$shard_wall_clock_budget_file}
+
+  (
+    export PATH="${serialized_bin}:${PATH}"
+    export SNAPLIST_IOS_SHARD_BUDGET_FILE=$budget_file
+
+    if [[ -n $shard ]]; then
+      export SNAPLIST_IOS_SHARD=$shard
+    else
+      unset SNAPLIST_IOS_SHARD
+    fi
+
+    unset SNAPLIST_IOS_ONLY_TESTING
+    unset SNAPLIST_IOS_REPOSITORY_ROOT
+    unset SNAPLIST_IOS_SHARD_WARN_SECONDS
+    unset SNAPLIST_IOS_SHARD_KILL_SECONDS
+
+    "$test_script" --print-shard-wall-clock-plan
+  ) 2>/dev/null
+}
+
+# Both timeout cases above override their thresholds, and the workflow cases
+# below only compare the file to a literal, so nothing yet proves the file
+# reaches the code that consumes it. Deleting the read, inverting the
+# arithmetic, or adding the margin instead of subtracting it all have to turn
+# this red.
+assert_the_wall_clock_budget_file_is_what_the_shard_actually_uses() {
+  local declared_minutes plan warn_seconds
+
+  declared_minutes=$(<"$shard_wall_clock_budget_file")
+  plan=$(print_shard_wall_clock_plan ui-1) || return 1
+  warn_seconds=${${(s: :)plan}[1]#warn=}
+
+  [[ $warn_seconds == $(( declared_minutes * 60 )) ]]
+}
+
+# One value cannot separate "reads the file" from "happens to agree with the
+# file". A second, different value can.
+assert_a_changed_wall_clock_budget_moves_the_thresholds_with_it() {
+  local plan warn_seconds kill_seconds
+
+  print -r -- 7 > "$substitute_shard_wall_clock_budget_file"
+
+  plan=$(print_shard_wall_clock_plan ui-1 "$substitute_shard_wall_clock_budget_file") || return 1
+  warn_seconds=${${(s: :)plan}[1]#warn=}
+  kill_seconds=${${(s: :)plan}[2]#kill=}
+
+  [[ $warn_seconds == 420 ]] && (( kill_seconds > warn_seconds ))
+}
+
+read_workflow_shard_timeout_minutes() {
+  ruby -ryaml -e '
+    workflow = YAML.load_file(ARGV.fetch(0))
+    puts workflow.fetch("jobs").fetch("shard").fetch("timeout-minutes")
+  ' "${1:-$workflow_file}"
+}
+
+# The job-level cap is asserted as a relationship to the derived kill
+# threshold rather than as a second copy of the budget, so the budget stays
+# stated in exactly one place. It has to sit above the kill, or GitHub's own
+# cap fires first with nothing but "The operation was canceled." — the failure
+# mode #936 was opened for — and close enough above it that a hung shard is
+# not paid for twice.
+assert_the_job_cap_leaves_room_for_the_shard_to_report_its_own_timeout() {
+  local plan kill_seconds job_cap_seconds
+
+  plan=$(print_shard_wall_clock_plan ui-1) || return 1
+  kill_seconds=${${(s: :)plan}[2]#kill=}
+  job_cap_seconds=$(( $(read_workflow_shard_timeout_minutes) * 60 ))
+
+  (( job_cap_seconds > kill_seconds )) &&
+    (( job_cap_seconds - kill_seconds <= 300 ))
 }
 
 failures=0
@@ -1021,6 +1471,7 @@ for contract_case in \
   assert_focused_selector_uses_the_target_repository \
   assert_malformed_selectors_fail_before_xcodebuild \
   assert_shard_inventory_fails_closed_on_omission_and_duplication \
+  assert_shard_inventory_baseline_names_the_layout_it_was_measured_under \
   assert_shard_inventory_fails_closed_on_empty_declared_shard \
   assert_shard_inventory_fails_closed_on_stale_timing_evidence \
   assert_nested_ui_test_file_cannot_be_silently_omitted \
@@ -1042,8 +1493,22 @@ for contract_case in \
   assert_a_waiting_invocation_keeps_reporting_while_it_waits \
   assert_a_failing_build_leaves_no_lock_behind \
   assert_a_terminated_holder_leaves_no_stale_owner_behind \
-  assert_the_first_wait_report_names_a_holder_that_records_itself_late
+  assert_the_first_wait_report_names_a_holder_that_records_itself_late \
+  assert_a_terminated_holder_reaps_its_build_before_releasing_the_lock \
+  assert_a_hung_shard_is_killed_with_a_named_annotation \
+  assert_a_shard_warns_at_the_declared_budget_before_it_kills \
+  assert_the_wall_clock_budget_does_not_apply_without_a_declared_shard \
+  assert_the_budget_counts_time_spent_waiting_for_the_build_lock \
+  assert_the_wall_clock_budget_file_is_what_the_shard_actually_uses \
+  assert_a_changed_wall_clock_budget_moves_the_thresholds_with_it \
+  assert_the_job_cap_leaves_room_for_the_shard_to_report_its_own_timeout
 do
+  if [[ -n ${SNAPLIST_IOS_CONTRACT_CASE_FILTER-} ]] &&
+    [[ $contract_case != *${SNAPLIST_IOS_CONTRACT_CASE_FILTER}* ]]
+  then
+    continue
+  fi
+
   if $contract_case; then
     print -r -- "PASS ${contract_case}"
   else
