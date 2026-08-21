@@ -4456,6 +4456,10 @@ struct PhotoReviewView: View {
                 Text("Add")
                     .snapListTypography(.metadata)
                     .fontWeight(.semibold)
+                    // The tile is the approved thumbnail size, which does not
+                    // grow, so at the accessibility sizes the label became
+                    // "A…" over an unexplained dashed square.
+                    .snapListFitsFixedSlot()
             }
             .foregroundStyle(SnapListColorToken.textSecondary.color)
             .frame(

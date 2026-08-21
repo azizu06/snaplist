@@ -251,4 +251,44 @@ final class AccessibilityFoundationTests: XCTestCase {
         // Library-only seam: neither their identities nor an action capability is part
         // of MountedLibraryControl or the consumer interface.
     }
+
+    // MARK: - Address wrapping (UI practice audit, 2026-08-21)
+
+    /// At accessibility5 the Settings profile card renders the seller's own
+    /// address in a column narrower than the address, and SwiftUI resolves
+    /// that by hyphenating: `jordan.hale@icloud.-com`. The hyphen is not in
+    /// the address. What has to hold is that the display copy adds only
+    /// zero-width break opportunities, so the layout engine has somewhere
+    /// legitimate to break and never invents a character of its own.
+    func testTheDisplayAddressAddsOnlyInvisibleBreakOpportunities() {
+        let address = "jordan.hale@icloud.com"
+        let display = address.withAddressLineBreakOpportunities
+
+        XCTAssertEqual(
+            display.replacingOccurrences(of: "\u{200B}", with: ""),
+            address,
+            "Stripping the inserted breaks must return the seller's exact address."
+        )
+        XCTAssertEqual(display, "jordan.\u{200B}hale@\u{200B}icloud.\u{200B}com")
+        XCTAssertFalse(display.contains("-"))
+    }
+
+    /// A break opportunity is only useful where a wrap is plausible. A string
+    /// with no separator has no place to break, and must come back untouched
+    /// rather than gaining a character.
+    func testTheDisplayAddressLeavesAStringWithNoSeparatorAlone() {
+        XCTAssertEqual(
+            "Not signed in".withAddressLineBreakOpportunities,
+            "Not signed in"
+        )
+    }
+
+    /// The guest profile's address slot holds copy, not an address, and the
+    /// member path can render the same value twice across a state change.
+    /// Applying the transform to its own output must not keep stacking
+    /// separators.
+    func testTheDisplayAddressIsIdempotent() {
+        let once = "jordan.hale@icloud.com".withAddressLineBreakOpportunities
+        XCTAssertEqual(once.withAddressLineBreakOpportunities, once)
+    }
 }

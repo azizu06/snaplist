@@ -419,6 +419,10 @@ struct ScanReviewButton: View {
 
     var body: some View {
         Button("Review", action: review)
+            // The capsule shares its row with the shutter and the library
+            // opener, so at the accessibility sizes the label had less width
+            // than the word and SwiftUI hyphenated it into "Re-view".
+            .snapListFitsFixedSlot()
             // The capsule below is this control's whole affordance. Left on
             // `.automatic`, iOS paints a second filled shape behind it for a
             // seller with Button Shapes on, which reads as an overlay sitting
