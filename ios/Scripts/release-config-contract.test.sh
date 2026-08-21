@@ -255,3 +255,36 @@ env \
   SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY=pk_live_valid \
   SNAPLIST_RELEASE_CLERK_FRONTEND_DOMAIN=release-clerk.example.invalid \
   "$release_lint"
+
+# #971. Verify Info.plist and Info-Release.plist have identical keys
+# outside of NSAppTransportSecurity. Release may strip the ATS exception
+# but must not add, remove, or change any other key.
+debug_plist_json=$(mktemp)
+release_plist_json=$(mktemp)
+
+plutil -convert json -o "$debug_plist_json" "$info_plist"
+plutil -convert json -o "$release_plist_json" "$info_plist_release"
+
+python3 <<PYTHON_EOF
+import json
+import sys
+
+with open('$debug_plist_json') as f:
+  debug_dict = json.load(f)
+with open('$release_plist_json') as f:
+  release_dict = json.load(f)
+
+debug_dict.pop('NSAppTransportSecurity', None)
+release_dict.pop('NSAppTransportSecurity', None)
+
+debug_json = json.dumps(debug_dict, sort_keys=True, separators=(',', ':'))
+release_json = json.dumps(release_dict, sort_keys=True, separators=(',', ':'))
+
+if debug_json != release_json:
+  print('Info.plist and Info-Release.plist differ outside NSAppTransportSecurity:', file=sys.stderr)
+  print('Debug:', file=sys.stderr)
+  print(json.dumps(debug_dict, indent=2, sort_keys=True), file=sys.stderr)
+  print('Release:', file=sys.stderr)
+  print(json.dumps(release_dict, indent=2, sort_keys=True), file=sys.stderr)
+  sys.exit(1)
+PYTHON_EOF
