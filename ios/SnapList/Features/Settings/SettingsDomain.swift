@@ -116,11 +116,26 @@ enum SettingsSignOutOutcome: Equatable {
 /// sign-out lands in can read whatever is still there. Removing first makes
 /// "signed out" imply "removed" rather than leaving a window where it does not.
 enum SettingsSignOutTransaction {
+    /// Issue #851. `UserDefaultsAnalyticsIdentityStore` is the same default
+    /// `AnalyticsClient` composition (`MobileAPIClient.makeAnalyticsClient`)
+    /// binds to when no test double is injected, so calling the bare
+    /// initializer here reaches the exact storage the guest-claim alias
+    /// writes to, without this file taking a dependency on which
+    /// `AnalyticsClient` is active.
     static func perform(
         removeLocalData: () async -> Bool,
-        endSession: () async throws -> Void
+        endSession: () async throws -> Void,
+        resetAnalyticsIdentity: () -> Void = {
+            UserDefaultsAnalyticsIdentityStore().reset()
+        }
     ) async -> SettingsSignOutOutcome {
         guard await removeLocalData() else { return .localDataNotRemoved }
+        // Best-effort and unconditional: local removal already committed by
+        // this point, so the stored id is cleared whether or not Clerk goes
+        // on to end the session (AC4). `resetAnalyticsIdentity` cannot throw,
+        // so it cannot fail sign-out or change the outcome the seller is told
+        // (AC3).
+        resetAnalyticsIdentity()
         do {
             try await endSession()
         } catch {

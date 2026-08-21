@@ -330,6 +330,14 @@ final class AccountDeletionCoordinator {
         /// here leaves a live credential on a device whose account is gone,
         /// which is the thing Guideline 5.1.1(v) exists to prevent.
         var signOut: @Sendable () async -> Bool
+        /// Issue #851. Clears the stored analytics Clerk user id once this
+        /// device's own copies are gone, so a later member who signs in here
+        /// is never reported under this one's id. Best-effort and
+        /// non-throwing, matching `SettingsSignOutTransaction`: it cannot fail
+        /// the deletion or change what the seller is told (AC3). The default
+        /// reaches the same `UserDefaultsAnalyticsIdentityStore` the default
+        /// `AnalyticsClient` composition binds to.
+        var resetAnalyticsIdentity: @Sendable () -> Void
         var newIdempotencyKey: @Sendable () -> String
         /// Reads the key an earlier attempt left behind. Without this, a seller
         /// who leaves the tail and comes back mints a key the server must
@@ -351,6 +359,9 @@ final class AccountDeletionCoordinator {
                 -> AccountErasureOutcome,
             clearDeviceState: @escaping @Sendable () async -> Bool,
             signOut: @escaping @Sendable () async -> Bool,
+            resetAnalyticsIdentity: @escaping @Sendable () -> Void = {
+                UserDefaultsAnalyticsIdentityStore().reset()
+            },
             newIdempotencyKey: @escaping @Sendable () -> String,
             loadIdempotencyKey: @escaping @Sendable () -> String? = { nil },
             rememberIdempotencyKey: @escaping @Sendable (String) -> Void = { _ in },
@@ -361,6 +372,7 @@ final class AccountDeletionCoordinator {
             self.requestErasure = requestErasure
             self.clearDeviceState = clearDeviceState
             self.signOut = signOut
+            self.resetAnalyticsIdentity = resetAnalyticsIdentity
             self.newIdempotencyKey = newIdempotencyKey
             self.loadIdempotencyKey = loadIdempotencyKey
             self.rememberIdempotencyKey = rememberIdempotencyKey
@@ -457,6 +469,11 @@ final class AccountDeletionCoordinator {
             phase = .deviceNotCleared
             return
         }
+        // Best-effort and unconditional, mirroring `SettingsSignOutTransaction`:
+        // this device's own copies are already gone by this point, so the
+        // stored analytics id is cleared whether or not the Clerk sign-out
+        // below succeeds (#851, AC2/AC4).
+        dependencies.resetAnalyticsIdentity()
         // Sign-out is last and its result is checked. It is a network call made
         // straight after a sequence that may have just failed over a bad
         // connection, and Clerk keeps its session in its own Keychain item that
