@@ -43,6 +43,51 @@ enum FirstValueOnboardingLayoutMetrics {
     static let includedCardTextBottomPadding: CGFloat = 12
 }
 
+/// Base (unscaled, default content size) point sizes for the compact-authority title.
+/// `@ScaledMetric` reads these as its `wrappedValue`, so at the default content size the
+/// render is unchanged; at larger content sizes it scales along the `.title` curve.
+enum FirstValueOnboardingTitleMetrics {
+    static let compactSize: CGFloat = 25
+    static let standardSize: CGFloat = 27
+
+    /// Owner ruling on #975: the title may grow with Dynamic Type, but only up to this
+    /// ceiling — past it, onb01's priced value-prop card and mascot get pushed below the
+    /// initial accessibility5 viewport. Body/actions elsewhere keep scaling uncapped.
+    static let scaleCeiling: DynamicTypeSize = .accessibility1
+
+    static func baseSize(for screen: FirstValueOnboardingScreen) -> CGFloat {
+        switch screen {
+        case .onb03, .onb04, .onb05: compactSize
+        case .onb01, .onb02, .onb06: standardSize
+        }
+    }
+}
+
+/// `@ScaledMetric` bakes its scaled value from the environment present when THIS view's
+/// own `body` resolves. Isolating the compact-authority title in its own view lets a
+/// `.dynamicTypeSize(...through:)` ceiling applied from the parent cap only this subtree,
+/// while the rest of the screen keeps scaling uncapped.
+private struct CompactAuthorityTitleText: View {
+    let screen: FirstValueOnboardingScreen
+    let content: Text
+
+    @ScaledMetric(relativeTo: .title) private var scaledCompactTitleSize: CGFloat =
+        FirstValueOnboardingTitleMetrics.compactSize
+    @ScaledMetric(relativeTo: .title) private var scaledStandardTitleSize: CGFloat =
+        FirstValueOnboardingTitleMetrics.standardSize
+
+    var body: some View {
+        content.font(.system(
+            size: FirstValueOnboardingTitleMetrics.baseSize(for: screen)
+                == FirstValueOnboardingTitleMetrics.compactSize
+                ? scaledCompactTitleSize
+                : scaledStandardTitleSize,
+            weight: .bold,
+            design: .rounded
+        ))
+    }
+}
+
 @MainActor
 struct FirstValueOnboardingView: View {
     @Bindable var model: FirstValueOnboardingModel
@@ -208,31 +253,30 @@ struct FirstValueOnboardingView: View {
     }
 
     private var title: some View {
-        Group {
-            switch model.screen {
-            case .onb01:
-                highlightedTitle("Photograph anything.\n", "We write the listing.")
-            case .onb02:
-                highlightedTitle("A few angles,\n", "then say the rest.")
-            case .onb03:
-                highlightedTitle("Priced from controllers\n", "that actually sold.")
-            case .onb04:
-                highlightedTitle("Written for you.\n", "Yours to change.")
-            case .onb05:
-                highlightedTitle("It finishes\n", "while you keep going.")
-            case .onb06:
-                highlightedTitle("Your first one\n", "is on us.", blue: SnapListColorToken.actionDeep.color)
+        let content: Text
+        switch model.screen {
+        case .onb01:
+            content = highlightedTitle("Photograph anything.\n", "We write the listing.")
+        case .onb02:
+            content = highlightedTitle("A few angles,\n", "then say the rest.")
+        case .onb03:
+            content = highlightedTitle("Priced from controllers\n", "that actually sold.")
+        case .onb04:
+            content = highlightedTitle("Written for you.\n", "Yours to change.")
+        case .onb05:
+            content = highlightedTitle("It finishes\n", "while you keep going.")
+        case .onb06:
+            content = highlightedTitle("Your first one\n", "is on us.", blue: SnapListColorToken.actionDeep.color)
+        }
+
+        return Group {
+            if usesCompactAuthorityLayout {
+                CompactAuthorityTitleText(screen: model.screen, content: content)
+                    .dynamicTypeSize(...FirstValueOnboardingTitleMetrics.scaleCeiling)
+            } else {
+                content.font(.system(.largeTitle, design: .rounded, weight: .bold))
             }
         }
-        .font(usesCompactAuthorityLayout
-            ? .system(
-                size: model.screen == .onb03 || model.screen == .onb04 || model.screen == .onb05
-                    ? 25
-                    : 27,
-                weight: .bold,
-                design: .rounded
-            )
-            : .system(.largeTitle, design: .rounded, weight: .bold))
         .frame(maxWidth: .infinity, alignment: .leading)
         .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)

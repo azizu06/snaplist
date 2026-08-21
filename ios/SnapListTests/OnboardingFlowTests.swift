@@ -1956,6 +1956,18 @@ final class OnboardingFlowTests: XCTestCase {
             "first-value-onboarding.continue resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
         )
     }
+
+    /// The title's `@ScaledMetric` reads these as its default-content-size `wrappedValue`
+    /// (#975). Pinning them keeps the default render byte-identical to before Dynamic Type
+    /// scaling was added, without standing up a heavyweight rendered-font UI test.
+    func testFirstValueOnboardingTitleBaseSizesAreUnchangedAtDefaultContentSize() {
+        XCTAssertEqual(FirstValueOnboardingTitleMetrics.baseSize(for: .onb01), 27)
+        XCTAssertEqual(FirstValueOnboardingTitleMetrics.baseSize(for: .onb02), 27)
+        XCTAssertEqual(FirstValueOnboardingTitleMetrics.baseSize(for: .onb03), 25)
+        XCTAssertEqual(FirstValueOnboardingTitleMetrics.baseSize(for: .onb04), 25)
+        XCTAssertEqual(FirstValueOnboardingTitleMetrics.baseSize(for: .onb05), 25)
+        XCTAssertEqual(FirstValueOnboardingTitleMetrics.baseSize(for: .onb06), 27)
+    }
 }
 
 private final class CameraAuthorizationStub: CameraAuthorizationProviding {
