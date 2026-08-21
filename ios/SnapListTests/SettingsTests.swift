@@ -799,6 +799,21 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    /// #823. Two artifacts once disagreed on DEL-03's fact-line order; ADR-0014
+    /// records identity-confirmation-first as authoritative. This pins the
+    /// order on `SettingsDeletionConfirmationCopy.factLines`, the seam the view
+    /// renders from, so a future reorder fails here instead of shipping silent.
+    func testDeletionConfirmationFactLineOrderIsPinnedToIdentityFirst() {
+        XCTAssertEqual(
+            SettingsDeletionConfirmationCopy.factLines(subscriptionTruth: .billing),
+            [
+                "It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account.",
+                "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
+                "SnapList Pro keeps billing until you cancel it in the App Store. Deleting this account does not cancel it.",
+            ]
+        )
+    }
+
     func testEntitlementRefreshPlanPreservesServerTruthAcrossLoadAndRestore() {
         XCTAssertEqual(
             SettingsEntitlementRefreshPlan.afterInitialLoad(.unconfigured),
