@@ -509,8 +509,16 @@ final class SnapListUITests: XCTestCase {
             XCTAssertTrue(dock.waitForExistence(timeout: 5), app.debugDescription)
             let last = app.descendants(matching: .any)[identifier]
             // Settings builds its rows lazily, so the last card does not exist
-            // until it has been scrolled near.
-            for _ in 0..<12 where !last.exists {
+            // until it has been scrolled near. `where` on a `for-in` filters
+            // which iterations run the body — it does not stop the loop, so a
+            // `for _ in 0..<12 where !last.exists` kept polling `last.exists`
+            // over IPC for every remaining iteration once the row was already
+            // found (#942), each one a chance for a transient main-run-loop
+            // stall on the app under test to surface as this selector's
+            // failure. `break` makes the loop actually stop, as the comment
+            // below always claimed it did.
+            for _ in 0..<12 {
+                guard !last.exists else { break }
                 app.swipeUp()
             }
             XCTAssertTrue(last.waitForExistence(timeout: 5), app.debugDescription)
@@ -521,7 +529,8 @@ final class SnapListUITests: XCTestCase {
                 last.tap()
             }
 
-            for _ in 0..<12 where last.frame.maxY > dock.frame.minY {
+            for _ in 0..<12 {
+                guard last.frame.maxY > dock.frame.minY else { break }
                 app.swipeUp()
             }
             let receipt =
