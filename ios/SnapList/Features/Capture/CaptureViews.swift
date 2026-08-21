@@ -289,10 +289,14 @@ private struct ScanLibraryLabel: View {
 /// and whether it is the selected one.
 /// The vertical band the zoom row reserves in the control stack when the
 /// hardware offers it: the gap `LiveScanCameraSurface` pads above the row
-/// plus the row's own rendered height. The framing corners' clearance and
-/// the ACT-01 / ACT-06 coach mark anchor (`AppShellView`) both read this
-/// single value instead of each carrying their own copy of it, so a future
-/// change to the row's spacing cannot leave one of them stale.
+/// plus the row's own rendered height.
+///
+/// The ACT-01 / ACT-06 coach mark anchor (`AppShellView`) reads this rather
+/// than carrying its own copy, so a change to the row's spacing cannot leave it
+/// stale. Since #954 the framing corners no longer read it: the capsule floats
+/// over the preview, inside the framing box rather than below it, so the box
+/// does not clear it. It still occupies this much of the control stack, which
+/// is the question the coach mark is asking.
 enum ScanZoomRowMetrics {
     static func reservedHeight(isAccessibility: Bool) -> CGFloat {
         isAccessibility ? 22 + 52 : 18 + 44
@@ -336,6 +340,12 @@ struct ScanZoomControlView: View {
         } label: {
             Text(control.label(for: lens))
                 .font(.subheadline.weight(.semibold))
+                // ".5x" is two glyph groups, so a squeezed chip wraps into a
+                // stack rather than truncating, and the capsule grows taller
+                // than the chrome it sits in. #954 hit this twice, once with
+                // the count capsule and once with this one.
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(
                     isSelected
                         ? SnapListColorToken.inkPrimary.color
@@ -473,6 +483,49 @@ enum ScanReturnFocusPolicy {
     }
 }
 
+/// Where the bottom control stack starts, in global coordinates.
+///
+/// The framing corners are drawn in a sibling layer of the same `ZStack`, so
+/// they cannot ask the control stack where it ended up. Every row of that stack
+/// reports its own top and the lowest value wins, which is the first row
+/// whatever occupies it — the staged strip when photos are staged, the shutter
+/// row when none are.
+///
+/// Measured rather than summed because the staged region is one row at most
+/// text sizes and two once Review wraps beneath the strip, and `ViewThatFits`
+/// decides which by measurement. A constant would be right at the sizes it was
+/// read off and wrong at the rest, which is the shape of #954's own defect.
+private struct ScanBottomStackTopPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = .greatestFiniteMagnitude
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = min(value, nextValue())
+    }
+}
+
+/// The bottom edge of the surface, in the same global space.
+private struct ScanSurfaceBottomPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+extension View {
+    /// Reports this row's top edge as a candidate for the bottom stack's start.
+    fileprivate func reportsBottomStackTop() -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ScanBottomStackTopPreferenceKey.self,
+                    value: proxy.frame(in: .global).minY
+                )
+            }
+        }
+    }
+}
+
 private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
     let photoIDs: [StagedCapturePhoto.ID]
@@ -496,6 +549,8 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     let removePhoto: (StagedCapturePhoto.ID) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var bottomStackTopY: CGFloat = .greatestFiniteMagnitude
+    @State private var surfaceBottomY: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -521,54 +576,79 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .accessibilitySortPriority(10)
             }
 
-            ResponsiveFramingCorners(additionalBottomInset: framingCornersClearance)
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
+            ResponsiveFramingCorners(
+                additionalBottomInset: -FloatingDockMetrics.containerHeight(for: .scan),
+                bottomEdgeAboveContainerBottom: framingCornersBottomEdge
+            )
+            .ignoresSafeArea()
+            .accessibilityHidden(true)
 
             VStack(spacing: 0) {
                 HStack {
                     closeButton
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 8)
 
                 Spacer(minLength: 20)
 
-                if !thumbnailURLs.isEmpty {
-                    photoProgress
-                        .transition(
-                            reduceMotion
-                                ? .identity
-                                : .opacity.combined(with: .offset(y: 10))
-                        )
-
-                    // Review keeps its own line rather than riding the strip.
-                    // Its name grows with the photo count and again with
-                    // Dynamic Type, so sharing a row with five thumbnails and
-                    // the count capsule would collide at accessibility sizes.
-                    HStack {
-                        Spacer(minLength: 8)
-                        reviewButton
-                            .transition(reduceMotion ? .identity : .opacity)
-                    }
-                    .padding(.horizontal, 15)
-                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 20 : 16)
-                }
-
+                // The zoom capsule gets a compact row of its own directly above
+                // the staged strip, so it stays next to the shutter it changes
+                // rather than drifting up to the close button.
+                //
+                // It cannot share the staged row: five thumbnails hold 265pt of
+                // the 372pt gutter at every text size, and the capsule and
+                // Review together want more than the 107pt left over well before
+                // accessibility sizes. That three-way squeeze is the collision
+                // #954 exists to remove, so the capsule keeps its own line and
+                // the strip keeps Review.
+                //
+                // `fixedSize` because ".5x" is two glyph groups: a squeezed
+                // capsule wraps into a stack rather than truncating, and grows
+                // taller than the row it sits in.
                 ScanZoomControlView(
                     control: zoomControl,
                     selectedLens: selectedZoomLens,
                     selectLens: selectZoomLens
                 )
-                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 22 : 18)
+                .fixedSize(horizontal: true, vertical: false)
+                .reportsBottomStackTop()
+
+                if !thumbnailURLs.isEmpty {
+                    stagedControls
+                        .padding(.horizontal, 15)
+                        .reportsBottomStackTop()
+                        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
+                        .transition(
+                            reduceMotion
+                                ? .identity
+                                : .opacity.combined(with: .offset(y: 10))
+                        )
+                }
 
                 cameraControls
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
-                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 18 : 14)
+                    .reportsBottomStackTop()
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
             }
             .safeAreaPadding(.top, 2)
             .safeAreaPadding(.bottom, 30)
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ScanSurfaceBottomPreferenceKey.self,
+                    value: proxy.frame(in: .global).maxY
+                )
+            }
+            .ignoresSafeArea()
+        }
+        .onPreferenceChange(ScanBottomStackTopPreferenceKey.self) { top in
+            bottomStackTopY = top
+        }
+        .onPreferenceChange(ScanSurfaceBottomPreferenceKey.self) { bottom in
+            surfaceBottomY = bottom
         }
         .background(SnapListColorToken.cameraSurface.color.ignoresSafeArea())
         .animation(
@@ -626,40 +706,58 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         )
     }
 
-    /// How this surface's control stack differs from the one the framing
-    /// corners' base inset was tuned against.
+    /// The strip and Review on one line, or stacked when that line cannot hold
+    /// them.
     ///
-    /// Every term is signed: the rows #885 adds push the corners up, and the
-    /// dock this surface does not float pulls them back down. Both added rows
-    /// are optional, so this is summed from what is actually on screen rather
-    /// than assumed.
-    private var framingCornersClearance: CGFloat {
-        let isAccessibility = dynamicTypeSize.isAccessibilitySize
-        // The base inset reserves room for a dock because this surface floated
-        // one when that inset was chosen. #885 takes the dock off the preview,
-        // so the reserved height is now empty and the framing box grows into it
-        // rather than leaving dead space above the controls.
-        //
-        // Not because of the recovery surfaces. They do not draw framing
-        // corners at all. The only other caller is `CameraFixtureSurface`, a
-        // DEBUG fixture, and it takes the base inset unmodified.
-        var clearance = -FloatingDockMetrics.containerHeight(for: .scan)
-        if !thumbnailURLs.isEmpty {
-            // The review row's lead-in, control, and gap to the control row,
-            // less the 28pt (38pt at accessibility sizes) the strip used to pad
-            // below itself, plus the 13pt the strip itself grew by.
-            //
-            // At accessibility sizes the strip also outgrows what the base
-            // inset assumed: its thumbnails hold their size, but the count
-            // capsule beside them is text and roughly doubles the row.
-            clearance += isAccessibility
-                ? (20 + 60 + 22) - 38 + 64 + 13
-                : (16 + 48 + 18) - 28 + 13
+    /// Five thumbnails hold 265pt of the 372pt gutter at every text size, so
+    /// whether Review fits beside them is purely a question of how wide its
+    /// name has grown. #885 answered that by giving Review a permanent line of
+    /// its own, but it was sharing the strip with the count capsule then;
+    /// deleting the capsule returns the width that collision needed.
+    ///
+    /// `ViewThatFits` measures rather than guesses, so the single line survives
+    /// exactly as far as it actually fits and the stack takes over the moment
+    /// it does not — no Dynamic Type threshold to keep in sync, and no size at
+    /// which the two overlap. Neither candidate scrolls, so both report an
+    /// honest ideal width and the wide one cannot claim to fit when it does
+    /// not.
+    private var stagedControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 0) {
+                photoProgress
+                // 8pt, not a comfortable gutter: five thumbnails and Review
+                // together want 355pt of the 372pt available at medium, so the
+                // gap between them is the entire margin the single-line branch
+                // has to work with. A roomier one costs the line itself.
+                Spacer(minLength: 8)
+                reviewButton
+            }
+
+            VStack(alignment: .trailing, spacing: 12) {
+                photoProgress
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                reviewButton
+            }
         }
-        if zoomControl.isOffered {
-            clearance += ScanZoomRowMetrics.reservedHeight(isAccessibility: isAccessibility)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: dynamicTypeSize)
+    }
+
+    /// How far above the screen's bottom edge the framing corners should end.
+    ///
+    /// One rule at every text size and every staged count: 18pt of daylight
+    /// above whatever row the bottom control stack starts with. That is the
+    /// staged strip once photos are staged and the shutter row before then, and
+    /// the strip's row count varies with how wide Review's name grew, so the
+    /// position is read from the rendered frames rather than summed from
+    /// constants (#954).
+    ///
+    /// `nil` until both measurements have landed, which leaves the corners on
+    /// their base inset for the first layout pass.
+    private var framingCornersBottomEdge: CGFloat? {
+        guard surfaceBottomY > 0, bottomStackTopY < .greatestFiniteMagnitude else {
+            return nil
         }
-        return clearance
+        return surfaceBottomY - bottomStackTopY + 18
     }
 
     // A `ZStack` that absolutely centers the shutter over an independent `HStack` once let
@@ -783,6 +881,7 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                             photoIDs: photoIDs,
                             removePhoto: removePhoto
                         )
+                        .padding(.horizontal, 15)
                         ScanReviewButton(
                             photoCount: thumbnailURLs.count,
                             priority: .recovery,
@@ -827,20 +926,11 @@ private struct ScanPhotoProgressRow: View {
                     )
                 }
             }
-            Spacer(minLength: 8)
-            Text("\(thumbnailURLs.count) of 5")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                .padding(.horizontal, 15)
-                .frame(minWidth: 60, minHeight: 34)
-                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
-                .clipShape(.capsule)
-                .accessibilityIdentifier("scan.photo-count")
-                .accessibilitySortPriority(69)
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 15)
     }
 }
+
 
 private struct ScanPhotoThumbnail: View {
     let url: URL?
@@ -1194,14 +1284,22 @@ private struct ResponsiveFramingCorners: View {
     /// a caller adds exactly the height of the rows it introduced, so the
     /// margin the corners had is the margin they keep.
     var additionalBottomInset: CGFloat = 0
+    /// Where the bottom edge should sit, measured up from the container's
+    /// bottom, when the caller knows that exactly.
+    ///
+    /// A caller that has measured its own control stack can say where the
+    /// corners end instead of describing how far its stack drifted from the
+    /// stack the base inset was tuned against. Takes precedence over
+    /// `additionalBottomInset`.
+    var bottomEdgeAboveContainerBottom: CGFloat?
 
     var body: some View {
         GeometryReader { proxy in
             let isCompactHeight = proxy.size.height <= 700
             let horizontalInset: CGFloat = proxy.size.width <= 375 ? 28 : 34
             let topInset: CGFloat = isCompactHeight ? 112 : 140
-            let bottomInset: CGFloat =
-                (isCompactHeight ? 264 : 300) + additionalBottomInset
+            let bottomInset: CGFloat = bottomEdgeAboveContainerBottom
+                ?? ((isCompactHeight ? 264 : 300) + additionalBottomInset)
             FramingCorners(
                 length: isCompactHeight ? 34 : 42,
                 cornerRadius: isCompactHeight ? 12 : 15,

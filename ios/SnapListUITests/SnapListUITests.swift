@@ -1017,14 +1017,17 @@ final class SnapListUITests: XCTestCase {
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
 
-        let photoCount = app.staticTexts["scan.photo-count"]
-        XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
+        // #954 deleted the "N of 5" capsule. The strip and Review's own
+        // count-bearing name carry that truth now, so the restored draft is
+        // proved by exactly one thumbnail rather than by the capsule's text.
+        let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        XCTAssertTrue(firstPhoto.waitForExistence(timeout: 3))
         XCTAssertEqual(
-            app.staticTexts.matching(identifier: "scan.photo-count").count,
+            app.descendants(matching: .any).matching(identifier: "scan.photo-1").count,
             1,
             app.debugDescription
         )
-        XCTAssertEqual(photoCount.label, "1 of 5")
+        XCTAssertFalse(app.descendants(matching: .any)["scan.photo-2"].exists)
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
         XCTAssertFalse(app.buttons["capture.take-one-item"].exists)
         XCTAssertFalse(app.buttons["capture.choose-library"].exists)
@@ -1051,10 +1054,12 @@ final class SnapListUITests: XCTestCase {
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
 
-        let scanCount = app.staticTexts["scan.photo-count"]
-        XCTAssertTrue(scanCount.waitForExistence(timeout: 3))
-        XCTAssertEqual(app.staticTexts.matching(identifier: "scan.photo-count").count, 1)
-        XCTAssertEqual(scanCount.label, "1 of 5")
+        let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        XCTAssertTrue(firstPhoto.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            app.descendants(matching: .any).matching(identifier: "scan.photo-1").count,
+            1
+        )
 
         let review = app.buttons["scan.review"]
         XCTAssertEqual(app.buttons.matching(identifier: "scan.review").count, 1)
@@ -1092,9 +1097,8 @@ final class SnapListUITests: XCTestCase {
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
 
-        let initialCount = app.staticTexts["scan.photo-count"]
-        XCTAssertTrue(initialCount.waitForExistence(timeout: 3))
-        XCTAssertEqual(initialCount.label, "1 of 5")
+        let initialPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        XCTAssertTrue(initialPhoto.waitForExistence(timeout: 3))
 
         let initialReview = app.buttons["scan.review"]
         XCTAssertTrue(initialReview.exists)
@@ -1117,15 +1121,14 @@ final class SnapListUITests: XCTestCase {
         back.tap()
 
         let returnedReview = app.buttons["scan.review"]
-        let returnedCount = app.staticTexts["scan.photo-count"]
+        let returnedPhoto = app.descendants(matching: .any)["scan.photo-1"]
         XCTAssertTrue(
             returnedReview.waitForExistence(timeout: 3),
             "Back must return the seller to Scan with the Review opener intact."
         )
         XCTAssertFalse(screen.waitForExistence(timeout: 2))
 
-        XCTAssertTrue(returnedCount.waitForExistence(timeout: 3))
-        XCTAssertEqual(returnedCount.label, "1 of 5")
+        XCTAssertTrue(returnedPhoto.waitForExistence(timeout: 3))
 
         XCTAssertEqual(returnedReview.label, "Review 1 photo")
         XCTAssertEqual(
@@ -1797,7 +1800,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(thumbnail.exists)
         XCTAssertFalse(addPhoto.exists)
         XCTAssertFalse(app.buttons["scan.review"].exists)
-        XCTAssertFalse(app.staticTexts["scan.photo-count"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["scan.photo-1"].exists)
 
         // Which ready Scan surface mounts decides whether a dock exists at all.
         // Issue #805 made the live camera preview full-bleed: the dock is absent
@@ -1932,7 +1935,7 @@ final class SnapListUITests: XCTestCase {
             "Zero-photo Scan has nothing to review."
         )
         XCTAssertFalse(
-            app.staticTexts["scan.photo-count"].exists,
+            app.descendants(matching: .any)["scan.photo-1"].exists,
             "The deleted photo must leave the Scan intake, not only Photo Review."
         )
         addScreenshot(named: "ZERO-402x874.png")
@@ -2047,13 +2050,24 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(zero.buttons["dock.scan"].exists)
         XCTAssertFalse(zero.buttons["dock.trophy-wall"].exists)
         XCTAssertFalse(zero.buttons["scan.review"].exists)
-        XCTAssertFalse(zero.staticTexts["scan.photo-count"].exists)
+        XCTAssertFalse(zero.descendants(matching: .any)["scan.photo-1"].exists)
+        XCTAssertTrue(zero.buttons["scan.shutter"].isEnabled)
+        XCTAssertEqual(zero.buttons["scan.shutter"].label, "Take photo")
         zero.terminate()
 
         let capped = launch(extraArguments: ["--visual-state=CAM-04"])
-        XCTAssertTrue(capped.staticTexts["scan.photo-count"].waitForExistence(timeout: 2))
-        XCTAssertEqual(capped.staticTexts["scan.photo-count"].label, "5 of 5")
+        XCTAssertTrue(
+            capped.descendants(matching: .any)["scan.photo-5"].waitForExistence(timeout: 2)
+        )
         XCTAssertTrue(capped.buttons["scan.review"].exists)
+        // #954 deleted the "5 of 5" capsule, which was the only text saying the
+        // seller had reached the cap. The shutter carries that now: it is
+        // actually disabled, and its accessibility label says why rather than
+        // letting a tap do nothing silently.
+        XCTAssertEqual(
+            capped.buttons["scan.shutter"].label,
+            "Take photo, unavailable at five photo limit"
+        )
         XCTAssertFalse(capped.buttons["scan.shutter"].isEnabled)
         XCTAssertFalse(capped.buttons["scan.library"].isEnabled)
         XCTAssertEqual(capped.buttons["scan.library"].label, "Library")
@@ -2277,6 +2291,167 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    /// #954. The bottom control area is three compact rows with photos staged:
+    /// the zoom capsule, then the thumbnail strip with Review beside it, then
+    /// flash, shutter and library.
+    ///
+    /// On the parent commit it was four — the strip carrying a "N of 5" capsule,
+    /// Review alone, the zoom capsule alone, then the shutter row — and at
+    /// accessibility3 the capsule wrapped into a three-line stack that ran into
+    /// the framing bracket above it. The owner specified the arrangement: the
+    /// count capsule is deleted, and the zoom capsule keeps a line of its own
+    /// directly above the strip, anchored near the shutter it changes.
+    ///
+    /// A row is derived from the rendered frames rather than declared, so this
+    /// cannot be satisfied by renesting the same bands: the bottom controls are
+    /// sorted by `minY` and grouped by overlapping vertical extent. Giving
+    /// Review a line of its own back, or reintroducing the count, produces a
+    /// fourth band whatever the view tree looks like.
+    ///
+    /// Accessibility sizes are allowed the honest degradation the owner named:
+    /// Review may wrap beneath the strip, because five thumbnails hold 265pt of
+    /// the 372pt gutter at every text size and Review's name does not stop
+    /// growing. Overlap and clipping are failures at every size; only the row
+    /// count relaxes, and only there.
+    ///
+    /// Activation guidance is parked on another surface for the same reason
+    /// `testIssue885EveryMovedScanControlKeepsA44ptTargetAtAX5` parks it: the
+    /// ACT-01 coach mark docks over this band, and letting it fail here would
+    /// be failing for #914 rather than for this contract.
+    func testIssue954StagedScanControlsFitTwoRowsAtEveryDynamicTypeSize() {
+        for typeSize in ["xSmall", "medium", "accessibility3", "accessibility5"] {
+            let isAccessibility = typeSize.hasPrefix("accessibility")
+            let app = launch(extraArguments: [
+                "--visual-state=CAM-04",
+                "--scan-zoom=dual-wide",
+                "--dynamic-type=\(typeSize)",
+                "--activation-guidance-step=listingReview",
+            ])
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 3), app.debugDescription)
+
+            let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+            let lastPhoto = app.descendants(matching: .any)["scan.photo-5"]
+            let zoom = app.descendants(matching: .any)["scan.zoom"]
+            let review = app.buttons["scan.review"]
+            let flash = app.buttons["scan.flash"]
+            let shutter = app.buttons["scan.shutter"]
+            let library = app.buttons["scan.library"]
+            let bottom = [zoom, firstPhoto, lastPhoto, review, flash, shutter, library]
+
+            for element in bottom {
+                XCTAssertTrue(
+                    element.waitForExistence(timeout: 3),
+                    "\(element.identifier) is missing at \(typeSize). \(app.debugDescription)"
+                )
+            }
+
+            let receipt = bottom
+                .map { "\($0.identifier)=\($0.frame)" }
+                .joined(separator: " ")
+                + " window=\(window.frame) dynamicType=\(typeSize)"
+            // The rectangles are this test's evidence, not a debugging aid:
+            // #954 is a claim about where controls land, and the owner reads
+            // the measured frames rather than a screenshot description.
+            print("SCAN-954-GEOMETRY \(receipt)")
+
+            // The capsule the owner deleted. Nothing may reintroduce it.
+            XCTAssertFalse(
+                app.staticTexts["scan.photo-count"].exists,
+                "The photo count capsule is back. \(receipt)"
+            )
+
+            // The capsule sits on its own line above the strip and stays in the
+            // bottom block, next to the shutter rather than up by the close
+            // button.
+            XCTAssertLessThanOrEqual(
+                zoom.frame.maxY,
+                firstPhoto.frame.minY,
+                "The zoom capsule must sit above the staged strip. \(receipt)"
+            )
+            XCTAssertGreaterThan(
+                zoom.frame.minY,
+                window.frame.midY,
+                "The zoom capsule must stay in the bottom control block. \(receipt)"
+            )
+            XCTAssertLessThanOrEqual(
+                firstPhoto.frame.maxY,
+                shutter.frame.minY,
+                "The staged strip must sit above the shutter row. \(receipt)"
+            )
+
+            let rows = scanStagedRowCount(of: bottom)
+            if isAccessibility {
+                // Review wraps beneath the strip here, which is the degradation
+                // the owner allowed. Four bands is the ceiling even so.
+                XCTAssertLessThanOrEqual(
+                    rows,
+                    4,
+                    "The bottom controls must not exceed four rows. \(receipt)"
+                )
+            } else {
+                XCTAssertEqual(
+                    rows,
+                    3,
+                    "The bottom controls must render in three rows. \(receipt)"
+                )
+            }
+
+            for (index, element) in bottom.enumerated() {
+                for other in bottom.dropFirst(index + 1) {
+                    XCTAssertFalse(
+                        element.frame.intersects(other.frame),
+                        "\(element.identifier) overlaps \(other.identifier). \(receipt)"
+                    )
+                }
+
+                // Clipping, not just overlap: an element pushed past the window
+                // is still a legible frame in the hierarchy.
+                XCTAssertGreaterThanOrEqual(element.frame.minX, window.frame.minX, receipt)
+                XCTAssertLessThanOrEqual(element.frame.maxX, window.frame.maxX, receipt)
+                XCTAssertGreaterThanOrEqual(element.frame.minY, window.frame.minY, receipt)
+                XCTAssertLessThanOrEqual(element.frame.maxY, window.frame.maxY, receipt)
+            }
+
+            // The cap signal the deleted capsule used to carry. A tap that
+            // silently does nothing would satisfy neither half of this.
+            XCTAssertFalse(shutter.isEnabled, "The capped shutter must be disabled. \(receipt)")
+            XCTAssertEqual(
+                shutter.label,
+                "Take photo, unavailable at five photo limit",
+                "The capped shutter must say why it is unavailable. \(receipt)"
+            )
+
+            for control in [review, app.buttons["scan.zoom.ultra-wide"], app.buttons["scan.zoom.wide"]] {
+                XCTAssertTrue(control.isHittable, "\(control.identifier) \(receipt)")
+                XCTAssertGreaterThanOrEqual(control.frame.width, 44, receipt)
+                XCTAssertGreaterThanOrEqual(control.frame.height, 44, receipt)
+            }
+        }
+    }
+
+    /// How many rows a set of on-screen elements actually renders as.
+    ///
+    /// Sorted by `minY`, an element joins the open band while it still overlaps
+    /// that band's vertical extent and opens a new one once it clears it. Two
+    /// controls side by side share a band however far apart they are
+    /// horizontally; one on a line of its own always earns another.
+    private func scanStagedRowCount(of elements: [XCUIElement]) -> Int {
+        var rows = 0
+        var openBandMaxY = -CGFloat.greatestFiniteMagnitude
+
+        for frame in elements.map(\.frame).sorted(by: { $0.minY < $1.minY }) {
+            if frame.minY >= openBandMaxY {
+                rows += 1
+                openBandMaxY = frame.maxY
+            } else {
+                openBandMaxY = max(openBandMaxY, frame.maxY)
+            }
+        }
+
+        return rows
+    }
+
     func testScanCameraCAM04MatchesLiveRenderedGeometryAt402x874() {
         let app = launch(extraArguments: ["--visual-state=CAM-04"])
         let window = app.windows.firstMatch
@@ -2300,11 +2475,16 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(firstPhoto.frame.size.width, 45, accuracy: 0.5)
         XCTAssertEqual(firstPhoto.frame.size.height, 57, accuracy: 0.5)
         XCTAssertEqual(secondPhoto.frame.minX - firstPhoto.frame.maxX, 10, accuracy: 0.5)
-        // #885 moved review off the bottom row onto its own line between the
-        // strip and the controls, so the strip no longer sits directly above
-        // the library. What used to be one 45pt gap is now the review row.
-        XCTAssertEqual(review.frame.minY - firstPhoto.frame.maxY, 16, accuracy: 2)
-        XCTAssertEqual(library.frame.minY - review.frame.maxY, 29, accuracy: 2)
+        // #954 put review back beside the strip rather than on a line of its
+        // own, so the two now share a band: each one's top sits above the
+        // other's bottom, and they are separated horizontally instead.
+        XCTAssertLessThan(review.frame.minY, firstPhoto.frame.maxY)
+        XCTAssertLessThan(firstPhoto.frame.minY, review.frame.maxY)
+        XCTAssertLessThanOrEqual(firstPhoto.frame.maxX, review.frame.minX)
+        // The row that used to hold review alone is gone, so the shutter row
+        // follows the strip directly. Pinning the gap keeps the reclaimed
+        // height from quietly reappearing as padding.
+        XCTAssertEqual(library.frame.minY - firstPhoto.frame.maxY, 28, accuracy: 2)
         // #885: no dock on the camera preview, so the shutter row is the last
         // thing above the home indicator rather than the second to last.
         XCTAssertFalse(app.buttons["dock.scan"].exists)
@@ -2331,7 +2511,6 @@ final class SnapListUITests: XCTestCase {
 
         let window = app.windows.firstMatch
         let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
-        let photoCount = app.staticTexts["scan.photo-count"]
         let closeButton = app.buttons["scan.close"]
         let library = app.buttons["scan.library"]
         let shutter = app.buttons["scan.shutter"]
@@ -2345,7 +2524,6 @@ final class SnapListUITests: XCTestCase {
 
         for element in [
             firstPhoto,
-            photoCount,
             closeButton,
             library,
             shutter,
@@ -2366,7 +2544,11 @@ final class SnapListUITests: XCTestCase {
         }
 
         XCTAssertLessThanOrEqual(firstPhoto.frame.maxY, library.frame.minY)
-        XCTAssertLessThanOrEqual(photoCount.frame.maxY, review.frame.minY)
+        // #954 put Review beside the strip rather than under it, so the two
+        // now share a band instead of stacking. What still has to hold is that
+        // they do not run into each other.
+        XCTAssertFalse(firstPhoto.frame.intersects(review.frame))
+        XCTAssertLessThanOrEqual(firstPhoto.frame.maxX, review.frame.minX)
 
         // The dock's absence is scoped to the live preview, not a permanent
         // side effect of having visited Scan: leaving capture must bring it
@@ -2439,13 +2621,15 @@ final class SnapListUITests: XCTestCase {
 
         let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
         let secondPhoto = app.descendants(matching: .any)["scan.photo-2"]
-        let photoCount = app.staticTexts["scan.photo-count"]
+        let review = app.buttons["scan.review"]
         let shutter = app.buttons["scan.shutter"]
         let removeSecond = app.buttons["scan.photo-2.remove"]
 
         XCTAssertTrue(firstPhoto.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(secondPhoto.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertEqual(photoCount.label, "2 of 5")
+        // #954 deleted the "N of 5" capsule; Review's own name is the surviving
+        // count-bearing text on this surface.
+        XCTAssertEqual(review.label, "Review 2 photos")
         XCTAssertTrue(removeSecond.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertEqual(removeSecond.label, "Remove photo 2")
         XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 44)
@@ -2454,13 +2638,13 @@ final class SnapListUITests: XCTestCase {
         removeSecond.tap()
 
         let oneRemaining = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label == %@", "1 of 5"),
-            object: photoCount
+            predicate: NSPredicate(format: "label == %@", "Review 1 photo"),
+            object: review
         )
         XCTAssertEqual(
             XCTWaiter.wait(for: [oneRemaining], timeout: 3),
             .completed,
-            "Removing photo 2 must update the durable count to 1 of 5."
+            "Removing photo 2 must leave one photo in the durable draft."
         )
         XCTAssertTrue(firstPhoto.exists, "The surviving photo must be the one that was kept.")
         XCTAssertFalse(secondPhoto.exists)
@@ -2479,7 +2663,6 @@ final class SnapListUITests: XCTestCase {
             .completed,
             "Removing the last photo must clear the strip."
         )
-        XCTAssertFalse(app.staticTexts["scan.photo-count"].exists)
         XCTAssertFalse(app.buttons["scan.review"].exists)
         XCTAssertTrue(
             shutter.waitForExistence(timeout: 3),
@@ -3830,8 +4013,8 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let photoCount = app.staticTexts["scan.photo-count"]
-        XCTAssertTrue(photoCount.waitForExistence(timeout: 5), app.debugDescription)
+        let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        XCTAssertTrue(firstPhoto.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(
             app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists,
             app.debugDescription
@@ -3992,10 +4175,10 @@ final class SnapListUITests: XCTestCase {
         // The handoff transfers one staged library photo at a time
         // (`OnboardingFlowModel.firstStagedLibraryPhotoForCapture`); the
         // second staged photo remains available for a later handoff.
-        let photoCount = app.staticTexts["scan.photo-count"]
-        XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
-        XCTAssertEqual(photoCount.label, "1 of 5")
-        XCTAssertTrue(app.buttons["scan.review"].exists)
+        let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        XCTAssertTrue(firstPhoto.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.descendants(matching: .any)["scan.photo-2"].exists)
+        XCTAssertEqual(app.buttons["scan.review"].label, "Review 1 photo")
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
         XCTAssertFalse(app.buttons["capture.take-one-item"].exists)
         XCTAssertFalse(app.buttons["capture.choose-library"].exists)
