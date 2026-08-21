@@ -12,7 +12,10 @@ import type { PipelineResult } from "@/lib/pipeline/types";
 import { buildPricingEvidenceProjection } from "@/lib/pricing-evidence";
 import { createMobileEbayOauthOperations } from "@/lib/marketplace/ebay/mobile-oauth";
 import {
+  ListingReviewCorrectionUnavailableError,
   ListingReviewIdempotencyConflictError,
+  ListingReviewNotEditableError,
+  ListingReviewSaveInProgressError,
   ListingReviewStaleError,
 } from "@/lib/listing-review/save";
 import {
@@ -268,6 +271,98 @@ describe("mobile API v1 provider-neutral handler", () => {
         requestId: "req_test",
       },
     });
+  });
+
+  it.each([
+    [new ListingReviewStaleError(), "This review changed. Reload and try again."],
+    [
+      new ListingReviewIdempotencyConflictError(),
+      "This Idempotency-Key is already bound to different review edits.",
+    ],
+    [new ListingReviewSaveInProgressError(), "This save is already in progress. Try again."],
+    [
+      new ListingReviewNotEditableError(),
+      "A published listing cannot be changed from review.",
+    ],
+    [
+      new ListingReviewCorrectionUnavailableError(
+        "A condition change alone cannot reprice this item again."
+          + " Add, replace, or remove a photo to price it again.",
+      ),
+      "A condition change alone cannot reprice this item again."
+        + " Add, replace, or remove a photo to price it again.",
+    ],
+    [
+      new ListingReviewCorrectionUnavailableError(
+        "This item's included correction is already used."
+          + " Add, replace, or remove a photo to price it again.",
+      ),
+      "This item's included correction is already used."
+        + " Add, replace, or remove a photo to price it again.",
+    ],
+    [
+      new ListingReviewCorrectionUnavailableError(
+        "This item was priced before SnapList could prove a correction reuses the"
+          + " same photos. Scan it again to price it.",
+      ),
+      "This item was priced before SnapList could prove a correction reuses the"
+        + " same photos. Scan it again to price it.",
+    ],
+    [
+      new ListingReviewCorrectionUnavailableError(
+        "This item has no eBay listing to regenerate.",
+      ),
+      "This item has no eBay listing to regenerate.",
+    ],
+    [
+      new ListingReviewCorrectionUnavailableError("This item has not been priced yet."),
+      "This item has not been priced yet.",
+    ],
+  ] as const)(
+    "answers a permanent Listing Review refusal 409 with its own remedy, quietly",
+    async (error, message) => {
+      const reportError = vi.fn();
+      const response = await handler({
+        listingReviewSave: { save: vi.fn().mockRejectedValue(error) },
+        reportError,
+      })(listingReviewSaveRequest());
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: { code: "conflict", message, requestId: "req_test" },
+      });
+      // Ordinary seller behaviour. Reporting it was the 503 path's noise.
+      expect(reportError).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a missing settled run out of a silent 409", async () => {
+    const reportError = vi.fn();
+    const error = new ListingReviewCorrectionUnavailableError(
+      "SnapList cannot match this item to the run that priced it."
+        + " Scan it again to price it.",
+      true,
+    );
+    const response = await handler({
+      listingReviewSave: { save: vi.fn().mockRejectedValue(error) },
+      reportError,
+    })(listingReviewSaveRequest());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "conflict",
+        message: "SnapList cannot match this item to the run that priced it."
+          + " Scan it again to price it.",
+        requestId: "req_test",
+      },
+    });
+    // The seller gets an actionable refusal; the ledger anomaly behind it still
+    // reaches monitoring, which moving off 503 would otherwise have dropped.
+    expect(reportError).toHaveBeenCalledWith(
+      "mobile-api.listing-review-save",
+      error,
+    );
   });
 
   it("reports a reused idempotency key with different intent as a conflict", async () => {

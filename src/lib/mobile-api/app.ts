@@ -16,6 +16,7 @@ import {
 import type { ActivationGuidanceCompletionStore } from "@/lib/activation-guidance/store";
 import type { PushDeviceTokenStore } from "@/lib/push-device-tokens/store";
 import {
+  ListingReviewCorrectionUnavailableError,
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
   listingReviewSaveIntentSchema,
@@ -1200,7 +1201,26 @@ export function createMobileApiHandler(
           || error instanceof ListingReviewIdempotencyConflictError
           || error instanceof ListingReviewSaveInProgressError
           || error instanceof ListingReviewNotEditableError
+          // #919 review round 3. A refusal the seller can act on, not an
+          // outage. Falling through below answered 503 "temporarily
+          // unavailable." and reported an error on every attempt, against a
+          // state that never clears on its own, so the copy asked the seller to
+          // retry forever. The message carries the remedy.
+          || error instanceof ListingReviewCorrectionUnavailableError
         ) {
+          // Round 3 correction: moving these off 503 also moved them out of
+          // monitoring. Most of them belong out of it -- a spent correction or
+          // an exhausted allowance is ordinary seller behaviour. One does not:
+          // a settled reservation that cannot be found for an item already in
+          // Listing Review is a ledger or photo-identity fault, and the refusal
+          // the seller sees would otherwise be its only trace. The error itself
+          // carries which is which.
+          if (
+            error instanceof ListingReviewCorrectionUnavailableError
+            && error.reportable
+          ) {
+            dependencies.reportError?.("mobile-api.listing-review-save", error);
+          }
           return errorResponse(
             requestId,
             409,

@@ -277,6 +277,39 @@ export class ListingReviewNotEditableError extends Error {
   }
 }
 
+/**
+ * #919 review round 3. This review cannot be regenerated again, and no retry of
+ * the same request will change that.
+ *
+ * Every refusal that lands here reaches the saver as a bare `Error` off the
+ * regeneration path, so the route matched none of its conflict classes and
+ * answered 503 "Listing Review save is temporarily unavailable." on every
+ * attempt, reporting an error each time. The state is permanent, so that copy
+ * invited a retry loop that could never succeed.
+ *
+ * The remedies differ per state, so the sentence is carried rather than fixed
+ * on the class: after a condition-allowance refusal the seller's included
+ * identity correction is still unspent, and copy that sent them off to start a
+ * new run would cost them a correction they still have.
+ *
+ * `PERMANENT_REGENERATION_REFUSALS` is the whole set and the only place the
+ * server sentence, the seller sentence, and the monitoring decision are paired.
+ */
+export class ListingReviewCorrectionUnavailableError extends Error {
+  /**
+   * True only for a refusal that indicates a server-side anomaly rather than
+   * ordinary seller behaviour. The route reports exactly these and stays quiet
+   * for the rest, so moving this path off 503 did not also move a real ledger
+   * or fingerprint fault out of monitoring.
+   */
+  readonly reportable: boolean;
+
+  constructor(message: string, reportable = false) {
+    super(message);
+    this.reportable = reportable;
+  }
+}
+
 export class ListingReviewSaveDataError extends Error {
   constructor(message = "Listing Review save failed.") {
     super(message);
@@ -333,7 +366,11 @@ function isStaleRegenerationError(error: unknown): error is Error {
     && [
       "This review changed. Reload and try again.",
       "Review changed. Reload and try again.",
-      "Guided correction authority changed.",
+      // No trailing period. Every migration that raises this one raises it
+      // bare (`20260820120000:742`, `20260801230000:574`, `20260719231000:401`),
+      // so a copy with a period here matched nothing and a genuine P0002
+      // authority change answered 503 instead of this conflict.
+      "Guided correction authority changed",
     ].some((message) => error.message.includes(message));
 }
 
@@ -343,6 +380,98 @@ function isNotEditableRegenerationError(error: unknown): error is Error {
       "A published listing cannot be regenerated from review.",
       "Editable eBay listing not found.",
     ].some((message) => error.message.includes(message));
+}
+
+/**
+ * #919 review round 3. The database owns this sentence, so it is repeated here
+ * verbatim rather than paraphrased; the RLS suite is what proves the two copies
+ * still agree.
+ */
+const CONDITION_ALLOWANCE_REFUSAL =
+  "A condition change alone cannot reprice this item again."
+  + " Add, replace, or remove a photo to price it again.";
+
+/**
+ * Every state below is permanent for the review as it stands: no retry of the
+ * same request reaches a different answer. Each entry pairs the sentence the
+ * server raises with the one the seller is shown, because several of the raised
+ * sentences are internal vocabulary and one of them names no remedy at all.
+ *
+ * `reportable` is the monitoring decision. A seller exhausting an allowance or
+ * spending their included correction is ordinary product behaviour and must not
+ * page anyone. A settled reservation that cannot be found for an item already
+ * in Listing Review is a ledger or photo-identity anomaly, and silently
+ * answering the seller 409 would be the only trace it ever left.
+ */
+const PERMANENT_REGENERATION_REFUSALS: ReadonlyArray<{
+  readonly raised: string;
+  readonly refusal: string;
+  readonly reportable: boolean;
+}> = [
+  {
+    raised: CONDITION_ALLOWANCE_REFUSAL,
+    refusal: CONDITION_ALLOWANCE_REFUSAL,
+    reportable: false,
+  },
+  // Checked before the bare sentence below: the database raises both, and this
+  // one is the longer of the two. It means there is no settled AI-item
+  // reservation whose photo-identity fingerprint matches the item's current
+  // one. Telling that seller they "already used" a correction they may never
+  // have had was false, and the remedy the spent-correction copy names —
+  // change the photo set — is what produces the fingerprint drift variant.
+  {
+    raised:
+      "The included guided correction is unavailable: no settled run matches"
+      + " these photos.",
+    refusal:
+      "SnapList cannot match this item to the run that priced it."
+      + " Scan it again to price it.",
+    reportable: true,
+  },
+  {
+    raised: "The included guided correction is unavailable.",
+    refusal:
+      "This item's included correction is already used."
+      + " Add, replace, or remove a photo to price it again.",
+    reportable: false,
+  },
+  // Raised for an item stored under a pre-`content_sha256_set_v1` photo
+  // identity. Guided correction can never be proved same-photo for it, so the
+  // route answered 503 and reported an error on every attempt for a state that
+  // never clears. The raised sentence is internal vocabulary, so it is
+  // translated rather than carried.
+  {
+    raised: "Legacy photo identity cannot prove same-photo correction.",
+    refusal:
+      "This item was priced before SnapList could prove a correction reuses the"
+      + " same photos. Scan it again to price it.",
+    reportable: false,
+  },
+  // From `src/lib/pipeline/review-regeneration.ts:398-399`. Same permanent
+  // shape, and these two are already plain seller-readable sentences, so they
+  // are carried verbatim instead of being restated.
+  {
+    raised: "This item has no eBay listing to regenerate.",
+    refusal: "This item has no eBay listing to regenerate.",
+    reportable: false,
+  },
+  {
+    raised: "This item has not been priced yet.",
+    refusal: "This item has not been priced yet.",
+    reportable: false,
+  },
+];
+
+function correctionUnavailableRefusal(
+  error: unknown,
+): { refusal: string; reportable: boolean } | null {
+  if (!(error instanceof Error)) return null;
+  const match = PERMANENT_REGENERATION_REFUSALS.find((candidate) =>
+    error.message.includes(candidate.raised)
+  );
+  return match
+    ? { refusal: match.refusal, reportable: match.reportable }
+    : null;
 }
 
 async function operationToken(
@@ -522,6 +651,13 @@ export function createListingReviewSaver(
         }
         if (isNotEditableRegenerationError(error)) {
           throw new ListingReviewNotEditableError();
+        }
+        const refusal = correctionUnavailableRefusal(error);
+        if (refusal) {
+          throw new ListingReviewCorrectionUnavailableError(
+            refusal.refusal,
+            refusal.reportable,
+          );
         }
         throw error;
       }
