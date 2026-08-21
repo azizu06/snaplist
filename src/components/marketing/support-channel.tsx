@@ -3,15 +3,19 @@ import { supportEmail } from "@/lib/marketing/site";
 /**
  * The one place the support address is rendered.
  *
- * The address comes from NEXT_PUBLIC_SUPPORT_EMAIL — the v6 design carried the
- * destination as the inert token COMPANY_CONTACT_PENDING, and it stays
- * env-driven so each environment can point somewhere else with no code change.
- * `.env.example` carries the published address, so an unconfigured checkout
- * renders the real one rather than the notice below (#953).
+ * The address comes from NEXT_PUBLIC_SUPPORT_EMAIL — the v6 design carries the
+ * destination as the inert token COMPANY_CONTACT_PENDING, and it stays env-driven
+ * so each environment can point somewhere else with no code change. Production is
+ * configured, so the deployed pages name a real address.
  *
- * The notice below is what remains when the variable is set to something
- * unusable: the page still renders and still says what to expect, it just
- * cannot name a channel.
+ * `.env.example` is a template; nothing loads it at runtime. A checkout that sets
+ * no environment of its own therefore still renders the notice below. What #953
+ * changed is that the template no longer documents an empty value: the address it
+ * names is one this component can actually render, so standing up an environment
+ * is a copy rather than a hunt.
+ *
+ * The notice below is what an unset or unusable value renders: the page still
+ * renders and still says what to expect, it just cannot name a channel.
  *
  * The unresolved state is deliberately not a `mailto:` with a placeholder
  * address: that would look like a working contact route and silently drop every

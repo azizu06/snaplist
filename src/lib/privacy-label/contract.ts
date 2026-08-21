@@ -48,13 +48,16 @@ export const PRIVACY_LABEL_COLUMNS = [
 const COLLECTED_TYPE_PREFIX = "NSPrivacyCollectedDataType";
 const PURPOSE_PREFIX = "NSPrivacyCollectedDataTypePurpose";
 
-type PlistValue = string | boolean | PlistValue[] | { [key: string]: PlistValue };
+type PlistValue =
+  string | boolean | PlistValue[] | { [key: string]: PlistValue };
 type OrderedNode = Record<string, unknown>;
 
 function tagOf(node: OrderedNode): [string, unknown] {
   const entries = Object.entries(node);
   if (entries.length !== 1) {
-    throw new Error(`expected one plist element per node, saw ${entries.length}`);
+    throw new Error(
+      `expected one plist element per node, saw ${entries.length}`,
+    );
   }
   return entries[0];
 }
@@ -97,7 +100,8 @@ function plistDict(children: OrderedNode[]): { [key: string]: PlistValue } {
   const result: { [key: string]: PlistValue } = {};
   for (let index = 0; index < children.length; index += 2) {
     const [tag, raw] = tagOf(children[index]);
-    if (tag !== "key") throw new Error(`expected <key> at dict position ${index}, saw <${tag}>`);
+    if (tag !== "key")
+      throw new Error(`expected <key> at dict position ${index}, saw <${tag}>`);
     const name = textOf(childrenOf(raw, tag));
     const value = children[index + 1];
     if (value === undefined) throw new Error(`<key>${name}</key> has no value`);
@@ -107,15 +111,23 @@ function plistDict(children: OrderedNode[]): { [key: string]: PlistValue } {
   return result;
 }
 
-function requireString(entry: { [key: string]: PlistValue }, key: string): string {
+function requireString(
+  entry: { [key: string]: PlistValue },
+  key: string,
+): string {
   const value = entry[key];
-  if (typeof value !== "string" || value === "") throw new Error(`${key} is missing or not a string`);
+  if (typeof value !== "string" || value === "")
+    throw new Error(`${key} is missing or not a string`);
   return value;
 }
 
-function requireBoolean(entry: { [key: string]: PlistValue }, key: string): boolean {
+function requireBoolean(
+  entry: { [key: string]: PlistValue },
+  key: string,
+): boolean {
   const value = entry[key];
-  if (typeof value !== "boolean") throw new Error(`${key} is missing or not a boolean`);
+  if (typeof value !== "boolean")
+    throw new Error(`${key} is missing or not a boolean`);
   return value;
 }
 
@@ -139,16 +151,20 @@ export function parseCollectedDataTypes(xcprivacy: string): DeclaredDataType[] {
 
   const manifest = plistDict(childrenOf(root.dict, "dict"));
   const collected = manifest.NSPrivacyCollectedDataTypes;
-  if (!Array.isArray(collected)) throw new Error("NSPrivacyCollectedDataTypes is missing");
+  if (!Array.isArray(collected))
+    throw new Error("NSPrivacyCollectedDataTypes is missing");
 
   const seen = new Set<string>();
   return collected.map((entry) => {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new Error("NSPrivacyCollectedDataTypes entries must be dictionaries");
+      throw new Error(
+        "NSPrivacyCollectedDataTypes entries must be dictionaries",
+      );
     }
     const record = entry as { [key: string]: PlistValue };
     const manifestKey = requireString(record, "NSPrivacyCollectedDataType");
-    if (seen.has(manifestKey)) throw new Error(`${manifestKey} is declared twice`);
+    if (seen.has(manifestKey))
+      throw new Error(`${manifestKey} is declared twice`);
     seen.add(manifestKey);
 
     const purposes = record.NSPrivacyCollectedDataTypePurposes;
@@ -164,32 +180,60 @@ export function parseCollectedDataTypes(xcprivacy: string): DeclaredDataType[] {
         return purpose;
       }),
       linkedToUser: requireBoolean(record, "NSPrivacyCollectedDataTypeLinked"),
-      usedForTracking: requireBoolean(record, "NSPrivacyCollectedDataTypeTracking"),
+      usedForTracking: requireBoolean(
+        record,
+        "NSPrivacyCollectedDataTypeTracking",
+      ),
     };
   });
 }
 
 /**
- * The doc's one table. A renamed or reordered column throws, because the
+ * The doc's label table. A renamed or reordered column throws, because the
  * mapping from cell position to question would otherwise shift in silence and
  * the label would still look filled in.
+ *
+ * The table is located as a contiguous run of pipe-prefixed lines rather than
+ * by collecting every such line in the file, so a second table — or a fenced
+ * block that happens to contain pipes — cannot be spliced into this one. When
+ * the file holds several runs, the one whose first column is the expected
+ * heading wins; a lone run is used as-is so that renaming a column still
+ * reports the rename rather than reporting the table missing.
  */
 export function parsePrivacyLabelRows(markdown: string): PrivacyLabelRow[] {
-  const lines = markdown
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("|"));
-  if (lines.length < 3) throw new Error("the privacy label table has no rows");
-
   const cells = (line: string) =>
     line
       .slice(1, line.endsWith("|") ? -1 : undefined)
       .split("|")
       .map((cell) => cell.trim());
 
+  const blocks: string[][] = [];
+  for (const line of markdown.split("\n").map((raw) => raw.trim())) {
+    if (!line.startsWith("|")) {
+      if (blocks.at(-1)?.length) blocks.push([]);
+      continue;
+    }
+    if (!blocks.length) blocks.push([]);
+    blocks.at(-1)!.push(line);
+  }
+
+  const tables = blocks.filter((block) => block.length > 0);
+  const lines =
+    tables.length === 1
+      ? tables[0]
+      : tables.find((block) => cells(block[0])[0] === PRIVACY_LABEL_COLUMNS[0]);
+  if (!lines) {
+    throw new Error(
+      `found ${tables.length} tables, none starting with the "${PRIVACY_LABEL_COLUMNS[0]}" column`,
+    );
+  }
+  if (lines.length < 3) throw new Error("the privacy label table has no rows");
+
   const header = cells(lines[0]);
-  if (header.length !== PRIVACY_LABEL_COLUMNS.length
-    || header.some((name, index) => name !== PRIVACY_LABEL_COLUMNS[index])) {
+  if (
+    header.length !== PRIVACY_LABEL_COLUMNS.length ||
+    header.some((name, index) => name !== PRIVACY_LABEL_COLUMNS[index])
+  ) {
     throw new Error(
       `table columns are ${JSON.stringify(header)}, expected ${JSON.stringify(PRIVACY_LABEL_COLUMNS)}`,
     );
@@ -198,7 +242,9 @@ export function parsePrivacyLabelRows(markdown: string): PrivacyLabelRow[] {
   return lines.slice(2).map((line) => {
     const row = cells(line);
     if (row.length !== PRIVACY_LABEL_COLUMNS.length) {
-      throw new Error(`row "${line}" has ${row.length} cells, expected ${PRIVACY_LABEL_COLUMNS.length}`);
+      throw new Error(
+        `row "${line}" has ${row.length} cells, expected ${PRIVACY_LABEL_COLUMNS.length}`,
+      );
     }
     return {
       dataType: row[0],
@@ -225,13 +271,24 @@ function foldForComparison(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-export function labelNamesManifestKey(label: string, manifestKey: string): boolean {
+export function labelNamesManifestKey(
+  label: string,
+  manifestKey: string,
+): boolean {
   if (!manifestKey.startsWith(COLLECTED_TYPE_PREFIX)) return false;
-  return foldForComparison(label)
-    === foldForComparison(manifestKey.slice(COLLECTED_TYPE_PREFIX.length));
+  return (
+    foldForComparison(label) ===
+    foldForComparison(manifestKey.slice(COLLECTED_TYPE_PREFIX.length))
+  );
 }
 
-export function labelNamesPurposeKey(label: string, purposeKey: string): boolean {
+export function labelNamesPurposeKey(
+  label: string,
+  purposeKey: string,
+): boolean {
   if (!purposeKey.startsWith(PURPOSE_PREFIX)) return false;
-  return foldForComparison(label) === foldForComparison(purposeKey.slice(PURPOSE_PREFIX.length));
+  return (
+    foldForComparison(label) ===
+    foldForComparison(purposeKey.slice(PURPOSE_PREFIX.length))
+  );
 }

@@ -92,6 +92,13 @@ grep -Fq 'webcredentials:$(SNAPLIST_CLERK_FRONTEND_DOMAIN)' "$entitlements"
 # encryption this key changes to true together with the CCATS and annual
 # self-classification report that answer obliges, so the value is pinned rather
 # than merely required to exist.
+# Checked before the extract so that an unreadable plist reports itself as one.
+# Otherwise every plutil failure — a corrupt file, a bad path — would be reported
+# as a missing key, and the fix would be looked for in the wrong place.
+plutil -lint "$info_plist" >/dev/null 2>&1 || {
+  print -u2 -r -- "Info.plist is not a readable property list: ${info_plist}"
+  exit 1
+}
 declared_encryption=$(plutil -extract ITSAppUsesNonExemptEncryption raw "$info_plist" 2>/dev/null) || {
   print -u2 -r -- "Info.plist declares no ITSAppUsesNonExemptEncryption. Without it App
 Store Connect stalls every upload waiting on the export-compliance answer."

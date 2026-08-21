@@ -30,23 +30,30 @@ const rows = parsePrivacyLabelRows(
 
 describe("App Store Connect privacy label", () => {
   it("has something on both sides to compare", () => {
-    // Guards the guards: an empty manifest or an empty table would make every
-    // per-type loop below pass without comparing anything.
+    // Guards the guards: an empty manifest would make every per-type loop below
+    // pass without comparing anything, and parseCollectedDataTypes returns an
+    // empty list for an empty array rather than throwing.
+    //
+    // The doc side needs no such guard — parsePrivacyLabelRows throws on a table
+    // with no rows, so an empty table cannot reach a loop in the first place.
     expect(manifest.length).toBeGreaterThan(0);
-    expect(rows.length).toBeGreaterThan(0);
   });
 
   it("carries exactly one row per type the manifest declares", () => {
     for (const declared of manifest) {
       expect(
-        rows.filter((row) => labelNamesManifestKey(row.dataType, declared.manifestKey)),
+        rows.filter((row) =>
+          labelNamesManifestKey(row.dataType, declared.manifestKey),
+        ),
         `${declared.manifestKey} is collected but the doc has no row for it`,
       ).toHaveLength(1);
     }
 
     for (const row of rows) {
       expect(
-        manifest.filter((declared) => labelNamesManifestKey(row.dataType, declared.manifestKey)),
+        manifest.filter((declared) =>
+          labelNamesManifestKey(row.dataType, declared.manifestKey),
+        ),
         `"${row.dataType}" is a row the manifest does not declare`,
       ).toHaveLength(1);
     }
@@ -54,20 +61,29 @@ describe("App Store Connect privacy label", () => {
 
   it("answers every column the way the manifest answers it", () => {
     for (const declared of manifest) {
-      const row = rows.find((candidate) => labelNamesManifestKey(candidate.dataType, declared.manifestKey));
+      const row = rows.find((candidate) =>
+        labelNamesManifestKey(candidate.dataType, declared.manifestKey),
+      );
       expect(row, `${declared.manifestKey} has no row`).toBeDefined();
       if (!row) continue;
 
       const where = `${declared.manifestKey}`;
       // Presence in NSPrivacyCollectedDataTypes is the declaration of collection.
       expect(row.collected, `${where}: collected`).toBe("Yes");
-      expect(row.linkedToUser, `${where}: linked to user`).toBe(declared.linkedToUser ? "Yes" : "No");
+      expect(row.linkedToUser, `${where}: linked to user`).toBe(
+        declared.linkedToUser ? "Yes" : "No",
+      );
       expect(row.usedForTracking, `${where}: used for tracking`).toBe(
         declared.usedForTracking ? "Yes" : "No",
       );
 
-      const purposes = row.purpose.split(",").map((purpose) => purpose.trim()).filter(Boolean);
-      expect(purposes, `${where}: purposes`).toHaveLength(declared.purposeKeys.length);
+      const purposes = row.purpose
+        .split(",")
+        .map((purpose) => purpose.trim())
+        .filter(Boolean);
+      expect(purposes, `${where}: purposes`).toHaveLength(
+        declared.purposeKeys.length,
+      );
       declared.purposeKeys.forEach((purposeKey, index) => {
         expect(
           labelNamesPurposeKey(purposes[index], purposeKey),
@@ -79,14 +95,18 @@ describe("App Store Connect privacy label", () => {
 
   it("names each type the way the form does, not by its manifest constant", () => {
     for (const row of rows) {
-      expect(row.dataType, "the form asks for a data-type name, not a manifest constant")
-        .not.toMatch(/^NSPrivacy/);
+      expect(
+        row.dataType,
+        "the form asks for a data-type name, not a manifest constant",
+      ).not.toMatch(/^NSPrivacy/);
     }
   });
 });
 
 describe("the manifest and doc parsers", () => {
-  const manifestOf = (entries: string) => `<?xml version="1.0" encoding="UTF-8"?>
+  const manifestOf = (
+    entries: string,
+  ) => `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict><key>NSPrivacyCollectedDataTypes</key><array>${entries}</array></dict></plist>`;
 
   const emailEntry = `
@@ -111,32 +131,57 @@ describe("the manifest and doc parsers", () => {
 
   it("refuses an entry that leaves an App Store Connect question unanswered", () => {
     expect(() =>
-      parseCollectedDataTypes(manifestOf(emailEntry.replace(
-        "<key>NSPrivacyCollectedDataTypeTracking</key><false/>",
-        "",
-      ))),
+      parseCollectedDataTypes(
+        manifestOf(
+          emailEntry.replace(
+            "<key>NSPrivacyCollectedDataTypeTracking</key><false/>",
+            "",
+          ),
+        ),
+      ),
     ).toThrow(/NSPrivacyCollectedDataTypeTracking/);
   });
 
   it("refuses a type declared twice, which would answer one question two ways", () => {
-    expect(() => parseCollectedDataTypes(manifestOf(emailEntry + emailEntry)))
-      .toThrow(/declared twice/);
+    expect(() =>
+      parseCollectedDataTypes(manifestOf(emailEntry + emailEntry)),
+    ).toThrow(/declared twice/);
   });
 
   it("refuses a renamed table column, which would shift every answer silently", () => {
     expect(() =>
       parsePrivacyLabelRows(
-        "| Data type | Collected | Purpose | Linked | Used for tracking |\n"
-        + "| --- | --- | --- | --- | --- |\n"
-        + "| User ID | Yes | Analytics | Yes | No |\n",
+        "| Data type | Collected | Purpose | Linked | Used for tracking |\n" +
+          "| --- | --- | --- | --- | --- |\n" +
+          "| User ID | Yes | Analytics | Yes | No |\n",
       ),
     ).toThrow(/columns/);
   });
 
   it("treats a manifest constant and the form's name as the same words", () => {
-    expect(labelNamesManifestKey("Photos or Videos", "NSPrivacyCollectedDataTypePhotosorVideos")).toBe(true);
-    expect(labelNamesManifestKey("Photo Library", "NSPrivacyCollectedDataTypePhotosorVideos")).toBe(false);
-    expect(labelNamesPurposeKey("App Functionality", "NSPrivacyCollectedDataTypePurposeAppFunctionality")).toBe(true);
-    expect(labelNamesPurposeKey("Analytics", "NSPrivacyCollectedDataTypePurposeAppFunctionality")).toBe(false);
+    expect(
+      labelNamesManifestKey(
+        "Photos or Videos",
+        "NSPrivacyCollectedDataTypePhotosorVideos",
+      ),
+    ).toBe(true);
+    expect(
+      labelNamesManifestKey(
+        "Photo Library",
+        "NSPrivacyCollectedDataTypePhotosorVideos",
+      ),
+    ).toBe(false);
+    expect(
+      labelNamesPurposeKey(
+        "App Functionality",
+        "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+      ),
+    ).toBe(true);
+    expect(
+      labelNamesPurposeKey(
+        "Analytics",
+        "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+      ),
+    ).toBe(false);
   });
 });
