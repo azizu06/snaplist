@@ -43,6 +43,21 @@ enum FirstValueOnboardingLayoutMetrics {
     static let includedCardTextBottomPadding: CGFloat = 12
 }
 
+/// Base (unscaled, default content size) point sizes for the compact-authority title.
+/// `@ScaledMetric` reads these as its `wrappedValue`, so at the default content size the
+/// render is unchanged; at larger content sizes it scales along the `.title` curve.
+enum FirstValueOnboardingTitleMetrics {
+    static let compactSize: CGFloat = 25
+    static let standardSize: CGFloat = 27
+
+    static func baseSize(for screen: FirstValueOnboardingScreen) -> CGFloat {
+        switch screen {
+        case .onb03, .onb04, .onb05: compactSize
+        case .onb01, .onb02, .onb06: standardSize
+        }
+    }
+}
+
 @MainActor
 struct FirstValueOnboardingView: View {
     @Bindable var model: FirstValueOnboardingModel
@@ -56,6 +71,14 @@ struct FirstValueOnboardingView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AccessibilityFocusState private var headingIsFocused: Bool
+
+    /// The compact-authority title held a fixed point size that ignored Dynamic Type
+    /// entirely (#975). `@ScaledMetric` renders at exactly the base value below at the
+    /// default content size, then scales along the `.title` curve at larger ones.
+    @ScaledMetric(relativeTo: .title) private var scaledCompactTitleSize: CGFloat =
+        FirstValueOnboardingTitleMetrics.compactSize
+    @ScaledMetric(relativeTo: .title) private var scaledStandardTitleSize: CGFloat =
+        FirstValueOnboardingTitleMetrics.standardSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -226,9 +249,10 @@ struct FirstValueOnboardingView: View {
         }
         .font(usesCompactAuthorityLayout
             ? .system(
-                size: model.screen == .onb03 || model.screen == .onb04 || model.screen == .onb05
-                    ? 25
-                    : 27,
+                size: FirstValueOnboardingTitleMetrics.baseSize(for: model.screen)
+                    == FirstValueOnboardingTitleMetrics.compactSize
+                    ? scaledCompactTitleSize
+                    : scaledStandardTitleSize,
                 weight: .bold,
                 design: .rounded
             )
