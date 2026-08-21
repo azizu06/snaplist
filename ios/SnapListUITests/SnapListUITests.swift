@@ -1942,13 +1942,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(screen.waitForExistence(timeout: 3))
         XCTAssertEqual(app.staticTexts["photo-review.count"].label, "1 of 5")
 
-        let delete = app.buttons["photo-review.delete"]
-        XCTAssertFalse(
-            delete.exists,
-            "Delete stays hidden until the seller opens actions on a photo."
+        let delete = app.buttons["photo-review.thumbnail.1.delete"]
+        XCTAssertTrue(
+            delete.waitForExistence(timeout: 2),
+            "#988 removed the actions row: the X badge deletes directly, no reveal step."
         )
-        app.buttons["photo-review.hero"].tap()
-        XCTAssertTrue(delete.waitForExistence(timeout: 2))
         delete.tap()
 
         XCTAssertTrue(
@@ -2882,7 +2880,7 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "PHOTO-REVIEW-883-REV-03-PAGE-INDICATOR-402x874.png")
     }
 
-    func testPhotoReviewHeroNavigationHidesAtOnePhotoAndDoesNotOpenActionsRow() {
+    func testPhotoReviewHeroNavigationDoesNotHideOrRevealTheDeleteBadge() {
         let app = launch(extraArguments: ["--photo-review-state=REV-01"])
         let hero = app.buttons["photo-review.hero"]
 
@@ -2896,9 +2894,14 @@ final class SnapListUITests: XCTestCase {
             app.otherElements["photo-review.hero.page-indicator"].exists,
             "A single staged photo has no pages to indicate."
         )
-        XCTAssertFalse(
-            app.buttons["photo-review.delete"].exists,
-            "Navigation must not open the Replace/Delete actions row by itself."
+        XCTAssertTrue(
+            app.buttons["photo-review.thumbnail.1.delete"].exists,
+            "#988 removed the actions row: the delete badge is always visible, not gated on navigation."
+        )
+        hero.tap()
+        XCTAssertTrue(
+            app.buttons["photo-review.thumbnail.1.delete"].exists,
+            "Navigating the hero must not hide or toggle the delete badge."
         )
     }
 
@@ -2919,7 +2922,7 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "PHOTO-REVIEW-V5-REV-02-COLLAPSED-402x874.png")
     }
 
-    func testPhotoReviewREV01RendersOneSelectedCoverPhotoWithProgressiveActions() {
+    func testPhotoReviewREV01RendersOneSelectedCoverPhotoWithADeleteBadge() {
         let app = launch(extraArguments: ["--photo-review-state=REV-01"])
         let screen = app.scrollViews["photo-review.screen"]
         let hero = app.buttons["photo-review.hero"]
@@ -2930,31 +2933,29 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(hero.exists)
         assertPhotoReviewThumbnailCatalog(app, state: "REV-01")
         XCTAssertFalse(app.buttons["photo-review.thumbnail.2"].exists)
-        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
-        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        XCTAssertTrue(app.buttons["photo-review.thumbnail.1.delete"].exists)
         addScreenshot(named: "REV-01-402x874.png")
 
         hero.tap()
 
-        XCTAssertTrue(app.buttons["photo-review.replace"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
+        XCTAssertTrue(app.buttons["photo-review.thumbnail.1.delete"].exists)
         XCTAssertTrue(firstPhoto.isSelected)
     }
 
-    func testPhotoReviewREV04RendersSecondPhotoSelectedWithActionsInFlow() {
+    func testPhotoReviewREV04RendersSecondPhotoWithItsOwnDeleteBadge() {
         let app = launch(extraArguments: ["--photo-review-state=REV-04"])
         let screen = app.scrollViews["photo-review.screen"]
         let secondPhoto = app.buttons["photo-review.thumbnail.2"]
-        let replace = app.buttons["photo-review.replace"]
-        let delete = app.buttons["photo-review.delete"]
+        let delete = app.buttons["photo-review.thumbnail.2.delete"]
 
         XCTAssertTrue(screen.waitForExistence(timeout: 3))
         XCTAssertEqual(app.staticTexts["photo-review.count"].label, "3 of 5")
         assertPhotoReviewThumbnailCatalog(app, state: "REV-04")
-        XCTAssertTrue(replace.exists)
         XCTAssertTrue(delete.exists)
-        XCTAssertGreaterThanOrEqual(replace.frame.minY, secondPhoto.frame.maxY)
-        XCTAssertGreaterThanOrEqual(delete.frame.minY, secondPhoto.frame.maxY)
+        XCTAssertTrue(
+            delete.frame.intersects(secondPhoto.frame),
+            "The badge sits on its own thumbnail's corner, not a separate row below it."
+        )
         addScreenshot(named: "REV-04-402x874.png")
     }
 
@@ -2987,7 +2988,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["photo-review.save-failure.retry"].exists)
         XCTAssertTrue(app.buttons["photo-review.save-failure.discard"].exists)
         XCTAssertFalse(app.buttons["photo-review.back"].exists)
-        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        XCTAssertFalse(app.buttons["photo-review.thumbnail.1.delete"].exists)
         XCTAssertFalse(app.staticTexts["photo-review.count"].exists)
     }
 
@@ -3008,7 +3009,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["photo-review.save-failure.retry"].exists)
         XCTAssertTrue(app.buttons["photo-review.save-failure.discard"].exists)
         XCTAssertFalse(app.buttons["photo-review.back"].exists)
-        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        XCTAssertFalse(app.buttons["photo-review.thumbnail.1.delete"].exists)
         XCTAssertFalse(app.staticTexts["photo-review.count"].exists)
     }
 
@@ -3066,12 +3067,12 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(movedPhoto.exists)
         XCTAssertEqual(
             movedPhoto.label,
-            "Photo 1 of 3, Cover, selected. Actions: Replace, Delete, Move later."
+            "Photo 1 of 3, Cover, selected. Actions: Move later."
         )
         XCTAssertTrue(movedPhoto.isSelected)
     }
 
-    func testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions() {
+    func testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionAndCover() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
         let screen = app.scrollViews["photo-review.screen"]
 
@@ -3095,7 +3096,7 @@ final class SnapListUITests: XCTestCase {
         let secondPhoto = app.buttons["photo-review.thumbnail.2"]
         XCTAssertEqual(
             hero.label,
-            "Photo 2 of 3, selected. Actions: Replace, Delete."
+            "Photo 2 of 3, selected."
         )
         assertPhotoReviewThumbnailCatalog(app, state: "REV-02")
         let back = app.buttons["photo-review.back"]
@@ -3112,14 +3113,14 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(startListing.exists)
         XCTAssertEqual(startListing.label, "Start listing")
 
-        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
-        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        // #988: the delete badge is always present per thumbnail, not gated on
+        // a prior tap that opens an actions row.
+        XCTAssertTrue(app.buttons["photo-review.thumbnail.2.delete"].exists)
         addScreenshot(named: "REV-02-402x874.png")
 
         secondPhoto.tap()
 
-        XCTAssertTrue(app.buttons["photo-review.replace"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
+        XCTAssertTrue(app.buttons["photo-review.thumbnail.2.delete"].exists)
         XCTAssertTrue(secondPhoto.isSelected)
         XCTAssertFalse(firstPhoto.isSelected)
     }
@@ -3133,19 +3134,16 @@ final class SnapListUITests: XCTestCase {
             "The live Photo Review fixture must render the native drag source."
         )
 
-        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
-        XCTAssertTrue(secondPhoto.exists)
-        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
-        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        let thirdPhoto = app.buttons["photo-review.thumbnail.3"]
+        XCTAssertTrue(thirdPhoto.exists)
+        XCTAssertFalse(thirdPhoto.isSelected)
 
-        secondPhoto.tap()
+        thirdPhoto.tap()
 
         XCTAssertTrue(
-            app.buttons["photo-review.replace"].waitForExistence(timeout: 2),
+            thirdPhoto.isSelected,
             "The native drag attachment must preserve the thumbnail Button tap."
         )
-        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
-        XCTAssertTrue(secondPhoto.isSelected)
     }
 
     func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
@@ -3353,45 +3351,13 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(fifthPhoto.exists)
         XCTAssertTrue(fifthPhoto.label.contains("Photo 5 of 5"))
 
-        // Replace stays available at the limit, because replacing is not capacity work.
-        app.buttons["photo-review.thumbnail.1"].tap()
-        let replace = app.buttons["photo-review.replace"]
-        XCTAssertTrue(replace.waitForExistence(timeout: 2))
-        XCTAssertTrue(replace.isEnabled)
+        // #988: Delete stays available at the limit, because deleting is not
+        // capacity work — only Add is gated at five photos.
+        let delete = app.buttons["photo-review.thumbnail.1.delete"]
+        XCTAssertTrue(delete.exists)
+        XCTAssertTrue(delete.isEnabled)
         XCTAssertEqual(app.staticTexts["photo-review.count"].label, "5 of 5")
         XCTAssertFalse(add.isEnabled)
-    }
-
-    func testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity() {
-        let app = launch(extraArguments: ["--photo-review-state=REV-02"])
-        let screen = app.scrollViews["photo-review.screen"]
-
-        XCTAssertTrue(
-            screen.waitForExistence(timeout: 3),
-            "The approved Photo Review fixture must render the public screen."
-        )
-
-        let count = app.staticTexts["photo-review.count"]
-
-        XCTAssertEqual(count.label, "3 of 5")
-        assertPhotoReviewThumbnailCatalog(app, state: "REV-02")
-        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
-        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
-
-        let hero = app.buttons["photo-review.hero"]
-        guard hero.waitForExistence(timeout: 2) else {
-            XCTFail(
-                "The selected hero must be a native Button that activates its exact photo identity."
-            )
-            return
-        }
-
-        hero.tap()
-
-        XCTAssertTrue(app.buttons["photo-review.replace"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
-        XCTAssertEqual(count.label, "3 of 5")
-        assertPhotoReviewThumbnailCatalog(app, state: "REV-02")
     }
 
     func testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion() {
@@ -4563,44 +4529,44 @@ final class SnapListUITests: XCTestCase {
         switch state {
         case "REV-01":
             expected = [(
-                "Photo 1 of 1, Cover, selected. Actions: Replace, Delete.",
+                "Photo 1 of 1, Cover, selected.",
                 true
             )]
         case "REV-02", "REV-04":
             expected = [
                 (
-                    "Photo 1 of 3, Cover. Actions: Replace, Delete, Move later.",
+                    "Photo 1 of 3, Cover. Actions: Move later.",
                     false
                 ),
                 (
-                    "Photo 2 of 3, selected. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    "Photo 2 of 3, selected. Actions: Move earlier, Move later, Make cover.",
                     true
                 ),
                 (
-                    "Photo 3 of 3. Actions: Replace, Delete, Move earlier, Make cover.",
+                    "Photo 3 of 3. Actions: Move earlier, Make cover.",
                     false
                 )
             ]
         case "REV-03":
             expected = [
                 (
-                    "Photo 1 of 5, Cover, selected. Actions: Replace, Delete, Move later.",
+                    "Photo 1 of 5, Cover, selected. Actions: Move later.",
                     true
                 ),
                 (
-                    "Photo 2 of 5. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    "Photo 2 of 5. Actions: Move earlier, Move later, Make cover.",
                     false
                 ),
                 (
-                    "Photo 3 of 5. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    "Photo 3 of 5. Actions: Move earlier, Move later, Make cover.",
                     false
                 ),
                 (
-                    "Photo 4 of 5. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    "Photo 4 of 5. Actions: Move earlier, Move later, Make cover.",
                     false
                 ),
                 (
-                    "Photo 5 of 5. Actions: Replace, Delete, Move earlier, Make cover.",
+                    "Photo 5 of 5. Actions: Move earlier, Make cover.",
                     false
                 )
             ]

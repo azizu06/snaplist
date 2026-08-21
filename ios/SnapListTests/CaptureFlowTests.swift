@@ -9799,11 +9799,14 @@ final class CaptureFlowTests: XCTestCase {
         host.close()
     }
 
-    func testPhotoReviewHeroAndStripDoNotOverlapTheDeleteControlAtDefaultAndAccessibilityFiveDynamicType() async {
+    // #988: the badge deliberately overlaps its own thumbnail's corner — that is
+    // the design, not a defect — so what must stay true across Dynamic Type is
+    // that it never strays onto the hero, and it stays anchored to the corner
+    // of the thumbnail it deletes rather than drifting into a neighbor's.
+    func testPhotoReviewDeleteBadgeStaysOffTheHeroAndAnchoredToItsOwnThumbnailCornerAtDefaultAndAccessibilityFiveDynamicType() async {
         for dynamicTypeSize: DynamicTypeSize in [.large, .accessibility5] {
             let photos = makeHeroNavigationPhotos(count: 5)
             let store = PhotoReviewStore(photos: photos)
-            store.selectPhotoForActions(id: photos[1].id)
             let host = HostedPhotoReviewTestWindow(
                 store: store,
                 dynamicTypeSize: dynamicTypeSize
@@ -9811,43 +9814,52 @@ final class CaptureFlowTests: XCTestCase {
             await host.settle()
 
             let hero = host.observation.frame(for: .hero)
-            let strip = host.observation.frame(for: .thumbnailStrip)
-            let deleteControl = host.observation.frame(for: .deleteControl)
+            let thumbnail = host.observation.frame(for: .thumbnail(1))
+            let deleteBadge = host.observation.frame(for: .deleteButton(1))
 
-            XCTAssertNotEqual(deleteControl, .zero, "\(dynamicTypeSize)")
+            XCTAssertNotEqual(deleteBadge, .zero, "\(dynamicTypeSize)")
             XCTAssertFalse(
-                hero.intersects(deleteControl),
-                "Delete control must not overlap the hero's bounds at \(dynamicTypeSize): hero=\(hero) delete=\(deleteControl)"
+                hero.intersects(deleteBadge),
+                "Delete badge must not overlap the hero's bounds at \(dynamicTypeSize): hero=\(hero) delete=\(deleteBadge)"
             )
-            XCTAssertFalse(
-                strip.intersects(deleteControl),
-                "Delete control must not overlap its thumbnail's bounds at \(dynamicTypeSize): strip=\(strip) delete=\(deleteControl)"
+            XCTAssertTrue(
+                thumbnail.intersects(deleteBadge),
+                "Delete badge must sit on its own thumbnail at \(dynamicTypeSize): thumbnail=\(thumbnail) delete=\(deleteBadge)"
+            )
+            XCTAssertGreaterThan(
+                deleteBadge.midX,
+                thumbnail.midX,
+                "Badge stays on the trailing half of its thumbnail at \(dynamicTypeSize): thumbnail=\(thumbnail) delete=\(deleteBadge)"
+            )
+            XCTAssertLessThan(
+                deleteBadge.midY,
+                thumbnail.midY,
+                "Badge stays on the top half of its thumbnail at \(dynamicTypeSize): thumbnail=\(thumbnail) delete=\(deleteBadge)"
             )
             host.close()
         }
     }
 
-    func testPhotoReviewDeleteControlHoldsTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
+    func testPhotoReviewDeleteBadgeHoldsTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
         for dynamicTypeSize: DynamicTypeSize in [.xSmall, .large, .accessibility5] {
             let photos = makeHeroNavigationPhotos(count: 2)
             let store = PhotoReviewStore(photos: photos)
-            store.selectPhotoForActions(id: photos[0].id)
             let host = HostedPhotoReviewTestWindow(
                 store: store,
                 dynamicTypeSize: dynamicTypeSize
             )
             await host.settle()
 
-            let deleteControl = host.observation.frame(for: .deleteControl)
+            let deleteBadge = host.observation.frame(for: .deleteButton(0))
             XCTAssertGreaterThanOrEqual(
-                deleteControl.width,
+                deleteBadge.width,
                 44,
-                "photo-review.delete width at \(dynamicTypeSize)"
+                "photo-review.thumbnail.1.delete width at \(dynamicTypeSize)"
             )
             XCTAssertGreaterThanOrEqual(
-                deleteControl.height,
+                deleteBadge.height,
                 44,
-                "photo-review.delete height at \(dynamicTypeSize)"
+                "photo-review.thumbnail.1.delete height at \(dynamicTypeSize)"
             )
             host.close()
         }
@@ -9961,98 +9973,6 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
-    // #883: `replace-delete-reference.png` shows one equal-width pair of tiles
-    // on a single row, Replace leading.
-    func testPhotoReviewReplaceAndDeleteRenderAsAnEqualWidthPairOnOneRow() async {
-        let photos = makeHeroNavigationPhotos(count: 3)
-        let store = PhotoReviewStore(photos: photos)
-        store.selectPhotoForActions(id: photos[1].id)
-        let host = HostedPhotoReviewTestWindow(store: store)
-        await host.settle()
-
-        let replace = host.observation.frame(for: .replaceControl)
-        let delete = host.observation.frame(for: .deleteControl)
-
-        XCTAssertNotEqual(replace, .zero, "Replace must carry its own landmark.")
-        XCTAssertNotEqual(delete, .zero)
-        XCTAssertEqual(
-            replace.width,
-            delete.width,
-            accuracy: 1,
-            "The reference splits the row evenly: replace=\(replace) delete=\(delete)"
-        )
-        XCTAssertEqual(
-            replace.midY,
-            delete.midY,
-            accuracy: 1,
-            "Both sit on one row."
-        )
-        XCTAssertEqual(
-            delete.minX - replace.maxX,
-            PhotoReviewV5VisualContract.actionRowGap,
-            accuracy: 1,
-            "Replace leads, Delete follows, one contract gap apart."
-        )
-        host.close()
-    }
-
-    func testPhotoReviewReplaceControlHoldsTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
-        for dynamicTypeSize: DynamicTypeSize in [.xSmall, .large, .accessibility5] {
-            let photos = makeHeroNavigationPhotos(count: 3)
-            let store = PhotoReviewStore(photos: photos)
-            store.selectPhotoForActions(id: photos[1].id)
-            let host = HostedPhotoReviewTestWindow(
-                store: store,
-                dynamicTypeSize: dynamicTypeSize
-            )
-            await host.settle()
-
-            let replace = host.observation.frame(for: .replaceControl)
-            XCTAssertGreaterThanOrEqual(
-                replace.width,
-                44,
-                "photo-review.replace width at \(dynamicTypeSize)"
-            )
-            XCTAssertGreaterThanOrEqual(
-                replace.height,
-                44,
-                "photo-review.replace height at \(dynamicTypeSize)"
-            )
-            host.close()
-        }
-    }
-
-    // #883: a row whose height is pinned to 44 clips its own labels once
-    // Dynamic Type passes the size that fits. The 44 is a floor, not a cap.
-    func testPhotoReviewActionRowGrowsWithAccessibilityDynamicTypeRatherThanClippingItsLabels() async {
-        var heights: [DynamicTypeSize: CGFloat] = [:]
-        for dynamicTypeSize: DynamicTypeSize in [.large, .accessibility5] {
-            let photos = makeHeroNavigationPhotos(count: 3)
-            let store = PhotoReviewStore(photos: photos)
-            store.selectPhotoForActions(id: photos[1].id)
-            let host = HostedPhotoReviewTestWindow(
-                store: store,
-                dynamicTypeSize: dynamicTypeSize
-            )
-            await host.settle()
-            heights[dynamicTypeSize] = host.observation
-                .frame(for: .deleteControl)
-                .height
-            host.close()
-        }
-
-        XCTAssertEqual(
-            heights[.large] ?? 0,
-            PhotoReviewV5VisualContract.actionRowHeight,
-            accuracy: 1,
-            "At the default size the row is exactly the contract height."
-        )
-        XCTAssertGreaterThan(
-            heights[.accessibility5] ?? 0,
-            heights[.large] ?? 0,
-            "At AX5 the row must grow instead of squeezing its labels."
-        )
-    }
 
     func testSelectPhotoForNavigationAtTheFirstAndLastPhotoStaysPinnedToTheBoundary() {
         let photos = makeHeroNavigationPhotos(count: 3)

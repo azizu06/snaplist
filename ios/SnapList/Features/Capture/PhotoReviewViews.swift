@@ -23,15 +23,6 @@ enum PhotoReviewV5VisualContract {
     static let thumbnailRadius: CGFloat = 12
     static let thumbnailGap: CGFloat = 10
     static let thumbnailStripTopPadding: CGFloat = 16
-    static let actionRowHeight: CGFloat = 44
-    static let actionRowGap: CGFloat = 8
-    // #883: Replace and Delete, measured off `replace-delete-reference.png` —
-    // an equal-width pair of outlined tiles on the canvas, each carrying a
-    // leading glyph beside its label, both in the same neutral ink. The
-    // reference does not tint Delete red, so neither does this row.
-    static let actionRowRadius: CGFloat = 12
-    static let actionRowIconSpacing: CGFloat = 8
-    static let actionRowBorderWidth: CGFloat = 1
     static let voiceRowHeight: CGFloat = 56
     static let voiceRowTopPadding: CGFloat = 16
     static let voiceRowRadius: CGFloat = 14
@@ -93,31 +84,6 @@ private struct PhotoReviewSecondaryActionButtonStyle: ButtonStyle {
     }
 }
 
-/// #883: the outlined tile `replace-delete-reference.png` shows for Replace and
-/// Delete. `.bordered` filled them with the system's tint instead, which is what
-/// the reference was given to correct.
-private struct PhotoReviewActionRowButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(SnapListColorToken.canvas.color)
-            .clipShape(
-                .rect(cornerRadius: PhotoReviewV5VisualContract.actionRowRadius)
-            )
-            .overlay {
-                RoundedRectangle(
-                    cornerRadius: PhotoReviewV5VisualContract.actionRowRadius
-                )
-                .stroke(
-                    SnapListColorToken.neutralOutline.color,
-                    lineWidth: PhotoReviewV5VisualContract.actionRowBorderWidth
-                )
-            }
-            .opacity(isEnabled ? (configuration.isPressed ? 0.72 : 1) : 0.45)
-    }
-}
-
 enum PhotoReviewLayoutLandmark: Hashable {
     case header
     case back
@@ -127,11 +93,9 @@ enum PhotoReviewLayoutLandmark: Hashable {
     case heroPageIndicator
     case thumbnailStrip
     case thumbnail(Int)
+    case deleteButton(Int)
     case addPhoto
     case coverPill
-    case actionRow
-    case replaceControl
-    case deleteControl
     case voiceNote
     case footer
     case startListing
@@ -3575,21 +3539,6 @@ struct PhotoReviewView: View {
                                         .accessibilityIdentifier("photo-review.intake-recovery")
                                 }
 
-                                if store.actionsPhotoID != nil {
-                                    // #883: width only. A fixed height here is a
-                                    // hard clamp the row's own 44pt floor cannot
-                                    // push past, which is what truncated Replace
-                                    // and Delete at accessibility Dynamic Type.
-                                    actionRow
-                                        .frame(width: contentWidth)
-                                        .photoReviewLayoutLandmark(.actionRow)
-                                        .padding(
-                                            .top,
-                                            PhotoReviewV5VisualContract
-                                                .voiceRowTopPadding
-                                        )
-                                }
-
                                 if let openBoundary {
                                     HStack(spacing: 0) {
                                         Spacer(minLength: 0)
@@ -4212,7 +4161,7 @@ struct PhotoReviewView: View {
             spacing: PhotoReviewV5VisualContract.coverColumnGap
         ) {
             Button {
-                store.selectPhotoForActions(id: photo.id)
+                store.selectPhotoForNavigation(id: photo.id)
                 hardwareFocusedThumbnailID = photo.id
             } label: {
                 LocalCaptureImage(
@@ -4299,6 +4248,9 @@ struct PhotoReviewView: View {
                     }
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                deleteBadge(for: photo, index: index).offset(x: 10, y: -10)
+            }
 
             if index == 0 {
                 Text("Cover")
@@ -4350,6 +4302,39 @@ struct PhotoReviewView: View {
                 : 0
         )
         .opacity(dragPresentation.draggedPhotoID == photo.id ? 0 : 1)
+    }
+
+    // #988: matches `ScanPhotoThumbnail.removeButton` in CaptureViews.swift — a
+    // fixed 18pt glyph in a 44pt hit target, so the badge stays a legal touch
+    // target and does not grow into the strip at accessibility Dynamic Type.
+    private func deleteBadge(
+        for photo: StagedCapturePhoto,
+        index: Int
+    ) -> some View {
+        Button {
+            store.selectPhotoForActions(id: photo.id)
+            performDelete()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 18, height: 18)
+                .background(SnapListColorToken.inkPrimary.color)
+                .overlay {
+                    Circle().stroke(
+                        SnapListColorToken.onDarkSurface.color.opacity(0.9),
+                        lineWidth: 1
+                    )
+                }
+                .clipShape(.circle)
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(.circle)
+        .accessibilityLabel("Delete photo \(index + 1)")
+        .accessibilityIdentifier("photo-review.thumbnail.\(index + 1).delete")
+        .photoReviewLayoutLandmark(.deleteButton(index))
     }
 
     private func autoScrollThumbnailStripIfNeeded(
@@ -4426,7 +4411,7 @@ struct PhotoReviewView: View {
             truths.append("selected")
         }
 
-        var actions = ["Replace", "Delete"]
+        var actions: [String] = []
         if includesThumbnailActions,
            store.photos.indices.contains(index) {
             actions.append(
@@ -4437,6 +4422,9 @@ struct PhotoReviewView: View {
             )
         }
 
+        guard !actions.isEmpty else {
+            return truths.joined(separator: ", ") + "."
+        }
         return "\(truths.joined(separator: ", ")). Actions: "
             + "\(actions.joined(separator: ", "))."
     }
@@ -4520,73 +4508,6 @@ struct PhotoReviewView: View {
             $focusedPickerOpener,
             equals: .addButton
         )
-    }
-
-    // #883: built to `replace-delete-reference.png` — an equal-width pair of
-    // outlined tiles on the canvas, each carrying a leading glyph beside its
-    // label, both in the same neutral ink. The reference does not tint Delete
-    // red, so this row does not either; the destructive moment is the
-    // confirmation that follows, not the button that opens it. At accessibility
-    // Dynamic Type the pair stacks, because half a row cannot hold either label
-    // at those sizes without truncating it.
-    @ViewBuilder
-    private var actionRow: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(
-                VStackLayout(spacing: PhotoReviewV5VisualContract.actionRowGap)
-            )
-            : AnyLayout(
-                HStackLayout(spacing: PhotoReviewV5VisualContract.actionRowGap)
-            )
-
-        layout {
-            if let photoID = store.actionsPhotoID {
-                Button {
-                    presentPicker(.replace(photoID: photoID))
-                } label: {
-                    actionRowLabel(
-                        systemImageName: "arrow.triangle.2.circlepath",
-                        title: "Replace"
-                    )
-                }
-                .buttonStyle(PhotoReviewActionRowButtonStyle())
-                .accessibilityLabel("Replace this photo")
-                .accessibilityIdentifier("photo-review.replace")
-                .photoReviewLayoutLandmark(.replaceControl)
-                .accessibilityFocused(
-                    $focusedPickerOpener,
-                    equals: .replaceButton(photoID: photoID)
-                )
-            }
-
-            Button(action: performDelete) {
-                actionRowLabel(systemImageName: "trash", title: "Delete")
-            }
-            .buttonStyle(PhotoReviewActionRowButtonStyle())
-            .accessibilityLabel("Delete this photo")
-            .accessibilityIdentifier("photo-review.delete")
-            .photoReviewLayoutLandmark(.deleteControl)
-        }
-    }
-
-    private func actionRowLabel(
-        systemImageName: String,
-        title: String
-    ) -> some View {
-        HStack(spacing: PhotoReviewV5VisualContract.actionRowIconSpacing) {
-            Image(systemName: systemImageName)
-                .accessibilityHidden(true)
-            Text(title)
-        }
-        .snapListTypography(.rowTitle)
-        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(
-            maxWidth: .infinity,
-            minHeight: PhotoReviewV5VisualContract.actionRowHeight
-        )
-        .contentShape(.rect)
     }
 
     // Live Photo Review v5 owns this collapsed row. Voice Note v8 owns only the
