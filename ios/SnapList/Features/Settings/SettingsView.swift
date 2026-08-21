@@ -423,17 +423,6 @@ struct SettingsView: View {
             }
             }
             }
-            VStack(alignment: .leading, spacing: 6) {
-                if let note = presentation.note { Text(note) }
-                if presentation.showsOwnershipNote {
-                    Text("Apple bills and cancels SnapList Pro. SnapList cannot cancel it for you.")
-                        .accessibilityIdentifier("settings.subscription.ownership-note")
-                }
-            }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 4)
-            .padding(.top, 8)
         }
         .onChange(of: presentation) { _, reading in
             AccessibilityNotification.Announcement(
@@ -679,6 +668,10 @@ struct SettingsView: View {
         .font(.subheadline.weight(.medium))
         .foregroundStyle(.secondary)
         .frame(minHeight: 18)
+        // Matches settingsSectionHeader's own leading inset (#888) so
+        // SUBSCRIPTION lines up with SELLING, PRIVACY, and ABOUT instead of
+        // sitting flush against the scroll view's edge (#991).
+        .padding(.leading, 16)
         .padding(.top, 19)
         .padding(.bottom, 3)
         // The state ID rides the header rather than the section around it: an

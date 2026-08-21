@@ -842,36 +842,57 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(toggle.value as? String, "0", app.debugDescription)
     }
 
-    /// Aziz found the subscription ownership note ("Apple bills and
-    /// cancels…") resting behind the floating Scan/Trophy Wall dock instead
-    /// of above it — the same "not dock-aware on this screen" gap
-    /// `testSettingsAboutRowsOpenTheirLiveLegalDestinations` already
-    /// documented for the ABOUT rows. `isHittable` reports true even when
-    /// the dock visually covers an element's center (#730), so this checks
-    /// geometry instead: the note's bottom edge against the dock's top edge.
-    func testSettingsSubscriptionOwnershipNoteClearsTheFloatingDock() {
+    /// #991: the ownership caption ("Apple bills and cancels…") and any
+    /// load-failure note used to hang under the subscription card as loose
+    /// text with no other section's header carrying a matching caption.
+    /// Aziz called it out as "random text underneath" that reads as unclean
+    /// next to the rest of the list, so it is gone from the main Settings
+    /// list entirely — nothing replaced `testSettingsSubscriptionOwnershipNoteClearsTheFloatingDock`
+    /// because the element it measured no longer renders here.
+    func testSettingsSubscriptionCaptionTextIsGoneFromTheMainList() {
         let app = launch(extraArguments: ["--settings-proof=SET-01"])
         let settingsScreen = app.descendants(matching: .any)["settings.screen"]
         XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
 
-        let note = app.descendants(matching: .any)["settings.subscription.ownership-note"]
-        let dock = app.buttons["dock.trophy-wall"]
-        XCTAssertTrue(dock.exists, app.debugDescription)
-
-        // Stopping the swipe as soon as the note merely exists caught it
-        // the moment it entered the bottom edge — still well below the
-        // dock's top, not yet clear of it. Keep swiping until it has
-        // actually cleared, the same fix
-        // `testSettingsAboutRowsOpenTheirLiveLegalDestinations` needed for
-        // its own swipe loop.
-        for _ in 0..<10 where !(note.exists && note.frame.maxY <= dock.frame.minY) {
+        let manage = app.buttons["settings.subscription.manage"]
+        for _ in 0..<10 where !manage.exists {
             app.swipeUp()
         }
-        XCTAssertTrue(note.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertLessThanOrEqual(
-            note.frame.maxY,
-            dock.frame.minY,
-            "note=\(note.frame), dock=\(dock.frame)"
+        XCTAssertTrue(manage.waitForExistence(timeout: 3), app.debugDescription)
+
+        XCTAssertFalse(
+            app.descendants(matching: .any)["settings.subscription.ownership-note"].exists,
+            app.debugDescription
+        )
+        XCTAssertFalse(
+            app.staticTexts["Apple bills and cancels SnapList Pro. SnapList cannot cancel it for you."]
+                .exists,
+            app.debugDescription
+        )
+    }
+
+    /// #991, verbatim owner feedback: "you aligned all the other headers of
+    /// certain settings sections except subscription. Subscription is still
+    /// falling towards the left." `settingsSectionHeader` gives SELLING its
+    /// 16pt leading inset; `settingsSubscriptionHeader` omitted it, so
+    /// SUBSCRIPTION sat flush against the scroll view's edge instead.
+    func testSettingsSubscriptionHeaderAlignsWithTheOtherSectionHeaders() {
+        let app = launch(extraArguments: ["--settings-proof=SET-01"])
+        let settingsScreen = app.descendants(matching: .any)["settings.screen"]
+        XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+
+        let sellingHeader = app.staticTexts["SELLING"]
+        let subscriptionHeader = app.staticTexts["SUBSCRIPTION"]
+        for _ in 0..<10 where !(sellingHeader.exists && subscriptionHeader.exists) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(sellingHeader.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(subscriptionHeader.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(
+            subscriptionHeader.frame.minX,
+            sellingHeader.frame.minX,
+            accuracy: 0.5,
+            "selling=\(sellingHeader.frame), subscription=\(subscriptionHeader.frame)"
         )
     }
 
