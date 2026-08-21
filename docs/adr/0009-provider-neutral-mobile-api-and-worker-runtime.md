@@ -8,9 +8,10 @@
 
 > **Lean-MVP scope amendment (2026-07-21):** ADR-0008/#349 is product authority for Scan and
 > Trophy Wall. The retained v1 OpenAPI describes current runtime compatibility, not native
-> navigation authority: `/v1/home` is a legacy projection, and the four-photo submission maximum is
-> an implementation gap owned by #352. Optional voice context is owned by #351. These gaps do not
-> authorize the retired Home dashboard or let documentation claim the lean target is already shipped.
+> navigation authority: `/v1/home` is a legacy projection. The one-to-five mobile submission
+> maximum shipped through #352; optional voice context shipped through #351 and #774. This does not
+> authorize the retired Home dashboard or let documentation claim more of the lean target is shipped
+> than #352/#351/#774 actually cover.
 
 ## Context
 

@@ -111,8 +111,8 @@ export async function runOfflinePipelineBenchmark(input: {
   if (!Number.isInteger(warmupIterations) || warmupIterations < 0) {
     throw new Error("Benchmark warmup iterations must be a non-negative integer");
   }
-  if (input.fixturePhotos.length < 1 || input.fixturePhotos.length > 4) {
-    throw new Error("Benchmark requires one to four representative photos");
+  if (input.fixturePhotos.length < 1 || input.fixturePhotos.length > 5) {
+    throw new Error("Benchmark requires one to five representative photos");
   }
 
   let peakRssBytes = process.memoryUsage().rss;

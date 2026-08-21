@@ -116,6 +116,21 @@ describe("resolveScoutGuidance", () => {
     expect(result.message.title).toBe("2 of 4 photos");
   });
 
+  it("derives the captured-photo fact from a five-photo capture session", () => {
+    const capturedPhotoCount = verifiedCapturedPhotoCount({
+      id: CAPTURE_SESSION_ID,
+      photos: [
+        { id: PHOTO_ID_1 },
+        { id: PHOTO_ID_2 },
+        { id: "66666666-6666-4666-8666-666666666663" },
+        { id: "66666666-6666-4666-8666-666666666664" },
+        { id: "66666666-6666-4666-8666-666666666665" },
+      ],
+    });
+
+    expect(capturedPhotoCount.value).toBe(5);
+  });
+
   it("rejects a missing required substitution with a stable contract error", () => {
     expect(() =>
       resolveScoutGuidance({
@@ -340,6 +355,21 @@ describe("resolveScoutGuidance", () => {
     });
 
     expect(result.accessibility.label).toContain("1 of 4");
+  });
+
+  it("derives the uploaded-photo fact from a five-photo durable run", () => {
+    const uploadedPhotoCount = verifiedUploadedPhotoCount({
+      id: RUN_ID,
+      photos: [
+        { id: PHOTO_ID_1, status: "uploaded" },
+        { id: PHOTO_ID_2, status: "uploaded" },
+        { id: "66666666-6666-4666-8666-666666666663", status: "uploaded" },
+        { id: "66666666-6666-4666-8666-666666666664", status: "pending" },
+        { id: "66666666-6666-4666-8666-666666666665", status: "pending" },
+      ],
+    });
+
+    expect(uploadedPhotoCount.value).toBe(3);
   });
 
   it("renders a one-day price evidence window with singular grammar", () => {
