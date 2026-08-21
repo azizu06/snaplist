@@ -3,12 +3,15 @@ import { supportEmail } from "@/lib/marketing/site";
 /**
  * The one place the support address is rendered.
  *
- * No support address exists in this repository — the v6 design carries the
- * destination as the inert token COMPANY_CONTACT_PENDING. Rather than hardcode a
- * guess, the address comes from NEXT_PUBLIC_SUPPORT_EMAIL. When it is unset the
- * page still renders and still says what to expect; it just cannot name a
- * channel yet. Setting the variable turns every instance into a real mailto:
- * with no code change.
+ * The address comes from NEXT_PUBLIC_SUPPORT_EMAIL — the v6 design carried the
+ * destination as the inert token COMPANY_CONTACT_PENDING, and it stays
+ * env-driven so each environment can point somewhere else with no code change.
+ * `.env.example` carries the published address, so an unconfigured checkout
+ * renders the real one rather than the notice below (#953).
+ *
+ * The notice below is what remains when the variable is set to something
+ * unusable: the page still renders and still says what to expect, it just
+ * cannot name a channel.
  *
  * The unresolved state is deliberately not a `mailto:` with a placeholder
  * address: that would look like a working contact route and silently drop every

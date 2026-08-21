@@ -9,10 +9,12 @@
  * held a retired claim green because nobody remembered to update the literal
  * alongside the behavior.
  *
- * Two destinations are unresolved at build time and are deliberately env-driven
- * rather than hardcoded: SnapList has no App Store listing until #380 submits,
- * and no published support address exists in this repository. Both render an
- * honest unavailable state when unset instead of a dead link.
+ * The App Store listing is unresolved at build time and is deliberately
+ * env-driven rather than hardcoded: SnapList has no listing until #380 submits,
+ * so it renders an honest unavailable state when unset instead of a dead link.
+ * The support address is published and `.env.example` carries it (#953); it
+ * stays env-driven so each environment can point somewhere else, and the same
+ * unavailable state covers a misconfigured override.
  */
 
 const HERO_BEFORE_ACCENT = "Turn photos into a";

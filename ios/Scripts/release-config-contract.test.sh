@@ -11,6 +11,7 @@ project_file=${repository_root}/ios/SnapList.xcodeproj/project.pbxproj
 debug_config=${repository_root}/ios/Configuration/SnapList.Debug.xcconfig
 release_config=${repository_root}/ios/Configuration/SnapList.Release.xcconfig
 entitlements=${repository_root}/ios/SnapList/SnapList.entitlements
+info_plist=${repository_root}/ios/SnapList/Info.plist
 
 assert_rejected() {
   if "$@" >/dev/null 2>&1; then
@@ -66,6 +67,7 @@ test -x "$pairing_lint"
 test -x "$dsyms_upload"
 test -f "$debug_config"
 test -f "$release_config"
+test -f "$info_plist"
 grep -Fq 'SnapList.Debug.xcconfig' "$project_file"
 grep -Fq 'SnapList.Release.xcconfig' "$project_file"
 grep -Eq '^SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_(live|test)_' "$debug_config"
@@ -78,6 +80,28 @@ if grep -Fq 'pk_' "$release_config"; then
   exit 1
 fi
 grep -Fq 'webcredentials:$(SNAPLIST_CLERK_FRONTEND_DOMAIN)' "$entitlements"
+
+# App Store Connect holds every uploaded build in "Missing Compliance" until the
+# export-compliance question is answered, and an unanswered build cannot be
+# submitted for review. Declaring the answer in Info.plist answers it for every
+# upload instead of once per build in the web UI, which is where a submission
+# silently stalls.
+#
+# SnapList's only cryptography is HTTPS to its own API and its providers, which
+# is exempt, so the answer is false. If SnapList ever ships non-exempt
+# encryption this key changes to true together with the CCATS and annual
+# self-classification report that answer obliges, so the value is pinned rather
+# than merely required to exist.
+declared_encryption=$(plutil -extract ITSAppUsesNonExemptEncryption raw "$info_plist" 2>/dev/null) || {
+  print -u2 -r -- "Info.plist declares no ITSAppUsesNonExemptEncryption. Without it App
+Store Connect stalls every upload waiting on the export-compliance answer."
+  exit 1
+}
+[[ $declared_encryption == "false" ]] || {
+  print -u2 -r -- "ITSAppUsesNonExemptEncryption is '${declared_encryption}', expected 'false'.
+Declaring true obliges a CCATS filing and an annual self-classification report."
+  exit 1
+}
 
 # #890. The CI Release job builds -sdk iphonesimulator with code signing off,
 # which never processes entitlements, so a missing or unexpanded

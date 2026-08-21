@@ -537,6 +537,27 @@ describe("marketing destinations", () => {
     expect($("body").text()).toMatch(/not live yet/i);
   });
 
+  /**
+   * App Review reads /privacy and /support, and both name the support channel
+   * through this one variable. Production sets it, so the deployed pages are
+   * fine (#953) — but the template shipped it empty, so every checkout and
+   * every build made without the variable rendered "not live yet" where the
+   * contact address belongs. The default now carries the address already
+   * published on snaplist.dev rather than leaving the honest-but-useless
+   * fallback as what the repository ships.
+   */
+  it("ships a default support address the site can actually render", () => {
+    const declared = readFileSync(resolve(".env.example"), "utf8")
+      .match(/^NEXT_PUBLIC_SUPPORT_EMAIL=(.*)$/m)?.[1]
+      .trim();
+
+    vi.stubEnv("NEXT_PUBLIC_SUPPORT_EMAIL", declared ?? "");
+    expect(
+      site.supportEmail(),
+      ".env.example must declare an address SupportChannel will render as a mailto:",
+    ).toBe(declared);
+  });
+
   it("renders a real mailto: once a support address is configured", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPPORT_EMAIL", "help@snaplist.dev");
     const $ = load(renderToStaticMarkup(<SupportPage />));
@@ -905,5 +926,59 @@ describe("feature explorer semantics", () => {
     expect(bodies.filter((body) => /optional voice note.*15 seconds/i.test(body))).toHaveLength(1);
     expect(site.FEATURE_STEPS.find((step) => step.id === "photo-review")?.body).toMatch(/replace|remove/i);
     expect(bodies.join(" ")).toMatch(/handoff you finish/i);
+  });
+});
+
+/**
+ * The processor list is the only place the privacy policy names who else
+ * receives seller data, and its failure mode is silence: an SDK gets linked
+ * into the app and nobody remembers this page exists. That is how PostHog
+ * shipped undisclosed (#953) while the privacy manifest already declared the
+ * Analytics collection it performs.
+ *
+ * So the list is not asserted against a literal. It is asserted against the
+ * Swift packages the iOS target actually links, which is the thing that
+ * changes when a new processor arrives.
+ */
+describe("privacy policy processor disclosure", () => {
+  /**
+   * Swift package -> the name the policy discloses it under. Every entry is a
+   * third-party SDK that receives seller data at runtime; a package that
+   * receives nothing does not belong here.
+   */
+  const LINKED_PROCESSORS: ReadonlyArray<readonly [string, string]> = [
+    ["posthog-ios", "PostHog"],
+    ["sentry-cocoa", "Sentry"],
+    ["clerk-ios", "Clerk"],
+    ["purchases-ios-spm", "RevenueCat"],
+  ];
+
+  function processorListText(): string {
+    const $ = load(renderToStaticMarkup(<PrivacyPage />));
+    const heading = $("h2").filter((_, el) => $(el).text().trim() === "Who else processes it");
+
+    expect(heading.length, "the processor section heading moved or was renamed").toBe(1);
+    const list = heading.nextAll("ul").first();
+    expect(list.find("li").length, "the processor section lists nobody").toBeGreaterThan(0);
+
+    return list.text();
+  }
+
+  it("discloses every third-party SDK the iOS app links", () => {
+    const project = readFileSync(resolve("ios/SnapList.xcodeproj/project.pbxproj"), "utf8");
+    const disclosed = processorListText();
+
+    for (const [swiftPackage, disclosedName] of LINKED_PROCESSORS) {
+      // Control. Without it, dropping an SDK would turn this loop into a test
+      // that asserts nothing while still reporting green.
+      expect(
+        project,
+        `${swiftPackage} is no longer linked — revisit the disclosure instead of deleting this row`,
+      ).toContain(swiftPackage);
+      expect(
+        disclosed,
+        `the app links ${swiftPackage} but the policy never names ${disclosedName}`,
+      ).toContain(disclosedName);
+    }
   });
 });
