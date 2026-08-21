@@ -117,6 +117,17 @@ final class ListingReviewUITests: XCTestCase {
                 copy: "You're offline. Your changes are saved on this phone.",
                 offersRetry: false
             ),
+            // #951. A permanent refusal has to reach the screen as the
+            // server's own remedy, and must not offer the one action that
+            // provably cannot work. Sharing this row with `save-failure` is
+            // the point: the two states differ only in the copy and the
+            // affordance, which is exactly what regressed.
+            (
+                fixture: "save-refusal",
+                copy: "A condition change alone cannot reprice this item again."
+                    + " Add, replace, or remove a photo to price it again.",
+                offersRetry: false
+            ),
         ]
 
         for expectation in expectations {

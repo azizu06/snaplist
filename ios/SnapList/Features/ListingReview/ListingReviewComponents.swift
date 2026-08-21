@@ -199,6 +199,15 @@ private actor ListingReviewFixtureService: ListingReviewServing {
         switch fixture {
         case .saveFailure:
             throw ListingReviewClientError.unavailable
+        case .saveRefusal:
+            // Verbatim from `CONDITION_ALLOWANCE_REFUSAL` in
+            // `src/lib/listing-review/save.ts`, which repeats the sentence the
+            // migration raises. #943 made the server send it; #951 is what
+            // gets it onto the screen instead of "Please try again."
+            throw ListingReviewClientError.refused(
+                "A condition change alone cannot reprice this item again."
+                    + " Add, replace, or remove a photo to price it again."
+            )
         case .offline:
             throw ListingReviewClientError.offline
         case .conflict:

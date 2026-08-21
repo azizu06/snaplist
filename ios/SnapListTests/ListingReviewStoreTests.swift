@@ -647,6 +647,103 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertTrue(store.isDirty)
     }
 
+    /// #951. Every 409 except the stale-review sentence used to reach the
+    /// seller as `ListingReviewCopy.saveFailed` — "Please try again." — so
+    /// #943's permanent refusals told the seller to repeat the one request
+    /// that can never succeed, and the remedy the server sent never rendered.
+    func testPermanentSaveRefusalRendersTheServerRemedyNotTheRetryCopy() async throws {
+        let snapshot = try Self.makeSnapshot()
+        // Verbatim from `CONDITION_ALLOWANCE_REFUSAL` in
+        // `src/lib/listing-review/save.ts`, which repeats the sentence the
+        // migration raises.
+        let capRefusal =
+            "A condition change alone cannot reprice this item again."
+            + " Add, replace, or remove a photo to price it again."
+        let cappedStore = makeStore(
+            service: makeSaveThroughAPIClient(
+                snapshot: snapshot,
+                code: "conflict_permanent",
+                message: capRefusal
+            )
+        )
+
+        let cappedOpened = await cappedStore.open(snapshot)
+        XCTAssertTrue(cappedOpened)
+        await cappedStore.setTitle("Sony WH-1000XM4 with the carry case")
+        let cappedOutcome = await cappedStore.done()
+
+        XCTAssertEqual(cappedOutcome, .stayed)
+        XCTAssertEqual(cappedStore.announcement, capRefusal)
+        // The sentence exists nowhere in the app, so holding it is itself
+        // proof the 409 body reached the seller through the live client.
+        XCTAssertEqual(cappedStore.phase, .refused)
+        // `.failed` is the only phase the review hangs a retry button on, and
+        // retrying this save reaches the same refusal every time.
+        XCTAssertNotEqual(cappedStore.phase, .failed)
+        // Nothing about the review went stale, so the reload alert must not
+        // take over the screen either.
+        XCTAssertNotEqual(cappedStore.phase, .conflict)
+        XCTAssertFalse(cappedStore.isStale)
+
+        // The cap is on repricing from a condition change alone. A draft the
+        // seller has since changed is a different question, so the refusal
+        // must not outlive the edit that provoked it.
+        await cappedStore.setTitle("Sony WH-1000XM4 headphones")
+        XCTAssertEqual(cappedStore.phase, .ready)
+
+        // A published listing never becomes editable again, so it gets the
+        // same treatment: its own sentence, and no retry.
+        let publishedRefusal = "A published listing cannot be changed from review."
+        let publishedStore = makeStore(
+            service: makeSaveThroughAPIClient(
+                snapshot: snapshot,
+                code: "conflict_permanent",
+                message: publishedRefusal
+            )
+        )
+        let publishedOpened = await publishedStore.open(snapshot)
+        XCTAssertTrue(publishedOpened)
+        await publishedStore.setTitle("Sony WH-1000XM4 sealed")
+        let publishedOutcome = await publishedStore.done()
+        XCTAssertEqual(publishedOutcome, .stayed)
+        XCTAssertEqual(publishedStore.announcement, publishedRefusal)
+        XCTAssertEqual(publishedStore.phase, .refused)
+
+        // Controls. A 409 that is not a permanent refusal keeps the behaviour
+        // it had: stale reloads, and everything else stays the generic save
+        // failure rather than echoing an internal sentence at the seller.
+        let staleStore = makeStore(
+            service: makeSaveThroughAPIClient(
+                snapshot: snapshot,
+                message: ListingReviewCopy.staleReview
+            )
+        )
+        let staleOpened = await staleStore.open(snapshot)
+        XCTAssertTrue(staleOpened)
+        await staleStore.setTitle("Sony WH-1000XM4 stale edit")
+        let staleOutcome = await staleStore.done()
+        XCTAssertEqual(staleOutcome, .stayed)
+        XCTAssertEqual(staleStore.phase, .conflict)
+        XCTAssertEqual(staleStore.announcement, ListingReviewCopy.staleReview)
+
+        let inProgressStore = makeStore(
+            service: makeSaveThroughAPIClient(
+                snapshot: snapshot,
+                message: "This save is already in progress. Try again."
+            )
+        )
+        let inProgressOpened = await inProgressStore.open(snapshot)
+        XCTAssertTrue(inProgressOpened)
+        await inProgressStore.setTitle("Sony WH-1000XM4 in-flight edit")
+        let inProgressOutcome = await inProgressStore.done()
+        XCTAssertEqual(inProgressOutcome, .stayed)
+        XCTAssertEqual(inProgressStore.phase, .failed)
+        XCTAssertEqual(
+            inProgressStore.announcement,
+            ListingReviewCopy.saveFailed
+        )
+    }
+
     private func makeStore(
         service: any ListingReviewServing,
         persistence: any ListingReviewDraftPersisting =
@@ -665,7 +762,28 @@ final class ListingReviewStoreTests: XCTestCase {
         )
     }
 
-    private func makeConflictSession(message: String) -> URLSession {
+    /// The refusal has to travel through the real `ListingReviewAPIClient`,
+    /// but opening the review is a run read the same stubbed session would
+    /// answer with the same 409. So only the save path is the live client;
+    /// the read replays the snapshot the review opened with.
+    private func makeSaveThroughAPIClient(
+        snapshot: ListingReviewResult,
+        code: String = "conflict",
+        message: String
+    ) -> any ListingReviewServing {
+        ListingReviewSaveThroughAPIClient(
+            client: ListingReviewAPIClient(
+                baseURL: URL(string: "https://api.snaplist.dev")!,
+                session: makeConflictSession(code: code, message: message)
+            ),
+            snapshot: snapshot
+        )
+    }
+
+    private func makeConflictSession(
+        code: String = "conflict",
+        message: String
+    ) -> URLSession {
         ListingReviewURLProtocolStub.handler = { request in
             (
                 HTTPURLResponse(
@@ -678,7 +796,7 @@ final class ListingReviewStoreTests: XCTestCase {
                     """
                     {
                       "error": {
-                        "code": "conflict",
+                        "code": "\(code)",
                         "message": "\(message)",
                         "requestId": "listing-review-request"
                       }
@@ -794,6 +912,34 @@ final class ListingReviewStoreTests: XCTestCase {
             ListingReviewResult.self,
             from: JSONSerialization.data(withJSONObject: object)
         )
+    }
+}
+
+private struct ListingReviewSaveThroughAPIClient: ListingReviewServing {
+    let client: ListingReviewAPIClient
+    let snapshot: ListingReviewResult
+
+    func save(
+        runID: UUID,
+        draft: ListingReviewDraft,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewSaveReceipt {
+        try await client.save(
+            runID: runID,
+            draft: draft,
+            expectedReviewRevision: expectedReviewRevision,
+            idempotencyKey: idempotencyKey,
+            bearerToken: bearerToken
+        )
+    }
+
+    func fetchReview(
+        runID: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewResult {
+        snapshot
     }
 }
 

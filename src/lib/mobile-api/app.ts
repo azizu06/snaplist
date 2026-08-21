@@ -1196,17 +1196,25 @@ export function createMobileApiHandler(
           }),
         );
       } catch (error) {
+        // #951. Two of these refusals are permanent: the review as it stands
+        // answers the same way to every repeat of the same request, and each
+        // carries the remedy the seller has to act on instead. The other three
+        // clear on their own or after a reload, so a retry is honest for them.
+        // Status, counter, and credit accounting are unchanged -- #943's
+        // contract is frozen -- and only the envelope's code separates the two,
+        // so the client stops matching on seller-facing copy to route them.
+        const permanent = error instanceof ListingReviewCorrectionUnavailableError
+          || error instanceof ListingReviewNotEditableError;
         if (
-          error instanceof ListingReviewStaleError
+          permanent
+          || error instanceof ListingReviewStaleError
           || error instanceof ListingReviewIdempotencyConflictError
           || error instanceof ListingReviewSaveInProgressError
-          || error instanceof ListingReviewNotEditableError
           // #919 review round 3. A refusal the seller can act on, not an
           // outage. Falling through below answered 503 "temporarily
           // unavailable." and reported an error on every attempt, against a
           // state that never clears on its own, so the copy asked the seller to
           // retry forever. The message carries the remedy.
-          || error instanceof ListingReviewCorrectionUnavailableError
         ) {
           // Round 3 correction: moving these off 503 also moved them out of
           // monitoring. Most of them belong out of it -- a spent correction or
@@ -1224,7 +1232,7 @@ export function createMobileApiHandler(
           return errorResponse(
             requestId,
             409,
-            "conflict",
+            permanent ? "conflict_permanent" : "conflict",
             error.message,
           );
         }
