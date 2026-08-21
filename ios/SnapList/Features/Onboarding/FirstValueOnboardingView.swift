@@ -174,6 +174,14 @@ struct FirstValueOnboardingView: View {
                     Text("Skip")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(SnapListColorToken.action.color)
+                        // The header slot is the 44pt touch target, so at the
+                        // accessibility sizes the word was truncated away and
+                        // the control read as an unlabelled row of dots. The
+                        // floor is lower than the default because `Skip` at
+                        // accessibility5 is close to three times the slot; even
+                        // at this floor it still resolves larger than the
+                        // default-size label, which is the point.
+                        .snapListFitsFixedSlot(minimumScale: 0.35)
                         .frame(
                             width: FirstValueOnboardingHeaderMetrics
                                 .trailingSlotWidth(for: model.screen),

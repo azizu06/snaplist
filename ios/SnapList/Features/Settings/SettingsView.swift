@@ -317,14 +317,25 @@ struct SettingsView: View {
 
     private var profileCard: some View {
         HStack(spacing: 14) {
+            // The disc is a fixed 46pt while `.headline` grows with the
+            // seller's Dynamic Type setting, so at the accessibility sizes the
+            // initials were dropped for an ellipsis. Shrinking to fit keeps
+            // them. They are hidden from VoiceOver because the name they
+            // abbreviate is the next thing in this same combined element.
             Text(profile.initials)
                 .font(.headline)
                 .foregroundStyle(.secondary)
+                .snapListFitsFixedSlot()
                 .frame(width: 46, height: 46)
                 .background(SnapListColorToken.avatarBackground.color, in: Circle())
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name).font(.headline)
-                Text(profile.email).foregroundStyle(.secondary)
+                Text(profile.email.withAddressLineBreakOpportunities)
+                    .foregroundStyle(.secondary)
+                    // The break opportunities are display-only. VoiceOver is
+                    // given the address the seller actually has.
+                    .accessibilityLabel(profile.email)
             }
         }
         .padding(.horizontal, 16)
@@ -1301,8 +1312,8 @@ private struct SettingsDeletionConsequencesView: View {
             SettingsExplanationPage(
                 title: "Delete your SnapList account",
                 lead: "Read what this does before you continue. You can still stop at every step.",
-                titleFont: .system(size: 20, weight: .bold),
-                leadFont: .system(size: 16),
+                titleFont: .system(.title3, weight: .bold),
+                leadFont: .system(.callout),
                 horizontalPadding: 25,
                 verticalPadding: 30,
                 titleToLeadSpacing: 22,
@@ -1318,7 +1329,7 @@ private struct SettingsDeletionConsequencesView: View {
                         "Your eBay connection, removed from SnapList"
                     ],
                     bulletColor: SnapListColorToken.destructiveText.color,
-                    rowFont: .system(size: 15),
+                    rowFont: .system(.subheadline),
                     rowVerticalPadding: 15.5,
                     rowHorizontalPadding: 12,
                     bulletSpacing: 8,

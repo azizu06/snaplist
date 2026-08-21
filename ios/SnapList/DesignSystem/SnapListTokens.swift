@@ -186,3 +186,63 @@ enum SnapListMetrics {
     static let primaryButtonRadius: CGFloat = 27
     static let sheetRadius: CGFloat = 26
 }
+
+extension View {
+    /// Keeps a short label whole inside a slot the approved design fixes the
+    /// size of.
+    ///
+    /// Every typography token scales with the seller's Dynamic Type setting,
+    /// which is the point of them. A label that scales inside a container that
+    /// cannot is the case the tokens do not cover: at the accessibility sizes
+    /// SwiftUI resolves the overflow on its own and always resolves it by
+    /// removing letters. `Add` becomes `A…`, `Skip` becomes an unlabelled row
+    /// of dots, and `Review` picks up a hyphen it does not have. A seller who
+    /// asked for larger text is handed a control they can no longer read.
+    ///
+    /// Shrinking to fit keeps the whole word instead. At the default sizes the
+    /// label already fits, so `minimumScaleFactor` never engages and nothing
+    /// about the approved rendering changes.
+    ///
+    /// This is for labels the design deliberately sizes, not a licence to pin
+    /// body copy. Text that is free to wrap should wrap.
+    func snapListFitsFixedSlot(minimumScale: CGFloat = 0.5) -> some View {
+        lineLimit(1).minimumScaleFactor(minimumScale)
+    }
+}
+
+extension String {
+    /// A display copy of this address that a narrow column can wrap without
+    /// inventing a character.
+    ///
+    /// An address is one unbreakable token, so when the column is narrower
+    /// than the token SwiftUI hyphenates it, and `jordan.hale@icloud.com`
+    /// renders as `jordan.hale@icloud.-com`. The hyphen is not in the seller's
+    /// address. Showing someone their own identifier with an extra character
+    /// in it is wrong in a way a layout artifact usually is not.
+    ///
+    /// A zero-width space after each `@` and `.` gives the layout engine a
+    /// legitimate place to break, so it breaks there instead of hyphenating.
+    /// The character is invisible, carries no width, and is silent to speech
+    /// synthesis. It is still display-only: pass the original string anywhere
+    /// the value is read, compared, or sent.
+    var withAddressLineBreakOpportunities: String {
+        let opportunity: Character = "\u{200B}"
+        let characters = Array(self)
+        var display = ""
+        display.reserveCapacity(characters.count * 2)
+        for (offset, character) in characters.enumerated() {
+            display.append(character)
+            guard character == "@" || character == "." else { continue }
+            // Applied to its own output — the member profile re-renders the
+            // same value across a state change — an unconditional append
+            // stacks a second separator on every pass.
+            let following = characters.indices.contains(offset + 1)
+                ? characters[offset + 1]
+                : nil
+            if following != opportunity {
+                display.append(opportunity)
+            }
+        }
+        return display
+    }
+}
