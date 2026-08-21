@@ -292,7 +292,12 @@ struct AssistedExportView: View {
             HStack(spacing: 12) {
                 destinationMark(destination)
                     .accessibilityHidden(true)
-                statusLine(destination)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(destination.displayName)
+                        .snapListTypography(.rowTitle)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    statusLine(destination)
+                }
                 Spacer(minLength: 0)
                 Image(systemName: domain.isWorkspaceOpen(destination) ? "chevron.up" : "chevron.down")
                     .font(.system(size: 12, weight: .semibold))
@@ -313,12 +318,16 @@ struct AssistedExportView: View {
         .accessibilityIdentifier("assisted-export.row.\(destination.rawValue)")
     }
 
-    /// The destination's own mark, in place of a generic glyph and a plain
-    /// text name. Facebook Marketplace has no wordmark of its own that also
-    /// carries Facebook's identity, so its mark is a composite lockup of the
-    /// Facebook icon asset and the Marketplace wordmark asset, both sized to
-    /// this row's 20pt convention; Mercari and Depop render their own single
-    /// wordmark asset at that same height. See `docs/demo-asset-provenance.md`.
+    /// The destination's own mark, in place of a generic glyph. It sits beside
+    /// `destination.displayName` rather than instead of it (#977): the mark
+    /// alone carried no text at any Dynamic Type size and never grew with
+    /// accessibility text, so a low-vision seller or anyone unfamiliar with a
+    /// brand's mark had nothing to read. Facebook Marketplace has no wordmark
+    /// of its own that also carries Facebook's identity, so its mark is a
+    /// composite lockup of the Facebook icon asset and the Marketplace
+    /// wordmark asset, both sized to this row's 20pt convention; Mercari and
+    /// Depop render their own single wordmark asset at that same height. See
+    /// `docs/demo-asset-provenance.md`.
     @ViewBuilder
     private func destinationMark(_ destination: AssistedExportDestination) -> some View {
         switch destination {
