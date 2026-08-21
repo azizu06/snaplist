@@ -3472,6 +3472,32 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
+    /// #978: the pinned footer used to sit beside the scroll view as a
+    /// `VStack` sibling, whose shrunk scroll frame cut the first
+    /// `WHAT PRO DOES` row mid-sentence behind the price block once scrolled
+    /// into view. The footer now floats over a full-height scroll view via
+    /// `safeAreaInset`, the same primitive `floatingDock(...)` uses, so
+    /// scrolling the row into view clears the footer instead of rendering
+    /// behind it — matching how `testFloatingDockDoesNotCoverTheLastRow...`
+    /// proves the Settings/Trophy Wall dock clearance.
+    func testProGateOfferFirstBenefitRowClearsThePriceBlockOnceScrolledIntoView() {
+        let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
+
+        let row = app.descendants(matching: .any)["pro-gate.allowance-row"]
+        let price = app.staticTexts["$9.99 per month"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(price.waitForExistence(timeout: 3))
+
+        for _ in 0..<12 {
+            guard row.frame.maxY > price.frame.minY else { break }
+            app.swipeUp()
+        }
+
+        let receipt = "row=\(row.frame), price=\(price.frame)"
+        addScreenshot(named: "PROGATE-BENEFIT-ROW-CLEARANCE-402x874.png")
+        XCTAssertLessThanOrEqual(row.frame.maxY, price.frame.minY, receipt)
+    }
+
     func testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
 
