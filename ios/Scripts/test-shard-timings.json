@@ -30,6 +30,7 @@
     "SnapListUITests/AssistedExportUITests/testListingReviewOpensThePreparedAssistedExportScreen": 27.29,
     "SnapListUITests/AssistedExportUITests/testPreparedHandedOffAndSharedStatesUseOnlyHonestWording": 13.55,
     "SnapListUITests/AssistedExportUITests/testRepeatedSaveTapsWritePhotosAndReceiptOnce": 13.177,
+    "SnapListUITests/AssistedExportUITests/testUntouchedDestinationRowGrowsWithDynamicType": 14.358,
     "SnapListUITests/EbayPublishUITests/testAccountClaimCancelPreservesTheExactSavedListingWithoutClaiming": 45.996,
     "SnapListUITests/EbayPublishUITests/testAccountClaimSuccessFailureAndRetryStayDeterministicAndAccessible": 31.546,
     "SnapListUITests/EbayPublishUITests/testAfterDisconnectingFromSettingsTheSellerCanReconnectWithoutOpeningAnItem": 9.995,

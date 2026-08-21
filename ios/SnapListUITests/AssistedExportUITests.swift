@@ -262,6 +262,46 @@ final class AssistedExportUITests: XCTestCase {
         }
     }
 
+    /// #977: an untouched destination row rendered only its brand mark, which
+    /// is a fixed-size image and never grows with Dynamic Type — the row
+    /// carried no text at any size. `destinationRow` now pairs the mark with
+    /// `destination.displayName` at the `.rowTitle` token, so a row that has
+    /// nothing else to say still has a real, scaling text identity. Depop is
+    /// untouched in the `prepared` fixture (no receipt), so its row's only
+    /// content is the mark plus that name — the exact case the issue named.
+    func testUntouchedDestinationRowGrowsWithDynamicType() {
+        let mediumApp = XCUIApplication()
+        mediumApp.launchArguments = [
+            "--assisted-export-fixture=prepared",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--dynamic-type=medium",
+        ]
+        mediumApp.launchAfterRetiringPriorInstance()
+        let mediumRow = mediumApp.buttons["assisted-export.row.depop"]
+        XCTAssertTrue(mediumRow.waitForExistence(timeout: 10))
+        let mediumHeight = mediumRow.frame.height
+
+        let a11yApp = XCUIApplication()
+        a11yApp.launchArguments = [
+            "--assisted-export-fixture=prepared",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--dynamic-type=accessibility5",
+        ]
+        a11yApp.launchAfterRetiringPriorInstance()
+        let a11yRow = a11yApp.buttons["assisted-export.row.depop"]
+        XCTAssertTrue(a11yRow.waitForExistence(timeout: 10))
+
+        XCTAssertGreaterThan(
+            a11yRow.frame.height,
+            mediumHeight,
+            "An untouched row's only content used to be a fixed-size mark, so "
+                + "the row never grew with Dynamic Type. It must grow now that "
+                + "the row carries the destination's own scaling text name."
+        )
+    }
+
     func testListingReviewOpensThePreparedAssistedExportScreen() {
         let app = XCUIApplication()
         app.launchArguments = [
