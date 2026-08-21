@@ -540,6 +540,31 @@ enum OnboardingCopy {
     ]
 }
 
+/// Loads a library picker's selection into the ordered photo bytes onboarding stages.
+///
+/// The loop lives here rather than inside `OnboardingFlowView` because the picker's own
+/// `maxSelectionCount` is only the first of the limits a selection passes through (#945):
+/// a picker that admits five selections still loses the fifth if the loading loop
+/// truncates behind it. Extracting the loop is what lets a test drive the real path —
+/// selection through loading through `didStageLibraryPhotos` through the store — instead
+/// of asserting the store's own guard, which stays green while the flow above it drops a
+/// photo. Generic over the item so the test can exercise it without PhotosUI.
+enum OnboardingLibraryStaging {
+    static func loadPhotos<Item>(
+        from items: [Item],
+        limit: Int = CapturePhotoLimits.maxPhotoCount,
+        loadData: (Item) async -> Data?
+    ) async -> [Data] {
+        var photos: [Data] = []
+        for item in items.prefix(limit) {
+            if let data = await loadData(item) {
+                photos.append(data)
+            }
+        }
+        return photos
+    }
+}
+
 @MainActor
 @Observable
 final class OnboardingFlowModel {

@@ -7,6 +7,15 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The one-to-five photo contract shared by every capture entry point — the main
+/// camera/library flow and guest onboarding's separate staging store alike. A second
+/// independently hardcoded maximum is how #945 shipped: onboarding's library picker and
+/// its `FileSystemStagedLibraryPhotoStore` each carried their own stale `4` after the
+/// product moved to five photos while this flow's limit already read `5`.
+enum CapturePhotoLimits {
+    static let maxPhotoCount = 5
+}
+
 /// Bounds one captured photo to bytes the upload can actually carry.
 ///
 /// `POST /v1/items/runs` is a Route Handler behind a platform body limit of
@@ -47,15 +56,6 @@ import UniformTypeIdentifiers
 /// step the ladder gives up resolution before it gives up quality: JPEG artifacts
 /// on a brand tag or serial number cost more identification accuracy than fewer
 /// pixels of the same subject do.
-/// The one-to-five photo contract shared by every capture entry point — the main
-/// camera/library flow and guest onboarding's separate staging store alike. A second
-/// independently hardcoded maximum is how #945 shipped: onboarding's library picker and
-/// its `FileSystemStagedLibraryPhotoStore` each carried their own stale `4` after the
-/// product moved to five photos while this flow's limit already read `5`.
-enum CapturePhotoLimits {
-    static let maxPhotoCount = 5
-}
-
 enum CapturePhotoBudget {
     static let maximumPhotoBytes = 640 * 1024
     static let maximumRequestBodyBytes = 4_500_000

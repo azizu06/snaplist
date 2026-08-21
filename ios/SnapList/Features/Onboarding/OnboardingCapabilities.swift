@@ -288,7 +288,7 @@ final class InMemoryStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
 
     @discardableResult
     func replace(with photos: [Data]) throws -> Int {
-        self.photos = Array(photos.prefix(4))
+        self.photos = Array(photos.prefix(CapturePhotoLimits.maxPhotoCount))
         cleanupNeededReceipt = nil
         return self.photos.count
     }
