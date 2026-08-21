@@ -1787,7 +1787,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(snapshot.recoveryHours, 24)
     }
 
-    func testFileSystemStagingIsRecoverableProtectedAndCappedAtFourPhotos() throws {
+    func testFileSystemStagingIsRecoverableProtectedAndCappedAtFivePhotos() throws {
         let fileManager = FileManager.default
         let parent = fileManager.temporaryDirectory.appendingPathComponent(
             "snaplist-onboarding-photo-store-\(UUID().uuidString)",
@@ -1801,8 +1801,14 @@ final class OnboardingFlowTests: XCTestCase {
         )
         let photos = (0..<5).map { Data([UInt8($0)]) }
 
-        XCTAssertEqual(try store.replace(with: photos), 4)
-        XCTAssertEqual(try store.load(), Array(photos.prefix(4)))
+        XCTAssertEqual(try store.replace(with: photos), 5)
+        XCTAssertEqual(try store.load(), photos)
+
+        // Even if the picker's own maxSelectionCount were bypassed, the store itself
+        // still caps persistence at 5 rather than trusting the caller's input size.
+        let sixPhotos = (0..<6).map { Data([UInt8($0)]) }
+        XCTAssertEqual(try store.replace(with: sixPhotos), 5)
+        XCTAssertEqual(try store.load(), Array(sixPhotos.prefix(5)))
 
         XCTAssertEqual(FileSystemStagedLibraryPhotoStore.fileProtection, .complete)
         XCTAssertTrue(

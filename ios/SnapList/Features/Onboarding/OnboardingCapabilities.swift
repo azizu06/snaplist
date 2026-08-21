@@ -106,7 +106,7 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
     @discardableResult
     func replace(with photos: [Data]) throws -> Int {
         removePendingDirectories()
-        let photos = Array(photos.prefix(4))
+        let photos = Array(photos.prefix(CapturePhotoLimits.maxPhotoCount))
         guard !photos.isEmpty else {
             clear()
             return 0
@@ -166,7 +166,7 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
         )
         .filter { $0.pathExtension == "photo" }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        .prefix(4)
+        .prefix(CapturePhotoLimits.maxPhotoCount)
         .map { try Data(contentsOf: $0) }
     }
 

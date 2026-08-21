@@ -45,7 +45,7 @@ struct OnboardingFlowView: View {
         .photosPicker(
             isPresented: $isPhotoPickerPresented,
             selection: $libraryItems,
-            maxSelectionCount: 4,
+            maxSelectionCount: CapturePhotoLimits.maxPhotoCount,
             matching: .images
         )
         .onChange(of: libraryItems) { _, items in

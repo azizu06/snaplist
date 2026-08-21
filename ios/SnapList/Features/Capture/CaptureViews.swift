@@ -139,7 +139,7 @@ struct ScanCameraView: View {
         return ScanLibraryPicker(
             style: labelStyle,
             selection: $libraryItems,
-            maxSelectionCount: max(1, 5 - flow.stagedPhotos.count),
+            maxSelectionCount: max(1, CapturePhotoLimits.maxPhotoCount - flow.stagedPhotos.count),
             isEnabled: isLibraryEnabled
         )
         .accessibilitySortPriority(60)
