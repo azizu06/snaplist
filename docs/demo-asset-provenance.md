@@ -75,18 +75,21 @@ format conversion and resizing.
 
 | Local asset | Destination row | Source | License / rationale |
 | --- | --- | --- | --- |
-| `Assets.xcassets/MarketplaceMarkFacebook.imageset/facebook-marketplace.png` | Facebook Marketplace | [2023 Facebook icon.svg](https://commons.wikimedia.org/wiki/File:2023_Facebook_icon.svg), Wikimedia Commons | Commons-listed public domain (simple logo, below the threshold of originality); Facebook is a trademark of Meta Platforms, Inc. Facebook Marketplace has no standalone app icon of its own — Marketplace is a tab inside the Facebook app — so the Facebook mark is what a seller actually recognizes for this destination. |
+| `Assets.xcassets/MarketplaceMarkFacebook.imageset/facebook-marketplace.png` | Facebook Marketplace | [marketplace-facebook](https://worldvectorlogo.com/logo/marketplace-facebook), WorldVectorLogo — same vendored file already used for the storefront glyph at `public/marketplaces/facebook-marketplace.svg`, re-cropped to its "MarketPlace" wordmark text path instead of the storefront icon path | WorldVectorLogo-hosted vector mark, used here under nominative fair use (identifies the destination only); Facebook and Facebook Marketplace are trademarks of Meta Platforms, Inc. This crop was chosen over the storefront-icon crop so the mark visibly reads "Marketplace" rather than plain Facebook, since Marketplace is a tab inside the Facebook app rather than its own icon. |
 | `Assets.xcassets/MarketplaceMarkMercari.imageset/mercari.png` | Mercari | [Mercari logo 2018.svg](https://commons.wikimedia.org/wiki/File:Mercari_logo_2018.svg), Wikimedia Commons | Commons-listed public domain (simple wordmark); Mercari is a trademark of Mercari, Inc. |
 | `Assets.xcassets/MarketplaceMarkDepop.imageset/depop.png` | Depop | [Depop logo.svg](https://commons.wikimedia.org/wiki/File:Depop_logo.svg), Wikimedia Commons | Commons-listed public domain (simple wordmark); Depop is a trademark of Depop Ltd. |
 
 Local transform: downloaded as SVG, rasterized with `rsvg-convert` at the
-source viewBox's aspect ratio (240×240 for the Facebook mark, 800×175 for the
+source viewBox's aspect ratio (800×120 for the Facebook wordmark, 800×175 for the
 Mercari wordmark, 800×206 for the Depop wordmark), and stored as a single
 `universal` 1x PNG in the asset catalog, matching the single-scale convention
 used by this catalog's other mark image sets (e.g. `MarketplaceMarkDepop.imageset`).
-No color, geometry, or wordmark text was altered. This sentence named
-`FirstValueJacket.imageset` until #887 deleted it; the marks are the remaining
-single-scale sets, and the onboarding photographs below ship real 1x, 2x, and 3x.
+No color or wordmark text was altered; the Facebook mark's viewBox was narrowed
+to the "MarketPlace" text path already present in the vendored file (the same
+file's storefront-icon path is unchanged and still backs the marketing site's
+crop). This sentence named `FirstValueJacket.imageset` until #887 deleted it;
+the marks are the remaining single-scale sets, and the onboarding photographs
+below ship real 1x, 2x, and 3x.
 
 ## Native onboarding item set
 

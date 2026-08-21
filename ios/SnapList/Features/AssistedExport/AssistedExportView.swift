@@ -313,12 +313,9 @@ struct AssistedExportView: View {
         .accessibilityIdentifier("assisted-export.row.\(destination.rawValue)")
     }
 
-    /// The destination's own mark, in place of a generic glyph and a plain
-    /// text name. Facebook Marketplace has no icon of its own — Marketplace
-    /// is a tab inside the Facebook app — so its mark is a square badge in
-    /// Facebook's own icon; Mercari and Depop are recognized by their own
-    /// wordmarks, so those render at their natural aspect ratio instead of
-    /// being forced into a square. See `docs/demo-asset-provenance.md`.
+    /// The destination's own wordmark, in place of a generic glyph and a
+    /// plain text name. All three destinations render at their natural
+    /// wordmark aspect ratio. See `docs/demo-asset-provenance.md`.
     @ViewBuilder
     private func destinationMark(_ destination: AssistedExportDestination) -> some View {
         switch destination {
@@ -326,7 +323,7 @@ struct AssistedExportView: View {
             Image("MarketplaceMarkFacebook")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 34, height: 34)
+                .frame(height: 20)
         case .mercari:
             Image("MarketplaceMarkMercari")
                 .resizable()
