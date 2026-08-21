@@ -85,9 +85,15 @@ enum ListingReviewStoreFactory {
                 try? FileManager.default.removeItem(at: root)
             }
             let fixture = configuration.listingReviewFixture ?? .loaded
-            let review = configuration.fixture == .trophyProcessing
-                ? ListingReviewLaunchFixture.processingReview()
-                : fixture.review
+            let review: ListingReviewResult
+            if configuration.fixture == .trophyProcessing {
+                review = ListingReviewLaunchFixture.processingReview()
+            } else if configuration.fixture == .trophyWall
+                || configuration.visualState == .trophyWallSettled {
+                review = ListingReviewLaunchFixture.trophyWallReview(variant: fixture)
+            } else {
+                review = fixture.review
+            }
             return ListingReviewStore(
                 service: ListingReviewFixtureService(
                     fixture: fixture,
@@ -382,6 +388,39 @@ enum ListingReviewLaunchFixture {
             )!,
             listingID: UUID(
                 uuidString: "37500000-0000-4000-8000-000000000008"
+            )!
+        )
+    }
+
+    /// #963: the first HOME-01 settled Trophy Wall tile's listing, so a tap on
+    /// that tile can open the same listing surface a Processing review action
+    /// reaches, with matching binding identifiers across both fixture stores.
+    /// `variant` carries the same evidence-count/long-text axis the deep-link
+    /// route used to exercise, so tests that need a specific review shape can
+    /// still ask for one while entering through the tile a seller actually taps.
+    static func trophyWallReview(
+        variant: ListingReviewFixture = .loaded
+    ) -> ListingReviewResult {
+        let matchCount: Int
+        switch variant {
+        case .zeroEvidence:
+            matchCount = 0
+        case .fiveEvidence:
+            matchCount = 5
+        default:
+            matchCount = 3
+        }
+        return review(
+            matchCount: matchCount,
+            usesLongText: variant == .longText,
+            runID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000021"
+            )!,
+            itemID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000029"
+            )!,
+            listingID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000030"
             )!
         )
     }

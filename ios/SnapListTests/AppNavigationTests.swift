@@ -155,12 +155,11 @@ final class AppNavigationTests: XCTestCase {
         let routes: [HomeRoute] = [
             .processing,
             .localRecovery(Self.logicalIdentity(1)),
-            .run(UUID())
         ]
 
         for route in routes {
             switch route {
-            case .processing, .localRecovery, .run:
+            case .processing, .localRecovery:
                 continue
             }
         }
@@ -609,14 +608,14 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertFalse(capture.usesOnboarding)
     }
 
-    func testRunDetailVisualStateLaunchesItsCanonicalRouteInTheTrophyWallStack() {
+    /// #963 removed the run-status screen, so the RUN-02 visual state now
+    /// opens Processing directly rather than naming a run detail destination
+    /// that no longer exists.
+    func testRunDetailVisualStateLaunchesTheTrophyWallProcessingStack() {
         let configuration = LaunchConfiguration.parse(arguments: ["--visual-state=RUN-02"])
 
         XCTAssertEqual(configuration.initialTab, .trophyWall)
-        XCTAssertEqual(
-            configuration.initialRoute,
-            .home(.run(LaunchConfiguration.runDetailFixtureID))
-        )
+        XCTAssertEqual(configuration.initialRoute, .home(.processing))
     }
 
     @MainActor
@@ -654,7 +653,7 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertFalse(router.presentedAccountEntry)
         XCTAssertEqual(
             router.pathBinding(for: .trophyWall).wrappedValue,
-            [.home(.run(runID))]
+            [.home(.processing)]
         )
     }
 

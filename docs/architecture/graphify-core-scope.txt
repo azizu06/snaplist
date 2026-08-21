@@ -114,7 +114,6 @@ ios/SnapList/Features/PushRegistration/PushForegroundNotification.swift
 ios/SnapList/Features/PushRegistration/PushRegistrationComposition.swift
 ios/SnapList/Features/PushRegistration/PushRegistrationDomain.swift
 ios/SnapList/Features/Runs/RunAPIClient.swift
-ios/SnapList/Features/Runs/RunDetailView.swift
 ios/SnapList/Features/Runs/RunModels.swift
 ios/SnapList/Features/Runs/RunStore.swift
 ios/SnapList/Features/Settings/AccountDeletion.swift

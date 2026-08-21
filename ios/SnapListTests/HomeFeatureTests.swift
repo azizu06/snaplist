@@ -194,7 +194,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: exactCards,
-                expectedDestinations: [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
+                expectedDestinations: [.localRecovery(fixture.unrelatedLogicalID), nil]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong principal",
@@ -289,7 +289,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), nil]
         )
     }
 
@@ -346,7 +346,7 @@ final class TrophyWallDomainTests: XCTestCase {
             )
             XCTAssertEqual(
                 store.processingRows.map(\.destination),
-                [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)],
+                [.localRecovery(fixture.unrelatedLogicalID), nil],
                 testCase.name
             )
         }
@@ -393,7 +393,12 @@ final class TrophyWallDomainTests: XCTestCase {
             XCTAssertEqual(canonicalRow?.accessibilityLabel,
                            "\(fixture.matchedItemName), working, \(testCase.accessibilityFact).",
                            testCase.name)
-            XCTAssertEqual(canonicalRow?.destination, .run(fixture.runID), testCase.name)
+            XCTAssertEqual(
+                canonicalRow?.activation,
+                TrophyWallProcessingRowActivation.none,
+                testCase.name
+            )
+            XCTAssertNil(canonicalRow?.destination, testCase.name)
         }
     }
 
@@ -429,10 +434,10 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(row?.action, .review(runID: fixture.runID))
     }
 
-    /// The states that are not ready keep reaching Run Detail from the row
-    /// body, because that is the screen that explains a failure and offers the
-    /// recovery. Only the ready row changed.
-    func testUnreadyProcessingRowsKeepActivatingTheirExactRunDestination() throws {
+    /// #963 removed the run-status intermediate card, so a retryable failure
+    /// row now acts inline: the row body retries the run directly rather than
+    /// pushing anywhere.
+    func testRetryableFailureProcessingRowActivatesRetryWithoutPushingRunDetail() throws {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore()
 
@@ -447,31 +452,13 @@ final class TrophyWallDomainTests: XCTestCase {
         )
 
         let row = store.processingRows.last
-        XCTAssertEqual(row?.activation, .route(.run(fixture.runID)))
-        XCTAssertEqual(row?.destination, .run(fixture.runID))
+        XCTAssertEqual(row?.activation, .action(.retry(runID: fixture.runID)))
+        XCTAssertNil(row?.destination)
+        XCTAssertEqual(row?.action, .retry(runID: fixture.runID))
     }
 
     func testStoreProjectsFailedRunWithoutRetryClientAsLockedNeedsRetryCard() throws {
         try assertLockedCanonicalProjection(.needsRetry)
-    }
-
-    func testRetryableFailureProcessingRowOffersRetryWithoutChangingExactRunDestination() throws {
-        let fixture = TrophyWallTestFixture()
-        let store = fixture.makeStore()
-
-        store.ingest(
-            historyPage: try fixture.historyPage(
-                status: .failed,
-                stage: .pricing,
-                terminalOutcome: .failed,
-                retryTruth: (canRetry: true, workPreserved: true)
-            ),
-            principalScope: fixture.principal
-        )
-
-        let row = store.processingRows.last
-        XCTAssertEqual(row?.destination, .run(fixture.runID))
-        XCTAssertEqual(row?.action, .retry(runID: fixture.runID))
     }
 
     func testRetryingQueuedRunRemainsVisibleWithoutAnotherAction() throws {
@@ -490,7 +477,8 @@ final class TrophyWallDomainTests: XCTestCase {
         let row = store.processingRows.last
         XCTAssertEqual(row?.stateLabel, "Retrying")
         XCTAssertEqual(row?.accessibilityLabel, "\(fixture.matchedItemName), retrying.")
-        XCTAssertEqual(row?.destination, .run(fixture.runID))
+        XCTAssertEqual(row?.activation, TrophyWallProcessingRowActivation.none)
+        XCTAssertNil(row?.destination)
         XCTAssertNil(row?.action)
     }
 
@@ -509,7 +497,8 @@ final class TrophyWallDomainTests: XCTestCase {
         )
 
         let scanRow = scanStore.processingRows.last
-        XCTAssertEqual(scanRow?.destination, .run(fixture.runID))
+        XCTAssertEqual(scanRow?.activation, .action(.scan(runID: fixture.runID)))
+        XCTAssertNil(scanRow?.destination)
         XCTAssertEqual(scanRow?.action, .scan(runID: fixture.runID))
         XCTAssertEqual(
             scanRow?.accessibilityLabel,
@@ -528,7 +517,11 @@ final class TrophyWallDomainTests: XCTestCase {
         )
 
         let staticRow = staticStore.processingRows.last
-        XCTAssertEqual(staticRow?.destination, .run(fixture.runID))
+        XCTAssertEqual(
+            staticRow?.activation,
+            TrophyWallProcessingRowActivation.none
+        )
+        XCTAssertNil(staticRow?.destination)
         XCTAssertNil(staticRow?.action)
         XCTAssertEqual(staticRow?.stateLabel, "Upload didn't finish.")
         XCTAssertEqual(
@@ -690,7 +683,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), nil]
         )
         XCTAssertEqual(
             page.entries.first?.run.lastMeaningfulUpdateAt,
@@ -698,7 +691,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
-    func testProcessingProjectionPreservesExactMergeTruthAndRunDestination() {
+    func testProcessingProjectionPreservesExactMergeTruth() {
         let fixture = TrophyWallTestFixture()
         let acceptedRun = TrophyWallCanonicalAcceptedRun(
             principalScope: fixture.principal,
@@ -724,7 +717,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID)]
+            [nil, .localRecovery(fixture.unrelatedLogicalID)]
         )
         XCTAssertEqual(
             store.processingRows.map(\.accessibilityLabel),
@@ -891,7 +884,7 @@ final class TrophyWallDomainTests: XCTestCase {
             historyOrderAt: Date(timeIntervalSince1970: 1_753_015_200)
         )
 
-        XCTAssertEqual(tile.destination, .run(runID))
+        XCTAssertEqual(tile.runID, runID)
         XCTAssertEqual(
             tile.accessibilityIdentifier,
             "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
@@ -915,7 +908,7 @@ final class TrophyWallDomainTests: XCTestCase {
             historyOrderAt: Date(timeIntervalSince1970: 1_753_015_200)
         )
 
-        XCTAssertNil(tile.destination)
+        XCTAssertNil(tile.runID)
         XCTAssertNil(tile.accessibilityIdentifier)
     }
 
@@ -1585,7 +1578,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             standardRows.map(\.destination),
-            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID), .run(fixture.thirdRunID)]
+            [nil, .localRecovery(fixture.unrelatedLogicalID), nil]
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.id),
@@ -1596,7 +1589,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.destination),
-            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID)]
+            [nil, .localRecovery(fixture.unrelatedLogicalID)]
         )
         let standardImage = await captureHostedTrophyWallProcessingView(
             rows: store.processingRows,
@@ -2276,6 +2269,23 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(result, .stalePrincipal)
     }
 
+    /// #963 chained three more modifiers onto `TrophyWallFeatureView.body`
+    /// (the two presentation-host `.navigationDestination`s and an
+    /// `.onChange`) so settled tiles can open their own listing surface.
+    /// The `content` label only reaches the modifier directly beneath the
+    /// outermost one, so this walks every nesting level until it finds the
+    /// unmodified view.
+    private func findModifiedContent<T>(_ value: Any, as type: T.Type) -> T? {
+        if let match = value as? T {
+            return match
+        }
+        guard let contentChild = Mirror(reflecting: value).children
+            .first(where: { $0.label == "content" }) else {
+            return nil
+        }
+        return findModifiedContent(contentChild.value, as: type)
+    }
+
     func testCollectionRefreshTaskRerunsForPrincipalTransitionAndWallTryAgain()
         async throws {
         let fixture = TrophyWallTestFixture()
@@ -2324,9 +2334,7 @@ final class TrophyWallDomainTests: XCTestCase {
         }
 
         let renderedWall = try XCTUnwrap(
-            Mirror(reflecting: root.feature.body).children
-                .first(where: { $0.label == "content" })?.value
-                as? TrophyWallView
+            findModifiedContent(root.feature.body, as: TrophyWallView.self)
         )
         renderedWall.onTryAgain()
         let retryTaskID = driver.refreshState.taskID(tab: .trophyWall)
@@ -2505,7 +2513,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     store: store,
                     openProcessing: {},
                     openAccount: {},
-                    openRun: { _ in },
+                    openListing: { _ in .presentedReview },
                     onScan: {},
                     onTryAgain: {}
                 ),
@@ -2550,7 +2558,7 @@ final class TrophyWallDomainTests: XCTestCase {
             store: settledStore,
             openProcessing: {},
             openAccount: {},
-            openRun: { _ in },
+            openListing: { _ in .presentedReview },
             onScan: {},
             onTryAgain: {}
         )
@@ -2775,7 +2783,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), nil]
         )
         XCTAssertEqual(store.cards, firstCards)
         XCTAssertEqual(store.processingRows, firstRows)
@@ -2809,19 +2817,89 @@ private final class TrophyWallRefreshTestDriver {
     var refreshState = TrophyWallCollectionRefreshState()
 }
 
+/// This test root never opens a listing, so both services only need to
+/// exist, not to answer with anything real.
+private struct NoOpTrophyWallListingReviewService: ListingReviewServing {
+    func save(
+        runID: UUID,
+        draft: ListingReviewDraft,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewSaveReceipt {
+        throw ListingReviewClientError.unavailable
+    }
+
+    func fetchReview(
+        runID: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewResult {
+        throw ListingReviewClientError.unavailable
+    }
+}
+
+private struct NoOpTrophyWallListingReviewDraftPersistence:
+    ListingReviewDraftPersisting {
+    func activate(
+        _ token: ListingReviewDraftPersistenceToken,
+        runID: UUID
+    ) async -> Bool {
+        true
+    }
+
+    func load(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> PersistedListingReviewDraft? {
+        nil
+    }
+
+    func save(
+        _ record: PersistedListingReviewDraft,
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool {
+        true
+    }
+
+    func remove(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool {
+        true
+    }
+}
+
 @MainActor
 private struct TrophyWallFeatureTestRoot: View {
     @Bindable var driver: TrophyWallRefreshTestDriver
     @Bindable var router: AppRouter
     @Bindable var store: TrophyWallStore
     let repository: any TrophyWallRunHistoryRepository
+    let runStore = RunDetailStore(
+        service: UnavailableRunService(),
+        tokenProvider: UnavailableBearerTokenProvider()
+    )
+    let listingReviewStore = ListingReviewStore(
+        service: NoOpTrophyWallListingReviewService(),
+        persistence: NoOpTrophyWallListingReviewDraftPersistence(),
+        tokenProvider: UnavailableBearerTokenProvider()
+    )
 
     var feature: TrophyWallFeatureView {
         TrophyWallFeatureView(
             router: router,
             store: store,
             repository: repository,
-            refreshState: $driver.refreshState
+            refreshState: $driver.refreshState,
+            runStore: runStore,
+            listingReviewStore: listingReviewStore,
+            correctionAvailable: false,
+            forceReducedMotion: false,
+            activationListingReviewOpened: {},
+            activationListingReviewDismissed: {},
+            activationGuestClaimPresentationChanged: { _ in },
+            activationListingReviewInteraction: {}
         )
     }
 
@@ -2916,7 +2994,7 @@ private final class TrophyWallProcessingTestHost {
                     collectionOutcome: collectionOutcome,
                     onBack: {},
                     openRoute: openRoute,
-                    onAction: { _ in },
+                    onAction: { _ in .rejected },
                     onScan: {},
                     onTryAgain: {}
                 )

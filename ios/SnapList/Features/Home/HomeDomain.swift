@@ -268,15 +268,21 @@ final class TrophyWallProcessingRefreshHost {
 enum TrophyWallProcessingRowActivation: Hashable {
     case route(HomeRoute)
     case action(TrophyWallProcessingAction)
+    /// #963: an intermediate run-status card is gone, and several states
+    /// (accepted, working, retrying, not-listed) have nowhere direct to send
+    /// the seller. The row still shows its plain-language state; the body
+    /// simply is not a control.
+    case none
 }
 
 struct TrophyWallProcessingRow: Identifiable, Hashable {
     let id: TrophyWallCardIdentity
     let itemName: String
     let stateLabel: String
-    /// Not optional. Every state this initializer accepts has somewhere for the
-    /// row body to go, and a state that does not fails the initializer outright
-    /// rather than producing a row that answers nothing.
+    /// Not optional. Every state this initializer accepts resolves the row
+    /// body to exactly one activation, including `.none` for a state with
+    /// nowhere direct to go — a state that fits none of these fails the
+    /// initializer outright rather than producing a row that answers wrong.
     let activation: TrophyWallProcessingRowActivation
     let action: TrophyWallProcessingAction?
     let localCoverPhotoData: Data?
@@ -333,64 +339,73 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             guard case .run(let runID) = card.identity else {
                 return nil
             }
-            // Run Detail is the default body destination because it is the
-            // screen that explains a run the seller cannot finish yet. A state
-            // that has somewhere better to go replaces this below.
-            var runActivation = TrophyWallProcessingRowActivation.route(
-                .run(runID)
-            )
             accessibilityIdentifier =
                 "trophy.processing.row.run.\(runID.uuidString.lowercased())"
+
+            let runActivation: TrophyWallProcessingRowActivation
 
             switch card.state {
             case .accepted:
                 stateLabel = "Accepted"
                 action = nil
+                runActivation = .none
                 accessibilityLabel = "\(itemName), accepted."
             case .workingIdentifying:
                 stateLabel = "Identifying"
                 action = nil
+                runActivation = .none
                 accessibilityLabel = "\(itemName), working, identifying."
             case .workingGenerating:
                 stateLabel = "Writing listing"
                 action = nil
+                runActivation = .none
                 accessibilityLabel = "\(itemName), working, writing listing."
             case .workingPricing:
                 stateLabel = "Pricing"
                 action = nil
+                runActivation = .none
                 accessibilityLabel = "\(itemName), working, pricing."
             case .workingPersisting:
                 stateLabel = "Saving"
                 action = nil
+                runActivation = .none
                 accessibilityLabel = "\(itemName), working, saving."
             case .retrying:
                 stateLabel = "Retrying"
                 action = nil
+                runActivation = .none
                 accessibilityLabel = "\(itemName), retrying."
             case .readyToReview:
                 stateLabel = "Ready to review"
                 action = .review(runID: runID)
-                // The whole row reaches Listing Review, not just the pill. Run
-                // Detail would only repeat the state the seller has read and
-                // offer the same Review button again (#897).
+                // The whole row reaches Listing Review, not just the pill
+                // (#897).
                 runActivation = .action(.review(runID: runID))
                 accessibilityLabel = "\(itemName), ready to review."
             case .readyToReviewLocked:
                 stateLabel = "Ready to review"
-                action = nil
+                // #963: the seller's own tap re-attempts the same
+                // server-authorized open rather than landing on a dead-end
+                // status screen. The row surfaces "unavailable" inline if the
+                // server still refuses.
+                action = .review(runID: runID)
+                runActivation = .action(.review(runID: runID))
                 accessibilityLabel =
                     "\(itemName), ready to review. Review is not available yet."
             case .needsRetryLocked(let detail):
                 stateLabel = "Needs retry · \(detail)"
                 action = .retry(runID: runID)
+                runActivation = .action(.retry(runID: runID))
                 accessibilityLabel = "\(itemName), needs retry. \(detail)"
             case .needsNewCapture(let detail):
                 stateLabel = "Needs retry · \(detail)"
                 action = .scan(runID: runID)
+                runActivation = .action(.scan(runID: runID))
                 accessibilityLabel = "\(itemName), needs retry. \(detail)"
             case .notListed(let detail):
                 stateLabel = detail
                 action = nil
+                runActivation = .none
                 accessibilityLabel = "\(itemName), not listed. \(detail)"
             case .pendingUpload, .publishedToEbay, .exportPrepared:
                 return nil
@@ -428,15 +443,15 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
         self.historyOrderAt = historyOrderAt
     }
 
-    /// Where this tile opens. Trophy Wall is the seller's one return
-    /// destination, so the tile is how they reach the listing their photos
-    /// produced. A tile the client cannot resolve to a run opens nothing rather
-    /// than guessing at one.
-    var destination: HomeRoute? {
+    /// The run this tile opens directly, as the seller's listing surface.
+    /// Trophy Wall is the seller's one return destination, so the tile is how
+    /// they reach the listing their photos produced. A tile the client cannot
+    /// resolve to a run opens nothing rather than guessing at one.
+    var runID: UUID? {
         guard case .run(let runID) = id else {
             return nil
         }
-        return .run(runID)
+        return runID
     }
 
     /// Present only for a tile that actually opens something, so a tile with no

@@ -317,12 +317,13 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(
             app.otherElements["trophy.wall"].waitForExistence(timeout: 10)
         )
-        // The seller-Home run row that used to open this screen was retired with
-        // the rest of that surface, so Run Detail is entered through its route.
-        app.open(URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!)
-        let review = app.buttons["run.review.open"]
-        XCTAssertTrue(review.waitForExistence(timeout: 5))
-        review.tap()
+        // #963 removed the run-status screen this used to open through; a
+        // settled Trophy Wall tile now opens the same listing directly.
+        let tile = app.buttons[
+            "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
+        ]
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        tile.tap()
 
         let entry = app.buttons["listing-review.assisted-export"]
         let scrollView = app.scrollViews.firstMatch

@@ -16,37 +16,6 @@ private struct RunStoreBearerTokenProvider: BearerTokenProviding {
 
 @MainActor
 final class RunStoreTests: XCTestCase {
-    func testLoaderUsesFreshBearerForTheExactRun() async {
-        let run = Self.makeRun()
-        let service = RecordingRunService(results: [.success(run)])
-        let tokens = FreshTokenSource(tokens: ["fresh-token-1"])
-        let store = RunDetailStore(
-            service: service,
-            tokenProvider: RunStoreBearerTokenProvider {
-                try await tokens.next()
-            }
-        )
-
-        await store.load(runID: run.id)
-
-        XCTAssertEqual(store.state, .loaded(run))
-        let requests = await service.requests
-        XCTAssertEqual(requests, [.init(runID: run.id, bearerToken: "fresh-token-1")])
-    }
-
-    func testLoaderFailsClosedWhenTheServiceReturnsAnotherRun() async {
-        let requestedID = UUID(uuidString: "31700000-0000-4000-8000-000000000020")!
-        let service = RecordingRunService(results: [.success(Self.makeRun())])
-        let store = RunDetailStore(
-            service: service,
-            tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
-        )
-
-        await store.load(runID: requestedID)
-
-        XCTAssertEqual(store.state, .unavailable)
-    }
-
     func testProcessingReviewRequiresExactServerRunAndBinding() async throws {
         let requestedRunID = UUID(
             uuidString: "31700000-0000-4000-8000-000000000030"
@@ -193,7 +162,6 @@ final class RunStoreTests: XCTestCase {
             let review = await store.processingReview(for: requestedRunID)
 
             XCTAssertEqual(review, testCase.expected, testCase.name)
-            XCTAssertEqual(store.state, .idle, testCase.name)
             let requests = await service.requests
             XCTAssertEqual(
                 requests,
@@ -641,7 +609,6 @@ final class RunStoreTests: XCTestCase {
 
             let didProject = retried.map(wall.applyRetryResult) ?? false
             XCTAssertEqual(didProject, testCase.expectedStateLabel != nil, testCase.name)
-            XCTAssertEqual(store.state, .idle, testCase.name)
 
             let requests = await service.retryRequests
             XCTAssertEqual(requests.count, testCase.responses.count, testCase.name)
@@ -682,8 +649,8 @@ final class RunStoreTests: XCTestCase {
                 testCase.name
             )
             XCTAssertEqual(
-                wall.processingRows.first { $0.id == .run(runID) }?.destination,
-                .run(runID),
+                wall.processingRows.first { $0.id == .run(runID) }?.activation,
+                TrophyWallProcessingRowActivation.none,
                 testCase.name
             )
             XCTAssertNil(
@@ -721,165 +688,6 @@ final class RunStoreTests: XCTestCase {
         XCTAssertEqual(firstRetryResult, retrying)
     }
 
-    func testRefreshUsesAnotherFreshBearerAndReplacesOnlyServerTruth() async {
-        let initial = Self.makeRun()
-        let refreshed = Self.makeRun(
-            status: .succeeded,
-            stage: .completed,
-            canOpenReview: true
-        )
-        let service = RecordingRunService(results: [.success(initial), .success(refreshed)])
-        let tokens = FreshTokenSource(tokens: ["fresh-token-1", "fresh-token-2"])
-        let store = RunDetailStore(
-            service: service,
-            tokenProvider: RunStoreBearerTokenProvider {
-                try await tokens.next()
-            }
-        )
-
-        await store.load(runID: initial.id)
-        await store.refresh()
-
-        XCTAssertEqual(store.state, .loaded(refreshed))
-        let requests = await service.requests
-        XCTAssertEqual(
-            requests,
-            [
-                .init(runID: initial.id, bearerToken: "fresh-token-1"),
-                .init(runID: initial.id, bearerToken: "fresh-token-2")
-            ]
-        )
-    }
-
-    func testRetryReusesOneIdentityAfterFailureAndKeepsPreservedRunLoaded()
-        async throws {
-        let safeFailure = try JSONDecoder().decode(
-            RunSafeFailure.self,
-            from: JSONSerialization.data(withJSONObject: [
-                "reason": "This run couldn’t finish",
-                "detail": "Upload didn't finish.",
-                "retryable": true,
-                "workPreserved": true,
-            ])
-        )
-        let failed = Self.makeRun(
-            status: .failed,
-            stage: .completed,
-            safeFailure: safeFailure
-        )
-        let retrying = Self.makeRun(status: .retrying, stage: .queued)
-        let service = RetryRunService(
-            initial: failed,
-            retryResults: [
-                .failure(RunAPIError.unavailable),
-                .success(retrying),
-            ]
-        )
-        let tokens = FreshTokenSource(tokens: [
-            "fresh-load-token",
-            "fresh-retry-token-1",
-            "fresh-retry-token-2",
-        ])
-        let store = RunDetailStore(
-            service: service,
-            tokenProvider: RunStoreBearerTokenProvider {
-                try await tokens.next()
-            }
-        )
-
-        await store.load(runID: failed.id)
-        await store.retry()
-
-        XCTAssertEqual(store.state, .loaded(failed))
-        XCTAssertFalse(store.isRetrying)
-
-        await store.retry()
-
-        XCTAssertEqual(store.state, .loaded(retrying))
-        XCTAssertFalse(store.isRetrying)
-        let retryRequests = await service.retryRequests
-        XCTAssertEqual(retryRequests.count, 2)
-        XCTAssertEqual(
-            retryRequests.map(\.idempotencyKey),
-            [retryRequests[0].idempotencyKey, retryRequests[0].idempotencyKey]
-        )
-        XCTAssertEqual(
-            retryRequests.map(\.bearerToken),
-            ["fresh-retry-token-1", "fresh-retry-token-2"]
-        )
-    }
-
-    func testNewExactLoadCannotPublishThePreviousRun() async {
-        let first = Self.makeRun()
-        let second = Self.makeRun(
-            id: UUID(uuidString: "31700000-0000-4000-8000-000000000021")!
-        )
-        let service = OverlappingRunService(first: first, second: second)
-        let store = RunDetailStore(
-            service: service,
-            tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
-        )
-
-        let firstLoad = Task { await store.load(runID: first.id) }
-        await service.waitForFirstRequest()
-        await store.load(runID: second.id)
-        await service.resumeFirstRequest()
-        await firstLoad.value
-
-        XCTAssertEqual(store.state, .loaded(second))
-        let requests = await service.requests
-        XCTAssertEqual(requests.map(\.runID), [first.id, second.id])
-    }
-
-    func testLateSuccessfulRetryCannotOverwriteAnotherOpenedRun() async throws {
-        let state = try await stateAfterLateRetry(
-            retryResult: .success(
-                Self.makeRun(status: .retrying, stage: .queued)
-            )
-        )
-
-        XCTAssertEqual(state, .loaded(Self.makeRun(id: Self.openedRunID)))
-    }
-
-    func testLateFailedRetryCannotRepublishThePreviousRun() async throws {
-        let state = try await stateAfterLateRetry(
-            retryResult: .failure(RunAPIError.unavailable)
-        )
-
-        XCTAssertEqual(state, .loaded(Self.makeRun(id: Self.openedRunID)))
-    }
-
-    private func stateAfterLateRetry(
-        retryResult: Result<DurableRun, Error>
-    ) async throws -> RunDetailLoadState {
-        let failed = Self.makeRun(
-            status: .failed,
-            stage: .completed,
-            safeFailure: try Self.makeRetryableFailure()
-        )
-        let opened = Self.makeRun(id: Self.openedRunID)
-        let service = LateRetryRunService(
-            failed: failed,
-            opened: opened,
-            retryResult: retryResult
-        )
-        let store = RunDetailStore(
-            service: service,
-            tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
-        )
-
-        await store.load(runID: failed.id)
-        let lateRetry = Task { await store.retry() }
-        await service.waitForRetryRequest()
-        await store.load(runID: opened.id)
-        await service.resumeRetryRequest()
-        await lateRetry.value
-
-        let retryRequests = await service.retryRequests
-        XCTAssertEqual(retryRequests, [failed.id])
-        return store.state
-    }
-
     func testReadyGuestRunPersistsLocallyAssembledClaimAuthority()
         async throws {
         let review = try Self.makeReview()
@@ -895,7 +703,8 @@ final class RunStoreTests: XCTestCase {
                 uuidString: "63860000-0000-4000-8000-000000000001"
             )!,
             recoveryToken: "raw-token-only-in-keychain",
-            recoveryTokenHash: String(repeating: "a", count: 64),
+            recoveryTokenHash:
+                "0cecceae54c12297ada48aa3075cad038a48411439cadc2cc90bb82977de9d25",
             itemID: review.binding.itemID,
             runID: review.binding.runID,
             photoIdentity: GuestPhotoIdentity(
@@ -921,10 +730,9 @@ final class RunStoreTests: XCTestCase {
             funnelAnalytics: funnelAnalytics
         )
 
-        await store.load(runID: run.id)
-        await store.refresh()
+        _ = await store.processingReviewRoute(for: run.id)
+        _ = await store.processingReviewRoute(for: run.id)
 
-        XCTAssertEqual(store.state, .loaded(run))
         XCTAssertEqual(funnelAnalytics.events, [.listingReadyToReview])
         let saved = await authorities.savedAuthority(
             listingID: review.binding.listingID
@@ -951,122 +759,6 @@ final class RunStoreTests: XCTestCase {
             )!.addingTimeInterval(24 * 60 * 60)
         )
     }
-
-    func testClaimedRunLoadedWithClerkPurgesAndCannotRecreateAuthority()
-        async throws {
-        let review = try Self.makeReview()
-        let run = Self.makeRun(
-            status: .succeeded,
-            stage: .completed,
-            canOpenReview: true,
-            listingID: review.binding.listingID,
-            review: review
-        )
-        let credential = GuestRecoveryCredential(
-            recoveryID: UUID(
-                uuidString: "63860000-0000-4000-8000-000000000011"
-            )!,
-            recoveryToken: "raw-token-only-in-keychain",
-            recoveryTokenHash: String(repeating: "d", count: 64),
-            itemID: review.binding.itemID,
-            runID: review.binding.runID,
-            photoIdentity: GuestPhotoIdentity(
-                kind: "content_sha256_set_v1",
-                fingerprint: String(repeating: "e", count: 64)
-            )
-        )
-        let credentials = RunStoreGuestRecoveryCredentials(
-            credential: credential
-        )
-        let authorities = RunStoreGuestClaimAuthorities()
-        let store = RunDetailStore(
-            service: RecordingRunService(results: [.success(run)]),
-            tokenProvider: RunStoreBearerTokenProvider { "clerk-session-token" },
-            guestRecoveryCredentials: credentials,
-            guestClaimAuthorities: authorities
-        )
-
-        await store.load(runID: run.id)
-
-        XCTAssertEqual(store.state, .loaded(run))
-        let saved = await authorities.savedAuthority(
-            listingID: review.binding.listingID
-        )
-        let purgedCredentials = await credentials.purgedRecoveryIDs()
-        let purgedAuthorities = await authorities.purgedRecoveryIDs()
-        XCTAssertNil(saved)
-        XCTAssertEqual(purgedCredentials, [credential.recoveryID])
-        XCTAssertEqual(purgedAuthorities, [credential.recoveryID])
-    }
-
-    func testTerminalGuestFailurePurgesUnusedRecoveryAuthority()
-        async throws {
-        let run = Self.makeRun(status: .failed, stage: .completed)
-        let credential = GuestRecoveryCredential(
-            recoveryID: UUID(
-                uuidString: "63860000-0000-4000-8000-000000000012"
-            )!,
-            recoveryToken: "raw-token-only-in-keychain",
-            recoveryTokenHash: String(repeating: "d", count: 64),
-            itemID: run.itemID,
-            runID: run.id,
-            photoIdentity: GuestPhotoIdentity(
-                kind: "content_sha256_set_v1",
-                fingerprint: String(repeating: "e", count: 64)
-            )
-        )
-        let credentials = RunStoreGuestRecoveryCredentials(
-            credential: credential
-        )
-        let authorities = RunStoreGuestClaimAuthorities()
-        let store = RunDetailStore(
-            service: RecordingRunService(results: [.success(run)]),
-            tokenProvider: RunStoreBearerTokenProvider {
-                "guestcap_\(String(repeating: "A", count: 43))"
-            },
-            guestRecoveryCredentials: credentials,
-            guestClaimAuthorities: authorities
-        )
-
-        await store.load(runID: run.id)
-
-        XCTAssertEqual(store.state, .loaded(run))
-        let purgedCredentials = await credentials.purgedRecoveryIDs()
-        let purgedAuthorities = await authorities.purgedRecoveryIDs()
-        XCTAssertEqual(purgedCredentials, [credential.recoveryID])
-        XCTAssertEqual(purgedAuthorities, [credential.recoveryID])
-    }
-
-    func testFailedRunDetailDisclosesFullSellerSafeFailure() throws {
-        let detail = String(String(repeating: "Retry detail remains visible. ", count: 18).prefix(500))
-        let safeFailure = try JSONDecoder().decode(
-            RunSafeFailure.self,
-            from: JSONSerialization.data(withJSONObject: [
-                "reason": "This run couldn’t finish",
-                "detail": detail,
-                "retryable": true,
-                "workPreserved": true,
-            ])
-        )
-        let run = Self.makeRun(
-            status: .failed,
-            stage: .pricing,
-            safeFailure: safeFailure
-        )
-
-        XCTAssertEqual(run.sellerFacingDetail, detail)
-    }
-
-    func testAcceptedRunUsesAcceptedLanguageWithoutQueueTerms() {
-        let run = Self.makeRun(status: .queued, stage: .queued)
-
-        XCTAssertEqual(run.status.sellerFacingLabel, "Accepted")
-        XCTAssertEqual(run.sellerFacingDetail, "Accepted")
-    }
-
-    private static let openedRunID = UUID(
-        uuidString: "31700000-0000-4000-8000-000000000022"
-    )!
 
     private static func makeRetryableFailure() throws -> RunSafeFailure {
         try JSONDecoder().decode(
@@ -1271,55 +963,6 @@ private extension ISO8601DateFormatter {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: value)
-    }
-}
-
-private actor OverlappingRunService: RunServing {
-    private let first: DurableRun
-    private let second: DurableRun
-    private var firstRequestStarted = false
-    private var firstRequestWaiters: [CheckedContinuation<Void, Never>] = []
-    private var firstResponse: CheckedContinuation<Void, Never>?
-    private(set) var requests: [RecordingRunService.Request] = []
-
-    init(first: DurableRun, second: DurableRun) {
-        self.first = first
-        self.second = second
-    }
-
-    func waitForFirstRequest() async {
-        guard !firstRequestStarted else { return }
-        await withCheckedContinuation { firstRequestWaiters.append($0) }
-    }
-
-    func resumeFirstRequest() {
-        firstResponse?.resume()
-        firstResponse = nil
-    }
-
-    func fetchRun(id: UUID, bearerToken: String) async throws -> DurableRun {
-        requests.append(.init(runID: id, bearerToken: bearerToken))
-        guard id == first.id else { return second }
-
-        firstRequestStarted = true
-        let waiters = firstRequestWaiters
-        firstRequestWaiters.removeAll()
-        waiters.forEach { $0.resume() }
-        await withCheckedContinuation { firstResponse = $0 }
-        return first
-    }
-}
-
-private actor FreshTokenSource {
-    private var tokens: [String]
-
-    init(tokens: [String]) {
-        self.tokens = tokens
-    }
-
-    func next() throws -> String {
-        guard !tokens.isEmpty else { throw RunAPIError.authenticationRequired }
-        return tokens.removeFirst()
     }
 }
 

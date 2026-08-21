@@ -315,10 +315,6 @@ enum AccountErasureFixtureState: String, Equatable {
 }
 
 struct LaunchConfiguration: Equatable {
-    static let runDetailFixtureID = UUID(
-        uuidString: "20800000-0000-4000-8000-000000000020"
-    )!
-
     var fixture: FoundationFixture
     var visualState: ApprovedVisualStateID?
     var firstValueOnboardingState: FirstValueOnboardingScreen?
@@ -689,7 +685,7 @@ struct LaunchConfiguration: Equatable {
 
     var initialRoute: AppRoute? {
         if visualState == .runDetail {
-            return .home(.run(Self.runDetailFixtureID))
+            return .home(.processing)
         }
         return fixture.initialRoute
     }

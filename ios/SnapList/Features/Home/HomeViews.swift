@@ -28,7 +28,10 @@ struct TrophyWallView: View {
     @Bindable var store: TrophyWallStore
     let openProcessing: () -> Void
     let openAccount: () -> Void
-    let openRun: (UUID) -> Void
+    /// #963: a settled tile opens its listing surface directly rather than an
+    /// intermediate run-status card. The outcome comes back so the tile can
+    /// say so inline if the server still refuses.
+    let openListing: (UUID) async -> ProcessingActionOutcome
     let onScan: () -> Void
     let onTryAgain: () -> Void
 
@@ -194,7 +197,7 @@ struct TrophyWallView: View {
                     spacing: TrophyWallGridMetrics.gutterPoints
                 ) {
                     ForEach(store.settledTiles) { tile in
-                        TrophyWallSettledTileView(tile: tile, openRun: openRun)
+                        TrophyWallSettledTileView(tile: tile, openListing: openListing)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -209,20 +212,24 @@ struct TrophyWallView: View {
 
 private struct TrophyWallSettledTileView: View {
     let tile: TrophyWallSettledTile
-    let openRun: (UUID) -> Void
+    let openListing: (UUID) async -> ProcessingActionOutcome
 
     @ScaledMetric(relativeTo: .callout) private var dateChipHorizontalPadding: CGFloat = 8
     @ScaledMetric(relativeTo: .callout) private var dateChipVerticalPadding: CGFloat = 4
+    /// #963: set when the seller's own tap asked for this listing and the
+    /// server refused, so the tile can say so instead of opening nothing.
+    @State private var isUnavailable = false
 
     var body: some View {
         // A tile that resolves to a run is a control; one that does not stays
         // exactly what it was, because a button that opens nothing is a worse
         // lie than a picture.
-        if let destination = tile.destination,
-           case .run(let runID) = destination,
+        if let runID = tile.runID,
            let identifier = tile.accessibilityIdentifier {
             Button {
-                openRun(runID)
+                Task {
+                    isUnavailable = await openListing(runID) == .rejected
+                }
             } label: {
                 surface
             }
@@ -237,7 +244,11 @@ private struct TrophyWallSettledTileView: View {
             // modifier swallows them is not established here, only that it
             // does. The tile's contents are decoration and hide themselves, so
             // the button needs nothing but its own two facts.
-            .accessibilityLabel(tile.accessibilityLabel)
+            .accessibilityLabel(
+                isUnavailable
+                    ? "\(tile.accessibilityLabel) Listing unavailable. Try again."
+                    : tile.accessibilityLabel
+            )
             .accessibilityIdentifier(identifier)
         } else {
             surface
@@ -277,6 +288,26 @@ private struct TrophyWallSettledTileView: View {
             .overlay(alignment: .topLeading) {
                 dateChip
             }
+            .overlay(alignment: .bottom) {
+                if isUnavailable {
+                    unavailableChip
+                }
+            }
+    }
+
+    private var unavailableChip: some View {
+        Text("Listing unavailable")
+            .snapListTypography(.status)
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+            .lineLimit(1)
+            .padding(.horizontal, dateChipHorizontalPadding)
+            .padding(.vertical, dateChipVerticalPadding)
+            .background(
+                SnapListColorToken.scrimOverlay.color.opacity(0.62),
+                in: .rect(cornerRadius: TrophyWallGridMetrics.dateChipCornerRadiusPoints)
+            )
+            .padding(TrophyWallGridMetrics.dateChipEdgeInsetPoints)
+            .accessibilityHidden(true)
     }
 
     private var dateChip: some View {
@@ -472,7 +503,7 @@ struct TrophyWallProcessingView: View {
     let refreshRecovery: TrophyWallCollectionRefreshRecovery
     let onBack: () -> Void
     let openRoute: (HomeRoute) -> Void
-    let onAction: (TrophyWallProcessingAction) -> Void
+    let onAction: (TrophyWallProcessingAction) async -> ProcessingActionOutcome
     let onScan: () -> Void
     let onTryAgain: () -> Void
     let onRefresh: () async -> Void
@@ -485,7 +516,7 @@ struct TrophyWallProcessingView: View {
         refreshRecovery: TrophyWallCollectionRefreshRecovery = .idle,
         onBack: @escaping () -> Void,
         openRoute: @escaping (HomeRoute) -> Void,
-        onAction: @escaping (TrophyWallProcessingAction) -> Void,
+        onAction: @escaping (TrophyWallProcessingAction) async -> ProcessingActionOutcome,
         onScan: @escaping () -> Void,
         onTryAgain: @escaping () -> Void,
         onRefresh: @escaping () async -> Void = {}
@@ -1028,12 +1059,24 @@ enum TrophyWallProcessingRowMetrics {
 private struct TrophyWallProcessingRowView: View {
     let row: TrophyWallProcessingRow
     let openRoute: (HomeRoute) -> Void
-    let onAction: (TrophyWallProcessingAction) -> Void
+    let onAction: (TrophyWallProcessingAction) async -> ProcessingActionOutcome
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// #963: the server-authorized action this row last attempted and had
+    /// rejected, so the row can say so where the seller is instead of pushing
+    /// them to a status screen. A later successful attempt clears it.
+    @State private var rejectedAction: TrophyWallProcessingAction?
 
     private var layout: TrophyWallProcessingRowMetrics.Layout {
         TrophyWallProcessingRowMetrics.layout(for: dynamicTypeSize)
+    }
+
+    private var unavailableLabel: String? {
+        switch rejectedAction {
+        case .review: "Review unavailable. Try again."
+        case .retry: "Retry unavailable. Try again."
+        case .scan, .none: nil
+        }
     }
 
     var body: some View {
@@ -1090,27 +1133,48 @@ private struct TrophyWallProcessingRowView: View {
         }
     }
 
+    @ViewBuilder
     private var activatableContent: some View {
-        Button {
-            switch row.activation {
-            case .route(let destination):
+        switch row.activation {
+        case .route(let destination):
+            Button {
                 openRoute(destination)
-            case .action(let action):
-                onAction(action)
+            } label: {
+                content
             }
-        } label: {
+            .buttonStyle(.plain)
+            .accessibilityLabel(row.accessibilityLabel)
+            .accessibilityIdentifier(row.accessibilityIdentifier)
+        case .action(let action):
+            Button {
+                perform(action)
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(row.accessibilityLabel)
+            .accessibilityIdentifier(row.accessibilityIdentifier)
+        case .none:
+            // Not a control: this state has nowhere direct to go (#963).
             content
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(row.accessibilityLabel)
+                .accessibilityIdentifier(row.accessibilityIdentifier)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(row.accessibilityLabel)
-        .accessibilityIdentifier(row.accessibilityIdentifier)
+    }
+
+    private func perform(_ action: TrophyWallProcessingAction) {
+        Task {
+            let outcome = await onAction(action)
+            rejectedAction = outcome == .rejected ? action : nil
+        }
     }
 
     private func actionControl(
         for action: TrophyWallProcessingAction
     ) -> some View {
         Button {
-            onAction(action)
+            perform(action)
         } label: {
             Text(action.label)
                 .snapListTypography(.status)
@@ -1149,12 +1213,22 @@ private struct TrophyWallProcessingRowView: View {
                 if row.action == nil {
                     Text(row.stateLabel)
                         .snapListTypography(.status)
-                        // This used to dim for a row with nowhere to go. No
-                        // such row is constructible, here or before this
-                        // change, so the dim branch had never once rendered.
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // #963: the "Ready / Review unavailable" defect used to be a
+                // dead end on Run Detail. The same tap now says so right here.
+                if let unavailableLabel {
+                    Text(unavailableLabel)
+                        .snapListTypography(.status)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier(
+                            "trophy.processing.row.unavailable"
+                        )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -896,18 +896,22 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
+    /// #963 removed the run-status screen's dedicated "Open review" button, so
+    /// this now reaches Listing Review the way a seller does: tapping the
+    /// ready row's review action in Processing.
     func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {
+        let reviewAction = "trophy.processing.action.review.37500000-0000-4000-8000-000000000003"
         let app = launch(extraArguments: [
+            "--fixture=trophy-processing",
             "--activation-onboarded-fixture",
             "--reset-activation-guidance",
-            "--visual-state=RUN-02",
             "--run-detail-fixture=reviewable",
             "--activation-guidance-step=listingReview",
             "--listing-review-fixture=loaded"
         ])
 
-        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
-        app.buttons["run.review.open"].tap()
+        XCTAssertTrue(app.buttons[reviewAction].waitForExistence(timeout: 3))
+        app.buttons[reviewAction].tap()
         XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
         app.buttons["activation-guidance.got-it"].tap()
         XCTAssertFalse(activationGuidance(in: app).exists)
@@ -915,15 +919,15 @@ final class SnapListUITests: XCTestCase {
         app.terminate()
         app.launchArguments = [
             "--zero-network-fixtures",
+            "--fixture=trophy-processing",
             "--activation-onboarded-fixture",
-            "--visual-state=RUN-02",
             "--run-detail-fixture=reviewable",
             "--listing-review-fixture=loaded"
         ]
         app.launch()
 
-        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
-        app.buttons["run.review.open"].tap()
+        XCTAssertTrue(app.buttons[reviewAction].waitForExistence(timeout: 3))
+        app.buttons[reviewAction].tap()
         XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
     }
 
@@ -949,9 +953,9 @@ final class SnapListUITests: XCTestCase {
             (
                 name: "ACT-04-normal",
                 arguments: [
+                    "--fixture=trophy-processing",
                     "--activation-onboarded-fixture",
                     "--reset-activation-guidance",
-                    "--visual-state=RUN-02",
                     "--run-detail-fixture=reviewable",
                     "--activation-guidance-step=listingReview",
                     "--listing-review-fixture=loaded"
@@ -961,9 +965,9 @@ final class SnapListUITests: XCTestCase {
             (
                 name: "ACT-04-reduced-motion",
                 arguments: [
+                    "--fixture=trophy-processing",
                     "--activation-onboarded-fixture",
                     "--reset-activation-guidance",
-                    "--visual-state=RUN-02",
                     "--run-detail-fixture=reviewable",
                     "--activation-guidance-step=listingReview",
                     "--listing-review-fixture=loaded",
@@ -973,11 +977,15 @@ final class SnapListUITests: XCTestCase {
             )
         ]
 
+        // #963 removed the run-status screen's dedicated "Open review" button;
+        // the ACT-04 cases now reach Listing Review through the ready row's
+        // Processing review action, the way a seller does.
+        let reviewAction = "trophy.processing.action.review.37500000-0000-4000-8000-000000000003"
         for fixture in fixtures {
             let app = launch(extraArguments: fixture.arguments)
             if fixture.opensReview {
-                XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
-                app.buttons["run.review.open"].tap()
+                XCTAssertTrue(app.buttons[reviewAction].waitForExistence(timeout: 3))
+                app.buttons[reviewAction].tap()
             }
 
             let guidance = activationGuidance(in: app)

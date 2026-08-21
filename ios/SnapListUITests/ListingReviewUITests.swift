@@ -41,7 +41,7 @@ final class ListingReviewUITests: XCTestCase {
     // proofs that were previously chained into one test:
     //
     // `testEditThenBackFlushesBeforeTheScreenDismisses` proves Back cannot
-    // dismiss until the pending autosave has flushed -- `run.review.open`
+    // dismiss until the pending autosave has flushed -- the Trophy Wall tile
     // reappearing is gated behind that flush completing.
     //
     // `testEditThenInterruptedBeforeFlushRelaunchShowsThePersistedTitle`
@@ -90,7 +90,9 @@ final class ListingReviewUITests: XCTestCase {
 
         app.buttons["listing-review.back"].tap()
         XCTAssertTrue(
-            app.buttons["run.review.open"].waitForExistence(timeout: 6),
+            app.buttons[
+                "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
+            ].waitForExistence(timeout: 6),
             "Back must flush the pending autosave before the screen dismisses."
         )
     }
@@ -368,17 +370,16 @@ final class ListingReviewUITests: XCTestCase {
                 resetDraft: true,
                 extraArguments: extraArguments
             )
-            app.open(
-                URL(
-                    string:
-                        "snaplist://runs/20800000-0000-4000-8000-000000000020"
-                )!
-            )
-            let reviewOpener = app.buttons["run.review.open"]
             XCTAssertTrue(
-                reviewOpener.waitForExistence(timeout: loadedTreeTimeout)
+                app.otherElements["trophy.wall"].waitForExistence(timeout: 3)
             )
-            reviewOpener.tap()
+            let tile = app.buttons[
+                "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
+            ]
+            XCTAssertTrue(
+                tile.waitForExistence(timeout: loadedTreeTimeout)
+            )
+            tile.tap()
             XCTAssertTrue(
                 app.otherElements["listing-review"]
                     .waitForExistence(timeout: loadedTreeTimeout)
@@ -1294,6 +1295,12 @@ final class ListingReviewUITests: XCTestCase {
         return app
     }
 
+    /// #963 removed the run-status screen and its dedicated "Open review"
+    /// button. A settled Trophy Wall tile now opens the same Listing Review
+    /// surface directly, so this enters the way a seller does; the tile is
+    /// also what a caller can wait on again after Back or Done dismisses
+    /// review, since dismissal returns to the wall underneath rather than to
+    /// a screen the reviewer opener lived on.
     @discardableResult
     private func openReview(
         in app: XCUIApplication,
@@ -1305,18 +1312,16 @@ final class ListingReviewUITests: XCTestCase {
             file: file,
             line: line
         )
-        // The seller-Home run row that used to open Run Detail was retired with
-        // the rest of that surface, so the route is entered directly.
-        app.open(URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!)
-
-        let reviewOpener = app.buttons["run.review.open"]
+        let tile = app.buttons[
+            "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
+        ]
         XCTAssertTrue(
-            reviewOpener.waitForExistence(timeout: 3),
-            "A canonical reviewable run must expose the Listing Review opener.",
+            tile.waitForExistence(timeout: 3),
+            "A canonical reviewable run must expose its Trophy Wall tile.",
             file: file,
             line: line
         )
-        reviewOpener.tap()
+        tile.tap()
 
         XCTAssertTrue(
             app.otherElements["listing-review"]
@@ -1324,7 +1329,7 @@ final class ListingReviewUITests: XCTestCase {
             file: file,
             line: line
         )
-        return reviewOpener
+        return tile
     }
 
     private func editTitle(
