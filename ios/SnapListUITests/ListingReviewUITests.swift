@@ -513,15 +513,30 @@ final class ListingReviewUITests: XCTestCase {
             app.scrollViews.firstMatch.swipeDown()
         }
         XCTAssertTrue(price.isHittable)
-        // #973: the price field reproducibly never takes keyboard focus
-        // after `.tap()` on this simulator/runtime -- confirmed against
-        // unmodified `origin/main`, so it predates and is unrelated to
-        // #962's autosave work. Skipping only this remaining portion keeps
-        // every field above it (description, condition, specifics) as live
-        // coverage.
-        throw XCTSkip(
-            "listing-review.price never takes keyboard focus after tap() "
-            + "on this simulator/runtime -- see #973."
+        let keyboard = app.keyboards.firstMatch
+        price.tap()
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        price.press(forDuration: 1.0)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) {
+            app.menuItems["Select All"].tap()
+        }
+        price.typeText("0")
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Must be above $0."].waitForExistence(timeout: 2)
+        )
+        price.tap()
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        price.press(forDuration: 1.0)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) {
+            app.menuItems["Select All"].tap()
+        }
+        price.typeText("61")
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertFalse(app.staticTexts["Must be above $0."].exists)
+        XCTAssertTrue(
+            stringValue(of: price).contains("61"),
+            "The typed, committed price must survive commitPrice()."
         )
     }
 
@@ -719,16 +734,67 @@ final class ListingReviewUITests: XCTestCase {
     /// to get one of two wrong outcomes depending on which async step landed
     /// first: eBay built from the old price, or a blank pushed screen once the
     /// blur commit flipped `isDirty` under `destinationView`'s own guard.
-    func testPublishToEbayCommitsTheTypedPriceThenProceedsWithoutRefusing() throws {
-        // #973: the price field reproducibly never takes keyboard focus
-        // after `.tap()` on this simulator/runtime -- confirmed against
-        // unmodified `origin/main`, so it predates and is unrelated to
-        // #962's autosave work. This entire scenario is built on typing a
-        // replacement price, so there is no partial-coverage version to
-        // keep; the sibling title-only variant below stays live.
-        throw XCTSkip(
-            "listing-review.price never takes keyboard focus after tap() "
-            + "on this simulator/runtime -- see #973."
+    func testPublishToEbayCommitsTheTypedPriceThenProceedsWithoutRefusing() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let price = app.textFields["listing-review.price"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        let before = stringValue(of: price)
+        price.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        // Replace rather than append, so the committed amount cannot coincide
+        // with the suggested one. `commitPrice` compares against
+        // `displayedPrice` and no-ops when they match, so an edit that lands on
+        // the same value would prove nothing.
+        price.press(forDuration: 1.0)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) {
+            app.menuItems["Select All"].tap()
+        }
+        price.typeText("133.70")
+        XCTAssertNotEqual(
+            stringValue(of: price), before,
+            "The typed price has to differ from the suggested one."
+        )
+
+        // No keyboard Done, no tap outside the field. Scrolling is how the
+        // seller reaches the entry and it leaves the field focused, which is
+        // the whole point: the typed price has not reached `commitPrice()` yet.
+        let entry = app.buttons["listing-review.ebay-publish"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 3))
+        for _ in 0..<12 where !entryIsClearOfTheFooter(entry, in: app) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: app.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18)
+                    )
+                )
+        }
+        XCTAssertTrue(entryIsClearOfTheFooter(entry, in: app), app.debugDescription)
+        XCTAssertTrue(
+            keyboard.exists,
+            "The scroll must leave the price focused, or this proves nothing."
+        )
+        entry.tap()
+
+        // #962: publish no longer refuses on a dirty screen. It commits the
+        // typed price and autosaves it first, so by the time the guard reads
+        // `isDirty` it is already clean and the push proceeds -- with the
+        // fresh price, not the pre-edit one a missed commit would have left
+        // behind.
+        let ebayBack = anyElement("ebay-publish.back", in: app).firstMatch
+        XCTAssertTrue(
+            ebayBack.waitForExistence(timeout: 10),
+            "The committed, autosaved price must let the push through.\n"
+                + app.debugDescription
+        )
+        ebayBack.tap()
+        XCTAssertTrue(price.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            stringValue(of: price).contains("133.70"),
+            "The typed price must survive the commit, autosave, and round trip."
         )
     }
 
