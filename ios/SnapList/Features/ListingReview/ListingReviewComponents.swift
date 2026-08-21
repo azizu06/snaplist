@@ -642,6 +642,10 @@ struct ListingReviewStatusBanner: View {
 struct ListingReviewInlineField<Content: View>: View {
     let label: String
     var pending = false
+    /// False lets the box hug its content's intrinsic width instead of
+    /// stretching to the row — for a value like Price whose content class is
+    /// a short currency amount, not a paragraph.
+    var fillWidth = true
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -665,8 +669,7 @@ struct ListingReviewInlineField<Content: View>: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(
-            maxWidth: .infinity,
-            minHeight: 62,
+            maxWidth: fillWidth ? .infinity : nil,
             alignment: .leading
         )
         .overlay {
@@ -1257,8 +1260,8 @@ struct ListingReviewDrawer<Content: View>: View {
                         .accessibilityHidden(true)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.top, 16)
 
             Divider()
 

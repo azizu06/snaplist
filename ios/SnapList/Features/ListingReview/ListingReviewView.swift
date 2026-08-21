@@ -387,7 +387,8 @@ struct ListingReviewView: View {
         ListingReviewInlineField(
             label: "Price",
             pending: draft.sellerPriceOverride
-                != snapshot.pricing.sellerPriceOverride
+                != snapshot.pricing.sellerPriceOverride,
+            fillWidth: false
         ) {
             TextField("Price", text: $priceText)
                 .focused($focusedField, equals: .price)
@@ -396,10 +397,19 @@ struct ListingReviewView: View {
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .multilineTextAlignment(.leading)
                 .textFieldStyle(.plain)
+                // A bare TextField takes all the width its parent offers
+                // even without an explicit `.infinity`, so sizing to its
+                // content is what actually makes the box hug a short
+                // currency amount instead of the row.
+                .fixedSize(horizontal: true, vertical: false)
                 // The retired price button carried this floor and the
                 // replacement field did not, which no compiler and no
                 // identifier grep would have caught.
-                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                .frame(
+                    minWidth: 110,
+                    minHeight: SnapListMetrics.minimumTouchTarget,
+                    alignment: .leading
+                )
                 .contentShape(Rectangle())
                 .accessibilityLabel(
                     draft.sellerPriceOverride == nil

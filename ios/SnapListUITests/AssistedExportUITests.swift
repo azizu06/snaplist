@@ -181,6 +181,43 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(cancel.isHittable)
     }
 
+    /// #961: `confirmSheetBinding`'s own setter comment says a swipe-down is
+    /// meant to be the same full cancel as "Not yet" — this is the UI proof
+    /// of that claim. `interactiveDismissDisabled(store.isWriting)` only
+    /// blocks the swipe while the durable "Shared" write is actually in
+    /// flight (see the guard comment on `dismissConfirmSheet()`), and no
+    /// write has started yet at this point, so the swipe must go through.
+    func testConfirmSheetSlidesDownToDismissAsAFullCancel() {
+        let app = launch(fixture: "prepared")
+        let row = app.buttons["assisted-export.row.facebook"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        openRow(row)
+        app.buttons["button.primary.open-facebook-marketplace"].tap()
+        let mark = app.buttons["assisted-export.mark-as-shared.facebook"]
+        XCTAssertTrue(mark.waitForExistence(timeout: loadedTreeTimeout))
+        mark.tap()
+
+        let question = app.staticTexts["assisted-export.confirm-sheet"]
+        XCTAssertTrue(question.waitForExistence(timeout: loadedTreeTimeout))
+
+        let start = question.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0)
+        )
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertFalse(
+            question.waitForExistence(timeout: 3),
+            "A swipe-down must dismiss the confirm sheet before any write "
+                + "starts."
+        )
+        XCTAssertTrue(
+            mark.waitForExistence(timeout: 3),
+            "A cancelled confirm sheet must leave Mark as shared tappable "
+                + "again, the same as 'Not yet' would."
+        )
+    }
+
     func testPreparedHandedOffAndSharedStatesUseOnlyHonestWording() {
         let app = launch(fixture: "honest-wording")
 

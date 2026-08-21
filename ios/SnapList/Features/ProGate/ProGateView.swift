@@ -607,7 +607,15 @@ struct ProGateFixtureHostView: View {
     private var fixtureBinding: Binding<Bool> {
         Binding(
             get: { fixture != .pay10 && store.isPresented },
-            set: { _ in }
+            // Ignoring the system's dismiss instruction here (as the
+            // fixture harness previously did) makes an interactive
+            // swipe-down silently re-present the sheet instead of
+            // closing it — mirror AppShellView's real binding and
+            // forward it to the store.
+            set: { presented in
+                guard !presented else { return }
+                store.dismiss()
+            }
         )
     }
 }

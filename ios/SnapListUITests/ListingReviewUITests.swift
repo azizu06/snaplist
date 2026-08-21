@@ -500,6 +500,114 @@ final class ListingReviewUITests: XCTestCase {
         )
     }
 
+    /// #961: every drawer on this screen has to slide down to dismiss, the
+    /// same as tapping its own close control. The pending selection is never
+    /// saved, so the assertion that matters is that the field's value is
+    /// unchanged after the swipe, not just that the drawer is gone. The drag
+    /// starts on the drawer's own accessibility container rather than a
+    /// specific glyph, because that container spans the fixed header the
+    /// drag has to originate from, above the options `ScrollView` a swipe
+    /// starting inside would just scroll instead of dismissing.
+    func testConditionDrawerSlidesDownToDismissWithoutSaving() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let condition = app.buttons["listing-review.condition"]
+        XCTAssertTrue(condition.waitForExistence(timeout: loadedTreeTimeout))
+        let before = String(describing: condition.value as Any)
+
+        condition.tap()
+        // Whichever condition is not already selected, so a swipe that
+        // wrongly committed the pending pick would change `condition`'s
+        // value and this could tell.
+        let candidate = before.localizedCaseInsensitiveContains("Poor")
+            ? "new" : "poor"
+        let pick = app.buttons["listing-review.condition.\(candidate)"]
+        XCTAssertTrue(pick.waitForExistence(timeout: 3))
+        pick.tap()
+
+        let drawer = anyElement("listing-review.drawer", in: app)
+        XCTAssertTrue(drawer.waitForExistence(timeout: 3))
+        dragDownToDismiss(from: drawer, in: app)
+
+        XCTAssertTrue(condition.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            app.buttons["listing-review.condition.save"].exists,
+            "The drawer must actually be gone, not just covered."
+        )
+        XCTAssertEqual(
+            String(describing: condition.value as Any),
+            before,
+            "A swipe-down cancels, the same as Close; it must not commit "
+                + "the pending selection."
+        )
+    }
+
+    /// The identity drawer pushed from Item specifics shares the same chrome
+    /// and the same close semantics, so it gets the same proof.
+    func testSpecificsIdentityDrawerSlidesDownToDismiss() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        openItemSpecifics(in: app)
+
+        let brand = app.buttons["listing-review.specific.brand"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        brand.tap()
+
+        let commit = app.buttons["listing-review.specific.correction"]
+        XCTAssertTrue(commit.waitForExistence(timeout: 3))
+        let drawer = anyElement("listing-review.drawer", in: app)
+        XCTAssertTrue(drawer.exists)
+        dragDownToDismiss(from: drawer, in: app)
+
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            commit.exists,
+            "The drawer must actually be gone, not just covered."
+        )
+        XCTAssertFalse(
+            anyElement("listing-review.correction-boundary", in: app).exists,
+            "A swipe-down cancels; it must not also route into guided "
+                + "correction."
+        )
+    }
+
+    /// #961: the price box sizes to its content, not the full row width the
+    /// typed fields use. The title field is the tallest bar to clear — it is
+    /// deliberately full width — so a comfortable margin below it proves the
+    /// price box is a short, content-sized control rather than an oversight.
+    func testPriceFieldSizesToItsContentNotTheFullRowWidth() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+
+        let price = app.textFields["listing-review.price"]
+        let title = app.textViews["listing-review.title"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        XCTAssertTrue(title.waitForExistence(timeout: loadedTreeTimeout))
+        let receipt = "price.frame=\(price.frame), title.frame=\(title.frame)"
+        XCTAssertLessThan(
+            price.frame.width,
+            title.frame.width * 0.6,
+            receipt
+        )
+    }
+
+    /// A drag that starts near the top of `element` — the drawer's own
+    /// fixed header chrome, never inside its `ScrollView` — and ends off the
+    /// bottom of the window, which is what an interactive sheet dismiss
+    /// actually looks like. Starting inside the scroll view would just
+    /// scroll its content instead.
+    private func dragDownToDismiss(
+        from element: XCUIElement,
+        in app: XCUIApplication
+    ) {
+        let start = element.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)
+        )
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
     /// Publishing is the one exit on this screen that reaches a real
     /// marketplace, and the tap that starts it does not resign the field's
     /// first responder. Nothing under `ios/` sets `scrollDismissesKeyboard`
