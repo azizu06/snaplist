@@ -377,6 +377,7 @@ src/lib/pricing/router.ts
 src/lib/pricing/sold-comp-matcher.ts
 src/lib/pricing/sold-comps-smoke.ts
 src/lib/pricing/types.ts
+src/lib/privacy-label/contract.ts
 src/lib/provider-usage/collector.ts
 src/lib/provider-usage/index.ts
 src/lib/provider-usage/post-completion.ts

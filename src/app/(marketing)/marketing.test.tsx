@@ -537,6 +537,28 @@ describe("marketing destinations", () => {
     expect($("body").text()).toMatch(/not live yet/i);
   });
 
+  /**
+   * App Review reads /privacy and /support, and both name the support channel through
+   * this one variable. Production sets it, so the deployed pages are fine (#953) — but
+   * the template documented it as empty, which is not a value anyone can copy into a
+   * new environment.
+   *
+   * This asserts what the template documents is resolvable, not what any page renders:
+   * `.env.example` is never loaded at runtime, so an environment that sets nothing
+   * still shows the notice. The test above covers that state.
+   */
+  it("documents a support address that resolves to a usable mailto address", () => {
+    const declared = readFileSync(resolve(".env.example"), "utf8")
+      .match(/^NEXT_PUBLIC_SUPPORT_EMAIL=(.*)$/m)?.[1]
+      .trim();
+
+    vi.stubEnv("NEXT_PUBLIC_SUPPORT_EMAIL", declared ?? "");
+    expect(
+      site.supportEmail(),
+      ".env.example must declare an address SupportChannel will render as a mailto:",
+    ).toBe(declared);
+  });
+
   it("renders a real mailto: once a support address is configured", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPPORT_EMAIL", "help@snaplist.dev");
     const $ = load(renderToStaticMarkup(<SupportPage />));
@@ -905,5 +927,90 @@ describe("feature explorer semantics", () => {
     expect(bodies.filter((body) => /optional voice note.*15 seconds/i.test(body))).toHaveLength(1);
     expect(site.FEATURE_STEPS.find((step) => step.id === "photo-review")?.body).toMatch(/replace|remove/i);
     expect(bodies.join(" ")).toMatch(/handoff you finish/i);
+  });
+});
+
+/**
+ * The processor list is the only place the privacy policy names who else receives
+ * seller data, and its failure mode is silence: an SDK gets linked into the app and
+ * nobody remembers this page exists. That is how PostHog shipped undisclosed (#953)
+ * while the privacy manifest already declared the Analytics collection it performs.
+ *
+ * So the list is not asserted against a literal. It is asserted against the Swift
+ * packages the iOS target actually links, which is the thing that changes when a new
+ * processor arrives.
+ */
+describe("privacy policy processor disclosure", () => {
+  /**
+   * Swift package -> the name the policy discloses it under, or null for a package
+   * that receives no seller data and is deliberately not disclosed.
+   *
+   * Every linked package needs an entry. That is the point: a new SDK cannot be added
+   * to the project without someone recording, here, whether it receives seller data.
+   * null is a decision, not an omission.
+   */
+  const PROCESSOR_DISCLOSURE: Readonly<Record<string, string | null>> = {
+    "posthog-ios": "PostHog",
+    "sentry-cocoa": "Sentry",
+    "clerk-ios": "Clerk",
+    "purchases-ios-spm": "RevenueCat",
+  };
+
+  /**
+   * Every remote Swift package the project links.
+   *
+   * Read from two independent places in the pbxproj, unioned: the Xcode-generated
+   * `XCRemoteSwiftPackageReference "name"` comments, and the `repositoryURL` of each
+   * entry in the package-reference section. Comments are the easier signal but a
+   * hand-edited pbxproj can omit them, and a repositoryURL cannot be omitted by
+   * anything that actually resolves. Taking the union means a package has to be
+   * invisible in *both* forms to escape.
+   */
+  function linkedSwiftPackages(project: string): ReadonlySet<string> {
+    const named = [...project.matchAll(/XCRemoteSwiftPackageReference "([^"]+)"/g)]
+      .map((match) => match[1]);
+    const fromUrls = [...project.matchAll(/repositoryURL\s*=\s*"([^"]+)"/g)]
+      .map((match) => match[1].replace(/\.git$/, "").split("/").filter(Boolean).at(-1) ?? "");
+
+    return new Set([...named, ...fromUrls].filter(Boolean));
+  }
+
+  function processorListText(): string {
+    const $ = load(renderToStaticMarkup(<PrivacyPage />));
+    const heading = $("h2").filter((_, el) => $(el).text().trim() === "Who else processes it");
+
+    expect(heading.length, "the processor section heading moved or was renamed").toBe(1);
+    const list = heading.nextAll("ul").first();
+    expect(list.find("li").length, "the processor section lists nobody").toBeGreaterThan(0);
+
+    return list.text();
+  }
+
+  /**
+   * The assertion that makes the rest mean anything: the set of packages the project
+   * links must equal the set this file has decisions for. An SDK added to the project
+   * without a decision recorded here turns this red, which is the exact thing that did
+   * not happen when PostHog was linked (#953).
+   */
+  it("has a recorded disclosure decision for every Swift package the app links", () => {
+    const project = readFileSync(resolve("ios/SnapList.xcodeproj/project.pbxproj"), "utf8");
+    const linked = linkedSwiftPackages(project);
+
+    expect(linked.size, "no Swift package references parsed — the pbxproj format moved")
+      .toBeGreaterThan(0);
+    expect([...linked].sort(), "a linked package has no recorded disclosure decision")
+      .toEqual(Object.keys(PROCESSOR_DISCLOSURE).sort());
+  });
+
+  it("names every seller-data processor in the privacy policy", () => {
+    const disclosed = processorListText();
+
+    for (const [swiftPackage, disclosedName] of Object.entries(PROCESSOR_DISCLOSURE)) {
+      if (disclosedName === null) continue;
+      expect(
+        disclosed,
+        `the app links ${swiftPackage} but the policy never names ${disclosedName}`,
+      ).toContain(disclosedName);
+    }
   });
 });

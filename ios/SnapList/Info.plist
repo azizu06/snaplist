@@ -33,6 +33,14 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Export compliance. SnapList's only cryptography is HTTPS to its own
+	     API and to its providers, which is exempt, so App Store Connect needs
+	     no per-upload answer. Without this key every upload sits in "Missing
+	     Compliance" and cannot be submitted. Flipping it to true obliges a
+	     CCATS filing and an annual self-classification report; see
+	     ios/Scripts/release-config-contract.test.sh. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>LSRequiresIPhoneOS</key>

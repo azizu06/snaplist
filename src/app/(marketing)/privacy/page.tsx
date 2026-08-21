@@ -118,6 +118,12 @@ export default function PrivacyPage() {
           <strong>Apple and RevenueCat</strong> — subscription purchase and status.
         </li>
         <li>
+          <strong>PostHog</strong> — product-usage measurement. It receives a fixed set of
+          typed events describing which steps you reach in the app, and your sign-in identity
+          once you create an account so those steps join up. Your photos, voice, and listing
+          text are not sent to it.
+        </li>
+        <li>
           <strong>Sentry</strong> — crash reporting, with listing contents scrubbed.
         </li>
       </ul>
