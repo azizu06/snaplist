@@ -5,7 +5,6 @@ extension ListingReviewCopy {
     static let invalidPrice = "Must be above $0."
     static let done = "Done"
     static let fixItem = "Fix item"
-    static let editDetails = "Edit details"
     static let reload = "Reload"
     static let keepEditing = "Keep editing"
     static let discardChangesAndReload = "Discard changes and reload"
@@ -130,7 +129,8 @@ extension LaunchConfiguration {
     /// Guided correction has no interior yet — Fix item pushes a typed
     /// boundary card owned by #212. Withholding the entry point unless a
     /// fixture asks for it keeps that placeholder out of a real launch, where
-    /// the footer offers Edit details instead.
+    /// every field is already inline-editable and the footer offers Done
+    /// alone (#989).
     var listingReviewCorrectionAvailable: Bool {
         listingReviewFixture?.correctionAvailable ?? false
     }
@@ -653,14 +653,11 @@ struct ListingReviewStatusBanner: View {
 ///
 /// The box is the affordance. It carries its own label so the value below it
 /// starts at the leading edge, which is what keeps the caret at the start of
-/// the text instead of against the right margin.
+/// the text instead of against the right margin. Every field on the review —
+/// Price included since #989 — spans the row, so the box always stretches.
 struct ListingReviewInlineField<Content: View>: View {
     let label: String
     var pending = false
-    /// False lets the box hug its content's intrinsic width instead of
-    /// stretching to the row — for a value like Price whose content class is
-    /// a short currency amount, not a paragraph.
-    var fillWidth = true
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -683,10 +680,7 @@ struct ListingReviewInlineField<Content: View>: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .frame(
-            maxWidth: fillWidth ? .infinity : nil,
-            alignment: .leading
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(SnapListColorToken.inputBorder.color)

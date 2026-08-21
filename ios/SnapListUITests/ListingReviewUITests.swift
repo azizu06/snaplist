@@ -308,19 +308,16 @@ final class ListingReviewUITests: XCTestCase {
             app.otherElements["listing-review.motion-reduced"]
                 .waitForExistence(timeout: 3)
         )
-        XCTAssertEqual(secondary.label, "Edit details")
-        XCTAssertTrue(secondary.isHittable)
+        // #989: Edit details is gone. Without guided correction available,
+        // Done is the footer's only action — every field is already
+        // inline-editable, so a second "start editing" control had nothing
+        // left to do.
+        XCTAssertFalse(secondary.exists)
         XCTAssertTrue(done.isHittable)
-        XCTAssertGreaterThanOrEqual(secondary.frame.height, 44)
         XCTAssertGreaterThanOrEqual(done.frame.height, 44)
         XCTAssertTrue(app.textViews["listing-review.title"].exists)
-        secondary.tap()
-        XCTAssertTrue(app.textViews["listing-review.title"].exists)
-        // XCUITest cannot inspect the VoiceOver cursor without assistive
-        // technology running; ListingReviewFocus binds this action to Title.
 
         let viewport = app.windows.firstMatch.frame
-        XCTAssertTrue(viewport.contains(secondary.frame))
         XCTAssertTrue(viewport.contains(done.frame))
         let screenshot = XCTAttachment(
             screenshot: XCUIScreen.main.screenshot()
@@ -600,11 +597,12 @@ final class ListingReviewUITests: XCTestCase {
         )
     }
 
-    /// #961: the price box sizes to its content, not the full row width the
-    /// typed fields use. The title field is the tallest bar to clear — it is
-    /// deliberately full width — so a comfortable margin below it proves the
-    /// price box is a short, content-sized control rather than an oversight.
-    func testPriceFieldSizesToItsContentNotTheFullRowWidth() {
+    /// #989 reverses #961: the price box now spans the full row width like
+    /// Title/Description instead of hugging its content, and its height stays
+    /// at a single line rather than the oversized box that made "$40" read as
+    /// floating. Title is the reference row — also full width, also floored
+    /// to a single line's worth of height at this (non-accessibility) size.
+    func testPriceFieldSpansTheFullRowWidthWithAShortHeight() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
 
@@ -613,11 +611,18 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
         XCTAssertTrue(title.waitForExistence(timeout: loadedTreeTimeout))
         let receipt = "price.frame=\(price.frame), title.frame=\(title.frame)"
-        XCTAssertLessThan(
+        XCTAssertEqual(
             price.frame.width,
-            title.frame.width * 0.6,
+            title.frame.width,
+            accuracy: 1,
             receipt
         )
+        XCTAssertLessThanOrEqual(
+            price.frame.height,
+            title.frame.height,
+            receipt
+        )
+        assertMeetsTouchTargetFloor(price.frame.height, receipt)
     }
 
     /// A drag that starts near the top of `element` — the drawer's own

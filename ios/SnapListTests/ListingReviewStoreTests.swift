@@ -775,6 +775,36 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertFalse(store.isDirty)
     }
 
+    // #989: the sibling of the autosave proof above, for the other of the
+    // review's two commit paths. `ListingReviewView.finish(retry:)` calls
+    // `commitPrice()` before `store.done()` on every Done tap, so a seller
+    // price override must reach the same save request an explicit Done
+    // produces, not just the one autosave produces on its own.
+    func testEditingSellerPriceOverrideThenExplicitDoneCommitsIt() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let receipt = Self.receipt(for: snapshot)
+        let service = ListingReviewRecordingService(
+            saves: [.success(receipt)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setSellerPriceOverride(Decimal(string: "129.99")!)
+        let outcome = await store.done()
+
+        XCTAssertEqual(outcome, .saved(receipt))
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(
+            requests[0].draft.sellerPriceOverride,
+            Decimal(string: "129.99")!
+        )
+        XCTAssertFalse(store.isDirty)
+    }
+
     // #962 hazard 2: autosave keeps the same store open across many saves
     // in one sitting, unlike `done()`, which always dismissed after its
     // one save. The store must advance its own idea of the review

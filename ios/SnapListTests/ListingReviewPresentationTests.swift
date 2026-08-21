@@ -45,7 +45,8 @@ final class ListingReviewPresentationTests: XCTestCase {
 
     func testGuidedCorrectionIsWithheldWithoutAFixtureBehindIt() {
         // Fix item pushes a typed boundary card until #212 builds its interior,
-        // so a production launch must offer Edit details instead.
+        // so a production launch withholds it and the footer offers Done alone
+        // (#989 — Edit details is gone; every field is already inline-editable).
         XCTAssertFalse(
             LaunchConfiguration.standard.listingReviewCorrectionAvailable
         )
