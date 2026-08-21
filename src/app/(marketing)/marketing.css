@@ -1214,6 +1214,38 @@ html:has(.mkt) {
   transform-origin: top left;
 }
 
+/* Scout stands on the phone's top-left corner, level with the section heading.
+   The clips are square with the character centred, so width and height are the
+   same number and the figure lands inside it.
+
+   The corner is the one place in this section with room. Measured across the
+   desktop band, the gap between the heading's last glyph row and the top of the
+   phone is 103px at 1440 through 900, so anything standing directly under the
+   title is capped at a figure about 100px tall and reads as a charm. Off to the
+   left it is not capped, because the heading is centred: the free band runs from
+   the phone's left edge to the first glyph, which is 267px wide at 1440, 196 at
+   900, and still 157 at 760. Scout rises past the heading's baseline inside that
+   band and collides with nothing.
+
+   `bottom: calc(100% - 20px)` puts his feet 20px below the frame's top edge, so
+   he stands on the bezel rather than floating over it. The clamp tops out at 208
+   because the band above the phone is about 156px of usable height and his feet
+   have to stay near the bezel; the 168 floor is the size at which the figure
+   still clears the heading at 760, the narrowest width he appears at.
+
+   He is not hidden below 760 by CSS. `display: none` would still mount the
+   element and still fetch the clip, so the breakpoint is enforced at the mount
+   instead — see `useScoutMount`. */
+.mkt-explorer__scout {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% - 20px);
+  width: clamp(168px, 14vw, 208px);
+  height: clamp(168px, 14vw, 208px);
+  pointer-events: none;
+  z-index: 2;
+}
+
 .mkt-explorer__device {
   position: relative;
   width: 288px;

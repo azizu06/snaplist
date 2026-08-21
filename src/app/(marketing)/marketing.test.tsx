@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { load } from "cheerio";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -662,6 +662,74 @@ describe("feature explorer semantics", () => {
     expect(tabs.filter('[aria-selected="true"]').attr("tabindex")).toBe("0");
     expect($('[role="tabpanel"]').length).toBe(1);
     expect($('.mkt-explorer__slide[data-active="true"]').length).toBe(1);
+  });
+
+  it("ships one Scout clip per step, named for the step", () => {
+    // The component builds the src from the step id, so a renamed or reordered
+    // step silently 404s rather than failing anywhere visible. Reading the
+    // directory catches both directions: a step with no clip, and a clip left
+    // behind by a step that no longer exists.
+    const shipped = readdirSync(resolve("public/scout")).sort();
+    const expected = site.FEATURE_STEPS.map((step) => `${step.id}.webm`).sort();
+
+    expect(shipped).toEqual(expected);
+    for (const file of shipped) {
+      expect(statSync(resolve("public/scout", file)).size).toBeGreaterThan(10_000);
+    }
+  });
+
+  it("keeps Scout's mount breakpoint and the explorer's column breakpoint in step", () => {
+    // Below the column breakpoint the phone sits above the cards and the gap
+    // over it drops to 44px, which is not enough for Scout to stand in. Two
+    // copies of that number exist, one in CSS and one in the mount gate, and
+    // they have to agree or he either overlaps the heading or disappears early.
+    const component = readFileSync(resolve("src/components/marketing/feature-explorer.tsx"), "utf8");
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+
+    const mountsAt = Number(component.match(/SCOUT_MIN_WIDTH = "\(min-width: (\d+)px\)"/)?.[1]);
+    const stacksAt = Number(
+      css.match(/@media \(max-width: (\d+)px\) \{\s*\.mkt-explorer \{[^}]*flex-direction: column/)?.[1],
+    );
+
+    expect(mountsAt).toBeGreaterThan(0);
+    expect(stacksAt).toBeGreaterThan(0);
+    expect(mountsAt).toBe(stacksAt + 1);
+  });
+
+  it("stands Scout on the phone and gates the download at the mount", () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    );
+    const component = readFileSync(resolve("src/components/marketing/feature-explorer.tsx"), "utf8");
+    const rule = css.match(/\.mkt-explorer__scout\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    // Positioned against the frame, so he tracks the phone at every width
+    // rather than sitting at a fixed offset the layout can slide out from under.
+    expect(rule).toMatch(/position:\s*absolute/);
+    expect(rule).toMatch(/bottom:\s*calc\(100% -/);
+
+    // `display: none` is the wrong lever below the breakpoint: the element still
+    // mounts and the clip is still fetched. The gate has to be the mount.
+    expect(rule).not.toMatch(/display:\s*none/);
+    expect(component).toMatch(/IntersectionObserver/);
+  });
+
+  it("holds Scout on a frame for Reduced Motion instead of removing him", () => {
+    // A <video> ignores the CSS media query, so the stylesheet cannot honour the
+    // preference here. Pausing keeps the character and drops the motion; hiding
+    // him would drop content that the preference never asked to remove.
+    //
+    // Two pauses, not one. The first catches an element that already has frames,
+    // the second catches one still decoding, which would otherwise start playing
+    // the moment it was ready. Dropping either leaves a case that still animates,
+    // so the count is the assertion.
+    const component = readFileSync(resolve("src/components/marketing/feature-explorer.tsx"), "utf8");
+    const start = component.indexOf("prefers-reduced-motion");
+    const reduced = component.slice(start, component.indexOf("addEventListener", start));
+
+    expect(start).toBeGreaterThan(-1);
+    expect(reduced.match(/\.pause\(\)/g)?.length).toBe(2);
   });
 
   it("labels the panel with the card that controls it", () => {
