@@ -410,7 +410,7 @@ actor NativeIntake {
             guard !inputs.isEmpty else {
                 return .unchanged
             }
-            guard active.photos.count + inputs.count <= 5 else {
+            guard active.photos.count + inputs.count <= PhotoReviewCapacityPolicy.photoLimit else {
                 return .rejected(.photoLimit)
             }
             let data: [(Data, LibraryPhotoTransferReceipt?)]
@@ -2116,7 +2116,7 @@ actor NativeIntake {
         _ stored: [Photo],
         assetsRoot: URL
     ) -> ReadResult<[Photo]> {
-        guard stored.count <= 5 else {
+        guard stored.count <= PhotoReviewCapacityPolicy.photoLimit else {
             return .malformed
         }
         var photos: [Photo] = []

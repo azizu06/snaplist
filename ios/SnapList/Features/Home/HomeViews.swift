@@ -211,6 +211,9 @@ private struct TrophyWallSettledTileView: View {
     let tile: TrophyWallSettledTile
     let openRun: (UUID) -> Void
 
+    @ScaledMetric(relativeTo: .callout) private var dateChipHorizontalPadding: CGFloat = 8
+    @ScaledMetric(relativeTo: .callout) private var dateChipVerticalPadding: CGFloat = 4
+
     var body: some View {
         // A tile that resolves to a run is a control; one that does not stays
         // exactly what it was, because a button that opens nothing is a worse
@@ -245,44 +248,54 @@ private struct TrophyWallSettledTileView: View {
     }
 
     private var surface: some View {
-        VStack(
-            alignment: .leading,
-            spacing: TrophyWallGridMetrics.tileCaptionSpacingPoints
-        ) {
-            SnapListColorToken.quietFill.color
-                .aspectRatio(
-                    TrophyWallGridMetrics.tileAspectRatio,
-                    contentMode: .fit
+        SnapListColorToken.quietFill.color
+            .aspectRatio(
+                TrophyWallGridMetrics.tileAspectRatio,
+                contentMode: .fit
+            )
+            .overlay {
+                photo
+            }
+            .clipShape(
+                .rect(
+                    cornerRadius: TrophyWallGridMetrics
+                        .tileCornerRadiusPoints
                 )
-                .overlay {
-                    photo
-                }
-                .clipShape(
-                    .rect(
-                        cornerRadius: TrophyWallGridMetrics
-                            .tileCornerRadiusPoints
-                    )
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: TrophyWallGridMetrics
+                        .tileCornerRadiusPoints
                 )
-                .overlay {
-                    RoundedRectangle(
-                        cornerRadius: TrophyWallGridMetrics
-                            .tileCornerRadiusPoints
-                    )
-                    .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
-                }
-
+                .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
+            }
             // The wall stayed a grid of photos with no date anywhere on it,
             // even though the tile already knew when the item went up (#897).
-            Text(tile.publishedDateLabel)
-                .snapListTypography(.status)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .lineLimit(1)
-                // The spoken label already names this date in full, and a
-                // second child inside the button's label is enough for SwiftUI
-                // to build the control's accessibility from the caption
-                // instead, dropping the tile's own label and identifier.
-                .accessibilityHidden(true)
-        }
+            // Owner correction (#960): the date reads as a translucent card
+            // overlaid on the photo, not a caption stealing rhythm underneath
+            // it, so it sits in the same corner on every tile.
+            .overlay(alignment: .topLeading) {
+                dateChip
+            }
+    }
+
+    private var dateChip: some View {
+        Text(tile.publishedDateLabel)
+            .snapListTypography(.status)
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+            .lineLimit(1)
+            .padding(.horizontal, dateChipHorizontalPadding)
+            .padding(.vertical, dateChipVerticalPadding)
+            .background(
+                SnapListColorToken.scrimOverlay.color.opacity(0.62),
+                in: .rect(cornerRadius: TrophyWallGridMetrics.dateChipCornerRadiusPoints)
+            )
+            .padding(TrophyWallGridMetrics.dateChipEdgeInsetPoints)
+            // The spoken label already names this date in full, and a second
+            // child inside the button's label is enough for SwiftUI to build
+            // the control's accessibility from the chip instead, dropping the
+            // tile's own label and identifier.
+            .accessibilityHidden(true)
     }
 
     /// Decoration. An asset-backed `Image` publishes itself with the asset name

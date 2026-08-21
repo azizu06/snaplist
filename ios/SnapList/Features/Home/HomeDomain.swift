@@ -14,8 +14,10 @@ enum TrophyWallGridMetrics {
     static let gutterPoints: CGFloat = 12
     static let tileCornerRadiusPoints: CGFloat = 12
     static let bottomPaddingPoints: CGFloat = 132
-    /// Between a tile's photo and the date caption under it.
-    static let tileCaptionSpacingPoints: CGFloat = 6
+    /// The translucent date chip overlaid on the tile's photo (#960): its
+    /// corner radius and its inset from the tile's own edges.
+    static let dateChipCornerRadiusPoints: CGFloat = 8
+    static let dateChipEdgeInsetPoints: CGFloat = 8
 }
 
 /// The approved empty wall uses a small optical overlap below Scout so the
