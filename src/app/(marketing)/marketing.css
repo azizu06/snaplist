@@ -1289,13 +1289,25 @@ html:has(.mkt) {
    than a single sampled pose, since the lowest and highest painted pixel both
    move as the animation runs.
 
+   `left` is not 0 for the same reason. The device's `border-radius: 48px` means
+   the top edge only becomes flat 48 unscaled px in from the left, and at 1440
+   that corner is 67 rendered px wide. Unioned across the five clips, the
+   contact band, meaning the lowest 4% of the figure where the shoes and any
+   carried object meet the surface, runs from 0.223 to 0.770 of the box width.
+   At `left: 0` that put the left shoe 33px from the device edge, a third of the
+   way up the corner curve, so he read as balancing on the rounded shoulder
+   rather than standing. 32 puts the contact band 8 unscaled px inside the
+   tangent point, with both shoes and the publish clip's box on flat surface.
+   The right side is not close: the band ends 125 unscaled px before the
+   opposite corner.
+
    He is not hidden below 760 by CSS. `display: none` would still mount the
    element and still fetch the clip, so the breakpoint is enforced at the mount
    instead. See `useScoutMount`. */
 .mkt-explorer__scout {
   --scout-size: calc(108px * var(--phone-scale));
   position: absolute;
-  left: 0;
+  left: calc(32px * var(--phone-scale));
   bottom: calc(100% - 15px * var(--phone-scale));
   width: var(--scout-size);
   height: var(--scout-size);
