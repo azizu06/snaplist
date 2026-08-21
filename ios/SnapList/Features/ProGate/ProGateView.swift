@@ -69,31 +69,17 @@ struct ProGateSheet: View {
     @ScaledMetric(relativeTo: .subheadline) private var plainActionSize: CGFloat = 15
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 15) {
-                    heading
-                    stateBody
-                }
-                .padding(.horizontal, contentHorizontalPadding)
-                .padding(.top, contentTopPadding)
-                .padding(.bottom, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if dynamicTypeSize.isAccessibilitySize {
-                    if case .offer = store.state {
-                        Divider()
-                            .foregroundStyle(SnapListColorToken.divider.color)
-                    }
-                    actionStack
-                        .padding(.horizontal, contentHorizontalPadding)
-                        .padding(.top, 12)
-                        .padding(.bottom, 20)
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 15) {
+                heading
+                stateBody
             }
-            .scrollIndicators(.visible)
+            .padding(.horizontal, contentHorizontalPadding)
+            .padding(.top, contentTopPadding)
+            .padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !dynamicTypeSize.isAccessibilitySize {
+            if dynamicTypeSize.isAccessibilitySize {
                 if case .offer = store.state {
                     Divider()
                         .foregroundStyle(SnapListColorToken.divider.color)
@@ -102,6 +88,17 @@ struct ProGateSheet: View {
                     .padding(.horizontal, contentHorizontalPadding)
                     .padding(.top, 12)
                     .padding(.bottom, 20)
+            }
+        }
+        .scrollIndicators(.visible)
+        // The footer pins via `safeAreaInset`, the same primitive
+        // `floatingDock(...)` uses for the app-wide dock: it both floats the
+        // footer over the scroll view and reserves that exact height as
+        // scroll-content safe area, so the content stops above it instead of
+        // sitting beside it in a shrunk VStack sibling.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                pinnedFooter
             }
         }
         .background(SnapListColorToken.canvas.color)
@@ -113,6 +110,20 @@ struct ProGateSheet: View {
         .interactiveDismissDisabled(!store.isDismissible)
         .onAppear(perform: focusHeading)
         .onChange(of: store.state) { _, _ in focusHeading() }
+    }
+
+    private var pinnedFooter: some View {
+        VStack(spacing: 0) {
+            if case .offer = store.state {
+                Divider()
+                    .foregroundStyle(SnapListColorToken.divider.color)
+            }
+            actionStack
+                .padding(.horizontal, contentHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
+        }
+        .background(SnapListColorToken.canvas.color)
     }
 
     private var heading: some View {
@@ -173,7 +184,8 @@ struct ProGateSheet: View {
             VStack(spacing: 8) {
                 valueCard(
                     title: ProGateCopy.allowance,
-                    detail: ProGateCopy.allowanceUnknown
+                    detail: ProGateCopy.allowanceUnknown,
+                    identifier: "pro-gate.allowance-row"
                 )
                 valueCard(title: ProGateCopy.keepsWork, detail: nil)
             }
@@ -263,7 +275,23 @@ struct ProGateSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func valueCard(title: String, detail: String?) -> some View {
+    private func valueCard(
+        title: String,
+        detail: String?,
+        identifier: String? = nil
+    ) -> some View {
+        Group {
+            if let identifier {
+                valueCardBody(title: title, detail: detail)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(identifier)
+            } else {
+                valueCardBody(title: title, detail: detail)
+            }
+        }
+    }
+
+    private func valueCardBody(title: String, detail: String?) -> some View {
         HStack(alignment: .top, spacing: 11) {
             Image(systemName: "checkmark")
                 .font(.system(size: 15, weight: .bold))
@@ -419,7 +447,7 @@ struct ProGateSheet: View {
         plainButton(
             "Not now",
             identifier: "pro-gate.not-now",
-            color: .ink
+            color: .action
         ) {
             store.dismiss()
         }
