@@ -323,7 +323,7 @@ struct ProGateSheet: View {
                         .font(.system(size: actionSize, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    Text("Billed by Apple · Cancel anytime in Settings")
+                    Text(product.proGateRenewalStatement)
                         .font(.system(size: detailSize))
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .multilineTextAlignment(.center)
@@ -549,6 +549,25 @@ private extension SubscriptionProductMetadata {
         case (1, .year): "\(localizedPrice) per year"
         default:
             localizedPurchaseTerms() ?? localizedPrice
+        }
+    }
+
+    /// App Review Guideline 3.1.2 requires the auto-renewing subscription's
+    /// billing period be stated next to the purchase action, along with the
+    /// fact that it renews until canceled. SnapList's only configured product
+    /// is monthly (`NativeSubscriptionConfiguration.monthlyProductID`); this
+    /// stays keyed off the live `billingPeriod` instead of hardcoding "month"
+    /// so it stays correct if a different period is ever configured.
+    var proGateRenewalStatement: String {
+        switch (billingPeriod.value, billingPeriod.unit) {
+        case (1, .day): "Renews automatically every day until canceled · Billed by Apple"
+        case (1, .week): "Renews automatically every week until canceled · Billed by Apple"
+        case (1, .month): "Renews automatically every month until canceled · Billed by Apple"
+        case (1, .year): "Renews automatically every year until canceled · Billed by Apple"
+        default:
+            localizedBillingPeriod().map {
+                "Renews automatically every \($0) until canceled · Billed by Apple"
+            } ?? "Renews automatically until canceled · Billed by Apple"
         }
     }
 }

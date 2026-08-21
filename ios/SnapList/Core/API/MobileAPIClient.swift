@@ -659,7 +659,17 @@ struct AppDependencies {
             )
         }
 
+        // `HomeRepositoryFactory.resolveAPIOrigin` only returns nil here on a
+        // misconfigured build (missing/invalid `SnapListAPIOrigin`); it already
+        // refuses a loopback origin outside DEBUG. This fallback must not
+        // reintroduce one — Release falls back to the production origin
+        // instead of a local address that is never reachable on a seller's
+        // device.
+#if DEBUG
         let origin = apiOrigin ?? URL(string: "http://127.0.0.1:3001")!
+#else
+        let origin = apiOrigin ?? URL(string: "https://snaplist.dev")!
+#endif
 
         let appAttest = AppAttestClient(
             appID: "35YFS8XJRQ.dev.snaplist.ios",

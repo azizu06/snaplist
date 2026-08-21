@@ -801,7 +801,15 @@ struct SettingsView: View {
     /// derivation (`MobileAPIClient.swift`) without adding a constructor
     /// parameter routed through `AppShellView.swift`, which #865 does not own.
     private var ebayOAuthCallbackURL: URL {
-        (HomeRepositoryFactory.defaultAPIOrigin ?? URL(string: "http://127.0.0.1:3001")!)
+        // Mirrors the Debug/Release split in `MobileAPIClient.AppDependencies.make`
+        // (#971): a misconfigured build must not fall back to a loopback origin
+        // outside DEBUG.
+#if DEBUG
+        let fallback = URL(string: "http://127.0.0.1:3001")!
+#else
+        let fallback = URL(string: "https://snaplist.dev")!
+#endif
+        return (HomeRepositoryFactory.defaultAPIOrigin ?? fallback)
             .appending(path: "/mobile/ebay/oauth")
     }
 }
