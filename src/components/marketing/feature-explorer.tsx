@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { FEATURE_STEPS } from "@/lib/marketing/site";
 import {
   ListingReviewScreen,
@@ -19,6 +19,113 @@ const STEP: Record<string, number> = {
   ArrowDown: 1,
   ArrowRight: 1,
 };
+
+/** Below this the explorer stacks the phone over the cards and Scout has nowhere to stand. */
+const SCOUT_MIN_WIDTH = "(min-width: 760px)";
+
+/**
+ * Reads a media query as state, through the store API rather than an effect.
+ *
+ * The server snapshot is `false` on purpose. It means the markup React sends
+ * never contains Scout, whatever the eventual viewport is, so hydration has
+ * nothing to reconcile; the client subscribes, reads the real value, and adds
+ * him on the next render.
+ */
+function useMediaQuery(query: string) {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    [query],
+  );
+  return useSyncExternalStore(
+    subscribe,
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
+
+/**
+ * Scout mounts only when the phone is near the viewport and wide enough to hold him.
+ *
+ * Both halves are about bytes. The five clips total about 4 MB, and while only
+ * one is ever fetched at a time, a `<video>` sitting in the initial tree starts
+ * downloading whether or not anyone scrolls this far. Gating on intersection
+ * means a visitor who reads the hero and leaves pays nothing, and gating on
+ * width means a phone pays nothing at all, since Scout is hidden there anyway.
+ *
+ * A CSS `display: none` would do neither: the element still mounts and the
+ * browser still fetches the clip. That is why the breakpoint is duplicated here
+ * as a media query rather than left to the stylesheet.
+ *
+ * There is no fallback for a missing IntersectionObserver. Every engine that can
+ * decode VP9 alpha has had one for years, and the honest failure for a browser
+ * that somehow lacks it is a missing decoration, not a mount that skips the gate.
+ */
+function useScoutMount(ref: React.RefObject<HTMLElement | null>) {
+  const [near, setNear] = useState(false);
+  const wide = useMediaQuery(SCOUT_MIN_WIDTH);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || near || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setNear(true);
+      },
+      { rootMargin: "400px" },
+    );
+    io.observe(node);
+    return () => io.disconnect();
+  }, [ref, near]);
+
+  return near && wide;
+}
+
+/**
+ * Scout stands on the phone and reacts to the selected step.
+ *
+ * The clips are the accepted Higgsfield motion set, VP9 with a real alpha
+ * channel, so the character composites straight onto the section background with
+ * no plate behind it. Remounting on `id` is deliberate: swapping `src` on a live
+ * element keeps the old frame on screen until the new one decodes, and `key`
+ * gives a clean element that starts at frame zero.
+ *
+ * Reduced Motion still gets Scout, held on his first frame. Hiding him would
+ * remove content rather than remove motion, and a `<video>` ignores the CSS
+ * media query, so the pause has to happen here.
+ */
+function ExplorerScout({ id }: { id: string }) {
+  const video = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const node = video.current;
+    if (!node) return;
+    if (!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    node.pause();
+    const hold = () => node.pause();
+    node.addEventListener("loadeddata", hold);
+    return () => node.removeEventListener("loadeddata", hold);
+  }, [id]);
+
+  return (
+    <video
+      key={id}
+      ref={video}
+      className="mkt-explorer__scout"
+      src={`/scout/${id}.webm`}
+      aria-hidden="true"
+      autoPlay
+      loop
+      muted
+      playsInline
+      preload="auto"
+      tabIndex={-1}
+    />
+  );
+}
 
 /**
  * The signature section: five selector cards drive one feature phone.
@@ -40,6 +147,8 @@ const STEP: Record<string, number> = {
 export function FeatureExplorer() {
   const [active, setActive] = useState(0);
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const stage = useRef<HTMLDivElement>(null);
+  const scoutReady = useScoutMount(stage);
 
   const onTabKey = useCallback((event: React.KeyboardEvent, index: number) => {
     let next: number | null = null;
@@ -60,7 +169,7 @@ export function FeatureExplorer() {
 
   return (
     <div className="mkt-explorer">
-      <div className="mkt-explorer__stage">
+      <div className="mkt-explorer__stage" ref={stage}>
         <div
           id="mkt-feature-panel"
           role="tabpanel"
@@ -68,6 +177,7 @@ export function FeatureExplorer() {
           className="mkt-explorer__panel"
         >
           <div className="mkt-explorer__frame">
+            {scoutReady ? <ExplorerScout id={FEATURE_STEPS[active].id} /> : null}
             <div className="mkt-explorer__scale">
               <div className="mkt-explorer__device">
                 {/* The device draws its own volume and power buttons as
