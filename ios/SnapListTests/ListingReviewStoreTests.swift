@@ -1004,6 +1004,122 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertFalse(store.isDirty)
     }
 
+    // #974 round-2 fix (Standards BLOCK, finding 1): the round-1 relaxed
+    // staleness guard inferred "own newer edit, safe to report success"
+    // purely from whether *this* attempt's own captured generation still
+    // matched the current one. That inference is wrong when a second local
+    // edit AND a foreign session's takeover both land in the same blocked
+    // window -- both make the generation check true, but only one of them
+    // is safe. This is the RED reproduction: a foreign token takes over the
+    // persisted draft while a local edit is also in flight, and the save
+    // must never claim success once that happens.
+    func testForeignTakeoverDuringAMidFlightEditIsNeverMaskedAsASuccessfulSave() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstReceipt = Self.receipt(for: snapshot)
+        let persistence = MemoryListingReviewDraftPersistence()
+        let service = ListingReviewSaveGateService(
+            saves: [.success(firstReceipt)],
+            reload: snapshot
+        )
+        let store = makeStore(service: service, persistence: persistence)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Sony WH-1000XM4 headphones with case")
+        let saveTask = Task { @MainActor in await store.done() }
+        await service.waitUntilSaveBlocked()
+
+        // A second local edit lands mid-flight, exactly like the round-1
+        // fix's own scenario -- but this time a different session also
+        // takes over the persisted draft in the same window (e.g. the
+        // seller reopened review on another device).
+        await store.setDescription("Second local edit during the same save")
+        let foreignToken = ListingReviewDraftPersistenceToken(
+            sessionID: UUID(),
+            generation: 0
+        )
+        let tookOver = await persistence.activate(
+            foreignToken,
+            runID: snapshot.binding.runID
+        )
+        XCTAssertTrue(tookOver)
+
+        await service.releaseSave()
+        let outcome = await saveTask.value
+
+        // The save must not claim success while a foreign session now owns
+        // the persisted draft -- that would be a silent last-write-wins.
+        XCTAssertEqual(outcome, .stayed)
+        XCTAssertEqual(store.phase, .conflict)
+        XCTAssertTrue(store.isStale)
+        XCTAssertEqual(
+            store.snapshot?.binding.reviewRevision,
+            snapshot.binding.reviewRevision
+        )
+        XCTAssertTrue(store.isDirty)
+    }
+
+    // #974 round-2 fix (Standards BLOCK, finding 2): `stage()`'s
+    // `persisted == false` branch used to write `phase = .failed`
+    // unconditionally, even while a save was already in flight --
+    // clobbering `executeSave`'s own `guard phase == .saving` checks and
+    // abandoning that attempt with no recovery. This is the RED
+    // reproduction: a mid-save `stage()` persistence failure must defer to
+    // the in-flight save's own honest outcome instead of stomping its
+    // phase.
+    func testAMidSaveStagingFailureDefersToTheInFlightSavesOwnOutcome() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstReceipt = Self.receipt(for: snapshot)
+        let persistence = ListingReviewTogglePersistence()
+        let service = ListingReviewSaveGateService(
+            saves: [.success(firstReceipt)],
+            reload: snapshot
+        )
+        let store = makeStore(service: service, persistence: persistence)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Sony WH-1000XM4 headphones with case")
+        let saveTask = Task { @MainActor in await store.done() }
+        await service.waitUntilSaveBlocked()
+
+        await persistence.failSaves()
+        await store.setDescription(
+            "Mid-flight edit while local persistence is failing"
+        )
+
+        // The in-flight save still owns `phase` -- a failed *local* disk
+        // write for this edit must not report it as a dropped save.
+        XCTAssertEqual(store.phase, .saving)
+        XCTAssertEqual(
+            store.draft?.description,
+            "Mid-flight edit while local persistence is failing"
+        )
+        XCTAssertTrue(store.isDirty)
+
+        await service.releaseSave()
+        let outcome = await saveTask.value
+
+        // The in-flight save's own network round trip still succeeded, but
+        // the edit it owed a resave for could never durably land while
+        // local persistence keeps failing -- so the deferred resave
+        // surfaces as an honest failure, not a second silent drop and not
+        // stuck in `.saving`.
+        XCTAssertEqual(outcome, .stayed)
+        XCTAssertEqual(store.phase, .failed)
+        XCTAssertEqual(
+            store.announcement,
+            ListingReviewCopy.draftPersistenceFailed
+        )
+        XCTAssertTrue(store.isDirty)
+        XCTAssertEqual(
+            store.draft?.description,
+            "Mid-flight edit while local persistence is failing"
+        )
+    }
+
     private func makeStore(
         service: any ListingReviewServing,
         persistence: any ListingReviewDraftPersisting =

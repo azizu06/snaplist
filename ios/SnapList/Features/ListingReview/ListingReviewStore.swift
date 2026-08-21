@@ -380,12 +380,39 @@ final class ListingReviewStore {
             guard phase == .saving, activeScope == scope else {
                 return .stayed
             }
-            if !removed && generation == draftGeneration {
-                // Nothing this attempt knows about explains the failed
-                // removal -- most likely a different session now owns this
-                // run's persisted draft -- so this save cannot claim to
-                // have durably landed.
-                return .stayed
+            if !removed {
+                // A failed removal reads identically as a boolean for two
+                // causes that must never collapse into the same branch:
+                // this attempt's own later local edit already re-persisted
+                // under a newer token of the same session (safe -- still my
+                // draft, still my session, still fine to report success),
+                // or a different session's token now owns the record
+                // entirely (unsafe -- reporting success would be a silent
+                // last-write-wins over whatever that other session is
+                // doing). Whether *this* attempt's own generation moved is
+                // not evidence of which one happened -- both can be true at
+                // once -- so ask persistence who currently holds the token.
+                let stillOwnedByThisSession: Bool
+                if generation == draftGeneration {
+                    stillOwnedByThisSession = false
+                } else {
+                    do {
+                        _ = try await persistence.load(
+                            runID: snapshot.binding.runID,
+                            token: persistenceToken
+                        )
+                        stillOwnedByThisSession = true
+                    } catch {
+                        stillOwnedByThisSession = false
+                    }
+                }
+                guard stillOwnedByThisSession else {
+                    guard phase == .saving else { return .stayed }
+                    isStale = true
+                    phase = .conflict
+                    announcement = ListingReviewCopy.staleReview
+                    return .stayed
+                }
             }
             if pendingSave?.idempotencyKey == operation.idempotencyKey {
                 pendingSave = nil
@@ -472,6 +499,18 @@ final class ListingReviewStore {
         guard generation == draftGeneration else { return }
         if persisted {
             if changed { scheduleAutosave() }
+        } else if phase == .saving {
+            // An in-flight save's own guards read `phase` to decide whether
+            // it still owns this attempt (see `executeSave`). Writing
+            // `.failed` here -- even though this failure is real -- would
+            // trip those guards and abandon that attempt with no recovery,
+            // since no field is disabled to have kept this edit from
+            // landing mid-save in the first place. Defer instead, through
+            // the same flag a reentrant mutator call already uses: the
+            // in-flight save's own completion resaves once more and
+            // resolves this failure honestly, whether that resave lands or
+            // fails again for real.
+            resaveRequested = true
         } else {
             phase = .failed
             self.announcement = ListingReviewCopy.draftPersistenceFailed
