@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Release-only mirror of Info.plist (#971). The two files must otherwise
+	     stay identical: this one exists solely to omit the Debug-only
+	     NSAppTransportSecurity/NSAllowsLocalNetworking local-networking
+	     exception, which App Review flags on a Release build and which
+	     Release never needs (HomeRepositoryFactory.resolveAPIOrigin already
+	     refuses a loopback API origin outside DEBUG). Wired via
+	     SnapList.Release.xcconfig's INFOPLIST_FILE override. When a key
+	     changes in Info.plist, mirror the same change here unless it is the
+	     ATS exception itself. -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -51,22 +60,6 @@
 	<string>Take photos of your item so SnapList can identify it, price it, and write your listing. Photos are uploaded and kept with the listing.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record a short voice note about your item. SnapList uploads it, turns it into text for your listing, then deletes the recording.</string>
-	<!-- Debug-only ATS exception (#971). The $0 local Supabase + local Node
-	     API/worker workflow (AGENTS.md) needs http://localhost reachability
-	     in Debug; Release always talks to the production https origin
-	     (HomeRepositoryFactory.resolveAPIOrigin rejects loopback outside
-	     DEBUG) and must not ship this exception. Release builds this target
-	     with INFOPLIST_FILE = SnapList/Info-Release.plist instead, which is
-	     identical to this file minus this dict — see that file's header.
-	     A $(VAR)-substituted plist value can't gate this: NSAllowsLocalNetworking
-	     is a boolean, and every ios/Scripts/*-contract.test.sh script plutil-lints
-	     this file directly as raw source, before any Xcode build-setting
-	     substitution runs, so an unresolved "<$(VAR)/>" tag fails that lint. -->
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save your prepared listing photos to your library when you choose Save photos. SnapList only adds photos and never browses your library.</string>
 	<key>SnapListAPIOrigin</key>

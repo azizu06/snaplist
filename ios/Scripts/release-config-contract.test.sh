@@ -12,6 +12,7 @@ debug_config=${repository_root}/ios/Configuration/SnapList.Debug.xcconfig
 release_config=${repository_root}/ios/Configuration/SnapList.Release.xcconfig
 entitlements=${repository_root}/ios/SnapList/SnapList.entitlements
 info_plist=${repository_root}/ios/SnapList/Info.plist
+info_plist_release=${repository_root}/ios/SnapList/Info-Release.plist
 
 assert_rejected() {
   if "$@" >/dev/null 2>&1; then
@@ -109,6 +110,36 @@ Store Connect stalls every upload waiting on the export-compliance answer."
 Declaring true obliges a CCATS filing and an annual self-classification report."
   exit 1
 }
+
+# #971. The Debug-only local-networking ATS exception must not ship in
+# Release. Release builds this target with a separate Info.plist
+# (Info-Release.plist) rather than a substituted plist value, because these
+# contract scripts plutil-lint the raw checked-in file directly, before any
+# Xcode build-setting substitution runs.
+test -f "$info_plist_release"
+plutil -lint "$info_plist_release" >/dev/null 2>&1 || {
+  print -u2 -r -- "Info-Release.plist is not a readable property list: ${info_plist_release}"
+  exit 1
+}
+if plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw "$info_plist_release" \
+    >/dev/null 2>&1; then
+  print -u2 -r -- "Info-Release.plist ships the Debug-only local-networking ATS exception"
+  exit 1
+fi
+declared_local_networking=$(
+  plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw "$info_plist" 2>/dev/null
+) || {
+  print -u2 -r -- "Info.plist lost the local-networking ATS exception Debug needs"
+  exit 1
+}
+[[ $declared_local_networking == "true" ]] || {
+  print -u2 -r -- "Info.plist's NSAllowsLocalNetworking is '${declared_local_networking}', expected 'true'"
+  exit 1
+}
+if ! grep -Fq 'INFOPLIST_FILE = "SnapList/Info-Release.plist"' "$project_file"; then
+  print -u2 -r -- "Release configuration must build with SnapList/Info-Release.plist"
+  exit 1
+fi
 
 # #890. The CI Release job builds -sdk iphonesimulator with code signing off,
 # which never processes entitlements, so a missing or unexpanded
@@ -224,3 +255,36 @@ env \
   SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY=pk_live_valid \
   SNAPLIST_RELEASE_CLERK_FRONTEND_DOMAIN=release-clerk.example.invalid \
   "$release_lint"
+
+# #971. Verify Info.plist and Info-Release.plist have identical keys
+# outside of NSAppTransportSecurity. Release may strip the ATS exception
+# but must not add, remove, or change any other key.
+debug_plist_json=$(mktemp)
+release_plist_json=$(mktemp)
+
+plutil -convert json -o "$debug_plist_json" "$info_plist"
+plutil -convert json -o "$release_plist_json" "$info_plist_release"
+
+python3 <<PYTHON_EOF
+import json
+import sys
+
+with open('$debug_plist_json') as f:
+  debug_dict = json.load(f)
+with open('$release_plist_json') as f:
+  release_dict = json.load(f)
+
+debug_dict.pop('NSAppTransportSecurity', None)
+release_dict.pop('NSAppTransportSecurity', None)
+
+debug_json = json.dumps(debug_dict, sort_keys=True, separators=(',', ':'))
+release_json = json.dumps(release_dict, sort_keys=True, separators=(',', ':'))
+
+if debug_json != release_json:
+  print('Info.plist and Info-Release.plist differ outside NSAppTransportSecurity:', file=sys.stderr)
+  print('Debug:', file=sys.stderr)
+  print(json.dumps(debug_dict, indent=2, sort_keys=True), file=sys.stderr)
+  print('Release:', file=sys.stderr)
+  print(json.dumps(release_dict, indent=2, sort_keys=True), file=sys.stderr)
+  sys.exit(1)
+PYTHON_EOF
