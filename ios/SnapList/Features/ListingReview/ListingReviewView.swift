@@ -396,26 +396,26 @@ struct ListingReviewView: View {
         ListingReviewInlineField(
             label: "Price",
             pending: draft.sellerPriceOverride
-                != snapshot.pricing.sellerPriceOverride,
-            fillWidth: false
+                != snapshot.pricing.sellerPriceOverride
         ) {
             TextField("Price", text: $priceText)
                 .focused($focusedField, equals: .price)
                 .keyboardType(.decimalPad)
-                .font(.title2.weight(.bold).monospacedDigit())
+                .font(.title3.weight(.bold).monospacedDigit())
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .multilineTextAlignment(.leading)
                 .textFieldStyle(.plain)
-                // A bare TextField takes all the width its parent offers
-                // even without an explicit `.infinity`, so sizing to its
-                // content is what actually makes the box hug a short
-                // currency amount instead of the row.
-                .fixedSize(horizontal: true, vertical: false)
+                // #989: the box now spans the row like Title/Description, so
+                // the field stretches with it instead of hugging its content.
+                // Fixing only the vertical axis keeps the box from taking
+                // more height than one line needs — that unclaimed room read
+                // as the value floating in an oversized box.
+                .fixedSize(horizontal: false, vertical: true)
                 // The retired price button carried this floor and the
                 // replacement field did not, which no compiler and no
                 // identifier grep would have caught.
                 .frame(
-                    minWidth: 110,
+                    maxWidth: .infinity,
                     minHeight: SnapListMetrics.minimumTouchTarget,
                     alignment: .leading
                 )
@@ -762,16 +762,25 @@ struct ListingReviewView: View {
 
     private var footer: some View {
         Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: 10) {
-                    secondaryButton
-                    doneButton
+            // #989: editing every field is already inline-editing-and-saving,
+            // so Edit details added a second control for a save Done already
+            // did. Fix item stays — it opens guided correction, a materially
+            // different action from typing in place — but without it Done is
+            // the only thing left for the footer to offer.
+            if correctionAvailable {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 10) {
+                        secondaryButton
+                        doneButton
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        secondaryButton
+                        doneButton
+                    }
                 }
             } else {
-                HStack(spacing: 12) {
-                    secondaryButton
-                    doneButton
-                }
+                doneButton
             }
         }
         .padding(.horizontal, 18)
@@ -877,42 +886,29 @@ struct ListingReviewView: View {
         return date.formatted(date: .omitted, time: .shortened)
     }
 
+    // #989: only reachable when `correctionAvailable`, so the footer that
+    // builds this never has to choose between Fix item and Edit details —
+    // Edit details is gone and Done alone covers everywhere it applied.
     private var secondaryButton: some View {
         Button {
-            if correctionAvailable {
-                ListingReviewAnnouncement.post(
-                    "Opened guided correction. Your photos and edits are kept.",
-                    assertive: false
-                )
-                returnFocus = .secondary
-                Task {
-                    await inlineEdits.flush(into: store)
-                    await commitPrice()
-                    await store.flushPendingAutosave()
-                    destination = .correction
-                }
-            } else {
-                ListingReviewAnnouncement.post(
-                    "Edit any detail below.",
-                    assertive: false
-                )
-                focusedElement = .title
+            ListingReviewAnnouncement.post(
+                "Opened guided correction. Your photos and edits are kept.",
+                assertive: false
+            )
+            returnFocus = .secondary
+            Task {
+                await inlineEdits.flush(into: store)
+                await commitPrice()
+                await store.flushPendingAutosave()
+                destination = .correction
             }
         } label: {
             Label {
-                Text(
-                    correctionAvailable
-                        ? ListingReviewCopy.fixItem
-                        : ListingReviewCopy.editDetails
-                )
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                Text(ListingReviewCopy.fixItem)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
             } icon: {
-                Image(
-                    systemName: correctionAvailable
-                        ? "sparkles"
-                        : "pencil"
-                )
-                .foregroundStyle(SnapListColorToken.action.color)
+                Image(systemName: "sparkles")
+                    .foregroundStyle(SnapListColorToken.action.color)
             }
             .font(.headline)
             .frame(maxWidth: .infinity)
@@ -933,11 +929,7 @@ struct ListingReviewView: View {
             RoundedRectangle(cornerRadius: 15)
                 .stroke(SnapListColorToken.inputBorder.color)
         }
-        .accessibilityHint(
-            correctionAvailable
-                ? "Opens guided correction"
-                : "Focuses Title"
-        )
+        .accessibilityHint("Opens guided correction")
         .accessibilityFocused($focusedElement, equals: .secondary)
         .accessibilityIdentifier("listing-review.secondary")
     }
