@@ -344,6 +344,144 @@ final class AnalyticsContractTests: XCTestCase {
         XCTAssertNil(restored.identity.clerkUserID)
     }
 
+    // MARK: - Issue #851: leaving a session resets the stored analytics identity
+
+    /// AC1, AC5, AC6. Drives a guest claim, a sign-out through the production
+    /// default (no injected override — the same two-argument call shape
+    /// `SettingsView.swift` uses), then a second member's sign-in, all against
+    /// the real `snaplist.analytics.*` keys on `UserDefaults.standard` — the
+    /// exact storage `MobileAPIClient.makeAnalyticsClient`'s default
+    /// `UserDefaultsAnalyticsIdentityStore()` binds to. This is the seam AC5
+    /// asks for: it proves the *stored* identity clears and that a second
+    /// `identify(clerkUserID:)` for a different member succeeds afterward. It
+    /// does not trace the value into a captured PostHog event, which is a
+    /// guarantee this test does not make.
+    ///
+    /// RED against ec1fd51fe: `SettingsSignOutTransaction.perform` had no
+    /// third parameter, so this call would not compile, and — proven
+    /// independently by `testAnonymousIdentityPersistsUntilResetThenRotates`
+    /// above — nothing else in the app calls `reset()` on the identity store,
+    /// so the assertions below fail once the signature exists.
+    /// Marked RED/control per assertion.
+    func testLeavingASessionClearsTheStoredAnalyticsIdentityForTheNextMemberAfterSignOut() async throws {
+        let clerkUserIDKey = "snaplist.analytics.clerk_user_id.v1"
+        let anonymousIDKey = "snaplist.analytics.anonymous_id.v1"
+        let defaults = UserDefaults.standard
+        let priorClerkUserID = defaults.string(forKey: clerkUserIDKey)
+        let priorAnonymousID = defaults.string(forKey: anonymousIDKey)
+        addTeardownBlock {
+            if let priorClerkUserID {
+                defaults.set(priorClerkUserID, forKey: clerkUserIDKey)
+            } else {
+                defaults.removeObject(forKey: clerkUserIDKey)
+            }
+            if let priorAnonymousID {
+                defaults.set(priorAnonymousID, forKey: anonymousIDKey)
+            } else {
+                defaults.removeObject(forKey: anonymousIDKey)
+            }
+        }
+
+        // Guest claims into member A. `GuestClaimDomain` is the only
+        // production writer (#851's diagnosis), reaching this same store
+        // through `FunnelAnalytics.alias(clerkUserID:)` -> `identify`.
+        XCTAssertTrue(
+            UserDefaultsAnalyticsIdentityStore(defaults: defaults)
+                .identify(clerkUserID: "user_memberA1111111")
+        )
+
+        // Leave: the production default, no override.
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: { true },
+            endSession: {}
+        )
+        XCTAssertEqual(outcome, .signedOut) // control: unaffected by the fix
+
+        // RED against ec1fd51fe: the stored id survived sign-out there.
+        XCTAssertNil(
+            UserDefaultsAnalyticsIdentityStore(defaults: defaults).identity.clerkUserID
+        )
+
+        // Second sign-in, same device. RED against ec1fd51fe: member A's id
+        // would still occupy the store, so this `identify` would be refused
+        // and member B would never be reported under their own id.
+        let secondIdentityStore = UserDefaultsAnalyticsIdentityStore(defaults: defaults)
+        XCTAssertTrue(secondIdentityStore.identify(clerkUserID: "user_memberB2222222"))
+        XCTAssertEqual(secondIdentityStore.identity.clerkUserID, "user_memberB2222222")
+        XCTAssertNotEqual(secondIdentityStore.identity.clerkUserID, "user_memberA1111111")
+    }
+
+    /// AC3. A no-op `resetAnalyticsIdentity` — standing in for a closure that
+    /// silently fails — cannot change the sign-out outcome or the seller-
+    /// facing copy. Passes both before and after the fix; included as the
+    /// contract's negative case rather than a RED assertion.
+    func testAnalyticsIdentityResetCannotChangeSignOutOutcomeOrCopy() async throws {
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: { true },
+            endSession: {},
+            resetAnalyticsIdentity: { /* stands in for a failed reset */ }
+        )
+        XCTAssertEqual(outcome, .signedOut)
+        XCTAssertNil(SettingsSignOutCopy.failureCopy(for: outcome))
+    }
+
+    /// AC4. Local removal commits even when Clerk refuses to end the session,
+    /// and the stored identity clears regardless — it is the session, not the
+    /// local removal, that did not finish.
+    ///
+    /// RED against ec1fd51fe: `resetAnalyticsIdentity` did not exist, so
+    /// nothing cleared the store here either.
+    func testSignOutStillClearsTheStoredIdentityWhenClerkRefusesToEndTheSession() async throws {
+        let suiteName = "AnalyticsContractTests-signout-clerk-refuses-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let identityStore = UserDefaultsAnalyticsIdentityStore(defaults: defaults)
+        XCTAssertTrue(identityStore.identify(clerkUserID: "user_memberA1111111"))
+
+        struct RefusedSignOut: Error {}
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: { true },
+            endSession: { throw RefusedSignOut() },
+            resetAnalyticsIdentity: { identityStore.reset() }
+        )
+
+        XCTAssertEqual(outcome, .sessionNotEnded) // control: unaffected by the fix
+        XCTAssertNil(identityStore.identity.clerkUserID) // RED against ec1fd51fe
+    }
+
+    /// AC2, AC4's analogue for account deletion. The stored identity clears
+    /// once this device's own copies are gone, even when the trailing Clerk
+    /// sign-out call fails and the phase reports `.deviceNotCleared` rather
+    /// than `.deleted`.
+    ///
+    /// RED against ec1fd51fe: `AccountDeletionCoordinator.Dependencies` had no
+    /// `resetAnalyticsIdentity` member, so this would not compile, and nothing
+    /// else in `AccountDeletion.swift` reaches the identity store.
+    func testAccountDeletionClearsStoredAnalyticsIdentityEvenWhenSignOutFails() async throws {
+        let suiteName = "AnalyticsContractTests-deletion-identity-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let identityStore = UserDefaultsAnalyticsIdentityStore(defaults: defaults)
+        XCTAssertTrue(identityStore.identify(clerkUserID: "user_memberA1111111"))
+
+        let dependencies = AccountDeletionCoordinator.Dependencies(
+            requestErasure: { _ in .completed(retainedRecords: []) },
+            clearDeviceState: { true },
+            signOut: { false },
+            resetAnalyticsIdentity: { identityStore.reset() },
+            newIdempotencyKey: { "key" },
+            maximumStatusFollowUps: 0
+        )
+        let coordinator = await AccountDeletionCoordinator(dependencies: dependencies)
+        await coordinator.deleteAccount()
+        let phase = await coordinator.phase
+
+        // control: unaffected by the fix — proves the reset didn't also
+        // silently paper over a real device-clearing/sign-out failure.
+        XCTAssertEqual(phase, .deviceNotCleared)
+        XCTAssertNil(identityStore.identity.clerkUserID) // RED against ec1fd51fe
+    }
+
     func testDedupePersistenceIsStableAcrossRelaunchAndBounded() throws {
         let suiteName = "AnalyticsContractTests-dedupe-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
