@@ -2186,6 +2186,13 @@ final class SnapListUITests: XCTestCase {
         let receipt = "zoom=\(zoom.frame) shutter=\(shutter.frame)"
         XCTAssertLessThan(zoom.frame.maxY, shutter.frame.minY, receipt)
         XCTAssertEqual(zoom.frame.midX, shutter.frame.midX, accuracy: 2, receipt)
+        // #987. The painted pill used to size itself off the two 44pt touch
+        // targets underneath it plus its own padding, landing at 52pt tall —
+        // visibly bigger than the Cal AI proportions the owner pointed to.
+        // The pill is now decorative and sized independently of the targets,
+        // so the container's height is the 44pt floor those targets still
+        // require, not the old inflated paint.
+        XCTAssertLessThanOrEqual(zoom.frame.height, 46, receipt)
 
         // Existence is not reachability, and a tap on an element with no hit
         // point is dropped without error, so it would surface below as the
@@ -2203,6 +2210,24 @@ final class SnapListUITests: XCTestCase {
         )
 
         ultraWide.tap()
+
+        // The container's spoken value flips as soon as `selectedLens`
+        // updates; each option's own `.isSelected` trait republishes to the
+        // accessibility tree on its own schedule and can read stale for a
+        // beat right after the tap even though the underlying state already
+        // changed. Settling on the value first, the same way the hittability
+        // wait above settles before the tap, keeps the assertions below from
+        // racing that publish.
+        let switched = expectation(
+            for: NSPredicate(format: "value == %@", "0.5x"),
+            evaluatedWith: zoom
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [switched], timeout: 5),
+            .completed,
+            "The zoom control must report 0.5x once the tap lands."
+        )
+
         // Frames and hittability, because the way this assertion fails in
         // practice is a tap that never lands rather than a lens that switched
         // to the wrong value.
@@ -2318,6 +2343,21 @@ final class SnapListUITests: XCTestCase {
             for other in controls.dropFirst(index + 1) {
                 XCTAssertFalse(control.frame.intersects(other.frame), receipt)
             }
+        }
+
+        // #987 round 2. The zoom tap targets size themselves from the same
+        // shared shape the painted chip uses, floored at 44pt rather than
+        // fixed at it, so they grow to CONTAIN a chip that outgrows 44pt at
+        // accessibility sizes instead of leaving untappable strips around a
+        // pinned 44x44 square. The decorative chip itself is
+        // `accessibilityHidden` and not independently queryable here, so
+        // this asserts the tap layer visibly tracks Dynamic Type growth
+        // (frame > 44) rather than the floor alone (frame >= 44, already
+        // covered above) — a regression back to a fixed-size tap frame would
+        // pin these at exactly 44 regardless of type size and fail here.
+        for control in [ultraWide, wide] {
+            XCTAssertGreaterThan(control.frame.height, 44, "\(control.identifier) \(receipt)")
+            XCTAssertGreaterThan(control.frame.width, 44, "\(control.identifier) \(receipt)")
         }
     }
 

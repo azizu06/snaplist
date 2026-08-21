@@ -310,20 +310,38 @@ struct ScanZoomControlView: View {
 
     var body: some View {
         if control.isOffered {
-            HStack(spacing: 4) {
-                ForEach(control.lenses, id: \.self) { lens in
-                    option(lens)
+            // The painted pill and the tappable buttons are sized
+            // independently on purpose. Owner device feedback (#987) is that
+            // a pill sized to the 44pt touch targets underneath it reads as
+            // oversized against the Cal AI reference it is proportioned
+            // after, and drifts close to the corner brackets above it. The
+            // decorative chips below paint the small pill the reference
+            // draws; the invisible buttons layered on top keep every option
+            // a real 44pt target without inflating that paint.
+            ZStack {
+                HStack(spacing: 3) {
+                    ForEach(control.lenses, id: \.self) { lens in
+                        visualChip(lens)
+                    }
+                }
+                .padding(3)
+                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
+                .overlay {
+                    Capsule().stroke(
+                        SnapListColorToken.onDarkSurface.color.opacity(0.12),
+                        lineWidth: 1
+                    )
+                }
+                .clipShape(.capsule)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
+                HStack(spacing: 3) {
+                    ForEach(control.lenses, id: \.self) { lens in
+                        tapTarget(lens)
+                    }
                 }
             }
-            .padding(4)
-            .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
-            .overlay {
-                Capsule().stroke(
-                    SnapListColorToken.onDarkSurface.color.opacity(0.12),
-                    lineWidth: 1
-                )
-            }
-            .clipShape(.capsule)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Zoom")
             .accessibilityValue(control.spokenFactor(for: selectedLens))
@@ -332,40 +350,65 @@ struct ScanZoomControlView: View {
         }
     }
 
-    private func option(_ lens: ScanZoomLens) -> some View {
+    /// The shared shape both `visualChip` and `tapTarget` size themselves
+    /// from, so the invisible tap layer's footprint can never drift smaller
+    /// than the painted chip's at large Dynamic Type sizes (#987 round 2) —
+    /// they run the exact same layout, not two hand-matched constants.
+    private func chipShape(_ lens: ScanZoomLens) -> some View {
+        Text(control.label(for: lens))
+            .font(.footnote.weight(.semibold))
+            // ".5x" is two glyph groups, so a squeezed chip wraps into a
+            // stack rather than truncating, and the capsule grows taller
+            // than the chrome it sits in. #954 hit this twice, once with
+            // the count capsule and once with this one.
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 32, minHeight: 26)
+    }
+
+    /// The small painted pill, purely decorative. VoiceOver reads the
+    /// matching `tapTarget` instead.
+    private func visualChip(_ lens: ScanZoomLens) -> some View {
+        let isSelected = lens == selectedLens
+
+        return chipShape(lens)
+            .foregroundStyle(
+                isSelected
+                    ? SnapListColorToken.inkPrimary.color
+                    : SnapListColorToken.onDarkSurface.color
+            )
+            .background {
+                if isSelected {
+                    Capsule().fill(SnapListColorToken.onDarkSurface.color)
+                }
+            }
+    }
+
+    /// The real touch target for one lens. Sized from the same `chipShape`
+    /// the painted pill uses, floored at 44pt, so it always CONTAINS the
+    /// visible chip instead of a fixed 44x44 square that a large Dynamic
+    /// Type chip could grow past. Its label carries no visible content —
+    /// `visualChip` paints what the seller sees underneath it.
+    private func tapTarget(_ lens: ScanZoomLens) -> some View {
         let isSelected = lens == selectedLens
 
         return Button {
             selectLens(lens)
         } label: {
-            Text(control.label(for: lens))
-                .font(.subheadline.weight(.semibold))
-                // ".5x" is two glyph groups, so a squeezed chip wraps into a
-                // stack rather than truncating, and the capsule grows taller
-                // than the chrome it sits in. #954 hit this twice, once with
-                // the count capsule and once with this one.
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(
-                    isSelected
-                        ? SnapListColorToken.inkPrimary.color
-                        : SnapListColorToken.onDarkSurface.color
-                )
-                .padding(.horizontal, 10)
-                // The visible chip stays compact the way the reference draws
-                // it. The 44pt floor lives on the button below it, so the
-                // target never shrinks with the artwork.
-                .frame(minWidth: 40, minHeight: 36)
-                .background {
-                    if isSelected {
-                        Capsule().fill(SnapListColorToken.onDarkSurface.color)
-                    }
-                }
-                .accessibilityHidden(true)
+            // `Color.clear` bakes in zero alpha, and `.opacity()` only
+            // multiplies existing alpha (0 × anything is still 0) — so even
+            // `Color.clear.opacity(0.001)` stays exactly transparent.
+            // SwiftUI excludes exactly-zero-alpha content from real touch
+            // delivery regardless of `.contentShape`, so this target went
+            // genuinely untappable until given a non-zero, imperceptible
+            // fill instead.
+            chipShape(lens)
+                .frame(minWidth: 44, minHeight: 44)
+                .opacity(0.001)
         }
         .buttonStyle(.plain)
-        .frame(minWidth: 44, minHeight: 44)
-        .contentShape(.capsule)
+        .contentShape(Rectangle())
         .accessibilityLabel(control.accessibilityLabel(for: lens))
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityIdentifier(
