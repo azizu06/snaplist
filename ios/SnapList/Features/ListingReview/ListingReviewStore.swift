@@ -7,6 +7,10 @@ enum ListingReviewPhase: Equatable, Sendable {
     case saving
     case offline
     case failed
+    /// #951. The server refused this save permanently and sent the remedy in
+    /// `announcement`. Distinct from `.failed` because `.failed` is the phase
+    /// the review offers a retry from, and no retry of this save can succeed.
+    case refused
     case conflict
     case reloadConfirmation
     case reloadFailed
@@ -328,6 +332,16 @@ final class ListingReviewStore {
             phase = .ready
             announcement = "Saved. Back to Processing review."
             return .saved(receipt)
+        } catch ListingReviewClientError.refused(let refusal) {
+            guard generation == draftGeneration,
+                  phase == .saving else {
+                return .stayed
+            }
+            // The draft stays on the phone. The refusal is about repricing this
+            // save asks for, not about the edits, and some of them -- putting
+            // the condition back the way it was -- make the next save legal.
+            phase = .refused
+            announcement = refusal
         } catch ListingReviewClientError.conflict {
             guard generation == draftGeneration,
                   phase == .saving else {
@@ -389,7 +403,7 @@ final class ListingReviewStore {
         if changed {
             draftGeneration &+= 1
             pendingSave = nil
-            if phase == .failed || phase == .offline {
+            if phase == .failed || phase == .offline || phase == .refused {
                 phase = .ready
             }
             self.announcement = announcement

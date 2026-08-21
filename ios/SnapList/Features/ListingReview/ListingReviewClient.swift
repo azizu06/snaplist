@@ -19,6 +19,11 @@ struct ListingReviewSaveReceipt: Decodable, Equatable, Sendable {
 enum ListingReviewClientError: Error, Equatable {
     case offline
     case conflict
+    /// A 409 the same request can never clear. The associated value is the
+    /// server's own sentence, which names the remedy the seller has to act on;
+    /// #951 exists because every one of these used to reach the seller as
+    /// `ListingReviewCopy.saveFailed`, telling them to retry forever.
+    case refused(String)
     case unavailable
     case invalidResponse
 }
@@ -97,6 +102,16 @@ struct ListingReviewAPIClient: ListingReviewServing {
                     ErrorEnvelope.self,
                     from: data
                 )
+                // The permanent refusals are the only 409s that carry copy
+                // written for the seller, and the code -- not the sentence --
+                // is what says so. Matching the sentence instead would make
+                // editing it for tone silently reroute the state (#951).
+                if envelope?.error.code == "conflict_permanent",
+                   let message = envelope?.error.message,
+                   !message.trimmingCharacters(in: .whitespacesAndNewlines)
+                       .isEmpty {
+                    throw ListingReviewClientError.refused(message)
+                }
                 if envelope?.error.code == "conflict",
                    envelope?.error.message == ListingReviewCopy.staleReview {
                     throw ListingReviewClientError.conflict

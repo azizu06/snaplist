@@ -185,6 +185,7 @@ struct ListingReviewView: View {
         }
         .onChange(of: store.announcement) { _, announcement in
             let assertive = store.phase == .failed
+                || store.phase == .refused
                 || store.phase == .conflict
                 || store.phase == .reloadFailed
             ListingReviewAnnouncement.post(
@@ -284,6 +285,16 @@ struct ListingReviewView: View {
             ListingReviewStatusBanner(
                 text: "You're offline. Your changes are saved on this phone.",
                 systemImage: "wifi.slash"
+            )
+        } else if store.phase == .refused {
+            // #951. No retry button: the server refused this save for good and
+            // the sentence it sent is the remedy. Done stays live because the
+            // remedy can be an edit the seller makes right here -- undoing the
+            // condition change that asked for the reprice -- and that is a
+            // different save, not a repeat of the refused one.
+            ListingReviewStatusBanner(
+                text: store.announcement,
+                systemImage: "exclamationmark.triangle"
             )
         } else if store.phase == .failed {
             ListingReviewStatusBanner(

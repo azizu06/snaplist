@@ -143,6 +143,10 @@ enum ListingReviewFixture: String, Equatable {
     case zeroEvidence = "zero-evidence"
     case fiveEvidence = "five-evidence"
     case saveFailure = "save-failure"
+    /// #951. A 409 the same save can never clear. Distinct from `saveFailure`
+    /// because the seller is shown the server's remedy and no retry, where
+    /// `saveFailure` is a transient outage that a retry can genuinely fix.
+    case saveRefusal = "save-refusal"
     case offline
     case conflict
     case correctionUnavailable = "correction-unavailable"

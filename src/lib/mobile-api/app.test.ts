@@ -273,15 +273,29 @@ describe("mobile API v1 provider-neutral handler", () => {
     });
   });
 
+  // #951. Every row is a 409, and the code is the only thing that separates a
+  // refusal a repeat of this request can clear from one it never can. The
+  // client routes on it, so a table that only checked the sentence would let
+  // the split rot the next time a sentence is edited for tone.
   it.each([
-    [new ListingReviewStaleError(), "This review changed. Reload and try again."],
+    [
+      new ListingReviewStaleError(),
+      "conflict",
+      "This review changed. Reload and try again.",
+    ],
     [
       new ListingReviewIdempotencyConflictError(),
+      "conflict",
       "This Idempotency-Key is already bound to different review edits.",
     ],
-    [new ListingReviewSaveInProgressError(), "This save is already in progress. Try again."],
+    [
+      new ListingReviewSaveInProgressError(),
+      "conflict",
+      "This save is already in progress. Try again.",
+    ],
     [
       new ListingReviewNotEditableError(),
+      "conflict_permanent",
       "A published listing cannot be changed from review.",
     ],
     [
@@ -289,6 +303,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         "A condition change alone cannot reprice this item again."
           + " Add, replace, or remove a photo to price it again.",
       ),
+      "conflict_permanent",
       "A condition change alone cannot reprice this item again."
         + " Add, replace, or remove a photo to price it again.",
     ],
@@ -297,6 +312,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         "This item's included correction is already used."
           + " Add, replace, or remove a photo to price it again.",
       ),
+      "conflict_permanent",
       "This item's included correction is already used."
         + " Add, replace, or remove a photo to price it again.",
     ],
@@ -305,6 +321,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         "This item was priced before SnapList could prove a correction reuses the"
           + " same photos. Scan it again to price it.",
       ),
+      "conflict_permanent",
       "This item was priced before SnapList could prove a correction reuses the"
         + " same photos. Scan it again to price it.",
     ],
@@ -312,15 +329,18 @@ describe("mobile API v1 provider-neutral handler", () => {
       new ListingReviewCorrectionUnavailableError(
         "This item has no eBay listing to regenerate.",
       ),
+      "conflict_permanent",
       "This item has no eBay listing to regenerate.",
     ],
     [
       new ListingReviewCorrectionUnavailableError("This item has not been priced yet."),
+      "conflict_permanent",
       "This item has not been priced yet.",
     ],
   ] as const)(
-    "answers a permanent Listing Review refusal 409 with its own remedy, quietly",
-    async (error, message) => {
+    "answers a Listing Review refusal 409 with its own remedy, quietly, and"
+      + " says in the code whether repeating the request can ever help",
+    async (error, code, message) => {
       const reportError = vi.fn();
       const response = await handler({
         listingReviewSave: { save: vi.fn().mockRejectedValue(error) },
@@ -329,7 +349,7 @@ describe("mobile API v1 provider-neutral handler", () => {
 
       expect(response.status).toBe(409);
       await expect(response.json()).resolves.toEqual({
-        error: { code: "conflict", message, requestId: "req_test" },
+        error: { code, message, requestId: "req_test" },
       });
       // Ordinary seller behaviour. Reporting it was the 503 path's noise.
       expect(reportError).not.toHaveBeenCalled();
@@ -351,7 +371,7 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "conflict",
+        code: "conflict_permanent",
         message: "SnapList cannot match this item to the run that priced it."
           + " Scan it again to price it.",
         requestId: "req_test",

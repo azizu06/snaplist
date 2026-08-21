@@ -18,6 +18,13 @@ export const apiErrorCodeSchema = z.enum([
   "not_found",
   "method_not_allowed",
   "conflict",
+  // #951. A 409 the caller cannot clear by repeating the request: the state is
+  // permanent for the resource as it stands, and `message` carries the remedy
+  // instead of an invitation to retry. Plain `conflict` stays what it was --
+  // a view that went stale, or work already in flight -- so a client can tell
+  // "reload and try again" from "this will never succeed" without matching on
+  // seller-facing copy.
+  "conflict_permanent",
   "rate_limited",
   "internal_error",
 ]);
