@@ -7,6 +7,15 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The one-to-five photo contract shared by every capture entry point — the main
+/// camera/library flow and guest onboarding's separate staging store alike. A second
+/// independently hardcoded maximum is how #945 shipped: onboarding's library picker and
+/// its `FileSystemStagedLibraryPhotoStore` each carried their own stale `4` after the
+/// product moved to five photos while this flow's limit already read `5`.
+enum CapturePhotoLimits {
+    static let maxPhotoCount = 5
+}
+
 /// Bounds one captured photo to bytes the upload can actually carry.
 ///
 /// `POST /v1/items/runs` is a Route Handler behind a platform body limit of
@@ -1890,7 +1899,7 @@ final class CaptureFlowModel {
             }
         }
         let phaseBeforeSelection = phase
-        let remainingCapacity = max(0, 5 - stagedPhotos.count)
+        let remainingCapacity = max(0, CapturePhotoLimits.maxPhotoCount - stagedPhotos.count)
         let admitted = selection.prefix(remainingCapacity)
         let isActive: @MainActor @Sendable () -> Bool = { [weak self] in
             self?.activeIntakeID == intakeID
@@ -1968,7 +1977,7 @@ final class CaptureFlowModel {
         while requestIsActive: @escaping @MainActor @Sendable () -> Bool
     ) async -> NativeIntake.Snapshot? {
         guard let intake, requestIsActive() else { return nil }
-        let remainingCapacity = max(0, 5 - stagedPhotos.count)
+        let remainingCapacity = max(0, CapturePhotoLimits.maxPhotoCount - stagedPhotos.count)
         let inputs = photos.prefix(remainingCapacity).map {
             guardedPhotoInput($0, while: requestIsActive)
         }

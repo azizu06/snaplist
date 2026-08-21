@@ -479,7 +479,9 @@ struct LaunchConfiguration: Equatable {
                 let value = String(
                     argument.dropFirst("--fixture-staged-library-photos=".count)
                 )
-                configuration.stagedLibraryPhotoFixtureCount = Int(value).map { min(max($0, 0), 4) }
+                configuration.stagedLibraryPhotoFixtureCount = Int(value).map {
+                    min(max($0, 0), CapturePhotoLimits.maxPhotoCount)
+                }
             } else if argument == "--restored-capture-fixture" {
                 configuration.usesRestoredCaptureFixture = true
                 configuration.usesZeroNetworkFixtures = true

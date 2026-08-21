@@ -1787,7 +1787,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(snapshot.recoveryHours, 24)
     }
 
-    func testFileSystemStagingIsRecoverableProtectedAndCappedAtFourPhotos() throws {
+    func testFileSystemStagingIsRecoverableProtectedAndCappedAtFivePhotos() throws {
         let fileManager = FileManager.default
         let parent = fileManager.temporaryDirectory.appendingPathComponent(
             "snaplist-onboarding-photo-store-\(UUID().uuidString)",
@@ -1801,8 +1801,14 @@ final class OnboardingFlowTests: XCTestCase {
         )
         let photos = (0..<5).map { Data([UInt8($0)]) }
 
-        XCTAssertEqual(try store.replace(with: photos), 4)
-        XCTAssertEqual(try store.load(), Array(photos.prefix(4)))
+        XCTAssertEqual(try store.replace(with: photos), 5)
+        XCTAssertEqual(try store.load(), photos)
+
+        // Even if the picker's own maxSelectionCount were bypassed, the store itself
+        // still caps persistence at 5 rather than trusting the caller's input size.
+        let sixPhotos = (0..<6).map { Data([UInt8($0)]) }
+        XCTAssertEqual(try store.replace(with: sixPhotos), 5)
+        XCTAssertEqual(try store.load(), Array(sixPhotos.prefix(5)))
 
         XCTAssertEqual(FileSystemStagedLibraryPhotoStore.fileProtection, .complete)
         XCTAssertTrue(
@@ -1828,6 +1834,50 @@ final class OnboardingFlowTests: XCTestCase {
 
         store.clear()
         XCTAssertEqual(try store.load(), [])
+    }
+
+    /// Drives the path a guest actually takes — picker selection, the view's loading
+    /// loop, `didStageLibraryPhotos`, the store the shipping composition supplies by
+    /// default — rather than the store's own guard in isolation. #945's fifth photo was
+    /// lost twice above that guard: once in the loading loop, once in
+    /// `InMemoryStagedLibraryPhotoStore`, so a store-only assertion stayed green while
+    /// the seller still lost a photo.
+    @MainActor
+    func testFivePickerSelectionsSurviveTheWholeOnboardingStagingPath() async {
+        let store = InMemoryStagedLibraryPhotoStore()
+        let model = makeModel(camera: .authorized, stagedPhotos: store)
+        let selection = (0..<5).map { Data([UInt8($0)]) }
+
+        let loaded = await OnboardingLibraryStaging.loadPhotos(from: selection) { $0 }
+
+        XCTAssertEqual(loaded, selection)
+        XCTAssertTrue(model.didStageLibraryPhotos(loaded))
+        XCTAssertEqual(model.state.stagedPhotoCount, 5)
+        XCTAssertEqual(try store.load(), selection)
+    }
+
+    /// The DEBUG staging fixture is the only way a UI-level test can put a five-photo
+    /// onboarding hand-off on screen, so a clamp of its own would make the five-photo
+    /// path unobservable from XCUITest while shipping code carried it correctly (#945).
+    func testStagedLibraryPhotoFixtureCountClampsToTheSharedPhotoContract() {
+        XCTAssertEqual(
+            LaunchConfiguration.parse(
+                arguments: ["--fixture-staged-library-photos=5"]
+            ).stagedLibraryPhotoFixtureCount,
+            5
+        )
+        XCTAssertEqual(
+            LaunchConfiguration.parse(
+                arguments: ["--fixture-staged-library-photos=9"]
+            ).stagedLibraryPhotoFixtureCount,
+            CapturePhotoLimits.maxPhotoCount
+        )
+        XCTAssertEqual(
+            LaunchConfiguration.parse(
+                arguments: ["--fixture-staged-library-photos=-3"]
+            ).stagedLibraryPhotoFixtureCount,
+            0
+        )
     }
 
     func testExactApprovedCopyPreservesFirstValueWithoutAQuestionnaire() {

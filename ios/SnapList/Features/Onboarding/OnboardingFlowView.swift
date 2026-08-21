@@ -45,7 +45,7 @@ struct OnboardingFlowView: View {
         .photosPicker(
             isPresented: $isPhotoPickerPresented,
             selection: $libraryItems,
-            maxSelectionCount: 4,
+            maxSelectionCount: CapturePhotoLimits.maxPhotoCount,
             matching: .images
         )
         .onChange(of: libraryItems) { _, items in
@@ -520,11 +520,8 @@ struct OnboardingFlowView: View {
     }
 
     private func stageLibraryItems(_ items: [PhotosPickerItem]) async {
-        var photos: [Data] = []
-        for item in items.prefix(4) {
-            if let data = try? await item.loadTransferable(type: Data.self) {
-                photos.append(data)
-            }
+        let photos = await OnboardingLibraryStaging.loadPhotos(from: items) { item in
+            try? await item.loadTransferable(type: Data.self)
         }
 
         guard !Task.isCancelled else { return }
