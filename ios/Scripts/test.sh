@@ -238,7 +238,8 @@ print -r -- \
 # `snaplist_terminate_xcodebuild` can signal the whole tree. zsh's own `set -m`
 # would do this, but it is unavailable without a controlling terminal, which is
 # exactly the CI case.
-xcodebuild \
+/usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' \
+  xcodebuild \
   -project ios/SnapList.xcodeproj \
   -scheme SnapList \
   -destination $snaplist_destination \

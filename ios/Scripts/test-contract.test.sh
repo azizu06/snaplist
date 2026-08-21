@@ -32,6 +32,8 @@ omitted_shard_inventory_file=${temporary_directory}/omitted-test-shards.json
 duplicated_shard_inventory_file=${temporary_directory}/duplicated-test-shards.json
 empty_shard_inventory_file=${temporary_directory}/empty-test-shards.json
 stale_timing_inventory_file=${temporary_directory}/stale-timing-test-shards.json
+unlabelled_layout_inventory_file=${temporary_directory}/unlabelled-layout-test-shards.json
+restated_budget_inventory_file=${temporary_directory}/restated-budget-test-shards.json
 nested_test_repository=${temporary_directory}/nested-test-repository
 lock_file=${temporary_directory}/xcodebuild.lock
 serialized_bin=${temporary_directory}/serialized-bin
@@ -54,11 +56,39 @@ cat > "${serialized_bin}/xcodebuild" <<'EOF'
 # booted simulator. Signalling only the direct child leaves those behind. So
 # this stand-in sleeps in a descendant and records it, which is the only way a
 # test can tell "the child died" from "the process tree died".
+# A build that dies the instant it is asked to leaves no window in which to
+# observe whether the lock was released before or after it went. This mode
+# swallows SIGTERM in both the stand-in and its descendant, so the reap takes
+# its full grace and the ordering becomes visible. SIGKILL still ends it.
+snaplist_outlast_a_term() {
+  integer remaining=$(( SNAPLIST_XCODEBUILD_SLEEP_SECONDS * 10 ))
+
+  TRAPTERM() { : }
+
+  while (( remaining > 0 )); do
+    sleep 0.1
+    (( remaining -= 1 ))
+  done
+}
+
 snaplist_sleep_in_a_descendant() {
+  if [[ -n ${SNAPLIST_XCODEBUILD_OUTLAST_TERM-} ]]; then
+    "$0" --outlast-a-term &
+    print -r -- "$!" >> "${SNAPLIST_XCODEBUILD_DESCENDANT_LOG:-/dev/null}"
+    snaplist_outlast_a_term
+
+    return 0
+  fi
+
   sleep "$SNAPLIST_XCODEBUILD_SLEEP_SECONDS" &
   print -r -- "$!" >> "${SNAPLIST_XCODEBUILD_DESCENDANT_LOG:-/dev/null}"
   wait $!
 }
+
+if [[ ${1-} == --outlast-a-term ]]; then
+  snaplist_outlast_a_term
+  exit 0
+fi
 
 if mkdir "$SNAPLIST_XCODEBUILD_ACTIVE_MARKER" 2>/dev/null; then
   print -r -- "$$" >> "$SNAPLIST_XCODEBUILD_STARTED_LOG"
@@ -349,6 +379,32 @@ assert_shard_inventory_fails_closed_on_omission_and_duplication() {
   ' "$shard_inventory_file" "$duplicated_shard_inventory_file"
 
   ! "$shard_inventory_validator" "$duplicated_shard_inventory_file" 2>/dev/null
+}
+
+# Selector timings survive a reshard; the layout they were measured under does
+# not. A baseline that carries a wall clock from an older split reads as a
+# claim about the current one, which is how "32m00s" outlived the three-shard
+# run that produced it. So the baseline has to name its own split, and it may
+# not keep a second copy of the budget that shard-wall-clock-budget-minutes
+# already owns.
+assert_shard_inventory_baseline_names_the_layout_it_was_measured_under() {
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    inventory.fetch("baseline").delete("measured_layout_ui_shard_count")
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$unlabelled_layout_inventory_file"
+
+  if "$shard_inventory_validator" "$unlabelled_layout_inventory_file" 2>/dev/null; then
+    return 1
+  fi
+
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    inventory.fetch("baseline")["required_pr_wall_clock"] = "32m00s"
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$restated_budget_inventory_file"
+
+  ! "$shard_inventory_validator" "$restated_budget_inventory_file" 2>/dev/null
 }
 
 assert_shard_inventory_fails_closed_on_empty_declared_shard() {
@@ -780,6 +836,33 @@ run_shard_timeout_test_script() {
   ) >/dev/null 2>"$diagnostics_file"
 }
 
+run_stubborn_serialized_test_script() {
+  local sleep_seconds=$1
+  local kill_grace_seconds=$2
+  local diagnostics_file=$3
+
+  (
+    export PATH="${serialized_bin}:${PATH}"
+    export SNAPLIST_IOS_LOCK_FILE=$lock_file
+    export SNAPLIST_IOS_LOCK_POLL_SECONDS=1
+    export SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS=30
+    export SNAPLIST_XCODEBUILD_ACTIVE_MARKER=$serialized_active_marker
+    export SNAPLIST_XCODEBUILD_OVERLAP_LOG=$serialized_overlap_log
+    export SNAPLIST_XCODEBUILD_STARTED_LOG=$serialized_started_log
+    export SNAPLIST_XCODEBUILD_DESCENDANT_LOG=$serialized_descendant_log
+    export SNAPLIST_XCODEBUILD_SLEEP_SECONDS=$sleep_seconds
+    export SNAPLIST_XCODEBUILD_EXIT_STATUS=0
+    export SNAPLIST_XCODEBUILD_OUTLAST_TERM=1
+    export SNAPLIST_IOS_ONLY_TESTING=$holder_selector
+    export SNAPLIST_IOS_SHARD_TIMEOUT_KILL_GRACE_SECONDS=$kill_grace_seconds
+
+    unset SNAPLIST_IOS_SHARD
+    unset SNAPLIST_IOS_REPOSITORY_ROOT
+
+    "$test_script"
+  ) >/dev/null 2>"$diagnostics_file"
+}
+
 assert_a_concurrent_invocation_waits_for_the_holder_instead_of_colliding() {
   local holder_job holder_status waiter_status
   local polls=0
@@ -1075,6 +1158,7 @@ assert_a_terminated_holder_leaves_no_stale_owner_behind() {
 # invocation in another worktree takes the flock and starts a second one.
 assert_a_terminated_holder_reaps_its_build_before_releasing_the_lock() {
   local holder_job recorded_owner holder_pid build_pid descendant_pid
+  local verdict=0
   local polls=0
 
   rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
@@ -1083,12 +1167,15 @@ assert_a_terminated_holder_reaps_its_build_before_releasing_the_lock() {
   : > "$serialized_descendant_log"
   : > "$holder_diagnostics_file"
 
-  run_serialized_test_script "$holder_selector" "$holder_diagnostics_file" 120 &
+  # A six second grace against a build that ignores SIGTERM. Eventual death is
+  # not the claim and cannot separate the two orderings, because the EXIT trap
+  # reaps too: a handler that released the lock first would still leave a dead
+  # build behind by the time anything asked. The claim is that the lock is
+  # never free while the build it stands for is alive, and this window is where
+  # that is visible.
+  run_stubborn_serialized_test_script 60 6 "$holder_diagnostics_file" &
   holder_job=$!
 
-  # Both logs, not just the marker. The fake records its own pid and then its
-  # descendant's, and reading either one early yields an empty string that
-  # would make the liveness checks below vacuously true.
   while [[ ! -d $serialized_active_marker ]] ||
     [[ ! -s $serialized_started_log ]] ||
     [[ ! -s $serialized_descendant_log ]]
@@ -1096,7 +1183,7 @@ assert_a_terminated_holder_reaps_its_build_before_releasing_the_lock() {
     sleep 0.1
     polls=$((polls + 1))
 
-    if (( polls > 200 )); then
+    if (( polls > 300 )); then
       kill "$holder_job" 2>/dev/null
       wait "$holder_job" 2>/dev/null
       return 1
@@ -1115,24 +1202,51 @@ assert_a_terminated_holder_reaps_its_build_before_releasing_the_lock() {
   fi
 
   kill -TERM "$holder_pid"
-  wait "$holder_job" 2>/dev/null
+
+  # Two seconds in, the reap is still working through its grace. The owner file
+  # has to still be there, or the next invocation in another worktree would
+  # take the flock right now and start a second xcodebuild against the same
+  # simulator and DerivedData.
+  sleep 2
+
+  if [[ ! -e ${lock_file}.owner ]] && kill -0 "$build_pid" 2>/dev/null; then
+    verdict=1
+  fi
+
+  polls=0
+
+  while kill -0 "$holder_pid" 2>/dev/null; do
+    sleep 0.2
+    polls=$((polls + 1))
+
+    if (( polls > 150 )); then
+      verdict=1
+      break
+    fi
+  done
 
   polls=0
 
   while kill -0 "$build_pid" 2>/dev/null || kill -0 "$descendant_pid" 2>/dev/null; do
-    sleep 0.1
+    sleep 0.2
     polls=$((polls + 1))
 
-    if (( polls > 100 )); then
-      kill -KILL "$build_pid" "$descendant_pid" 2>/dev/null
-      rm -rf "$serialized_active_marker"
-      return 1
+    if (( polls > 75 )); then
+      verdict=1
+      break
     fi
   done
 
+  kill -KILL "$holder_pid" "$build_pid" "$descendant_pid" 2>/dev/null
+  wait "$holder_job" 2>/dev/null
   rm -rf "$serialized_active_marker"
 
-  [[ ! -e ${lock_file}.owner ]]
+  if [[ -e ${lock_file}.owner ]]; then
+    verdict=1
+    rm -f "${lock_file}.owner"
+  fi
+
+  return $verdict
 }
 
 assert_a_hung_shard_is_killed_with_a_named_annotation() {
@@ -1341,6 +1455,7 @@ for contract_case in \
   assert_focused_selector_uses_the_target_repository \
   assert_malformed_selectors_fail_before_xcodebuild \
   assert_shard_inventory_fails_closed_on_omission_and_duplication \
+  assert_shard_inventory_baseline_names_the_layout_it_was_measured_under \
   assert_shard_inventory_fails_closed_on_empty_declared_shard \
   assert_shard_inventory_fails_closed_on_stale_timing_evidence \
   assert_nested_ui_test_file_cannot_be_silently_omitted \
@@ -1372,6 +1487,12 @@ for contract_case in \
   assert_a_changed_wall_clock_budget_moves_the_thresholds_with_it \
   assert_the_job_cap_leaves_room_for_the_shard_to_report_its_own_timeout
 do
+  if [[ -n ${SNAPLIST_IOS_CONTRACT_CASE_FILTER-} ]] &&
+    [[ $contract_case != *${SNAPLIST_IOS_CONTRACT_CASE_FILTER}* ]]
+  then
+    continue
+  fi
+
   if $contract_case; then
     print -r -- "PASS ${contract_case}"
   else
