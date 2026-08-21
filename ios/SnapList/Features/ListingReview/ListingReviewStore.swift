@@ -56,6 +56,13 @@ final class ListingReviewStore {
     /// multiple in-flight sleeps can coexist safely without ever dropping
     /// the last edit.
     private var pendingAutosaveGeneration: UInt?
+    /// Set when a mutator lands (or a debounce fires) while a save is
+    /// already in flight. `performSave` is not reentrant -- two saves can
+    /// never race the same draft -- so instead of dropping that edit, the
+    /// in-flight save's own completion consumes this flag and resaves once
+    /// it is free, carrying whatever the server just returned as the next
+    /// `expectedReviewRevision`.
+    private var resaveRequested = false
 
     private var persistenceToken: ListingReviewDraftPersistenceToken {
         ListingReviewDraftPersistenceToken(
@@ -193,19 +200,19 @@ final class ListingReviewStore {
     }
 
     func setTitle(_ value: String) async {
-        guard phase != .saving, var draft else { return }
+        guard var draft else { return }
         draft.title = value
         await stage(draft, announcement: "Title updated. Unsaved changes.")
     }
 
     func setDescription(_ value: String) async {
-        guard phase != .saving, var draft else { return }
+        guard var draft else { return }
         draft.description = value
         await stage(draft, announcement: "Description updated. Unsaved changes.")
     }
 
     func setCondition(_ value: ListingReviewCondition) async {
-        guard phase != .saving, var draft else { return }
+        guard var draft else { return }
         draft.condition = value
         await stage(
             draft,
@@ -214,8 +221,7 @@ final class ListingReviewStore {
     }
 
     func setSpecific(name: String, value: String) async {
-        guard phase != .saving,
-              var draft,
+        guard var draft,
               let index = draft.specifics.firstIndex(where: {
                   $0.name.caseInsensitiveCompare(name) == .orderedSame
               }),
@@ -239,7 +245,7 @@ final class ListingReviewStore {
     }
 
     func setSellerPriceOverride(_ value: Decimal?) async {
-        guard phase != .saving, var draft else { return }
+        guard var draft else { return }
         draft.sellerPriceOverride = value
         await stage(
             draft,
@@ -269,7 +275,27 @@ final class ListingReviewStore {
         return await performSave(silent: true)
     }
 
+    /// A mutator can now land mid-save (see the mutators above -- none of
+    /// them refuse), so `performSave` must never let two attempts run at
+    /// once. A reentrant call while `.saving` cannot join or preempt the one
+    /// in flight; it only records that another save is owed, and the
+    /// in-flight attempt's own completion (`executeSave`'s return, below)
+    /// discharges that debt by resaving once, serialized, threading the
+    /// revision the completing save just returned.
     private func performSave(silent: Bool) async -> ListingReviewDoneOutcome {
+        guard phase != .saving else {
+            resaveRequested = true
+            return .stayed
+        }
+        let outcome = await executeSave(silent: silent)
+        if resaveRequested {
+            resaveRequested = false
+            return await performSave(silent: true)
+        }
+        return outcome
+    }
+
+    private func executeSave(silent: Bool) async -> ListingReviewDoneOutcome {
         guard let snapshot, let draft else {
             return .stayed
         }
@@ -291,15 +317,20 @@ final class ListingReviewStore {
             return .stayed
         }
 
+        // Captured once, at the top: this attempt's own identity. A field
+        // edit landing after this point advances `draftGeneration`/`draft`
+        // out from under these locals -- expected, since the mutators no
+        // longer refuse during `.saving` -- but this specific attempt still
+        // owes the server exactly the draft it captured here, and must
+        // still resolve `phase` out of `.saving` when it completes,
+        // regardless of what has since superseded it.
         let generation = draftGeneration
         let token = persistenceToken
         phase = .saving
         if !silent { announcement = "Saving your changes." }
         do {
             let bearer = try await tokenProvider.principalBoundBearer()
-            guard generation == draftGeneration,
-                  phase == .saving,
-                  bearer.scopeProof == scope else {
+            guard phase == .saving, bearer.scopeProof == scope else {
                 throw ListingReviewClientError.unavailable
             }
             let operation = pendingSave?.draft == draft
@@ -309,23 +340,23 @@ final class ListingReviewStore {
                     draft: draft
                 )
             pendingSave = operation
-            guard await persistCurrent(
-                generation: generation,
-                token: token,
-                validating: bearer.scopeProof
-            ) else {
-                guard generation == draftGeneration,
-                      phase == .saving else {
+            if generation == draftGeneration {
+                // Worth durably re-staging the idempotency pairing only
+                // while nothing has superseded it -- otherwise this would
+                // try to persist a stale draft under a token the
+                // persistence layer will (correctly) refuse anyway.
+                guard await persistCurrent(
+                    generation: generation,
+                    token: token,
+                    validating: bearer.scopeProof
+                ) else {
+                    guard phase == .saving else { return .stayed }
+                    phase = .failed
+                    announcement = ListingReviewCopy.draftPersistenceFailed
                     return .stayed
                 }
-                phase = .failed
-                announcement = ListingReviewCopy.draftPersistenceFailed
-                return .stayed
             }
-            guard generation == draftGeneration,
-                  phase == .saving,
-                  self.draft == draft,
-                  activeScope == scope else {
+            guard phase == .saving, activeScope == scope else {
                 return .stayed
             }
             let receipt = try await service.save(
@@ -338,7 +369,6 @@ final class ListingReviewStore {
             guard receipt.runID == snapshot.binding.runID,
                   receipt.itemID == snapshot.binding.itemID,
                   receipt.listingID == snapshot.binding.listingID,
-                  generation == draftGeneration,
                   phase == .saving,
                   activeScope == scope else {
                 throw ListingReviewClientError.invalidResponse
@@ -347,18 +377,25 @@ final class ListingReviewStore {
                 runID: snapshot.binding.runID,
                 token: token
             )
-            guard removed,
-                  generation == draftGeneration,
-                  token == persistenceToken,
-                  phase == .saving,
-                  activeScope == scope else {
+            guard phase == .saving, activeScope == scope else {
                 return .stayed
             }
-            pendingSave = nil
+            if !removed && generation == draftGeneration {
+                // Nothing this attempt knows about explains the failed
+                // removal -- most likely a different session now owns this
+                // run's persisted draft -- so this save cannot claim to
+                // have durably landed.
+                return .stayed
+            }
+            if pendingSave?.idempotencyKey == operation.idempotencyKey {
+                pendingSave = nil
+            }
             savedDraft = draft
             // Autosave keeps this store open across many saves in one
             // sitting; the next save's `expectedReviewRevision` must track
-            // what the server just advanced to, or it 409s as stale.
+            // what the server just advanced to, or it 409s as stale. The
+            // receipt is server truth regardless of whether a newer local
+            // edit has since arrived.
             self.snapshot = snapshot.withBinding(
                 snapshot.binding.advancingReviewRevision(to: receipt.reviewRevision)
             )
@@ -366,35 +403,23 @@ final class ListingReviewStore {
             if !silent { announcement = "Saved. Back to Processing review." }
             return .saved(receipt)
         } catch ListingReviewClientError.refused(let refusal) {
-            guard generation == draftGeneration,
-                  phase == .saving else {
-                return .stayed
-            }
+            guard phase == .saving else { return .stayed }
             // The draft stays on the phone. The refusal is about repricing this
             // save asks for, not about the edits, and some of them -- putting
             // the condition back the way it was -- make the next save legal.
             phase = .refused
             announcement = refusal
         } catch ListingReviewClientError.conflict {
-            guard generation == draftGeneration,
-                  phase == .saving else {
-                return .stayed
-            }
+            guard phase == .saving else { return .stayed }
             isStale = true
             phase = .conflict
             announcement = ListingReviewCopy.staleReview
         } catch ListingReviewClientError.offline {
-            guard generation == draftGeneration,
-                  phase == .saving else {
-                return .stayed
-            }
+            guard phase == .saving else { return .stayed }
             phase = .offline
             announcement = "You're offline. Your changes are saved on this phone."
         } catch {
-            guard generation == draftGeneration,
-                  phase == .saving else {
-                return .stayed
-            }
+            guard phase == .saving else { return .stayed }
             phase = .failed
             announcement = ListingReviewCopy.saveFailed
         }
@@ -603,6 +628,7 @@ final class ListingReviewStore {
     private func resetForOpen() {
         draftGeneration &+= 1
         pendingAutosaveGeneration = nil
+        resaveRequested = false
         phase = .idle
         snapshot = nil
         draft = nil

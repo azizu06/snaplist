@@ -106,9 +106,9 @@ final class ForegroundPushPresenter {
 ///
 /// Candidate visual (#891). No design package covers this family yet, so it
 /// borrows entirely from frozen V1 rather than proposing anything: the
-/// `infoBannerFill` and `infoBannerDivider` tokens `ListingReviewPendingStrip`
-/// uses, the 16-point bubble radius and 44-point dismiss target from
-/// `ActivationGuidanceCoachMark`, and that coach mark's overlay idiom.
+/// `infoBannerFill` and `infoBannerDivider` tokens, the 16-point bubble radius
+/// and 44-point dismiss target from `ActivationGuidanceCoachMark`, and that
+/// coach mark's overlay idiom.
 struct ForegroundPushBanner: View {
     let notification: ForegroundPushNotification
     let dismiss: () -> Void
