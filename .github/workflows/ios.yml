@@ -74,12 +74,15 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: validate
     runs-on: macos-26
-    # This is the same 35 in ios/Scripts/shard-wall-clock-budget-minutes, the
-    # one place that number is stated. ios/Scripts/test.sh derives its own
-    # internal soft timeout from that file and kills a hung shard a few
-    # minutes before this job-level cap would. test-contract.test.sh asserts
-    # this literal still matches the file so the two cannot drift apart. See
-    # issue #936.
+    # Not the budget. The budget is stated once, in
+    # ios/Scripts/shard-wall-clock-budget-minutes, and ios/Scripts/test.sh
+    # derives from it both the point where a shard annotates that it has
+    # overrun (the budget itself, #936's acceptance criterion) and the point a
+    # few minutes later where it stops the build and says so. This cap only has
+    # to sit above that second point, so a hung shard reports a named timeout
+    # instead of GitHub cancelling the job with nothing but "The operation was
+    # canceled." test-contract.test.sh asserts that relationship rather than
+    # comparing two copies of one number. See issue #936.
     timeout-minutes: 35
     strategy:
       fail-fast: false
