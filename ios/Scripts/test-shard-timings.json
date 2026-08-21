@@ -149,6 +149,7 @@
     "SnapListUITests/SnapListUITests/testPhotoPrimerRowsPublishOneAddressableAccessibilityElementEach": 7.051,
     "SnapListUITests/SnapListUITests/testPhotoReviewAtFivePhotosShowsAddDimmedDisabledAndInert": 10.655,
     "SnapListUITests/SnapListUITests/testPhotoReviewControlsReachTheirExactTypedBoundaryDestinations": 19.535,
+    "SnapListUITests/SnapListUITests/testPhotoReviewFooterPrimaryActionAndSavedNoteScaleAtAccessibility5": 12.5,
     "SnapListUITests/SnapListUITests/testPhotoReviewHardwareKeyboardControlLeftMovesSelectedSecondPhotoToCoverWithReducedMotion": 12.276,
     "SnapListUITests/SnapListUITests/testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity": 12.672,
     "SnapListUITests/SnapListUITests/testPhotoReviewHeroNavigationHidesAtOnePhotoAndDoesNotOpenActionsRow": 8.0,
