@@ -2,7 +2,6 @@ import SwiftUI
 
 extension ListingReviewCopy {
     static let retry = "Retry"
-    static let unsavedChanges = "Unsaved changes"
     static let invalidPrice = "Must be above $0."
     static let done = "Done"
     static let fixItem = "Fix item"
@@ -102,10 +101,17 @@ enum ListingReviewStoreFactory {
             )
         }
 #endif
+        // Mirrors MobileAPIClient's origin fallback: a missing/invalid
+        // `apiOrigin` must not resolve to a loopback address outside DEBUG,
+        // since that is never reachable on a seller's device.
+#if DEBUG
+        let origin = apiOrigin ?? URL(string: "http://127.0.0.1:3001")!
+#else
+        let origin = apiOrigin ?? URL(string: "https://snaplist.dev")!
+#endif
         return ListingReviewStore(
             service: ListingReviewAPIClient(
-                baseURL: apiOrigin
-                    ?? URL(string: "http://127.0.0.1:3001")!,
+                baseURL: origin,
                 session: session
             ),
             persistence: LocalListingReviewDraftPersistence(),
@@ -167,7 +173,12 @@ private struct ListingReviewFixtureBearerTokenProvider:
 
 private actor ListingReviewFixtureService: ListingReviewServing {
     let fixture: ListingReviewFixture
-    let review: ListingReviewResult
+    // Autosave makes more than one save routine within a single fixture
+    // session (#962). A real server advances its stored revision on every
+    // save; this fake must too, or a second save's `expectedReviewRevision`
+    // -- which the client already advanced to match the first receipt --
+    // would be checked against a binding that never moved.
+    var review: ListingReviewResult
 
     init(fixture: ListingReviewFixture, review: ListingReviewResult) {
         self.fixture = fixture
@@ -218,7 +229,11 @@ private actor ListingReviewFixtureService: ListingReviewServing {
                   binding.reviewRevision == expectedReviewRevision else {
                 throw ListingReviewClientError.invalidResponse
             }
-            return ListingReviewLaunchFixture.receipt(binding: binding)
+            let receipt = ListingReviewLaunchFixture.receipt(binding: binding)
+            review = review.withBinding(
+                binding.advancingReviewRevision(to: receipt.reviewRevision)
+            )
+            return receipt
         }
     }
 }
@@ -1330,49 +1345,6 @@ struct ListingReviewDrawerOptionRow: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityIdentifier(identifier)
-    }
-}
-
-struct ListingReviewPendingStrip: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulses = false
-
-    var body: some View {
-        HStack(spacing: 9) {
-            ZStack {
-                Circle()
-                    .fill(SnapListColorToken.action.color.opacity(0.2))
-                    .frame(width: 16, height: 16)
-                    .scaleEffect(pulses && !reduceMotion ? 1.25 : 1)
-                    .opacity(pulses && !reduceMotion ? 0 : 1)
-                Circle()
-                    .fill(SnapListColorToken.action.color)
-                    .frame(width: 8, height: 8)
-            }
-            .accessibilityHidden(true)
-            Text(ListingReviewCopy.unsavedChanges)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .frame(minHeight: 44)
-        .background(SnapListColorToken.infoBannerFill.color)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(SnapListColorToken.infoBannerDivider.color)
-                .frame(height: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("listing-review.unsaved")
-        .task {
-            guard !reduceMotion else { return }
-            withAnimation(
-                .easeOut(duration: 1.25).repeatForever(autoreverses: false)
-            ) {
-                pulses = true
-            }
-        }
     }
 }
 

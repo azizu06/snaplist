@@ -38,6 +38,37 @@ struct ListingReviewBinding: Codable, Equatable, Sendable {
         )
         reviewRevision = try values.decode(UUID.self, forKey: .reviewRevision)
     }
+
+    /// Autosave keeps the same store session across many saves, so unlike a
+    /// fresh `open()` it can't just re-decode the read contract to pick up
+    /// the revision a save just advanced. Every field this carries already
+    /// passed the decoder's checks on the way in; carrying them forward
+    /// without re-validation is exactly what it should do.
+    init(
+        runID: UUID,
+        itemID: UUID,
+        listingID: UUID,
+        reviewContentRevision: UUID,
+        reviewRevision: UUID
+    ) {
+        self.runID = runID
+        self.itemID = itemID
+        self.listingID = listingID
+        self.reviewContentRevision = reviewContentRevision
+        self.reviewRevision = reviewRevision
+    }
+}
+
+extension ListingReviewBinding {
+    func advancingReviewRevision(to newRevision: UUID) -> ListingReviewBinding {
+        ListingReviewBinding(
+            runID: runID,
+            itemID: itemID,
+            listingID: listingID,
+            reviewContentRevision: reviewContentRevision,
+            reviewRevision: newRevision
+        )
+    }
 }
 
 extension ListingReviewBinding {
@@ -531,6 +562,49 @@ struct ListingReviewResult: Codable, Equatable, Sendable {
         try values.encode(verifiedSoldMatches, forKey: .verifiedSoldMatches)
         try values.encode(startingPriceCopy, forKey: .startingPriceCopy)
         try values.encodeRequired(soldEvidenceCopy, forKey: .soldEvidenceCopy)
+    }
+
+    /// See `ListingReviewBinding`'s matching init: swapping only the binding
+    /// can't violate any of this type's decode-time invariants, since every
+    /// one of them is checked against `photos`/`verifiedSoldMatches`/copy
+    /// fields the binding never touches.
+    func withBinding(_ newBinding: ListingReviewBinding) -> ListingReviewResult {
+        ListingReviewResult(
+            schemaVersion: schemaVersion,
+            binding: newBinding,
+            photos: photos,
+            identity: identity,
+            listing: listing,
+            pricing: pricing,
+            evidenceAsOf: evidenceAsOf,
+            verifiedSoldMatches: verifiedSoldMatches,
+            startingPriceCopy: startingPriceCopy,
+            soldEvidenceCopy: soldEvidenceCopy
+        )
+    }
+
+    private init(
+        schemaVersion: Int,
+        binding: ListingReviewBinding,
+        photos: [ListingReviewPhoto],
+        identity: ListingReviewIdentity,
+        listing: ListingReviewListing,
+        pricing: ListingReviewPricing,
+        evidenceAsOf: String,
+        verifiedSoldMatches: [ListingReviewSoldMatch],
+        startingPriceCopy: String,
+        soldEvidenceCopy: String?
+    ) {
+        self.schemaVersion = schemaVersion
+        self.binding = binding
+        self.photos = photos
+        self.identity = identity
+        self.listing = listing
+        self.pricing = pricing
+        self.evidenceAsOf = evidenceAsOf
+        self.verifiedSoldMatches = verifiedSoldMatches
+        self.startingPriceCopy = startingPriceCopy
+        self.soldEvidenceCopy = soldEvidenceCopy
     }
 }
 

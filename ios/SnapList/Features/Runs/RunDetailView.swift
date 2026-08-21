@@ -191,8 +191,17 @@ struct RunDetailView: View {
     }
 
     private func dismissListingReview() {
-        listingReviewPresentation.dismiss()
-        reviewOpenerFocused = true
+        // Autosave can have advanced the review's server-side revision while
+        // the screen was open. `store.state` still holds whatever revision
+        // was current when this run last loaded, and the reopen guard in
+        // `ListingReviewPresentationHost.open` refuses to open a review
+        // whose binding no longer matches -- so leaving that stale until the
+        // seller taps Review again would make every reopen fail.
+        Task {
+            await store.refresh()
+            listingReviewPresentation.dismiss()
+            reviewOpenerFocused = true
+        }
     }
 }
 

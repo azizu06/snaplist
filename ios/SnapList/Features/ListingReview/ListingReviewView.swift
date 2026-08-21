@@ -39,6 +39,7 @@ struct ListingReviewView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
     @Environment(\.appDependencies) private var dependencies
+    @Environment(\.scenePhase) private var scenePhase
     @State private var destination: ListingReviewDestination?
     @State private var returnFocus: ListingReviewFocus = .back
     @State private var hasAppeared = false
@@ -77,10 +78,12 @@ struct ListingReviewView: View {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
                     // Leaving is not discarding. Whatever is sitting in a
-                    // field goes to the draft before the screen goes away.
+                    // field goes to the draft, then autosave flushes that
+                    // draft to the server, before the screen goes away.
                     Task {
                         await inlineEdits.flush(into: store)
                         await commitPrice()
+                        await store.flushPendingAutosave()
                         dismissReview()
                     }
                 } label: {
@@ -183,6 +186,17 @@ struct ListingReviewView: View {
             guard previous != nil, current == nil else { return }
             focusedElement = returnFocus
         }
+        .onChange(of: scenePhase) { _, phase in
+            // Backgrounding is a form of leaving the screen too: whatever is
+            // sitting in a field must reach the server before iOS can
+            // suspend or terminate the process out from under it.
+            guard phase == .background else { return }
+            Task {
+                await inlineEdits.flush(into: store)
+                await commitPrice()
+                await store.flushPendingAutosave()
+            }
+        }
         .onChange(of: store.announcement) { _, announcement in
             let assertive = store.phase == .failed
                 || store.phase == .refused
@@ -256,13 +270,8 @@ struct ListingReviewView: View {
             .padding(.top, 9)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                if store.isDirty {
-                    ListingReviewPendingStrip()
-                }
-                footer
-            }
-            .background(SnapListColorToken.canvas.color)
+            footer
+                .background(SnapListColorToken.canvas.color)
         }
     }
 
@@ -463,7 +472,12 @@ struct ListingReviewView: View {
                             total: matches.count
                         ) {
                             returnFocus = .soldMatch(index)
-                            destination = .sold(index)
+                            Task {
+                                await inlineEdits.flush(into: store)
+                                await commitPrice()
+                                await store.flushPendingAutosave()
+                                destination = .sold(index)
+                            }
                         }
                         .accessibilityFocused(
                             $focusedElement,
@@ -560,7 +574,14 @@ struct ListingReviewView: View {
                 activationInteraction()
                 returnFocus = .condition
                 conditionSelection = draft.condition
-                conditionDrawerPresented = true
+                // Presenting the sheet cannot race whatever is still sitting
+                // in Title or Description behind it.
+                Task {
+                    await inlineEdits.flush(into: store)
+                    await commitPrice()
+                    await store.flushPendingAutosave()
+                    conditionDrawerPresented = true
+                }
             }
             .accessibilityFocused($focusedElement, equals: .condition)
 
@@ -574,7 +595,12 @@ struct ListingReviewView: View {
             ) {
                 activationInteraction()
                 returnFocus = .specifics
-                destination = .specifics
+                Task {
+                    await inlineEdits.flush(into: store)
+                    await commitPrice()
+                    await store.flushPendingAutosave()
+                    destination = .specifics
+                }
             }
             .accessibilityFocused($focusedElement, equals: .specifics)
         }
@@ -629,6 +655,7 @@ struct ListingReviewView: View {
             Task {
                 await inlineEdits.flush(into: store)
                 guard await commitPrice() else { return }
+                await store.flushPendingAutosave()
                 guard !store.isDirty else {
                     ListingReviewAnnouncement.post(
                         AssistedExportCopy.saveBeforeSharing,
@@ -685,9 +712,10 @@ struct ListingReviewView: View {
             Task {
                 await inlineEdits.flush(into: store)
                 guard await commitPrice() else { return }
+                await store.flushPendingAutosave()
                 guard !store.isDirty else {
                     ListingReviewAnnouncement.post(
-                        "Save your changes before publishing to eBay.",
+                        "Couldn’t save your changes. Check your connection and try again.",
                         assertive: true
                     )
                     return
@@ -725,7 +753,7 @@ struct ListingReviewView: View {
         }
         .accessibilityHint(
             store.isDirty
-                ? "Save your changes before publishing to eBay."
+                ? "Couldn’t save your changes. Check your connection and try again."
                 : "Opens eBay connection and publish review"
         )
         .accessibilityFocused($focusedElement, equals: .ebayPublish)
@@ -857,7 +885,12 @@ struct ListingReviewView: View {
                     assertive: false
                 )
                 returnFocus = .secondary
-                destination = .correction
+                Task {
+                    await inlineEdits.flush(into: store)
+                    await commitPrice()
+                    await store.flushPendingAutosave()
+                    destination = .correction
+                }
             } else {
                 ListingReviewAnnouncement.post(
                     "Edit any detail below.",

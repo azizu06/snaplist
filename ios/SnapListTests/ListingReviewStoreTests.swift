@@ -744,6 +744,382 @@ final class ListingReviewStoreTests: XCTestCase {
         )
     }
 
+    // #962 hazard 1: before this issue, price never traveled the
+    // View-layer flush mechanism (`ListingReviewInlineEdits.flush(into:)`
+    // has no case for price at all), so nothing durably persisted a price
+    // edit except an explicit Done tap. This proves the store's own
+    // autosave -- not that mechanism -- carries a price edit to the
+    // server on its own.
+    func testEditingSellerPriceOverrideAloneAutosavesWithoutAnExplicitDone() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let receipt = Self.receipt(for: snapshot)
+        let service = ListingReviewRecordingService(
+            saves: [.success(receipt)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setSellerPriceOverride(Decimal(string: "129.99")!)
+        let outcome = await store.flushPendingAutosave()
+
+        XCTAssertEqual(outcome, .saved(receipt))
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(
+            requests[0].draft.sellerPriceOverride,
+            Decimal(string: "129.99")!
+        )
+        XCTAssertFalse(store.isDirty)
+    }
+
+    // #962 hazard 2: autosave keeps the same store open across many saves
+    // in one sitting, unlike `done()`, which always dismissed after its
+    // one save. The store must advance its own idea of the review
+    // revision after each save, or the second save's
+    // `expectedReviewRevision` goes stale and a save that should succeed
+    // 409s instead.
+    func testSequentialAutosavesAdvanceTheExpectedReviewRevision() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstRevision = UUID(
+            uuidString: "55000000-0000-4000-8000-000000000061"
+        )!
+        let secondRevision = UUID(
+            uuidString: "55000000-0000-4000-8000-000000000062"
+        )!
+        let firstReceipt = ListingReviewSaveReceipt(
+            schemaVersion: 1,
+            runID: snapshot.binding.runID,
+            itemID: snapshot.binding.itemID,
+            listingID: snapshot.binding.listingID,
+            reviewRevision: firstRevision
+        )
+        let secondReceipt = ListingReviewSaveReceipt(
+            schemaVersion: 1,
+            runID: snapshot.binding.runID,
+            itemID: snapshot.binding.itemID,
+            listingID: snapshot.binding.listingID,
+            reviewRevision: secondRevision
+        )
+        let service = ListingReviewRecordingService(
+            saves: [.success(firstReceipt), .success(secondReceipt)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setSellerPriceOverride(Decimal(99))
+        let firstOutcome = await store.flushPendingAutosave()
+        XCTAssertEqual(firstOutcome, .saved(firstReceipt))
+
+        await store.setTitle("Sony WH-1000XM4 headphones, mint condition")
+        let secondOutcome = await store.flushPendingAutosave()
+        XCTAssertEqual(secondOutcome, .saved(secondReceipt))
+
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            requests[0].expectedRevision,
+            snapshot.binding.reviewRevision
+        )
+        XCTAssertEqual(requests[1].expectedRevision, firstRevision)
+    }
+
+    // #962 hazard 5: a silent autosave attempt that genuinely fails must
+    // surface the same truthful, retryable state an explicit Done would --
+    // and must not drop the edit that failed to save.
+    func testFlushPendingAutosaveSurfacesAnHonestFailureAndKeepsTheDraft() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [.failure(ListingReviewClientError.offline)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Sony WH-1000XM4 headphones, boxed")
+        let outcome = await store.flushPendingAutosave()
+
+        XCTAssertEqual(outcome, .stayed)
+        XCTAssertEqual(store.phase, .offline)
+        XCTAssertEqual(
+            store.announcement,
+            "You're offline. Your changes are saved on this phone."
+        )
+        XCTAssertTrue(store.isDirty)
+        XCTAssertEqual(
+            store.draft?.title,
+            "Sony WH-1000XM4 headphones, boxed"
+        )
+    }
+
+    // #974 round-1 fix (Standards BLOCK): every mutator early-returned
+    // without touching `draft` whenever `phase == .saving`, while no field
+    // was disabled during a save -- so a field switch during any ordinary
+    // network round trip silently vanished (not in `draft`, not on disk,
+    // not in the caller's local buffer). This is the RED reproduction: a
+    // mutator call lands mid-flight, on a slow/suspended mock transport,
+    // and must survive -- staged, dirty, and durably persisted by a
+    // follow-up save once the in-flight one completes.
+    func testMutatorDuringAnInFlightSaveStagesTheEditAndAFollowUpSavePersistsIt() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstReceipt = Self.receipt(for: snapshot)
+        let secondReceipt = ListingReviewSaveReceipt(
+            schemaVersion: 1,
+            runID: snapshot.binding.runID,
+            itemID: snapshot.binding.itemID,
+            listingID: snapshot.binding.listingID,
+            reviewRevision: UUID(
+                uuidString: "55000000-0000-4000-8000-000000000080"
+            )!
+        )
+        let service = ListingReviewSaveGateService(
+            saves: [.success(firstReceipt), .success(secondReceipt)],
+            reload: snapshot
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Sony WH-1000XM4 headphones with case")
+        let saveTask = Task { @MainActor in await store.done() }
+        await service.waitUntilSaveBlocked()
+
+        // Lands entirely inside the network round trip, while
+        // phase == .saving and no field is disabled.
+        await store.setDescription(
+            "Mid-flight edit during the network round trip"
+        )
+        XCTAssertEqual(store.phase, .saving)
+        XCTAssertEqual(
+            store.draft?.description,
+            "Mid-flight edit during the network round trip"
+        )
+        XCTAssertTrue(store.isDirty)
+
+        await service.releaseSave()
+        let firstOutcome = await saveTask.value
+        XCTAssertEqual(firstOutcome, .saved(firstReceipt))
+
+        // The mid-flight edit must reach the server on its own, without
+        // another explicit Done, threading the revision the completing
+        // save just returned.
+        let followUpOutcome = await store.flushPendingAutosave()
+        XCTAssertEqual(followUpOutcome, .saved(secondReceipt))
+
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            requests[0].draft.title,
+            "Sony WH-1000XM4 headphones with case"
+        )
+        XCTAssertEqual(
+            requests[0].draft.description,
+            snapshot.listing.description
+        )
+        XCTAssertEqual(
+            requests[0].expectedRevision,
+            snapshot.binding.reviewRevision
+        )
+        XCTAssertEqual(
+            requests[1].draft.description,
+            "Mid-flight edit during the network round trip"
+        )
+        XCTAssertEqual(
+            requests[1].expectedRevision,
+            firstReceipt.reviewRevision
+        )
+        XCTAssertFalse(store.isDirty)
+    }
+
+    // #974 round-1 fix: a flush requested while a save is already in
+    // flight (the debounce firing mid-network-round-trip) must not race
+    // the in-flight request. It has to be remembered and resaved,
+    // serialized, once the in-flight save completes -- never two requests
+    // interleaved, and the follow-up must use the revision the completing
+    // save just returned.
+    func testAFlushRequestedWhileASaveIsInFlightResavesSerializedAfterItCompletes() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstReceipt = Self.receipt(for: snapshot)
+        let secondReceipt = ListingReviewSaveReceipt(
+            schemaVersion: 1,
+            runID: snapshot.binding.runID,
+            itemID: snapshot.binding.itemID,
+            listingID: snapshot.binding.listingID,
+            reviewRevision: UUID(
+                uuidString: "55000000-0000-4000-8000-000000000081"
+            )!
+        )
+        let service = ListingReviewSaveGateService(
+            saves: [.success(firstReceipt), .success(secondReceipt)],
+            reload: snapshot
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Blocked save title")
+        let saveTask = Task { @MainActor in await store.done() }
+        await service.waitUntilSaveBlocked()
+
+        await store.setDescription("Second edit while blocked")
+        let earlyOutcome = await store.flushPendingAutosave()
+        XCTAssertEqual(earlyOutcome, .stayed)
+        let inFlightRequests = await service.recordedSaveRequests()
+        XCTAssertEqual(inFlightRequests.count, 0)
+
+        await service.releaseSave()
+        let outcome = await saveTask.value
+        // The in-flight save's own wrapper discharges the resave flag and
+        // returns the follow-up's outcome, not the original save's.
+        XCTAssertEqual(outcome, .saved(secondReceipt))
+
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[0].draft.title, "Blocked save title")
+        XCTAssertEqual(
+            requests[0].draft.description,
+            snapshot.listing.description
+        )
+        XCTAssertEqual(
+            requests[0].expectedRevision,
+            snapshot.binding.reviewRevision
+        )
+        XCTAssertEqual(
+            requests[1].draft.description,
+            "Second edit while blocked"
+        )
+        XCTAssertEqual(
+            requests[1].expectedRevision,
+            firstReceipt.reviewRevision
+        )
+        XCTAssertFalse(store.isDirty)
+    }
+
+    // #974 round-2 fix (Standards BLOCK, finding 1): the round-1 relaxed
+    // staleness guard inferred "own newer edit, safe to report success"
+    // purely from whether *this* attempt's own captured generation still
+    // matched the current one. That inference is wrong when a second local
+    // edit AND a foreign session's takeover both land in the same blocked
+    // window -- both make the generation check true, but only one of them
+    // is safe. This is the RED reproduction: a foreign token takes over the
+    // persisted draft while a local edit is also in flight, and the save
+    // must never claim success once that happens.
+    func testForeignTakeoverDuringAMidFlightEditIsNeverMaskedAsASuccessfulSave() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstReceipt = Self.receipt(for: snapshot)
+        let persistence = MemoryListingReviewDraftPersistence()
+        let service = ListingReviewSaveGateService(
+            saves: [.success(firstReceipt)],
+            reload: snapshot
+        )
+        let store = makeStore(service: service, persistence: persistence)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Sony WH-1000XM4 headphones with case")
+        let saveTask = Task { @MainActor in await store.done() }
+        await service.waitUntilSaveBlocked()
+
+        // A second local edit lands mid-flight, exactly like the round-1
+        // fix's own scenario -- but this time a different session also
+        // takes over the persisted draft in the same window (e.g. the
+        // seller reopened review on another device).
+        await store.setDescription("Second local edit during the same save")
+        let foreignToken = ListingReviewDraftPersistenceToken(
+            sessionID: UUID(),
+            generation: 0
+        )
+        let tookOver = await persistence.activate(
+            foreignToken,
+            runID: snapshot.binding.runID
+        )
+        XCTAssertTrue(tookOver)
+
+        await service.releaseSave()
+        let outcome = await saveTask.value
+
+        // The save must not claim success while a foreign session now owns
+        // the persisted draft -- that would be a silent last-write-wins.
+        XCTAssertEqual(outcome, .stayed)
+        XCTAssertEqual(store.phase, .conflict)
+        XCTAssertTrue(store.isStale)
+        XCTAssertEqual(
+            store.snapshot?.binding.reviewRevision,
+            snapshot.binding.reviewRevision
+        )
+        XCTAssertTrue(store.isDirty)
+    }
+
+    // #974 round-2 fix (Standards BLOCK, finding 2): `stage()`'s
+    // `persisted == false` branch used to write `phase = .failed`
+    // unconditionally, even while a save was already in flight --
+    // clobbering `executeSave`'s own `guard phase == .saving` checks and
+    // abandoning that attempt with no recovery. This is the RED
+    // reproduction: a mid-save `stage()` persistence failure must defer to
+    // the in-flight save's own honest outcome instead of stomping its
+    // phase.
+    func testAMidSaveStagingFailureDefersToTheInFlightSavesOwnOutcome() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstReceipt = Self.receipt(for: snapshot)
+        let persistence = ListingReviewTogglePersistence()
+        let service = ListingReviewSaveGateService(
+            saves: [.success(firstReceipt)],
+            reload: snapshot
+        )
+        let store = makeStore(service: service, persistence: persistence)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Sony WH-1000XM4 headphones with case")
+        let saveTask = Task { @MainActor in await store.done() }
+        await service.waitUntilSaveBlocked()
+
+        await persistence.failSaves()
+        await store.setDescription(
+            "Mid-flight edit while local persistence is failing"
+        )
+
+        // The in-flight save still owns `phase` -- a failed *local* disk
+        // write for this edit must not report it as a dropped save.
+        XCTAssertEqual(store.phase, .saving)
+        XCTAssertEqual(
+            store.draft?.description,
+            "Mid-flight edit while local persistence is failing"
+        )
+        XCTAssertTrue(store.isDirty)
+
+        await service.releaseSave()
+        let outcome = await saveTask.value
+
+        // The in-flight save's own network round trip still succeeded, but
+        // the edit it owed a resave for could never durably land while
+        // local persistence keeps failing -- so the deferred resave
+        // surfaces as an honest failure, not a second silent drop and not
+        // stuck in `.saving`.
+        XCTAssertEqual(outcome, .stayed)
+        XCTAssertEqual(store.phase, .failed)
+        XCTAssertEqual(
+            store.announcement,
+            ListingReviewCopy.draftPersistenceFailed
+        )
+        XCTAssertTrue(store.isDirty)
+        XCTAssertEqual(
+            store.draft?.description,
+            "Mid-flight edit while local persistence is failing"
+        )
+    }
+
     private func makeStore(
         service: any ListingReviewServing,
         persistence: any ListingReviewDraftPersisting =
@@ -1279,6 +1655,83 @@ private actor ListingReviewRecordingService: ListingReviewServing {
     ) async throws -> ListingReviewResult {
         guard !reloads.isEmpty else { throw ListingReviewClientError.unavailable }
         return try reloads.removeFirst().get()
+    }
+
+    func recordedSaveRequests() -> [SaveRequest] {
+        saveRequests
+    }
+}
+
+/// A slow/suspended mock transport: blocks inside its first `save(...)`
+/// call, at the seam a real network round trip would suspend, so a test can
+/// land a mutator call while `phase == .saving` and before the request has
+/// even been recorded -- not merely before a bearer fetch or a persistence
+/// commit, which the other gate doubles already cover.
+private actor ListingReviewSaveGateService: ListingReviewServing {
+    struct SaveRequest: Equatable {
+        let idempotencyKey: UUID
+        let expectedRevision: UUID
+        let draft: ListingReviewDraft
+    }
+
+    private var saves: [Result<ListingReviewSaveReceipt, Error>]
+    private let reload: ListingReviewResult
+    private(set) var saveRequests: [SaveRequest] = []
+    private var isBlocked = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    init(
+        saves: [Result<ListingReviewSaveReceipt, Error>],
+        reload: ListingReviewResult
+    ) {
+        self.saves = saves
+        self.reload = reload
+    }
+
+    func save(
+        runID: UUID,
+        draft: ListingReviewDraft,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewSaveReceipt {
+        if !isBlocked {
+            isBlocked = true
+            blockedWaiters.forEach { $0.resume() }
+            blockedWaiters.removeAll()
+            await withCheckedContinuation {
+                releaseContinuation = $0
+            }
+        }
+        saveRequests.append(
+            SaveRequest(
+                idempotencyKey: idempotencyKey,
+                expectedRevision: expectedReviewRevision,
+                draft: draft
+            )
+        )
+        guard !saves.isEmpty else { throw ListingReviewClientError.unavailable }
+        return try saves.removeFirst().get()
+    }
+
+    func fetchReview(
+        runID: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewResult {
+        reload
+    }
+
+    func waitUntilSaveBlocked() async {
+        guard !isBlocked else { return }
+        await withCheckedContinuation {
+            blockedWaiters.append($0)
+        }
+    }
+
+    func releaseSave() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
     }
 
     func recordedSaveRequests() -> [SaveRequest] {
