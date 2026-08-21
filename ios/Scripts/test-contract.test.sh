@@ -9,6 +9,7 @@ workflow_file=${script_directory:h:h}/.github/workflows/ios.yml
 workflow_contract_parser=${script_directory}/validate-workflow-concurrency.rb
 shard_inventory_file=${script_directory}/test-shards.json
 shard_inventory_validator=${script_directory}/validate-test-shards.rb
+shard_wall_clock_budget_file=${script_directory}/shard-wall-clock-budget-minutes
 temporary_parent=${TMPDIR:-/tmp}
 temporary_directory=$(mktemp -d "${temporary_parent%/}/snaplist-ios-test-contract.XXXXXX")
 fake_bin=${temporary_directory}/bin
@@ -38,6 +39,8 @@ serialized_active_marker=${temporary_directory}/xcodebuild-active
 serialized_overlap_log=${temporary_directory}/xcodebuild-overlap
 serialized_started_log=${temporary_directory}/xcodebuild-started
 holder_diagnostics_file=${temporary_directory}/holder-diagnostics
+shard_timeout_diagnostics_file=${temporary_directory}/shard-timeout-diagnostics
+mismatched_shard_wall_clock_budget_file=${temporary_directory}/mismatched-shard-wall-clock-budget-minutes
 waiter_diagnostics_file=${temporary_directory}/waiter-diagnostics
 holder_selector="SnapListTests/LockHolderProbeTests/testHoldsTheBuildLock"
 
@@ -716,6 +719,39 @@ run_serialized_test_script() {
   ) >/dev/null 2>"$diagnostics_file"
 }
 
+run_shard_timeout_test_script() {
+  local shard=$1
+  local sleep_seconds=$2
+  local soft_timeout_seconds=$3
+  local diagnostics_file=$4
+
+  (
+    export PATH="${serialized_bin}:${PATH}"
+    export SNAPLIST_IOS_LOCK_FILE=$lock_file
+    export SNAPLIST_IOS_LOCK_POLL_SECONDS=1
+    export SNAPLIST_IOS_LOCK_TIMEOUT_SECONDS=30
+    export SNAPLIST_XCODEBUILD_ACTIVE_MARKER=$serialized_active_marker
+    export SNAPLIST_XCODEBUILD_OVERLAP_LOG=$serialized_overlap_log
+    export SNAPLIST_XCODEBUILD_STARTED_LOG=$serialized_started_log
+    export SNAPLIST_XCODEBUILD_SLEEP_SECONDS=$sleep_seconds
+    export SNAPLIST_XCODEBUILD_EXIT_STATUS=0
+    export SNAPLIST_IOS_SHARD_SOFT_TIMEOUT_SECONDS=$soft_timeout_seconds
+    export SNAPLIST_IOS_SHARD_TIMEOUT_POLL_SECONDS=1
+    export SNAPLIST_IOS_SHARD_TIMEOUT_KILL_GRACE_SECONDS=1
+
+    unset SNAPLIST_IOS_ONLY_TESTING
+    unset SNAPLIST_IOS_REPOSITORY_ROOT
+
+    if [[ -n $shard ]]; then
+      export SNAPLIST_IOS_SHARD=$shard
+    else
+      unset SNAPLIST_IOS_SHARD
+    fi
+
+    "$test_script"
+  ) >/dev/null 2>"$diagnostics_file"
+}
+
 assert_a_concurrent_invocation_waits_for_the_holder_instead_of_colliding() {
   local holder_job holder_status waiter_status
   local polls=0
@@ -1013,6 +1049,64 @@ assert_a_terminated_holder_leaves_no_stale_owner_behind() {
   return 0
 }
 
+assert_shard_soft_timeout_kills_a_hung_build_with_a_named_annotation() {
+  local exit_status
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$shard_timeout_diagnostics_file"
+
+  run_shard_timeout_test_script "ui-1" 30 1 "$shard_timeout_diagnostics_file"
+  exit_status=$?
+
+  if [[ $exit_status -ne 124 ]]; then
+    return 1
+  fi
+
+  grep -q -- "::error::iOS shard ui-1" "$shard_timeout_diagnostics_file" &&
+    grep -q -- "exceeded its internal wall-clock budget" "$shard_timeout_diagnostics_file"
+}
+
+assert_shard_soft_timeout_does_not_apply_without_a_declared_shard() {
+  local exit_status
+
+  rm -rf "$serialized_active_marker" "$lock_file" "${lock_file}.owner"
+  : > "$serialized_overlap_log"
+  : > "$serialized_started_log"
+  : > "$shard_timeout_diagnostics_file"
+
+  run_shard_timeout_test_script "" 1 0 "$shard_timeout_diagnostics_file"
+  exit_status=$?
+
+  [[ $exit_status -eq 0 && ! -s $shard_timeout_diagnostics_file ]]
+}
+
+assert_shard_wall_clock_budget_matches() {
+  local candidate_workflow_file=${1:-$workflow_file}
+  local candidate_budget_file=${2:-$shard_wall_clock_budget_file}
+
+  ruby -ryaml -e '
+    workflow = YAML.load_file(ARGV.fetch(0))
+    workflow_timeout = workflow.fetch("jobs").fetch("shard").fetch("timeout-minutes")
+    budget_minutes = Integer(File.read(ARGV.fetch(1)).strip)
+    exit(workflow_timeout == budget_minutes ? 0 : 1)
+  ' "$candidate_workflow_file" "$candidate_budget_file"
+}
+
+assert_shard_wall_clock_budget_is_declared_once_and_stays_consistent() {
+  assert_shard_wall_clock_budget_matches
+}
+
+assert_shard_wall_clock_budget_mismatch_fails_closed() {
+  ruby -ryaml -e '
+    workflow = YAML.load_file(ARGV.fetch(0))
+    puts workflow.fetch("jobs").fetch("shard").fetch("timeout-minutes") + 1
+  ' "$workflow_file" > "$mismatched_shard_wall_clock_budget_file"
+
+  ! assert_shard_wall_clock_budget_matches "$workflow_file" "$mismatched_shard_wall_clock_budget_file"
+}
+
 failures=0
 
 for contract_case in \
@@ -1042,7 +1136,11 @@ for contract_case in \
   assert_a_waiting_invocation_keeps_reporting_while_it_waits \
   assert_a_failing_build_leaves_no_lock_behind \
   assert_a_terminated_holder_leaves_no_stale_owner_behind \
-  assert_the_first_wait_report_names_a_holder_that_records_itself_late
+  assert_the_first_wait_report_names_a_holder_that_records_itself_late \
+  assert_shard_soft_timeout_kills_a_hung_build_with_a_named_annotation \
+  assert_shard_soft_timeout_does_not_apply_without_a_declared_shard \
+  assert_shard_wall_clock_budget_is_declared_once_and_stays_consistent \
+  assert_shard_wall_clock_budget_mismatch_fails_closed
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"

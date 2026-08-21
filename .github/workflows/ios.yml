@@ -74,11 +74,17 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: validate
     runs-on: macos-26
-    timeout-minutes: 40
+    # This is the same 35 in ios/Scripts/shard-wall-clock-budget-minutes, the
+    # one place that number is stated. ios/Scripts/test.sh derives its own
+    # internal soft timeout from that file and kills a hung shard a few
+    # minutes before this job-level cap would. test-contract.test.sh asserts
+    # this literal still matches the file so the two cannot drift apart. See
+    # issue #936.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit, ui-1, ui-2, ui-3]
+        shard: [unit, ui-1, ui-2, ui-3, ui-4, ui-5, ui-6, ui-7, ui-8]
     steps:
       - uses: actions/checkout@v4
         with:

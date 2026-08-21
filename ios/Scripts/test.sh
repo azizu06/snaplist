@@ -12,6 +12,13 @@ snaplist_derived_data=${SNAPLIST_IOS_DERIVED_DATA:-${TMPDIR:-/tmp}/snaplist-ios-
 snaplist_test_selector_pattern='^[[:alnum:]_][[:alnum:]_.-]*(/[[:alnum:]_][[:alnum:]_.-]*){0,2}$'
 snaplist_shard_inventory=${script_directory}/test-shards.json
 snaplist_shard_validator=${script_directory}/validate-test-shards.rb
+snaplist_shard_budget_file=${script_directory}/shard-wall-clock-budget-minutes
+# Kept a few minutes below the job-level `timeout-minutes` in
+# .github/workflows/ios.yml so this soft cap reports a named timeout before
+# GitHub's own hard cap fires with nothing but "The operation was canceled."
+snaplist_shard_soft_timeout_margin_minutes=${SNAPLIST_IOS_SHARD_SOFT_TIMEOUT_MARGIN_MINUTES:-3}
+snaplist_shard_timeout_poll_seconds=${SNAPLIST_IOS_SHARD_TIMEOUT_POLL_SECONDS:-5}
+snaplist_shard_timeout_kill_grace_seconds=${SNAPLIST_IOS_SHARD_TIMEOUT_KILL_GRACE_SECONDS:-5}
 snaplist_lock_file=${SNAPLIST_IOS_LOCK_FILE:-${TMPDIR:-/tmp}/snaplist-ios-xcodebuild.lock}
 snaplist_lock_owner_file=${snaplist_lock_file}.owner
 snaplist_lock_poll_seconds=${SNAPLIST_IOS_LOCK_POLL_SECONDS:-15}
@@ -62,6 +69,21 @@ if (( ${+SNAPLIST_IOS_SHARD} )); then
   for snaplist_shard_selector in "${snaplist_shard_selectors[@]}"; do
     snaplist_test_arguments+=("-only-testing:${snaplist_shard_selector}")
   done
+fi
+
+# The wall-clock budget only applies to a declared shard. The unsharded
+# `serial` job on main carries its own much larger job-level timeout and is
+# not what issue #936 measured.
+snaplist_shard_soft_timeout_seconds=0
+if (( ${+SNAPLIST_IOS_SHARD} )); then
+  if (( ${+SNAPLIST_IOS_SHARD_SOFT_TIMEOUT_SECONDS} )); then
+    snaplist_shard_soft_timeout_seconds=$SNAPLIST_IOS_SHARD_SOFT_TIMEOUT_SECONDS
+  else
+    snaplist_shard_budget_minutes=$(<"$snaplist_shard_budget_file")
+    snaplist_shard_soft_timeout_seconds=$(( \
+      (snaplist_shard_budget_minutes - snaplist_shard_soft_timeout_margin_minutes) * 60 \
+    ))
+  fi
 fi
 
 # The holder records itself in the sidecar file immediately after it takes the
@@ -160,4 +182,29 @@ xcodebuild \
   -destination $snaplist_destination \
   -derivedDataPath $snaplist_derived_data \
   "${snaplist_test_arguments[@]}" \
-  test {snaplist_lock_descriptor}<&-
+  test {snaplist_lock_descriptor}<&- &
+snaplist_xcodebuild_pid=$!
+
+if (( snaplist_shard_soft_timeout_seconds <= 0 )); then
+  wait $snaplist_xcodebuild_pid
+  exit $?
+fi
+
+snaplist_shard_deadline=$(( SECONDS + snaplist_shard_soft_timeout_seconds ))
+
+while kill -0 $snaplist_xcodebuild_pid 2>/dev/null; do
+  if (( SECONDS >= snaplist_shard_deadline )); then
+    kill -TERM $snaplist_xcodebuild_pid 2>/dev/null || true
+    sleep $snaplist_shard_timeout_kill_grace_seconds
+    kill -KILL $snaplist_xcodebuild_pid 2>/dev/null || true
+    wait $snaplist_xcodebuild_pid 2>/dev/null || true
+
+    print -u2 -r -- \
+      "::error::iOS shard ${SNAPLIST_IOS_SHARD:-unspecified} exceeded its internal wall-clock budget of ${snaplist_shard_soft_timeout_seconds}s and was killed by test.sh before the job's own timeout; no test failed."
+    exit 124
+  fi
+
+  sleep $snaplist_shard_timeout_poll_seconds
+done
+
+wait $snaplist_xcodebuild_pid
