@@ -90,6 +90,25 @@ struct GuestCapabilityBearer: Codable, Equatable, Sendable {
     func isUsable(at instant: Date) -> Bool { instant < expiresAt }
 }
 
+/**
+ Issue #854. What a caller does with the guest capability a verified assertion
+ earns.
+
+ Every verified assertion the server answers carries one, because the endpoint
+ that verifies assertions is the signed-out endpoint and cannot know who is
+ asking. Taking it into custody is right for the enrollment that asked for a
+ credential and wrong for an account-bound caller that already has one: the
+ store is shared with the guest composition, so an account path that saved
+ there would overwrite the signed-out seller's live bearer with one it never
+ intends to present.
+ */
+enum AppAttestGuestCapabilityCustody: Equatable, Sendable {
+    /// A signed-out installation earning the only credential it can submit with.
+    case take
+    /// An account-bound caller that needs the verified key and nothing else.
+    case decline
+}
+
 /// Durable custody of the current guest capability. Separate from the App Attest
 /// key store because the key proves the installation while this authorizes one
 /// signed-out seller's requests, and they expire on entirely different clocks.
@@ -637,13 +656,16 @@ actor AppAttestClient {
         self.service = service
     }
 
-    func attestInstallation() async -> AppAttestTruth {
+    func attestInstallation(
+        guestCapabilityCustody: AppAttestGuestCapabilityCustody = .take
+    ) async -> AppAttestTruth {
         guard service.isSupported else { return .unavailable(.unsupportedDevice) }
         do {
             if let storedKey = try keyStore.load() {
                 let attempt = await attemptAssertion(
                     keyID: storedKey.id,
-                    requestBody: Self.persistedKeyRestorationRequestBody
+                    requestBody: Self.persistedKeyRestorationRequestBody,
+                    guestCapabilityCustody: guestCapabilityCustody
                 )
                 switch attempt {
                 case .keyNotAttested, .staleKey:
@@ -807,7 +829,8 @@ actor AppAttestClient {
 
     private func attemptAssertion(
         keyID: String,
-        requestBody: Data
+        requestBody: Data,
+        guestCapabilityCustody: AppAttestGuestCapabilityCustody = .take
     ) async -> AssertionAttempt {
         do {
             let challenge = try await server.issueChallenge(kind: .assertion, keyID: keyID)
@@ -832,7 +855,8 @@ actor AppAttestClient {
             // verified response without durable custody would leave the signed-out
             // seller unable to authorize the later submission.
             if case .verified(let verified) = truth,
-               let capability = verified.guestCapability {
+               let capability = verified.guestCapability,
+               guestCapabilityCustody == .take {
                 guard verified.kind == .assertion,
                       verified.keyID == keyID,
                       let scopeProof = ItemRunSubmissionPrincipalScopeProof(
@@ -1219,6 +1243,85 @@ struct AppAttestGuestCapabilityComposition: Sendable {
         return Task {
             await launchEnrollment()
         }
+    }
+}
+
+/**
+ Issue #854. Earns the verified App Attest key an account-bound assertion needs,
+ for an installation that missed its signed-out enrollment window.
+
+ `AppAttestGuestCapabilityComposition` enrolls only while the installation is
+ confirmed signed out, and that gate is right: guest work belongs to a guest.
+ But a first launch that failed — no signal, a Clerk error that was not
+ `sessionAbsent`, an unreadable Keychain — leaves no key behind, and the seller
+ who then creates an account is signed in on every later launch. Enrollment
+ never runs again, `assertionProof` answers `.invalid(.missingVerifiedKey)`
+ forever, and that account can never reach its included run.
+
+ The gate here is not "signed in". It is `.invalid(.missingVerifiedKey)` — no
+ verified key exists on this installation — which is both narrower and
+ self-limiting:
+
+ - **It cannot rotate.** An installation holding a verified key never produces
+   the outcome that triggers recovery, so the key it presents to the fence is
+   the one it has always presented. Rotation would silently retire the guest
+   tenant that installation's own allowance is filed under.
+ - **It cannot farm.** The guest allowance is fenced per App Attest key: the
+   server derives the guest tenant as `guest_<sha256(appId‖keyId)>` in
+   `src/lib/guest-capability/service.ts`. Minting *extra* keys is what would
+   mint extra guest tenants, so recovery reuses a stored pending key through
+   `attestInstallation()` and attests at most once per process — no more often
+   than the signed-out enrollment it stands in for.
+ - **It cannot hand an account a guest credential.** Recovery declines custody
+   of any capability the resumed assertion earns, so the
+   `KeychainGuestCapabilityBearerStore` shared with the guest composition is
+   never written by the account path.
+
+ The included offer itself is bounded elsewhere, by different primitives: per
+ account by `isIncludedRunAvailable` (`src/lib/included-offer-fence/service.ts`)
+ and per physical device by Apple's DeviceCheck lifetime bit. Neither is keyed
+ by the App Attest key, so a recovered key buys exactly one thing — the ability
+ to prove which installation is asking.
+ */
+actor AppAttestKeyRecoveringProofProvider: AppAttestProofProviding {
+    private let base: any AppAttestProofProviding
+    private let recoverVerifiedKey: @Sendable () async -> AppAttestTruth
+    private var recovery: Task<AppAttestTruth, Never>?
+
+    init(
+        base: any AppAttestProofProviding,
+        recoverVerifiedKey: @escaping @Sendable () async -> AppAttestTruth
+    ) {
+        self.base = base
+        self.recoverVerifiedKey = recoverVerifiedKey
+    }
+
+    func assertionProof(requestBody: Data) async -> AppAttestProofOutcome {
+        let outcome = await base.assertionProof(requestBody: requestBody)
+        guard case .invalid(.missingVerifiedKey) = outcome else { return outcome }
+        guard case .verified = await recoveredKey() else {
+            // A recovery that produced no key changes nothing the caller can
+            // act on, so the installation's own answer stands rather than a
+            // second, differently-shaped failure.
+            return outcome
+        }
+        return await base.assertionProof(requestBody: requestBody)
+    }
+
+    /// At most one attestation per process, shared by everything that arrives
+    /// while it runs and by everything that arrives after.
+    ///
+    /// One `redeem()` can ask for two proofs — the claim and the token
+    /// rendezvous — and one launch can drive more than one principal. Each
+    /// extra attestation on a launch whose first one failed is another Apple
+    /// key generation, and a generated key that survives is another guest
+    /// tenant. A recovery lost to an outage is retried on the next launch,
+    /// which is the cadence the signed-out enrollment already runs at.
+    private func recoveredKey() async -> AppAttestTruth {
+        if let recovery { return await recovery.value }
+        let started = Task { [recoverVerifiedKey] in await recoverVerifiedKey() }
+        recovery = started
+        return await started.value
     }
 }
 

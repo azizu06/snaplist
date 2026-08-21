@@ -255,11 +255,21 @@ enum AccountDeletionDeviceState {
     /// that was current at render time is a discard the store refuses.
     static func steps(
         removeIntake: @escaping () async -> Bool,
-        removeCachedItems: @escaping () async -> Bool
+        removeCachedItems: @escaping () async -> Bool,
+        // #854 item 3. The included-offer redemption record is one of the app's
+        // own stores, scoped by the Clerk subject and held in `UserDefaults`
+        // rather than the Keychain, so the Keychain half never reached it and a
+        // deleted subject's id stayed on the device after erasure reported the
+        // device clean.
+        removeIncludedOfferRedemption: @escaping () async -> Bool
     ) -> [Step] {
         [
             Step(name: "intake", remove: removeIntake),
             Step(name: "cached-items", remove: removeCachedItems),
+            Step(
+                name: "included-offer-redemption",
+                remove: removeIncludedOfferRedemption
+            ),
         ] + keychainSteps
     }
 

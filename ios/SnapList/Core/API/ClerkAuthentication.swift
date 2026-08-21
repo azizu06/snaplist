@@ -1,5 +1,6 @@
 import ClerkKit
 import Foundation
+import os
 
 enum NativeAppConfigurationError: Error, Equatable {
     case missingAPIOrigin
@@ -407,27 +408,79 @@ enum ClerkAuthenticationComposition {
                 session: session
             )
         )
+        // #854. The one place a signed-in installation may earn the verified
+        // key its account-bound assertions need. Declining custody is what
+        // keeps the account path out of the guest bearer store the signed-out
+        // composition owns; see `AppAttestKeyRecoveringProofProvider`.
+        let proofProvider = AppAttestKeyRecoveringProofProvider(
+            base: attest,
+            recoverVerifiedKey: {
+                await attest.attestInstallation(guestCapabilityCustody: .decline)
+            }
+        )
         let api = URLSessionMobileAPIClient(
             baseURL: apiOrigin,
             tokenProvider: tokenProvider,
             session: session
         )
         let principals = liveClerkPrincipals()
-        return Task {
+        return redemptionDrive.start {
             await IncludedOfferRedemptionComposition.drive(
                 principals: principals,
                 redeem: { userID in
-                    _ = await IncludedOfferRedemptionCoordinator(
+                    await IncludedOfferRedemptionCoordinator(
                         redemption: IncludedOfferRedemption(
-                            attest: attest,
+                            attest: proofProvider,
                             client: api,
                             userID: userID
                         ),
-                        store: IncludedOfferRedemptionStore(userID: userID)
+                        store: IncludedOfferRedemptionStore(userID: userID),
+                        report: { Self.report($0) }
                     ).redeem()
                 }
             )
         }
+    }
+
+    /// #854 item 4. One redemption drive per process.
+    ///
+    /// `UIApplicationSupportsMultipleScenes` is true, so a second `.task` on a
+    /// second scene would otherwise start a second drive carrying its own
+    /// in-memory `handled` set. `TARGETED_DEVICE_FAMILY = 1` makes that
+    /// unreachable on iPhone today, which is why the guard is a latch rather
+    /// than per-account serialization: two drives would mint two idempotency
+    /// keys for one principal and open two claims that
+    /// `unique (user_id, idempotency_key)` cannot collapse.
+    @MainActor
+    private static let redemptionDrive = IncludedOfferRedemptionDrive()
+
+    /// #854 item 1. Where a discarded disposition now lands.
+    ///
+    /// This is the only path that decides whether the free listing is
+    /// reachable, so a seller permanently stuck on `.retryable` has to produce
+    /// something an operator can see. `os.Logger` rather than the analytics
+    /// taxonomy: this is installation health rather than a funnel event, and it
+    /// must not be gated behind the seller's analytics consent.
+    ///
+    /// Bounded values only — a disposition case and a follow-up count. No
+    /// subject, claim id, or idempotency key reaches the log.
+    private static let redemptionLog = Logger(
+        subsystem: "dev.snaplist.ios",
+        category: "included-offer-redemption"
+    )
+
+    private static func report(_ report: IncludedOfferRedemptionReport) {
+        let disposition = report.disposition.rawValue
+        let followUps = report.followUps.map(String.init) ?? "none"
+        guard report.disposition.isSettled else {
+            redemptionLog.error(
+                "included-offer redemption unsettled disposition=\(disposition, privacy: .public) follow_ups=\(followUps, privacy: .public)"
+            )
+            return
+        }
+        redemptionLog.notice(
+            "included-offer redemption settled disposition=\(disposition, privacy: .public) follow_ups=\(followUps, privacy: .public)"
+        )
     }
 
     /// The signed-in principal now, and again on every Clerk auth event.
@@ -691,7 +744,14 @@ enum AccountDeletionComposition {
                 await AccountDeletionDeviceState.clear(
                     steps: AccountDeletionDeviceState.steps(
                         removeIntake: removeIntake,
-                        removeCachedItems: removeCachedItems
+                        removeCachedItems: removeCachedItems,
+                        removeIncludedOfferRedemption: {
+                            IncludedOfferRedemptionStore(
+                                userID: userID,
+                                defaults: keyStoreDefaults
+                            ).forget()
+                            return true
+                        }
                     )
                 )
             },
