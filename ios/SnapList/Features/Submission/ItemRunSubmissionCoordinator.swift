@@ -1669,6 +1669,22 @@ final class ItemRunSubmissionCoordinator {
             return .retained(.attemptNotPersisted)
         }
         if let storedAttempt,
+           storedAttemptMatches,
+           let scopeProof = context.scopeProof,
+           !storedAttempt.wasMintedUnder(scopeProof) {
+            // #935. This record travelled here with the seller's photos across
+            // a device-identity rename, and its key belongs to the principal
+            // that minted it. Presenting it under this one is not a replay:
+            // the server resolves the caller's own `user_id` before it compares
+            // the key, so the lookup misses and a second run is created for one
+            // item. Minting a fresh key does exactly the same thing. The only
+            // send that does not spend a second AI-item credit is the one that
+            // does not happen, so this stops before the network and leaves the
+            // intake staged. Changing the photo set is the way forward, and is
+            // a different item that legitimately buys a run.
+            return .retained(.attemptNotPersisted)
+        }
+        if let storedAttempt,
            storedAttemptMatches {
             if let identity = storedAttempt.guestRecoveryIdentity {
                 do {
@@ -1697,7 +1713,8 @@ final class ItemRunSubmissionCoordinator {
                 idempotencyKey: newIdempotencyKey(),
                 photos: snapshot,
                 voiceContext: intake.voiceContext,
-                guestRecoveryIdentity: guestRecoveryIdentity
+                guestRecoveryIdentity: guestRecoveryIdentity,
+                mintedUnderPrincipalScope: context.scopeProof?.opaqueDigest
             )
         }
         if attempt != storedAttempt {

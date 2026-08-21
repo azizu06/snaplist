@@ -90,7 +90,7 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     /// Bumped when the persisted shape changes. A record written by another version is
     /// recognisably stale rather than corrupt, so it can be discarded instead of
     /// blocking the seller.
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     let idempotencyKey: UUID
     let photos: [ItemRunSubmissionPhoto]
@@ -98,6 +98,11 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     /// Hash-only server identity. The corresponding raw token lives only in
     /// Keychain and is never encoded with the durable submission attempt.
     let guestRecoveryIdentity: GuestRecoverySubmissionIdentity?
+    /// #935. The opaque principal scope this key was minted under, so a record
+    /// that travelled across a device-identity rename can be told from one this
+    /// scope minted itself. It is the same digest the intake directory is named
+    /// after; no identity value is recoverable from it.
+    let mintedUnderPrincipalScope: Data?
     var schemaVersion = ItemRunSubmissionAttempt.currentSchemaVersion
 
     init(
@@ -105,12 +110,14 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
         photos: [ItemRunSubmissionPhoto],
         voiceContext: ItemRunSubmissionVoice? = nil,
         guestRecoveryIdentity: GuestRecoverySubmissionIdentity? = nil,
+        mintedUnderPrincipalScope: Data? = nil,
         schemaVersion: Int = ItemRunSubmissionAttempt.currentSchemaVersion
     ) {
         self.idempotencyKey = idempotencyKey
         self.photos = photos
         self.voiceContext = voiceContext
         self.guestRecoveryIdentity = guestRecoveryIdentity
+        self.mintedUnderPrincipalScope = mintedUnderPrincipalScope
         self.schemaVersion = schemaVersion
     }
 
@@ -119,6 +126,35 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     /// genuine corruption both surface as a decoding error.
     struct StoredVersion: Decodable {
         let schemaVersion: Int?
+    }
+
+    /// Whether this record was minted under `scope` and may therefore keep its
+    /// key.
+    ///
+    /// A key is only idempotent to the principal that minted it. The server
+    /// deduplicates on `(user_id, idempotency_key)` and resolves `user_id` from
+    /// the caller's own capability, so a key presented under a principal that
+    /// did not mint it is not refused there — it is not found, and a second run
+    /// is created. This is what makes a stale key worse than useless after a
+    /// device-identity rename rather than merely redundant.
+    ///
+    /// A record with no stamp answers true. It was written before #935, and the
+    /// build that wrote it never moved this file out of the directory it was
+    /// minted in, so for every such record already at rest the answer is
+    /// correct. The one case it gets wrong is narrow and named: a record left
+    /// outstanding by a pre-#935 build, carried across a rename by a build that
+    /// has this, and retried. Closing that would mean refusing every record
+    /// written before the upgrade, which strands sellers whose scope never
+    /// changed at all — a strictly more common case, and one with nothing to
+    /// leak. The window is self-closing: the next submission any device makes
+    /// writes a stamped record.
+    func wasMintedUnder(
+        _ scope: ItemRunSubmissionPrincipalScopeProof
+    ) -> Bool {
+        guard let mintedUnderPrincipalScope else {
+            return true
+        }
+        return mintedUnderPrincipalScope == scope.opaqueDigest
     }
 
     /// True when this attempt stands for the same submission the server would see.

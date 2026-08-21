@@ -5263,6 +5263,212 @@ final class ItemRunSubmissionTests: XCTestCase {
         throw CocoaError(.fileReadUnknown)
     }
 
+    /// #935. A device-identity rename must not let one item's photo set buy a
+    /// second AI item run.
+    ///
+    /// This is the sequence that spends it. A guest submits, the response is
+    /// ambiguous — the run may or may not exist on the server, and this device
+    /// will never learn which — and then the App Attest key is renewed. #855
+    /// carries the staged photos into the arriving scope, so the seller comes
+    /// back to the same item and taps Start listing again.
+    ///
+    /// Server-side, idempotency is jointly keyed on principal *and* key.
+    /// `public.find_mobile_item_submission` resolves
+    /// `private.assert_verified_guest_capability()` into `v_user_id` and
+    /// filters on it before it ever compares `p_idempotency_key`
+    /// (`supabase/migrations/20260728140000_authenticated_guest_submission_replay_lookup.sql`),
+    /// against a table whose primary key is `(user_id, idempotency_key)`
+    /// (`20260720210000_mobile_item_submission.sql:6-34`). The guest `user_id`
+    /// is `guest_` + sha256(appId ‖ keyId) (`src/lib/guest-capability/service.ts:56-59`),
+    /// so a renewed key *is* a different tenant. The departing key replayed
+    /// under it is not rejected and not honoured — it is not seen. The lookup
+    /// misses, `begin_mobile_item_submission` inserts at a free primary key,
+    /// and one photo set has bought two runs.
+    ///
+    /// Carrying the key forward therefore buys the same second run as minting a
+    /// fresh one, and no server-side fence catches it either: verified-guest
+    /// principals short-circuit the DeviceCheck device fence by design
+    /// (`20260731190000_included_offer_device_fence.sql:1013-1023`). The only
+    /// answer a client can hold is to refuse to send at all. So the record
+    /// travels with the photos it stands for — as evidence this photo set
+    /// already bought a run, not as a key to replay — and the arriving scope
+    /// keeps the seller off the network.
+    @MainActor
+    func testAKeyRenewalAfterAnAmbiguousSubmissionCannotBuyASecondRun()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "attempt-record-rename-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let identity = TestNativeIntakeIdentity(
+            NativeIntake.Identity(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "guest-key-before-renewal"
+            )
+        )
+        // The production composition, because `.device` authority on both sides
+        // is what makes the renewal an adoption rather than a handover.
+        let intake = NativeIntake(
+            applicationSupportDirectory: applicationSupport,
+            identitySource:
+                ClerkAuthenticationComposition.makeNativeIntakeIdentitySource(
+                    keyStore: identity,
+                    verifiedClerkSubject: identity.clerkSubject,
+                    clerkChanges: identity.changes,
+                    appAttestChanges: { AsyncStream { $0.finish() } }
+                )
+        )
+        let session = try await NativeIntakeTestSession(intake)
+        let departing = try await session.commit(
+            .addPhotos([
+                NativeIntake.PhotoInput {
+                    SubmissionIntakeFixture.jpeg(
+                        filling: "attempt-record-rename",
+                        repeated: 1
+                    )
+                },
+            ])
+        )
+        XCTAssertEqual(departing.photos.count, 1)
+
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let tokenProvider = RenewingBearerTokenProvider(
+            verifiedAppAttestKeyID: "guest-key-before-renewal"
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                // Unused on this path on purpose: a synchronized principal
+                // submits through the durable store the staged photos resolve,
+                // which is the store this row is about.
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: departing.photos
+                ),
+                tokenProvider: tokenProvider,
+                guestRecoveryCredentials:
+                    RecordingGuestRecoveryCredentialStore(
+                        identity: GuestRecoverySubmissionIdentity(
+                            recoveryID: UUID(),
+                            recoveryTokenHash: String(
+                                repeating: "a",
+                                count: 64
+                            )
+                        )
+                    ),
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(snapshot: departing, intake: intake)
+
+        await host.startListing(photos: departing.photos)
+
+        let departingRoot = try Self.principalRoot(of: departing)
+        let persisted = try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: departingRoot
+        ).loadAttempt()
+        let departingKey = try XCTUnwrap(
+            persisted,
+            "Control: an ambiguous outcome has to leave its key behind."
+        ).idempotencyKey
+        let dispatched = await submitter.payloads
+        XCTAssertEqual(dispatched.count, 1)
+        XCTAssertEqual(dispatched.first?.attempt.idempotencyKey, departingKey)
+
+        // `AppAttestClient.attestInstallation` finding the key stale, removing
+        // it, and enrolling its replacement.
+        await identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(
+                id: "guest-key-after-renewal",
+                state: .verified
+            )
+        )
+        let arriving = try await session.nextSnapshot()
+        XCTAssertNotEqual(
+            arriving.version.activationID,
+            departing.version.activationID,
+            "Control: a renewal really is a principal transition."
+        )
+        XCTAssertEqual(
+            arriving.photos.map(\.id),
+            departing.photos.map(\.id),
+            "Control: #855 carried the staged item into the arriving scope."
+        )
+        let arrivingRoot = try Self.principalRoot(of: arriving)
+        XCTAssertNotEqual(
+            arrivingRoot,
+            departingRoot,
+            "Control: the renewal really renamed the scope directory."
+        )
+        // The renewal has already replaced the server-side guest identity, so
+        // the bearer this device can mint is bound to the arriving key.
+        tokenProvider.renew(verifiedAppAttestKeyID: "guest-key-after-renewal")
+        host.synchronizePrincipal(snapshot: arriving, intake: intake)
+
+        await host.startListing(photos: arriving.photos)
+
+        let payloads = await submitter.payloads
+        XCTAssertEqual(
+            payloads.count,
+            1,
+            """
+            The retry reached the network under a principal the server has \
+            never seen. Its replay lookup filters on that principal before the \
+            key, so the departing key is invisible there and \
+            `begin_mobile_item_submission` inserts a fresh row: one photo set, \
+            two AI item runs. Nothing a client sends can make that request a \
+            replay, so it must not be sent.
+            """
+        )
+        XCTAssertNil(host.acceptedRun)
+        XCTAssertEqual(
+            host.retention,
+            .attemptNotPersisted,
+            """
+            The same answer the sibling guard gives a legacy guest attempt, \
+            and for the same reason: a response for this photo set may already \
+            have committed, so the seller gets the retry destination rather \
+            than a fresh key.
+            """
+        )
+        let carried = try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: arrivingRoot
+        ).loadAttempt()
+        XCTAssertEqual(
+            try XCTUnwrap(carried).idempotencyKey,
+            departingKey,
+            """
+            The record has to travel with the photos it stands for. Left \
+            behind, the arriving store is empty and the retry mints a second \
+            key for one item — and the departing root no longer holds a \
+            `Current`, so #545's sweep reads it as malformed and deletes the \
+            evidence at the next pass rather than at its former expiry.
+            """
+        )
+    }
+
+    /// The opaque principal directory the staged photos are filed under.
+    /// `ItemRunSubmissionPrincipalContext` derives its durable store from this
+    /// same walk, so reading it here reads what production would.
+    private static func principalRoot(
+        of snapshot: NativeIntake.Snapshot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> URL {
+        let assets = try XCTUnwrap(
+            snapshot.photos.first,
+            file: file,
+            line: line
+        ).photoURL.deletingLastPathComponent()
+        XCTAssertEqual(assets.lastPathComponent, "Assets", file: file, line: line)
+        let current = assets.deletingLastPathComponent()
+        XCTAssertEqual(current.lastPathComponent, "Current", file: file, line: line)
+        return current.deletingLastPathComponent().standardizedFileURL
+    }
+
     private func makeNativePrincipalIntake(
         applicationSupport: URL,
         verifiedClerkSubject: String,
@@ -5491,6 +5697,46 @@ private struct TestBearerTokenProvider: BearerTokenProviding {
             bearerToken: try await resolve(),
             scopeProof: principalScopeProof
         )
+    }
+}
+
+/// A guest bearer whose scope proof follows the device's App Attest key, so a
+/// test can renew the key the way `AppAttestClient` does and have the next
+/// bearer bind to the replacement.
+private final class RenewingBearerTokenProvider:
+    BearerTokenProviding,
+    @unchecked Sendable {
+    private let lock = NSLock()
+    private var proof: ItemRunSubmissionPrincipalScopeProof
+    private var token: String
+
+    init(verifiedAppAttestKeyID: String) {
+        proof = ItemRunSubmissionPrincipalScopeProof(
+            verifiedAppAttestKeyID: verifiedAppAttestKeyID
+        )!
+        token = GuestCapabilityToken.prefix + verifiedAppAttestKeyID
+    }
+
+    func renew(verifiedAppAttestKeyID: String) {
+        let renewed = ItemRunSubmissionPrincipalScopeProof(
+            verifiedAppAttestKeyID: verifiedAppAttestKeyID
+        )!
+        lock.lock()
+        defer { lock.unlock() }
+        proof = renewed
+        token = GuestCapabilityToken.prefix + verifiedAppAttestKeyID
+    }
+
+    func bearerToken() async throws -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return token
+    }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        lock.lock()
+        defer { lock.unlock() }
+        return PrincipalBoundBearer(bearerToken: token, scopeProof: proof)
     }
 }
 

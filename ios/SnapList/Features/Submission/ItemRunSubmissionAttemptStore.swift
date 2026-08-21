@@ -392,8 +392,16 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         let isCompatibleAuthenticatedV2 =
             version?.schemaVersion == 2
                 && stored.guestRecoveryIdentity == nil
+        // #935 added the minting-scope stamp, so a v3 record decodes cleanly
+        // with none. Discarding it here would discard a live idempotency key,
+        // which is the second run this store exists to prevent;
+        // `wasMintedUnder` owns what an absent stamp is taken to mean.
+        let isCompatibleUnstampedV3 =
+            version?.schemaVersion == 3
+                && stored.mintedUnderPrincipalScope == nil
         guard isCurrent || isCompatiblePhotoOnlyV1
-                || isCompatibleAuthenticatedV2 else {
+                || isCompatibleAuthenticatedV2
+                || isCompatibleUnstampedV3 else {
             return try discardUnusableAttempt()
         }
         return stored

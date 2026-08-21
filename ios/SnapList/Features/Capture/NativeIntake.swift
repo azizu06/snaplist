@@ -710,11 +710,38 @@ actor NativeIntake {
     /// move can leave the arriving root created and empty; `readStoredBundle`
     /// reports that as `.malformed` and the sweep removes it.
     ///
-    /// Only `Current` travels. The sibling `ItemRunSubmission/attempt.json` is
-    /// deliberately left behind: it holds an idempotency key minted under the
-    /// departing App Attest key, and replaying it under the key that replaced it
-    /// is a question about credit accounting rather than about staged photos.
-    /// #935 owns that decision.
+    /// #935's decision: the sibling `ItemRunSubmission/` travels too, and it
+    /// travels as evidence rather than as a key to re-present.
+    ///
+    /// Leaving it behind is the expensive answer. The arriving store loads
+    /// empty, the seller's retry mints a second idempotency key for the same
+    /// photo set, and the server creates a second AI item run for one item —
+    /// while the departing root, now without a `Current`, is swept as
+    /// `.malformed` at the next pass rather than at the record's own expiry, so
+    /// the evidence disappears early too.
+    ///
+    /// Replaying the carried key is equally expensive, and this is the part
+    /// that is easy to get wrong. Server-side idempotency is keyed jointly on
+    /// principal and key: `public.find_mobile_item_submission` filters
+    /// `private.assert_verified_guest_capability()`'s `user_id` before it
+    /// compares the key, over a table whose primary key is
+    /// `(user_id, idempotency_key)`. The guest `user_id` is derived from the
+    /// App Attest key id, so the key that replaced it is a different tenant and
+    /// the departing key is not rejected there — it is not seen. Replaying it
+    /// creates the same second run as minting a fresh one, and no device fence
+    /// catches that either, because verified-guest principals are exempt from
+    /// it by design.
+    ///
+    /// So the record arrives to be recognised as foreign and refuse the send.
+    /// `ItemRunSubmissionAttempt` carries the scope it was minted under and the
+    /// submission path stops before the network when that scope is not this
+    /// one. Changing the photo set is the way out, and the right one: a
+    /// different photo set is a different item and legitimately buys a run.
+    ///
+    /// The record moves before `Current`, which is not arbitrary. If the record
+    /// arrives and the photos do not, the arriving bundle is empty and there is
+    /// nothing to submit; if the photos arrived without their record, the retry
+    /// would mint the second key this whole path exists to prevent.
     private func adoptDepartingDeviceBundle(into arriving: Scope?, at root: URL) {
         guard let arriving,
               arriving.authority == .device,
@@ -725,27 +752,38 @@ actor NativeIntake {
         else {
             return
         }
-        let source = departing.root.appendingPathComponent(
-            "Current",
-            isDirectory: true
-        )
-        let destination = root.appendingPathComponent(
-            "Current",
-            isDirectory: true
-        )
+        let carried = ["ItemRunSubmission", "Current"].map {
+            (
+                source: departing.root.appendingPathComponent(
+                    $0,
+                    isDirectory: true
+                ),
+                destination: root.appendingPathComponent($0, isDirectory: true)
+            )
+        }
         do {
-            try Self.validateContainedPath(
-                source,
-                under: durableAnchor,
-                fileManager: fileManager
-            )
-            try Self.validateContainedPath(
-                destination,
-                under: durableAnchor,
-                fileManager: fileManager
-            )
-            guard fileManager.fileExists(atPath: source.path),
-                  !fileManager.fileExists(atPath: destination.path) else {
+            for move in carried {
+                try Self.validateContainedPath(
+                    move.source,
+                    under: durableAnchor,
+                    fileManager: fileManager
+                )
+                try Self.validateContainedPath(
+                    move.destination,
+                    under: durableAnchor,
+                    fileManager: fileManager
+                )
+                // An arriving scope that already owns either directory keeps
+                // both. A key that comes back is not authority to overwrite
+                // what it left behind, and a record it did not mint is not its
+                // record.
+                guard !fileManager.fileExists(atPath: move.destination.path)
+                else {
+                    return
+                }
+            }
+            guard let current = carried.last,
+                  fileManager.fileExists(atPath: current.source.path) else {
                 return
             }
             try Self.prepareRoot(
@@ -753,7 +791,10 @@ actor NativeIntake {
                 under: durableAnchor,
                 fileManager: fileManager
             )
-            try fileManager.moveItem(at: source, to: destination)
+            for move in carried
+            where fileManager.fileExists(atPath: move.source.path) {
+                try fileManager.moveItem(at: move.source, to: move.destination)
+            }
         } catch {
             return
         }
