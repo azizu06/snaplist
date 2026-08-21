@@ -1364,7 +1364,7 @@ private struct CameraFixtureSurface: View {
                         .background(.black.opacity(0.38))
                         .clipShape(.circle)
                     Spacer()
-                    Label(captured ? "1 of 4 photos" : "Auto", systemImage: captured ? "photo.stack" : "bolt.slash.fill")
+                    Label(captured ? "1 of 5 photos" : "Auto", systemImage: captured ? "photo.stack" : "bolt.slash.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .padding(.horizontal, 12)

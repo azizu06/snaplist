@@ -174,21 +174,21 @@
     "capture.photo-count": {
       "approvedStateIds": ["CAP-02c"],
       "templates": {
-        "title": "{capturedPhotoCount} of 4 photos",
+        "title": "{capturedPhotoCount} of 5 photos",
         "body": null,
-        "accessibilityLabel": "{capturedPhotoCount} of 4 photos"
+        "accessibilityLabel": "{capturedPhotoCount} of 5 photos"
       },
       "canonicalSubstitutions": {"capturedPhotoCount": "1"},
       "expected": {
-        "title": "1 of 4 photos",
+        "title": "1 of 5 photos",
         "body": null,
-        "accessibilityLabel": "1 of 4 photos"
+        "accessibilityLabel": "1 of 5 photos"
       },
       "sources": [{
         "kind": "json-string-keys",
         "path": "ios/DesignContracts/V1/snaplist-copy-catalog.json",
         "keys": ["photo_count_one"],
-        "fragments": ["1 of 4 photos"]
+        "fragments": ["1 of 5 photos"]
       }]
     },
     "processing.finding-sold-comps": {
@@ -268,13 +268,13 @@
       "templates": {
         "title": "Upload paused",
         "body": "Your photos are safe on this device",
-        "accessibilityLabel": "Upload paused. Uploaded to SnapList. {uploadedPhotoCount} of 4 · resumes on reconnect. Your photos are safe on this device."
+        "accessibilityLabel": "Upload paused. Uploaded to SnapList. {uploadedPhotoCount} of 5 · resumes on reconnect. Your photos are safe on this device."
       },
       "canonicalSubstitutions": {"uploadedPhotoCount": "2"},
       "expected": {
         "title": "Upload paused",
         "body": "Your photos are safe on this device",
-        "accessibilityLabel": "Upload paused. Uploaded to SnapList. 2 of 4 · resumes on reconnect. Your photos are safe on this device."
+        "accessibilityLabel": "Upload paused. Uploaded to SnapList. 2 of 5 · resumes on reconnect. Your photos are safe on this device."
       },
       "sources": [{
         "kind": "json-state-copy",
@@ -283,7 +283,7 @@
         "fragments": [
           "Upload paused",
           "Uploaded to SnapList",
-          "2 of 4 · resumes on reconnect",
+          "2 of 5 · resumes on reconnect",
           "Your photos are safe on this device"
         ]
       }]

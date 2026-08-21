@@ -2031,7 +2031,7 @@ final class SnapListUITests: XCTestCase {
             ("CAP-02a", "Start with one clear photo."),
             ("CAP-02b1", "Move closer"),
             ("CAP-02b2", "Whole item is in frame"),
-            ("CAP-02c", "1 of 4 photos"),
+            ("CAP-02c", "1 of 5 photos"),
             ("CAP-03-handoff", "Photos ready to review")
         ]
 
