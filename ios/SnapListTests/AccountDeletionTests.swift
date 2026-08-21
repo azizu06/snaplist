@@ -353,7 +353,11 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
         var attempted: [String] = []
         let steps = AccountDeletionDeviceState.steps(
             removeIntake: { attempted.append("intake"); return false },
-            removeCachedItems: { attempted.append("cached-items"); return true }
+            removeCachedItems: { attempted.append("cached-items"); return true },
+            removeIncludedOfferRedemption: {
+                attempted.append("included-offer-redemption")
+                return true
+            }
         )
 
         let cleared = await AccountDeletionDeviceState.clear(steps: steps)
@@ -361,12 +365,19 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
         // Composing these two through `SettingsLocalRemovalTransaction` would
         // short-circuit here, and the seller's cached items would survive a
         // deletion because intake removal happened to fail first.
-        XCTAssertEqual(attempted, ["intake", "cached-items"])
+        XCTAssertEqual(
+            attempted,
+            ["intake", "cached-items", "included-offer-redemption"]
+        )
         XCTAssertFalse(cleared)
         // The Keychain half still follows the app's own stores, in that order.
+        // #854 item 3: the included-offer redemption record is one of those
+        // stores. It is keyed by the Clerk subject and the Keychain half never
+        // touched it, so before this a deleted subject's id stayed on the
+        // device after erasure reported the device clean.
         XCTAssertEqual(
             steps.map(\.name),
-            ["intake", "cached-items"]
+            ["intake", "cached-items", "included-offer-redemption"]
                 + AccountDeletionDeviceState.keychainSteps.map(\.name)
         )
     }
@@ -398,7 +409,8 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
         var intakeVersion = 1
         let steps = AccountDeletionDeviceState.steps(
             removeIntake: { intakeVersion == 2 },
-            removeCachedItems: { true }
+            removeCachedItems: { true },
+            removeIncludedOfferRedemption: { true }
         )
         // Whatever the seller did between opening the screen and confirming.
         intakeVersion = 2

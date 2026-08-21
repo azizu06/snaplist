@@ -90,6 +90,37 @@ struct IncludedOfferRedemptionStore: Sendable {
     func settle(_ disposition: IncludedOfferRedemptionDisposition) {
         defaults.set(disposition.rawValue, forKey: dispositionStorageKey)
     }
+
+    /// Issue #854 item 3. Takes both keys back when the account is gone.
+    ///
+    /// Modelled on `AccountErasureKeyStore.forget()`, and needed for the same
+    /// reason: these values are scoped by the Clerk subject, so a deleted
+    /// account's id survives erasure unless the device clear names this store.
+    /// The disposition goes with the key, or a later key minted for a reused
+    /// subject would inherit an answer it never earned.
+    func forget() {
+        defaults.removeObject(forKey: keyStorageKey)
+        defaults.removeObject(forKey: dispositionStorageKey)
+    }
+}
+
+/**
+ Issue #854 item 1. What one completed drive of `redeem()` is worth telling the
+ operator.
+
+ The disposition alone cannot separate the two failures that matter. An account
+ that reached the fence and was refused looks identical, at the seller, to one
+ whose claim never settled inside its follow-up budget — and only the second is
+ the shape of a seller who can never reach their included run. `followUps`
+ carries that difference: `nil` when the durable record answered with no
+ request at all, otherwise how many follow-ups this drive spent.
+
+ Deliberately no subject, claim id, or idempotency key. This is a health signal
+ about whether the free listing is reachable, not a record of who asked.
+ */
+struct IncludedOfferRedemptionReport: Equatable, Sendable {
+    let disposition: IncludedOfferRedemptionDisposition
+    let followUps: Int?
 }
 
 /**
@@ -140,6 +171,41 @@ enum IncludedOfferRedemptionComposition {
 }
 
 /**
+ Issue #854 item 4. One redemption drive per process.
+
+ `IncludedOfferRedemptionComposition.drive` carries its `handled` set in
+ memory, so a second drive is a second set: both would redeem for the same
+ principal, mint two idempotency keys, and open two claims that
+ `unique (user_id, idempotency_key)` cannot collapse into one.
+
+ A latch rather than per-account serialization because the second caller is
+ unreachable today — `UIApplicationSupportsMultipleScenes` is true, but
+ `TARGETED_DEVICE_FAMILY = 1` means there is no second scene on iPhone to fire
+ a second `.task` from. This closes the shape without building for a caller
+ that does not exist.
+
+ `@MainActor` is the mutual exclusion: `start` is only ever reached from the
+ scene body, so the check and the store cannot interleave.
+ */
+@MainActor
+final class IncludedOfferRedemptionDrive {
+    private var drive: Task<Void, Never>?
+
+    init() {}
+
+    /// The running drive, started now if there is not one already.
+    @discardableResult
+    func start(
+        _ work: @escaping @Sendable () async -> Void
+    ) -> Task<Void, Never> {
+        if let drive { return drive }
+        let started = Task { await work() }
+        drive = started
+        return started
+    }
+}
+
+/**
  Drives one account's included-offer redemption to a durable answer.
 
  Nothing here decides whether the promotion is owed. It produces the evidence
@@ -154,22 +220,51 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
     private let newIdempotencyKey: @Sendable () -> String
     private let waitBeforeFollowUp: @Sendable (_ milliseconds: Int) async -> Void
     private let maximumFollowUps: Int
+    private let report: @Sendable (IncludedOfferRedemptionReport) -> Void
+
+    /// The longest this client will wait between follow-ups.
+    ///
+    /// The fence sends 2000. A minute is far enough above that to be no
+    /// constraint on it, and near enough to keep a launch from parking on a
+    /// value nobody meant to send.
+    static let maximumFollowUpDelayMilliseconds = 60_000
+
+    /**
+     Issue #854 item 2. Turns the server's `retryAfterMs` into a sleep.
+
+     `retryAfterMs` decodes as an unbounded `Int`
+     (`MobileAPIModels.swift`), and `UInt64(milliseconds) * 1_000_000` traps
+     above roughly 1.8e13. Only SnapList's own fence feeds this and it only
+     sends 2000, so there is no live path — but the clamp is one expression and
+     the alternative is a crash on a value the client never validated.
+     */
+    static func followUpNanoseconds(forRetryAfterMs milliseconds: Int) -> UInt64 {
+        let bounded = min(
+            max(0, milliseconds),
+            maximumFollowUpDelayMilliseconds
+        )
+        return UInt64(bounded) * 1_000_000
+    }
 
     init(
         redemption: IncludedOfferRedemption,
         store: IncludedOfferRedemptionStore,
+        report: @escaping @Sendable (IncludedOfferRedemptionReport) -> Void,
         newIdempotencyKey: @escaping @Sendable () -> String = {
             UUID().uuidString.lowercased()
         },
         waitBeforeFollowUp: @escaping @Sendable (Int) async -> Void = { milliseconds in
             try? await Task.sleep(
-                nanoseconds: UInt64(max(0, milliseconds)) * 1_000_000
+                nanoseconds: Self.followUpNanoseconds(
+                    forRetryAfterMs: milliseconds
+                )
             )
         },
         maximumFollowUps: Int = 4
     ) {
         self.redemption = redemption
         self.store = store
+        self.report = report
         self.newIdempotencyKey = newIdempotencyKey
         self.waitBeforeFollowUp = waitBeforeFollowUp
         self.maximumFollowUps = maximumFollowUps
@@ -179,6 +274,7 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
     func redeem() async -> IncludedOfferRedemptionDisposition {
         let record = store.load()
         if let settled = record?.disposition, settled.isSettled {
+            report(.init(disposition: settled, followUps: nil))
             return settled
         }
 
@@ -206,6 +302,12 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
         if disposition.isSettled {
             store.settle(disposition)
         }
+        // #854 item 1. Every drive says how it ended, settled or not. Before
+        // this the disposition was discarded at the call site and nothing was
+        // logged, so a seller permanently stuck on `.retryable` produced no
+        // signal at all on the one path that decides whether the free listing
+        // is reachable.
+        report(.init(disposition: disposition, followUps: followUps))
         return disposition
     }
 
