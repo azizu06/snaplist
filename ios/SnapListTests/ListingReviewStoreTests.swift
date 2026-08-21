@@ -744,6 +744,121 @@ final class ListingReviewStoreTests: XCTestCase {
         )
     }
 
+    // #962 hazard 1: before this issue, price never traveled the
+    // View-layer flush mechanism (`ListingReviewInlineEdits.flush(into:)`
+    // has no case for price at all), so nothing durably persisted a price
+    // edit except an explicit Done tap. This proves the store's own
+    // autosave -- not that mechanism -- carries a price edit to the
+    // server on its own.
+    func testEditingSellerPriceOverrideAloneAutosavesWithoutAnExplicitDone() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let receipt = Self.receipt(for: snapshot)
+        let service = ListingReviewRecordingService(
+            saves: [.success(receipt)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setSellerPriceOverride(Decimal(string: "129.99")!)
+        let outcome = await store.flushPendingAutosave()
+
+        XCTAssertEqual(outcome, .saved(receipt))
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(
+            requests[0].draft.sellerPriceOverride,
+            Decimal(string: "129.99")!
+        )
+        XCTAssertFalse(store.isDirty)
+    }
+
+    // #962 hazard 2: autosave keeps the same store open across many saves
+    // in one sitting, unlike `done()`, which always dismissed after its
+    // one save. The store must advance its own idea of the review
+    // revision after each save, or the second save's
+    // `expectedReviewRevision` goes stale and a save that should succeed
+    // 409s instead.
+    func testSequentialAutosavesAdvanceTheExpectedReviewRevision() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let firstRevision = UUID(
+            uuidString: "55000000-0000-4000-8000-000000000061"
+        )!
+        let secondRevision = UUID(
+            uuidString: "55000000-0000-4000-8000-000000000062"
+        )!
+        let firstReceipt = ListingReviewSaveReceipt(
+            schemaVersion: 1,
+            runID: snapshot.binding.runID,
+            itemID: snapshot.binding.itemID,
+            listingID: snapshot.binding.listingID,
+            reviewRevision: firstRevision
+        )
+        let secondReceipt = ListingReviewSaveReceipt(
+            schemaVersion: 1,
+            runID: snapshot.binding.runID,
+            itemID: snapshot.binding.itemID,
+            listingID: snapshot.binding.listingID,
+            reviewRevision: secondRevision
+        )
+        let service = ListingReviewRecordingService(
+            saves: [.success(firstReceipt), .success(secondReceipt)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setSellerPriceOverride(Decimal(99))
+        let firstOutcome = await store.flushPendingAutosave()
+        XCTAssertEqual(firstOutcome, .saved(firstReceipt))
+
+        await store.setTitle("Sony WH-1000XM4 headphones, mint condition")
+        let secondOutcome = await store.flushPendingAutosave()
+        XCTAssertEqual(secondOutcome, .saved(secondReceipt))
+
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            requests[0].expectedRevision,
+            snapshot.binding.reviewRevision
+        )
+        XCTAssertEqual(requests[1].expectedRevision, firstRevision)
+    }
+
+    // #962 hazard 5: a silent autosave attempt that genuinely fails must
+    // surface the same truthful, retryable state an explicit Done would --
+    // and must not drop the edit that failed to save.
+    func testFlushPendingAutosaveSurfacesAnHonestFailureAndKeepsTheDraft() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [.failure(ListingReviewClientError.offline)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        await store.setTitle("Sony WH-1000XM4 headphones, boxed")
+        let outcome = await store.flushPendingAutosave()
+
+        XCTAssertEqual(outcome, .stayed)
+        XCTAssertEqual(store.phase, .offline)
+        XCTAssertEqual(
+            store.announcement,
+            "You're offline. Your changes are saved on this phone."
+        )
+        XCTAssertTrue(store.isDirty)
+        XCTAssertEqual(
+            store.draft?.title,
+            "Sony WH-1000XM4 headphones, boxed"
+        )
+    }
+
     private func makeStore(
         service: any ListingReviewServing,
         persistence: any ListingReviewDraftPersisting =

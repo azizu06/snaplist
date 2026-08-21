@@ -443,7 +443,10 @@ enum AssistedExportCopy {
     // `ListingReviewView.swift`; #896 should drop them from this file in the
     // same change that removes their last render.
     static let entryTitle = "Share to other marketplaces"
-    static let saveBeforeSharing = "Save your changes before sharing."
+    // #962: every edit autosaves, so reaching this guard means the autosave
+    // attempt itself failed (offline, conflict, etc.) -- not that the seller
+    // forgot a save step that no longer exists.
+    static let saveBeforeSharing = "Couldn’t save your changes. Check your connection and try again."
 
     static func savePhotos(count: Int) -> String {
         "Save \(photos(count))"

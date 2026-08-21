@@ -49,6 +49,13 @@ final class ListingReviewStore {
     private var expiresAt: Date?
     private var draftGeneration: UInt = 0
     private var openGeneration: UInt = 0
+    /// Non-cancellation debounce: every edit schedules a sleep-then-flush
+    /// task and overwrites this marker with the draft generation it should
+    /// fire for. Any earlier scheduled task whose captured generation no
+    /// longer matches this marker when it wakes is stale and no-ops, so
+    /// multiple in-flight sleeps can coexist safely without ever dropping
+    /// the last edit.
+    private var pendingAutosaveGeneration: UInt?
 
     private var persistenceToken: ListingReviewDraftPersistenceToken {
         ListingReviewDraftPersistenceToken(
@@ -242,20 +249,40 @@ final class ListingReviewStore {
         )
     }
 
+    @discardableResult
     func done() async -> ListingReviewDoneOutcome {
+        pendingAutosaveGeneration = nil
+        return await performSave(silent: false)
+    }
+
+    /// Where the debounce in `scheduleAutosave()` settles, and where every
+    /// "leaving the screen" call site (back, push a destination, present a
+    /// sheet, background the app) flushes a pending edit before it can be
+    /// lost. Runs the identical save `done()` runs, but a field mid-edit is
+    /// not a failure: an unmet precondition (nothing dirty, stale, invalid)
+    /// is a quiet no-op here instead of overwriting whatever announcement
+    /// the edit itself just posted. An actual save attempt that fails is
+    /// never silenced -- the seller needs to know that edit didn't stick.
+    @discardableResult
+    func flushPendingAutosave() async -> ListingReviewDoneOutcome {
+        pendingAutosaveGeneration = nil
+        return await performSave(silent: true)
+    }
+
+    private func performSave(silent: Bool) async -> ListingReviewDoneOutcome {
         guard let snapshot, let draft else {
             return .stayed
         }
         guard !isStale else {
-            announcement = ListingReviewCopy.staleReview
+            if !silent { announcement = ListingReviewCopy.staleReview }
             return .stayed
         }
         guard canSave else {
-            announcement = "Enter a price above $0 to continue."
+            if !silent { announcement = "Enter a price above $0 to continue." }
             return .stayed
         }
         guard isDirty else {
-            announcement = "Done. Back to Processing review."
+            if !silent { announcement = "Done. Back to Processing review." }
             return .dismissedWithoutWrite
         }
         guard let scope = activeScope else {
@@ -267,7 +294,7 @@ final class ListingReviewStore {
         let generation = draftGeneration
         let token = persistenceToken
         phase = .saving
-        announcement = "Saving your changes."
+        if !silent { announcement = "Saving your changes." }
         do {
             let bearer = try await tokenProvider.principalBoundBearer()
             guard generation == draftGeneration,
@@ -329,8 +356,14 @@ final class ListingReviewStore {
             }
             pendingSave = nil
             savedDraft = draft
+            // Autosave keeps this store open across many saves in one
+            // sitting; the next save's `expectedReviewRevision` must track
+            // what the server just advanced to, or it 409s as stale.
+            self.snapshot = snapshot.withBinding(
+                snapshot.binding.advancingReviewRevision(to: receipt.reviewRevision)
+            )
             phase = .ready
-            announcement = "Saved. Back to Processing review."
+            if !silent { announcement = "Saved. Back to Processing review." }
             return .saved(receipt)
         } catch ListingReviewClientError.refused(let refusal) {
             guard generation == draftGeneration,
@@ -410,18 +443,37 @@ final class ListingReviewStore {
         }
         let generation = draftGeneration
         let token = persistenceToken
-        if !(await persistCurrent(
-            generation: generation,
-            token: token
-        )),
-           generation == draftGeneration {
+        let persisted = await persistCurrent(generation: generation, token: token)
+        guard generation == draftGeneration else { return }
+        if persisted {
+            if changed { scheduleAutosave() }
+        } else {
             phase = .failed
             self.announcement = ListingReviewCopy.draftPersistenceFailed
         }
     }
 
+    /// Schedules a flush after a debounce window. Never cancels a prior
+    /// scheduled flush -- see `pendingAutosaveGeneration` -- so a save this
+    /// triggers can never be silently dropped by a later edit superseding
+    /// it; the later edit just wins the race to actually fire.
+    private func scheduleAutosave() {
+        let generation = draftGeneration
+        pendingAutosaveGeneration = generation
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            await self?.fireAutosaveIfStillPending(generation: generation)
+        }
+    }
+
+    private func fireAutosaveIfStillPending(generation: UInt) async {
+        guard pendingAutosaveGeneration == generation else { return }
+        await flushPendingAutosave()
+    }
+
     private func adoptFresh(_ canonical: ListingReviewResult) {
         draftGeneration &+= 1
+        pendingAutosaveGeneration = nil
         snapshot = canonical
         draft = ListingReviewDraft(snapshot: canonical)
         pendingSave = nil
@@ -435,6 +487,7 @@ final class ListingReviewStore {
         canonical: ListingReviewResult
     ) {
         draftGeneration &+= 1
+        pendingAutosaveGeneration = nil
         snapshot = canonical
         draft = persisted.draft
         pendingSave = persisted.pendingSave
@@ -549,6 +602,7 @@ final class ListingReviewStore {
 
     private func resetForOpen() {
         draftGeneration &+= 1
+        pendingAutosaveGeneration = nil
         phase = .idle
         snapshot = nil
         draft = nil
