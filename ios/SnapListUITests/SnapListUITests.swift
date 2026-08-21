@@ -3610,6 +3610,62 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["pro-gate.not-now"].exists)
     }
 
+    /// #976: `Start listing` and the saved-item note above it stayed pinned to
+    /// their default sizes at every Dynamic Type setting — the button's
+    /// `maxHeight` capped it at the approved `primaryActionHeight` (52pt) and
+    /// the note's font never scaled at all. Both must grow at accessibility5;
+    /// only the default-size render stays pixel-locked to `primaryActionHeight`.
+    func testPhotoReviewFooterPrimaryActionAndSavedNoteScaleAtAccessibility5() {
+        let defaultApp = launch(extraArguments: ["--pro-gate-fixture=PAY-10"])
+        let defaultButton = defaultApp.buttons["photo-review.start-listing"]
+        XCTAssertTrue(defaultButton.waitForExistence(timeout: 3))
+        XCTAssertEqual(defaultButton.label, "Start listing")
+        XCTAssertEqual(defaultButton.frame.height, 52, accuracy: 0.5)
+
+        let defaultMessage = defaultApp.staticTexts["photo-review.submission-message"]
+        XCTAssertTrue(defaultMessage.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            defaultMessage.label,
+            "This item is saved. It needs SnapList Pro to go through AI."
+        )
+        let defaultMessageHeight = defaultMessage.frame.height
+        addScreenshot(named: "AX5-PHOTO-REVIEW-FOOTER-default-402x874.png")
+        defaultApp.terminate()
+
+        let a11yApp = launch(
+            extraArguments: [
+                "--pro-gate-fixture=PAY-10",
+                "--dynamic-type=accessibility5",
+            ]
+        )
+        let a11yButton = a11yApp.buttons["photo-review.start-listing"]
+        XCTAssertTrue(a11yButton.waitForExistence(timeout: 3))
+        XCTAssertEqual(a11yButton.label, "Start listing")
+        // `Start listing` is short enough that its scaled bold single line
+        // still fits inside the frozen 52pt floor at accessibility5 — the
+        // floor was already sized generously for these labels. The fix
+        // removed `maxHeight`, which matters for longer/localized labels;
+        // what this button-side assertion can honestly prove is that the
+        // floor still holds and the control stays fully hittable, not that
+        // it grows. The note assertion below is the definitive proof that
+        // Dynamic Type reaches this view at all.
+        XCTAssertGreaterThanOrEqual(a11yButton.frame.height, 51.5)
+        XCTAssertTrue(a11yButton.isHittable)
+
+        let a11yMessage = a11yApp.staticTexts["photo-review.submission-message"]
+        XCTAssertTrue(a11yMessage.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            a11yMessage.label,
+            "This item is saved. It needs SnapList Pro to go through AI."
+        )
+        XCTAssertGreaterThan(
+            a11yMessage.frame.height,
+            defaultMessageHeight * 1.5,
+            "The saved-item note must scale with Dynamic Type."
+        )
+        addScreenshot(named: "AX5-PHOTO-REVIEW-FOOTER-accessibility5-402x874.png")
+    }
+
     func testAccessibilityDynamicTypeKeepsFoundationControlsReachable() {
         let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
         app.buttons["dock.trophy-wall"].tap()

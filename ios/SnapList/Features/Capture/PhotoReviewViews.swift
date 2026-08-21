@@ -3340,6 +3340,13 @@ struct PhotoReviewView: View {
     private var reviewCountSize: CGFloat = 13
     @ScaledMetric(relativeTo: .body)
     private var saveFailureActionTitleSize: CGFloat = 16
+    // #976: `primaryActionHeight` is a frozen DEFAULT-size value in the Photo
+    // Review v5 visual contract, not a ceiling — at larger Dynamic Type
+    // sizes the button and the note above it are approved to grow past it.
+    @ScaledMetric(relativeTo: .body)
+    private var primaryActionLabelSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .subheadline)
+    private var submissionMessageSize: CGFloat = 14
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -4695,7 +4702,7 @@ struct PhotoReviewView: View {
                     }
 
                     Text(message)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: submissionMessageSize, weight: .semibold))
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -4756,17 +4763,18 @@ struct PhotoReviewView: View {
             openBoundary(submissionPresentation.primaryActionEvent)
         } label: {
             Text(submissionPresentation.primaryActionLabel)
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: primaryActionLabelSize, weight: .bold))
                 .foregroundStyle(
                     submissionPresentation.actionStyle == .filled
                         ? SnapListColorToken.canvas.color
                         : SnapListColorToken.inkPrimary.color
                 )
+                // `primaryActionHeight` is the frozen DEFAULT-size render; at
+                // larger Dynamic Type sizes the label may grow past it rather
+                // than truncate, so this is a floor, not a fixed height (#976).
                 .frame(
                     maxWidth: .infinity,
                     minHeight:
-                        PhotoReviewV5VisualContract.primaryActionHeight,
-                    maxHeight:
                         PhotoReviewV5VisualContract.primaryActionHeight
                 )
                 .contentShape(.rect)
