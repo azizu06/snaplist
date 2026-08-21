@@ -277,6 +277,23 @@ export class ListingReviewNotEditableError extends Error {
   }
 }
 
+/**
+ * #919 review round 3. This review cannot be regenerated again, and no retry of
+ * the same request will change that.
+ *
+ * Both refusals that land here come out of `authorize_ai_item_guided_correction`
+ * as a bare `Error` off the authorization RPC, so the route matched none of its
+ * conflict classes and answered 503 "Listing Review save is temporarily
+ * unavailable." on every attempt, reporting an error each time. The state is
+ * permanent, so that copy invited a retry loop that could never succeed.
+ *
+ * The remedies differ, so the sentence is carried rather than fixed: after a
+ * condition-allowance refusal the seller's included identity correction is
+ * still unspent, and copy that sent them off to start a new run would cost them
+ * a correction they still have.
+ */
+export class ListingReviewCorrectionUnavailableError extends Error {}
+
 export class ListingReviewSaveDataError extends Error {
   constructor(message = "Listing Review save failed.") {
     super(message);
@@ -343,6 +360,36 @@ function isNotEditableRegenerationError(error: unknown): error is Error {
       "A published listing cannot be regenerated from review.",
       "Editable eBay listing not found.",
     ].some((message) => error.message.includes(message));
+}
+
+/**
+ * #919 review round 3. The database owns this sentence, so it is repeated here
+ * verbatim rather than paraphrased; the RLS suite is what proves the two copies
+ * still agree.
+ */
+const CONDITION_ALLOWANCE_REFUSAL =
+  "You have used every condition update for this item."
+  + " Add, replace, or remove a photo to price it again.";
+
+/**
+ * The included identity correction is spent. The database sentence names no
+ * remedy, so the seller-facing one does.
+ */
+const INCLUDED_CORRECTION_REFUSAL =
+  "This item's included correction is already used."
+  + " Add, replace, or remove a photo to price it again.";
+
+function correctionUnavailableRefusal(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  if (error.message.includes(CONDITION_ALLOWANCE_REFUSAL)) {
+    return CONDITION_ALLOWANCE_REFUSAL;
+  }
+  if (
+    error.message.includes("The included guided correction is unavailable.")
+  ) {
+    return INCLUDED_CORRECTION_REFUSAL;
+  }
+  return null;
 }
 
 async function operationToken(
@@ -522,6 +569,10 @@ export function createListingReviewSaver(
         }
         if (isNotEditableRegenerationError(error)) {
           throw new ListingReviewNotEditableError();
+        }
+        const refusal = correctionUnavailableRefusal(error);
+        if (refusal) {
+          throw new ListingReviewCorrectionUnavailableError(refusal);
         }
         throw error;
       }

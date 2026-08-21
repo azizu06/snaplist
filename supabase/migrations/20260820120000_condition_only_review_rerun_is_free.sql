@@ -61,12 +61,20 @@ alter table public.ai_item_credit_reservations
 -- condition guidance. Past that the seller is sampling the price surface, which
 -- is the unbounded provider spend this cap exists to stop.
 --
--- Exceeding it is NOT a new refusal. The save simply stops being exempt and
--- falls back to the pre-#919 accounting, so it spends the included correction if
--- one is unspent and is refused by the existing guard if it is not. Worst case
--- per item is therefore four regenerations (three free condition reruns plus the
--- one included identity correction) — a bounded, small multiple of the single
--- run the seller already paid for, and never worse than before this issue.
+-- Exceeding it refuses the save. It does NOT fall back to charging the included
+-- identity correction: the seller asked to restate condition, which is ground
+-- truth they hold and not a report that SnapList got the item wrong, so "a
+-- condition-only save does not spend a correction credit" stays literally true
+-- for every condition-only save, including the one over the cap. Nothing on the
+-- refused path writes to the reservation, so the included correction is left
+-- unspent and a later genuine identity fix still runs free.
+--
+-- Worst case per item is therefore four regenerations (three free condition
+-- reruns plus the one included identity correction), a bounded, small multiple
+-- of the single run the seller already paid for. Past that the only way on is
+-- the escape hatch that already existed and that the refusal message names: a
+-- changed photo set is a new item run. There is no second escape hatch and no
+-- new entitlement to buy.
 create or replace function private.condition_only_rerun_allowance()
 returns integer
 language sql
@@ -535,14 +543,27 @@ begin
       errcode = 'P0001',
       message = 'The included guided correction is unavailable.';
   end if;
-  -- #919 review round 1. Spend the exemption, not the seller's trust: once the
-  -- free condition reruns for this reservation are used up the save is treated
-  -- as an ordinary guided correction again, so the guard below applies to it
-  -- exactly as it did before this issue.
+  -- #919 review round 3. Once the free condition reruns for this reservation
+  -- are used up the save is refused outright. It is deliberately NOT downgraded
+  -- to an ordinary guided correction: doing that spent the seller's one included
+  -- identity correction on a condition restatement they never offered to pay
+  -- for, and it made the acceptance promise false for the fourth condition-only
+  -- save.
+  --
+  -- This raise happens before every write below, so the reservation keeps both
+  -- `guided_correction_started_at` and `guided_correction_completed_at` null and
+  -- the rerun counter does not move for a rerun that never ran. The seller's
+  -- included correction survives this refusal intact.
+  --
+  -- The message names the remedy that already exists rather than inventing one:
+  -- changing the photo set is a new item run.
   if v_condition_only
     and v_reservation.condition_only_reruns
         >= private.condition_only_rerun_allowance() then
-    v_condition_only := false;
+    raise exception using
+      errcode = 'P0001',
+      message = 'You have used every condition update for this item.'
+        || ' Add, replace, or remove a photo to price it again.';
   end if;
   if not v_condition_only
     and v_reservation.guided_correction_completed_at is not null then
@@ -796,18 +817,26 @@ begin
 
   if v_cap.condition_only then
     -- #919 review round 1. A free rerun still costs a pricing-router pass and a
-    -- grounded generation, so it is recorded. Gated on the capability still
-    -- being unconsumed for the same reason the branch below is gated on
-    -- `guided_correction_completed_at`: a replay must not count twice.
+    -- grounded generation, so it is recorded.
+    --
+    -- Round 3 correction: this increment carries no replay guard of its own, and
+    -- it does not need one. `v_cap` was taken `for update` above and the function
+    -- already raised there if `consumed_at` was set, so a replay of the same
+    -- capability token never reaches this line and a concurrent one blocks on
+    -- that row lock until the first transaction commits `consumed_at`. Unlike
+    -- the paid branch below there is no once-only column to key on, because a
+    -- counter is meant to move on every distinct rerun.
+    --
+    -- An earlier version added `and exists (… capability.consumed_at is null)`
+    -- here and described it as that guard. It was not one: the predicate is
+    -- satisfied by `v_cap`'s own locked, still-unconsumed row on every reachable
+    -- path, so it could never be false. It is dropped rather than left standing
+    -- as a guard that reads real and is not.
     update public.ai_item_credit_reservations
     set condition_only_reruns = condition_only_reruns + 1, updated_at = v_now
-    where id = v_cap.reservation_id
-      and exists (
-        select 1
-        from private.guided_correction_completion_capabilities capability
-        where capability.reservation_id = v_cap.reservation_id
-          and capability.consumed_at is null
-      );
+    where id = v_cap.reservation_id;
+    -- The reservation was locked by the authority check above, so this is an
+    -- invariant assertion, not a race the caller can lose.
     if not found then
       raise exception using errcode = '55000', message = 'Guided correction completion was already recorded.';
     end if;

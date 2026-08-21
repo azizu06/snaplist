@@ -30,6 +30,7 @@ import {
   createListingReviewSaveDataClient,
   createListingReviewSaver,
   listingReviewSaveIntentSchema,
+  ListingReviewCorrectionUnavailableError,
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
   ListingReviewSaveInProgressError,
@@ -1522,10 +1523,13 @@ describe("mobile Listing Review save RLS authority", () => {
         unspentIncludedCorrection(3),
       );
 
-      // Past the cap the save is NOT refused — it stops being exempt and falls
-      // back to the accounting it had before #919, so this one spends the
-      // included correction. The counter stops moving because this rerun is no
-      // longer a free one.
+      // Past the cap the save is REFUSED (#919 review round 3). It does NOT
+      // fall back to spending the seller's included identity correction: they
+      // asked to restate condition, which is ground truth rather than a
+      // correction of SnapList's identity claim, so "a condition-only save does
+      // not spend a correction credit" has to stay literally true for every
+      // condition-only save, including the one over the cap. The refusal points
+      // at the escape hatch that already exists, a changed photo set.
       const cappedConditionKey = crypto.randomUUID();
       const cappedConditionRegenerate = vi.fn(async () => {
         await completeMockedCorrection({
@@ -1539,52 +1543,66 @@ describe("mobile Listing Review save RLS authority", () => {
           correctedCondition: "very-good",
         });
       });
+      await expect(
+        createListingReviewSaver(conditionData, {
+          regenerate: cappedConditionRegenerate,
+        }).save({
+          runId: conditionFixture.runId,
+          idempotencyKey: cappedConditionKey,
+          intent: {
+            ...conditionIntent,
+            condition: "very-good",
+            expectedReviewRevision: thirdConditionKey,
+          },
+          userId: conditionUserId,
+          bearerToken: conditionToken,
+        }),
+      ).rejects.toThrow(ListingReviewCorrectionUnavailableError);
+      // Untouched, not merely unspent: the included correction was never even
+      // started, and the free-rerun counter did not move for a rerun that never
+      // ran.
+      expect(await correctionLedger(database, conditionUserId)).toEqual(
+        unspentIncludedCorrection(3),
+      );
+      // The refused save left no half-written review behind either.
+      expect(await reviewState(database, conditionFixture.itemId)).toEqual({
+        condition: "good",
+        model: "WH-1000XM4",
+        price_override: "139.49",
+        review_revision: thirdConditionKey,
+      });
+
+      // …and this is the whole point of refusing instead of charging: the
+      // included correction is still there, so a later GENUINE identity fix
+      // still runs free.
+      const identityAfterCapKey = crypto.randomUUID();
+      const identityAfterCapRegenerate = vi.fn(async () => {
+        await completeMockedCorrection({
+          admin,
+          fixture: conditionFixture,
+          owner: conditionOwner,
+          key: identityAfterCapKey,
+          expectedReviewRevision: thirdConditionKey,
+          expectedRunId: thirdConditionKey,
+          correctedModel: "WH-1000XM5",
+          correctedCondition: "good",
+        });
+      });
       await createListingReviewSaver(conditionData, {
-        regenerate: cappedConditionRegenerate,
+        regenerate: identityAfterCapRegenerate,
       }).save({
         runId: conditionFixture.runId,
-        idempotencyKey: cappedConditionKey,
+        idempotencyKey: identityAfterCapKey,
         intent: {
           ...conditionIntent,
-          condition: "very-good",
+          condition: "good",
+          specifics: sellerSpecifics("WH-1000XM5", "good"),
           expectedReviewRevision: thirdConditionKey,
         },
         userId: conditionUserId,
         bearerToken: conditionToken,
       });
-      expect(cappedConditionRegenerate).toHaveBeenCalledOnce();
-      expect(await correctionLedger(database, conditionUserId)).toEqual(
-        spentIncludedCorrection(3),
-      );
-
-      // …and with both the free reruns and the included correction gone, the
-      // next one fails closed on the guard that was already there.
-      const exhaustedConditionKey = crypto.randomUUID();
-      await expect(
-        createListingReviewSaver(conditionData, {
-          regenerate: () =>
-            completeMockedCorrection({
-              admin,
-              fixture: conditionFixture,
-              owner: conditionOwner,
-              key: exhaustedConditionKey,
-              expectedReviewRevision: cappedConditionKey,
-              expectedRunId: cappedConditionKey,
-              correctedModel: "WH-1000XM4",
-              correctedCondition: "good",
-            }),
-        }).save({
-          runId: conditionFixture.runId,
-          idempotencyKey: exhaustedConditionKey,
-          intent: {
-            ...conditionIntent,
-            condition: "good",
-            expectedReviewRevision: cappedConditionKey,
-          },
-          userId: conditionUserId,
-          bearerToken: conditionToken,
-        }),
-      ).rejects.toThrow(/included guided correction is unavailable/i);
+      expect(identityAfterCapRegenerate).toHaveBeenCalledOnce();
       expect(await correctionLedger(database, conditionUserId)).toEqual(
         spentIncludedCorrection(3),
       );
@@ -1741,6 +1759,24 @@ describe("mobile Listing Review save RLS authority", () => {
       );
       expect(desyncProbe.error).toBeNull();
       expect(desyncProbe.data).toMatchObject({ state: "regeneration" });
+      // Regenerating is only half of what this probe decides. Because only the
+      // mirror moved and `p_condition` did not, the scope diff (which drops the
+      // mirror) sees no identity change, so this lands the FREE 'condition'
+      // scope. That is accepted rather than accidental: a save arriving through
+      // `listingReviewSaveIntentSchema` cannot produce it, since
+      // `normalizeReservedSpecifics` rewrites the reserved entry to
+      // `intent.condition` before the RPC sees it, and a direct caller who
+      // reaches this path is bounded by the free-rerun cap. The scope is absent
+      // from the RPC's return value, so it is read off the row the gate wrote.
+      // Pinned so the case cannot change without this test saying so (#919
+      // review round 3).
+      const desyncScope = await database.query(
+        `select regeneration_scope
+         from private.mobile_listing_review_saves
+         where user_id = $1`,
+        [desyncUserId],
+      );
+      expect(desyncScope.rows).toEqual([{ regeneration_scope: "condition" }]);
     } finally {
       await Promise.all(
         fixtures.map((fixture) =>

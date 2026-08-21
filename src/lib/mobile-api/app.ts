@@ -16,6 +16,7 @@ import {
 import type { ActivationGuidanceCompletionStore } from "@/lib/activation-guidance/store";
 import type { PushDeviceTokenStore } from "@/lib/push-device-tokens/store";
 import {
+  ListingReviewCorrectionUnavailableError,
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
   listingReviewSaveIntentSchema,
@@ -1200,6 +1201,12 @@ export function createMobileApiHandler(
           || error instanceof ListingReviewIdempotencyConflictError
           || error instanceof ListingReviewSaveInProgressError
           || error instanceof ListingReviewNotEditableError
+          // #919 review round 3. A refusal the seller can act on, not an
+          // outage. Falling through below answered 503 "temporarily
+          // unavailable." and reported an error on every attempt, against a
+          // state that never clears on its own, so the copy asked the seller to
+          // retry forever. The message carries the remedy.
+          || error instanceof ListingReviewCorrectionUnavailableError
         ) {
           return errorResponse(
             requestId,
