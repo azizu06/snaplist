@@ -311,7 +311,7 @@
         393,
         852
       ],
-      "fixture": "Four photos local; two uploaded; offline",
+      "fixture": "Five photos local; two uploaded; offline",
       "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
     },
     {

@@ -382,7 +382,7 @@
       "device": "default",
       "title": "Captured photo",
       "copy": [
-        "1 of 4 photos"
+        "1 of 5 photos"
       ],
       "actions": [
         {
@@ -812,7 +812,7 @@
       "status": "approved",
       "device": "default",
       "title": "Interrupted upload",
-      "fixture": "Four photos local; two uploaded; offline",
+      "fixture": "Five photos local; two uploaded; offline",
       "entry_routes": [
         "restored interrupted upload",
         "RUN-01 uploading row"
@@ -828,9 +828,9 @@
         "You went offline",
         "Your photos are safe on this device",
         "Saved on this device",
-        "All 4 photos",
+        "All 5 photos",
         "Uploaded to SnapList",
-        "2 of 4 · resumes on reconnect",
+        "2 of 5 · resumes on reconnect",
         "Resume upload",
         "Review photos",
         "Cancel"

@@ -91,11 +91,11 @@ describe("resolveScoutGuidance", () => {
 
     expect(result).toMatchObject({
       message: {
-        title: "2 of 4 photos",
+        title: "2 of 5 photos",
         body: null,
       },
       accessibility: {
-        label: "2 of 4 photos",
+        label: "2 of 5 photos",
       },
     });
   });
@@ -113,7 +113,7 @@ describe("resolveScoutGuidance", () => {
       substitutions: { capturedPhotoCount },
     });
 
-    expect(result.message.title).toBe("2 of 4 photos");
+    expect(result.message.title).toBe("2 of 5 photos");
   });
 
   it("derives the captured-photo fact from a five-photo capture session", () => {
@@ -354,7 +354,7 @@ describe("resolveScoutGuidance", () => {
       substitutions: { uploadedPhotoCount },
     });
 
-    expect(result.accessibility.label).toContain("1 of 4");
+    expect(result.accessibility.label).toContain("1 of 5");
   });
 
   it("derives the uploaded-photo fact from a five-photo durable run", () => {

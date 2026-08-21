@@ -192,7 +192,7 @@
           "valueType": "integer",
           "trustedSources": ["capture-session"],
           "minimum": 1,
-          "maximum": 4
+          "maximum": 5
         }
       ],
       "copyKeys": {
@@ -320,7 +320,7 @@
           "valueType": "integer",
           "trustedSources": ["durable-run"],
           "minimum": 0,
-          "maximum": 4
+          "maximum": 5
         }
       ],
       "copyKeys": {
@@ -460,8 +460,8 @@
       "capture.move-closer.accessibilityLabel": "Move closer",
       "capture.framing-accepted.title": "Whole item is in frame",
       "capture.framing-accepted.accessibilityLabel": "Whole item is in frame",
-      "capture.photo-count.title": "{capturedPhotoCount} of 4 photos",
-      "capture.photo-count.accessibilityLabel": "{capturedPhotoCount} of 4 photos",
+      "capture.photo-count.title": "{capturedPhotoCount} of 5 photos",
+      "capture.photo-count.accessibilityLabel": "{capturedPhotoCount} of 5 photos",
       "processing.finding-sold-comps.title": "Working on your item",
       "processing.finding-sold-comps.body": "Finding recent sold comps",
       "processing.finding-sold-comps.accessibilityLabel": "Working on your item. {itemDisplayName}. Finding recent sold comps. You can leave — we’ll keep working.",
@@ -475,7 +475,7 @@
       "uncertainty.identity.accessibilityLabel": "We’re not fully sure. Limited evidence.",
       "recovery.upload-paused.title": "Upload paused",
       "recovery.upload-paused.body": "Your photos are safe on this device",
-      "recovery.upload-paused.accessibilityLabel": "Upload paused. Uploaded to SnapList. {uploadedPhotoCount} of 4 · resumes on reconnect. Your photos are safe on this device.",
+      "recovery.upload-paused.accessibilityLabel": "Upload paused. Uploaded to SnapList. {uploadedPhotoCount} of 5 · resumes on reconnect. Your photos are safe on this device.",
       "recovery.processing-failed.title": "Couldn’t finish this run",
       "recovery.processing-failed.body": "We hit a snag finding comps",
       "recovery.processing-failed.accessibilityLabel": "Couldn’t finish this run. We hit a snag finding comps. Trying again is free.",
