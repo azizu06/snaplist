@@ -312,12 +312,23 @@ the frame is a flex item narrower than its declared width and shrinks to the col
 last two steps were left alone rather than raised into no effect. The card stack takes its height
 from the row and its width from `--phone-w` once stacked, so it grew with the phone on its own.
 
-## Known honesty gap
+## The figures in `listing-review.webp` are fixture data, and that is settled
 
-`listing-review.webp` shows $118 with three sold matches between $104 and $135. Those numbers are
-prototype fixture data, not a real pricing run, and they are on a public page. The correct fix is a
-genuine run captured fresh, not an edited number in the image. Flagged in PR #860 and repeated here
-so the next person to touch this directory sees it before they treat the figure as product truth.
+The screen shows $118 with three sold matches between $98 and $135. Those numbers are prototype
+fixture data, not the output of a real pricing run. PR #860 flagged this as an open honesty gap
+and proposed a fresh capture of a genuine run as the fix. Aziz closed it on 2026-08-21 and chose
+to leave the capture alone: representative data in a product screenshot is ordinary, and nothing
+about the price misrepresents what the app does.
+
+Two things made the proposed fix worse than the problem. A genuine run returns real eBay listing
+photographs for the comp rail, and those cannot be licensed for marketing use, so the rail would
+have had to change to something less accurate than the licensed Air Jordan 3 set it carries now.
+And a disclaimer line under the explorer would put design-stage vocabulary on the landing page,
+which the copy contract and `marketing.test.tsx` both push against.
+
+So: do not treat $118 as product truth, do not cite it as evidence of pricing accuracy, and do
+not edit a number inside the image. If a fresh capture ever happens for another reason, take the
+figures it produces. This is no longer an open item.
 
 The screens themselves depict shipping UI. Apple guideline 2.3.3 forbids showing interface the app
 does not have, so any future screen added here has to come from a build that actually renders it.
