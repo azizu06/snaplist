@@ -1261,46 +1261,44 @@ html:has(.mkt) {
   transform-origin: top left;
 }
 
-/* Scout stands on the phone's top-left corner, level with the section heading.
-   The clips are square with the character centred, so width and height are the
-   same number and the figure lands inside it.
+/* Scout stands on the phone's top-left corner, one tier below the heading.
 
-   The corner is the one place in this section with room. Measured across the
-   desktop band, the gap between the heading's last glyph row and the top of the
-   phone is 103px at 1440 through 900, so anything standing directly under the
-   title is capped at a figure about 100px tall and reads as a charm. Off to the
-   left it is not capped, because the heading is centred: the free band runs from
-   the phone's left edge to the first glyph, which is 267px wide at 1440, 196 at
-   900, and still 157 at 760. Scout rises past the heading's baseline inside that
-   band and collides with nothing.
+   Both numbers below are multiples of `--phone-scale`, the same variable the
+   device itself is scaled by, so Scout is a fixed fraction of the phone at
+   every breakpoint instead of a viewport share that drifts against it. That
+   matters because the ledge he stands on is the device's own `padding: 11px`,
+   which scales with the phone; a `vw`-based size lands him differently at each
+   step and only looks right at whichever width it was tuned on.
 
-   `bottom: calc(100% - 20px)` puts his feet 20px below the frame's top edge, so
-   he stands on the bezel rather than floating over it. The clamp tops out at 208
-   because the band above the phone is about 156px of usable height and his feet
-   have to stay near the bezel; the 168 floor is the size at which the figure
-   still clears the heading at 760, the narrowest width he appears at.
+   In unscaled device units the box bottom sits 15px below the phone's top edge
+   and the lowest painted pixel across all five clips is 8.6px above that box
+   bottom, so his feet land about 6px down the 11px metal rail. He rests on the
+   case with roughly 5px to spare before the glass, at every width, in every
+   pose. An earlier pass put the box 52px into the device, which cleared the
+   heading but drove his feet 13 to 23px past the rail and onto the screen; it
+   read as standing inside the phone rather than on it.
+
+   The size is what separates his head from the heading, and it is the only
+   thing that can. The box is pinned by its bottom edge, so `bottom` moves feet
+   and head together; shrinking the box drops the head by about 0.93 of the
+   change and the feet by only 0.08, because the feet sit near the pinned edge.
+   108 is the largest base that keeps the top of his head at least 21px under
+   the heading's cap line at 900, where the band between heading and phone is
+   narrowest at 133px. Verified at nine widths from 1440 to 780 against all
+   five clips, using each clip's alpha bounds unioned over every frame rather
+   than a single sampled pose, since the lowest and highest painted pixel both
+   move as the animation runs.
 
    He is not hidden below 760 by CSS. `display: none` would still mount the
    element and still fetch the clip, so the breakpoint is enforced at the mount
-   instead — see `useScoutMount`. */
-/* Scout sits below the section headline, not level with it. The old box was
-   208px tall and stood 20px into the device, which put the top of his camera
-   head within a couple of pixels of the headline's cap line at 1440 and 900,
-   so two things of very different weight competed for the same tier. Two
-   changes fix it together, because neither is enough alone: the ceiling drops
-   to 180px, and the box stands 52px into the device instead of 20px. Since
-   the box is pinned by its bottom edge, both push the figure down. Measured
-   against the headline cap line, his head moves from 2px above to 37px below
-   at 1440, and from level to 33px below at 900. His feet then overlap the top
-   bezel rather than balancing on its edge, which reads as standing on the
-   phone. Padding the section instead would have reopened the gap the Cal AI
-   pass closed. */
+   instead. See `useScoutMount`. */
 .mkt-explorer__scout {
+  --scout-size: calc(108px * var(--phone-scale));
   position: absolute;
   left: 0;
-  bottom: calc(100% - 52px);
-  width: clamp(168px, 14vw, 180px);
-  height: clamp(168px, 14vw, 180px);
+  bottom: calc(100% - 15px * var(--phone-scale));
+  width: var(--scout-size);
+  height: var(--scout-size);
   pointer-events: none;
   z-index: 2;
 }
