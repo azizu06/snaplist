@@ -5302,10 +5302,284 @@ final class ItemRunSubmissionTests: XCTestCase {
                 isDirectory: true
             )
         defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let scenario = try await Self.stageAnAmbiguousSubmissionThenRenewTheKey(
+            applicationSupport: applicationSupport
+        )
+        XCTAssertEqual(
+            scenario.arriving.photos.map(\.id),
+            scenario.departing.photos.map(\.id),
+            "Control: #855 carried the staged item into the arriving scope."
+        )
+
+        await scenario.host.startListing(photos: scenario.arriving.photos)
+
+        let payloads = await scenario.submitter.payloads
+        XCTAssertEqual(
+            payloads.count,
+            1,
+            """
+            The retry reached the network under a principal the server has \
+            never seen. Its replay lookup filters on that principal before the \
+            key, so the departing key is invisible there and \
+            `begin_mobile_item_submission` inserts a fresh row: one photo set, \
+            two AI item runs. Nothing a client sends can make that request a \
+            replay, so it must not be sent.
+            """
+        )
+        XCTAssertNil(scenario.host.acceptedRun)
+        XCTAssertEqual(
+            PhotoReviewSubmissionRejectionFamily(
+                retention: try XCTUnwrap(scenario.host.retention)
+            ),
+            .departedDeviceIdentity,
+            """
+            The refusal has to be told apart from the fifteen other sites that \
+            retain, four of which sit upstream of this guard on the same path. \
+            Its own family is what makes this assertion able to fail for the \
+            reason it names.
+            """
+        )
+        let carried = try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: scenario.arrivingRoot
+        ).loadAttempt()
+        XCTAssertEqual(
+            try XCTUnwrap(carried).idempotencyKey,
+            scenario.departingKey,
+            """
+            The record has to travel with the photos it stands for. Left \
+            behind, the arriving store is empty and the retry mints a second \
+            key for one item, and the departing root no longer holds a \
+            `Current`, so #545's sweep reads it as malformed and deletes the \
+            evidence at the next pass rather than at its former expiry.
+            """
+        )
+    }
+
+    /// #935 round 1. The refusal above is permanent: its guard clears only when
+    /// the record's minting scope equals this one, which is only when the phone
+    /// is back on the App Attest key that departed. Routing it to `sub06` gave
+    /// the seller a `Try again` button that starts a fresh submission and
+    /// re-enters the same guard, forever, with nothing on screen ever naming
+    /// the one thing that would clear it.
+    ///
+    /// The valve is already in the mechanism: `standsFor` is false for a
+    /// different photo set, so a changed set mints a fresh key under the
+    /// arriving scope and sends. That is the sentence the seller needs.
+    @MainActor
+    func testTheDepartedKeyRefusalNamesTheOneChangeThatClearsIt()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "attempt-record-rename-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let scenario = try await Self.stageAnAmbiguousSubmissionThenRenewTheKey(
+            applicationSupport: applicationSupport
+        )
+
+        await scenario.host.startListing(photos: scenario.arriving.photos)
+
+        let family = try XCTUnwrap(
+            PhotoReviewSubmissionRejectionFamily(
+                retention: try XCTUnwrap(scenario.host.retention)
+            )
+        )
+        XCTAssertEqual(
+            family.message,
+            """
+            This phone's ID changed, so these photos can't be sent as they \
+            are. Add, replace, or remove a photo, then try again.
+            """,
+            """
+            `.tryAgain`'s words describe a send that failed once. This one \
+            fails identically every time until the photo set changes, so the \
+            copy has to name that change rather than offer a retry that \
+            cannot succeed.
+            """
+        )
+        XCTAssertEqual(family.primaryActionLabel, "Review")
+        guard case .submissionRejected(let eventID, _)? =
+                scenario.host.pendingPresentationEvent else {
+            return XCTFail("The refusal has to reach the seller at all.")
+        }
+        XCTAssertEqual(
+            family.primaryActionEvent(eventID: eventID),
+            .reviewSubmission(eventID: eventID)
+        )
+        XCTAssertFalse(
+            scenario.host.canRetryAmbiguousSubmission(eventID: eventID),
+            "Control: nothing here can be resent as it is."
+        )
+        XCTAssertTrue(
+            scenario.host.reviewRejectedSubmission(eventID: eventID),
+            """
+            The primary action has to reach the one screen where the photo set \
+            can change. A destination whose button the boundary refuses to \
+            honour is the same dead end in different words.
+            """
+        )
+    }
+
+    /// #935 round 1. The two-directory carry is not atomic, and the arriving
+    /// scope's `ItemRunSubmission` is exactly what a kill between the two moves
+    /// leaves behind. Aborting the whole adoption over it strands the staged
+    /// photos in a root the seller can no longer open, and #545's sweep removes
+    /// that root at its deadline: the photo loss #855 exists to prevent, from
+    /// the record carry that #935 added.
+    @MainActor
+    func testAnAdoptionInterruptedAfterTheRecordStillCarriesThePhotos()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "attempt-record-rename-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let scenario = try await Self.stageAnAmbiguousSubmissionThenRenewTheKey(
+            applicationSupport: applicationSupport,
+            beforeTheRenewal: { departingRoot, arrivingRoot in
+                // Byte for byte the state a process death between the record
+                // move and the `Current` move leaves on disk.
+                let fileManager = FileManager.default
+                try fileManager.createDirectory(
+                    at: arrivingRoot,
+                    withIntermediateDirectories: true
+                )
+                try fileManager.moveItem(
+                    at: departingRoot.appendingPathComponent(
+                        "ItemRunSubmission",
+                        isDirectory: true
+                    ),
+                    to: arrivingRoot.appendingPathComponent(
+                        "ItemRunSubmission",
+                        isDirectory: true
+                    )
+                )
+            }
+        )
+
+        XCTAssertEqual(
+            scenario.arriving.photos.map(\.id),
+            scenario.departing.photos.map(\.id),
+            """
+            The seller's staged item has to arrive. A record already standing \
+            in the arriving root is evidence the carry was interrupted, not \
+            authority to leave the photos in a directory nothing will open \
+            again.
+            """
+        )
+        let carried = try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: scenario.arrivingRoot
+        ).loadAttempt()
+        XCTAssertEqual(
+            try XCTUnwrap(carried).idempotencyKey,
+            scenario.departingKey,
+            "Control: the interrupted move is the one that put it there."
+        )
+
+        await scenario.host.startListing(photos: scenario.arriving.photos)
+
+        let refused = await scenario.submitter.payloads
+        XCTAssertEqual(
+            refused.count,
+            1,
+            """
+            The record that arrived early is still the departing key, so the \
+            refusal is unchanged by which move carried it.
+            """
+        )
+    }
+
+    /// #935 round 1. `wasMintedUnder` answers true for a record with no stamp,
+    /// which is correct for every unstamped record at rest: the build that
+    /// wrote it never moved this file out of the directory that minted it. This
+    /// build does. A pre-stamp record carried across a rename by a build that
+    /// has the stamp replays under the arriving principal and buys the second
+    /// run this whole path exists to prevent.
+    ///
+    /// The carry is the only thing that ever moves this file and it knows the
+    /// record is crossing, so the record is stamped there rather than guessed
+    /// at read time. That closes the hole without refusing records that never
+    /// moved at all.
+    @MainActor
+    func testAPreStampRecordCarriedAcrossARenameCannotReplayItsKey()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "attempt-record-rename-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let scenario = try await Self.stageAnAmbiguousSubmissionThenRenewTheKey(
+            applicationSupport: applicationSupport,
+            beforeTheRenewal: { departingRoot, _ in
+                // Exactly what a pre-#935 build left outstanding: the v3 shape,
+                // and no minting scope on it.
+                let url = departingRoot
+                    .appendingPathComponent(
+                        "ItemRunSubmission",
+                        isDirectory: true
+                    )
+                    .appendingPathComponent("attempt.json")
+                var record = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: try Data(contentsOf: url)
+                    ) as? [String: Any]
+                )
+                XCTAssertNotNil(
+                    record["mintedUnderPrincipalScope"],
+                    "Control: this build stamps what it mints."
+                )
+                record["mintedUnderPrincipalScope"] = nil
+                record["schemaVersion"] = 3
+                try JSONSerialization
+                    .data(withJSONObject: record)
+                    .write(to: url, options: .atomic)
+            }
+        )
+
+        await scenario.host.startListing(photos: scenario.arriving.photos)
+
+        let dispatched = await scenario.submitter.payloads
+        XCTAssertEqual(
+            dispatched.count,
+            1,
+            """
+            An unstamped record that travelled is foreign to the scope it \
+            arrived in, and presenting its key there is not a replay: the \
+            server resolves the caller's own principal before it compares the \
+            key, so the lookup misses and a second run is created for one item.
+            """
+        )
+        XCTAssertNil(scenario.host.acceptedRun)
+        XCTAssertEqual(
+            PhotoReviewSubmissionRejectionFamily(
+                retention: try XCTUnwrap(scenario.host.retention)
+            ),
+            .departedDeviceIdentity,
+            "The carried record is refused for the reason it is foreign."
+        )
+    }
+
+    /// One ambiguous guest submission, then the App Attest key renewal that
+    /// renames the scope directory its photos and record are filed under.
+    ///
+    /// `beforeTheRenewal` receives the departing and arriving roots while the
+    /// departing one still owns both directories, which is the only window in
+    /// which an interrupted carry or a pre-stamp record can be staged.
+    private static func stageAnAmbiguousSubmissionThenRenewTheKey(
+        applicationSupport: URL,
+        beforeTheRenewal: (_ departingRoot: URL, _ arrivingRoot: URL) throws
+            -> Void = { _, _ in },
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> DeviceKeyRenewalScenario {
         let identity = TestNativeIntakeIdentity(
             NativeIntake.Identity(
                 verifiedClerkSubject: nil,
-                persistedAppAttestKeyID: "guest-key-before-renewal"
+                persistedAppAttestKeyID: DeviceKeyRenewalScenario
+                    .departingKeyID
             )
         )
         // The production composition, because `.device` authority on both sides
@@ -5331,18 +5605,18 @@ final class ItemRunSubmissionTests: XCTestCase {
                 },
             ])
         )
-        XCTAssertEqual(departing.photos.count, 1)
+        XCTAssertEqual(departing.photos.count, 1, file: file, line: line)
 
         let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
         let tokenProvider = RenewingBearerTokenProvider(
-            verifiedAppAttestKeyID: "guest-key-before-renewal"
+            verifiedAppAttestKeyID: DeviceKeyRenewalScenario.departingKeyID
         )
         let host = ItemRunSubmissionHost(
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: submitter,
                 // Unused on this path on purpose: a synchronized principal
                 // submits through the durable store the staged photos resolve,
-                // which is the store this row is about.
+                // which is the store this scenario is about.
                 attemptStore: InMemoryItemRunSubmissionAttemptStore(),
                 draftStore: RecordingCaptureDraftStore(
                     photos: departing.photos
@@ -5365,24 +5639,61 @@ final class ItemRunSubmissionTests: XCTestCase {
 
         await host.startListing(photos: departing.photos)
 
-        let departingRoot = try Self.principalRoot(of: departing)
+        let departingRoot = try Self.principalRoot(
+            applicationSupport: applicationSupport,
+            verifiedAppAttestKeyID: DeviceKeyRenewalScenario.departingKeyID,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            departingRoot,
+            try Self.principalRoot(of: departing, file: file, line: line),
+            """
+            Control: the root this scenario stages into is the one the staged \
+            photos are actually filed under.
+            """,
+            file: file,
+            line: line
+        )
         let persisted = try await LocalItemRunSubmissionAttemptStore(
             principalRootDirectory: departingRoot
         ).loadAttempt()
         let departingKey = try XCTUnwrap(
             persisted,
-            "Control: an ambiguous outcome has to leave its key behind."
+            "Control: an ambiguous outcome has to leave its key behind.",
+            file: file,
+            line: line
         ).idempotencyKey
         let dispatched = await submitter.payloads
-        XCTAssertEqual(dispatched.count, 1)
-        XCTAssertEqual(dispatched.first?.attempt.idempotencyKey, departingKey)
+        XCTAssertEqual(dispatched.count, 1, file: file, line: line)
+        XCTAssertEqual(
+            dispatched.first?.attempt.idempotencyKey,
+            departingKey,
+            file: file,
+            line: line
+        )
+
+        let arrivingRoot = try Self.principalRoot(
+            applicationSupport: applicationSupport,
+            verifiedAppAttestKeyID: DeviceKeyRenewalScenario.arrivingKeyID,
+            file: file,
+            line: line
+        )
+        XCTAssertNotEqual(
+            arrivingRoot,
+            departingRoot,
+            "Control: the renewal really renames the scope directory.",
+            file: file,
+            line: line
+        )
+        try beforeTheRenewal(departingRoot, arrivingRoot)
 
         // `AppAttestClient.attestInstallation` finding the key stale, removing
         // it, and enrolling its replacement.
         await identity.set(
             clerkSubject: nil,
             appAttestKey: .init(
-                id: "guest-key-after-renewal",
+                id: DeviceKeyRenewalScenario.arrivingKeyID,
                 state: .verified
             )
         )
@@ -5390,64 +5701,69 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertNotEqual(
             arriving.version.activationID,
             departing.version.activationID,
-            "Control: a renewal really is a principal transition."
-        )
-        XCTAssertEqual(
-            arriving.photos.map(\.id),
-            departing.photos.map(\.id),
-            "Control: #855 carried the staged item into the arriving scope."
-        )
-        let arrivingRoot = try Self.principalRoot(of: arriving)
-        XCTAssertNotEqual(
-            arrivingRoot,
-            departingRoot,
-            "Control: the renewal really renamed the scope directory."
+            "Control: a renewal really is a principal transition.",
+            file: file,
+            line: line
         )
         // The renewal has already replaced the server-side guest identity, so
         // the bearer this device can mint is bound to the arriving key.
-        tokenProvider.renew(verifiedAppAttestKeyID: "guest-key-after-renewal")
+        tokenProvider.renew(
+            verifiedAppAttestKeyID: DeviceKeyRenewalScenario.arrivingKeyID
+        )
         host.synchronizePrincipal(snapshot: arriving, intake: intake)
+        return DeviceKeyRenewalScenario(
+            intake: intake,
+            session: session,
+            host: host,
+            submitter: submitter,
+            departing: departing,
+            departingRoot: departingRoot,
+            departingKey: departingKey,
+            arriving: arriving,
+            arrivingRoot: arrivingRoot
+        )
+    }
 
-        await host.startListing(photos: arriving.photos)
+    private struct DeviceKeyRenewalScenario {
+        static let departingKeyID = "guest-key-before-renewal"
+        static let arrivingKeyID = "guest-key-after-renewal"
 
-        let payloads = await submitter.payloads
-        XCTAssertEqual(
-            payloads.count,
-            1,
-            """
-            The retry reached the network under a principal the server has \
-            never seen. Its replay lookup filters on that principal before the \
-            key, so the departing key is invisible there and \
-            `begin_mobile_item_submission` inserts a fresh row: one photo set, \
-            two AI item runs. Nothing a client sends can make that request a \
-            replay, so it must not be sent.
-            """
+        let intake: NativeIntake
+        let session: NativeIntakeTestSession
+        let host: ItemRunSubmissionHost
+        let submitter: RecordingItemRunSubmitter
+        let departing: NativeIntake.Snapshot
+        let departingRoot: URL
+        let departingKey: UUID
+        let arriving: NativeIntake.Snapshot
+        let arrivingRoot: URL
+    }
+
+    /// The scope directory one App Attest key id is filed under, composed the
+    /// way `NativeIntake` composes it rather than walked back from a staged
+    /// photo. An arriving root has to be reachable before anything is filed
+    /// under it, and a root with no photos cannot be walked back from one.
+    private static func principalRoot(
+        applicationSupport: URL,
+        verifiedAppAttestKeyID: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> URL {
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedAppAttestKeyID: verifiedAppAttestKeyID
+            ),
+            file: file,
+            line: line
         )
-        XCTAssertNil(host.acceptedRun)
-        XCTAssertEqual(
-            host.retention,
-            .attemptNotPersisted,
-            """
-            The same answer the sibling guard gives a legacy guest attempt, \
-            and for the same reason: a response for this photo set may already \
-            have committed, so the seller gets the retry destination rather \
-            than a fresh key.
-            """
-        )
-        let carried = try await LocalItemRunSubmissionAttemptStore(
-            principalRootDirectory: arrivingRoot
-        ).loadAttempt()
-        XCTAssertEqual(
-            try XCTUnwrap(carried).idempotencyKey,
-            departingKey,
-            """
-            The record has to travel with the photos it stands for. Left \
-            behind, the arriving store is empty and the retry mints a second \
-            key for one item — and the departing root no longer holds a \
-            `Current`, so #545's sweep reads it as malformed and deletes the \
-            evidence at the next pass rather than at its former expiry.
-            """
-        )
+        let digest = proof.opaqueDigest
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return applicationSupport
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("NativeIntake", isDirectory: true)
+            .appendingPathComponent("v1-\(digest)", isDirectory: true)
+            .standardizedFileURL
     }
 
     /// The opaque principal directory the staged photos are filed under.

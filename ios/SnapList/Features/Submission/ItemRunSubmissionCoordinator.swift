@@ -103,6 +103,12 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
             // sendable, so the retry destination is still the right one. Only
             // its words have to change, which the rejection family below does.
             self = .photoReview(.sub06)
+        case .attemptMintedUnderADepartedDeviceIdentity:
+            // #935. The one change that clears this guard is a change to the
+            // photo set, and Photo Review is where the seller makes it. A
+            // retry destination would hand back a button that re-enters the
+            // same refusal every time it is tapped.
+            self = .photoReview(.sub07)
         }
     }
 }
@@ -119,6 +125,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
     case photosTooLarge
     case sessionRenewal
     case deviceIdentity
+    case departedDeviceIdentity
 
     init?(retention: ItemRunSubmissionRetention) {
         // `sub07` carries every refusal the seller has to fix by hand, so the
@@ -140,6 +147,14 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
         // identically every time until the device earns a principal.
         if case .deviceIdentityUnavailable = retention {
             self = .deviceIdentity
+            return
+        }
+        // #935. `sub07` is the right destination and "this item can't be sent
+        // as it is" is not the right sentence: it leaves the seller looking at
+        // an item that is intact with nothing naming the one edit that makes it
+        // sendable. Name the photo set ahead of the shared map.
+        if case .attemptMintedUnderADepartedDeviceIdentity = retention {
+            self = .departedDeviceIdentity
             return
         }
         switch ItemRunSubmissionDestinationDecision(retention: retention) {
@@ -166,7 +181,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
             "Try again"
         case .cancelled:
             "Start listing"
-        case .conflict, .review, .photosTooLarge:
+        case .conflict, .review, .photosTooLarge, .departedDeviceIdentity:
             "Review"
         }
     }
@@ -202,6 +217,16 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
             // in ends it immediately, so the copy offers both without ordering
             // them. Two sentences and no dash, like every other message here.
             "This phone isn't ready to send yet. Your item is saved, so try again in a moment or sign in."
+        case .departedDeviceIdentity:
+            // "This phone's ID" is the seller's word for the device identity
+            // that was renewed; App Attest key, scope, and principal are ours.
+            // The photos are all still here, so nothing may suggest they were
+            // lost, and the second sentence names the only edit that clears the
+            // refusal rather than offering a retry that cannot.
+            """
+            This phone's ID changed, so these photos can't be sent as they \
+            are. Add, replace, or remove a photo, then try again.
+            """
         }
     }
 
@@ -210,7 +235,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
         case .conflict:
             "Something changed since your last try."
         case .cancelled, .offline, .ambiguity, .tryAgain, .review, .photosTooLarge,
-             .sessionRenewal, .deviceIdentity:
+             .sessionRenewal, .deviceIdentity, .departedDeviceIdentity:
             message
         }
     }
@@ -220,7 +245,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
         case .offline:
             .offline
         case .cancelled, .ambiguity, .conflict, .tryAgain, .review, .photosTooLarge,
-             .sessionRenewal, .deviceIdentity:
+             .sessionRenewal, .deviceIdentity, .departedDeviceIdentity:
             .warning
         }
     }
@@ -230,7 +255,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
         case .cancelled, .conflict:
             .filled
         case .offline, .ambiguity, .tryAgain, .review, .photosTooLarge,
-             .sessionRenewal, .deviceIdentity:
+             .sessionRenewal, .deviceIdentity, .departedDeviceIdentity:
             .outlined
         }
     }
@@ -252,7 +277,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
             // one that re-reads the intake scope once the device earns a
             // principal, which is what #843 item 3 leaves the seller waiting on.
             .startListing
-        case .review, .photosTooLarge:
+        case .review, .photosTooLarge, .departedDeviceIdentity:
             .reviewSubmission(eventID: eventID)
         }
     }
@@ -740,7 +765,8 @@ final class ItemRunSubmissionHost {
         case .conflict, .creditDenied, .rateLimited, .rejected,
              .authenticationRequired, .sessionRenewalRequired, .receiptMismatch,
              .intakeUnavailable, .attemptNotPersisted, .submissionUnavailable,
-             .photosTooLarge, .deviceIdentityUnavailable:
+             .photosTooLarge, .deviceIdentityUnavailable,
+             .attemptMintedUnderADepartedDeviceIdentity:
             // `deviceIdentityUnavailable` sits here because this gate replays a
             // dispatched attempt, and that submission never reached dispatch.
             // The seller's `Try again` starts a fresh one, which is the retry
@@ -749,6 +775,11 @@ final class ItemRunSubmissionHost {
             // `photosTooLarge` sits here rather than above because the retry this
             // gate offers resends the identical bytes, which the platform already
             // refused for their size.
+            //
+            // `attemptMintedUnderADepartedDeviceIdentity` sits here for the
+            // same reason and one stronger: those bytes carry a key this
+            // principal cannot make idempotent, so no resend of them is a
+            // replay.
             return false
         }
     }
@@ -786,7 +817,7 @@ final class ItemRunSubmissionHost {
             eventID: let pendingEventID,
             retention: let retention
         )? = pendingPresentationEvent,
-              [.review, .photosTooLarge].contains(
+              [.review, .photosTooLarge, .departedDeviceIdentity].contains(
                   PhotoReviewSubmissionRejectionFamily(retention: retention)
               ),
               pendingEventID == eventID else {
@@ -1680,9 +1711,17 @@ final class ItemRunSubmissionCoordinator {
             // item. Minting a fresh key does exactly the same thing. The only
             // send that does not spend a second AI-item credit is the one that
             // does not happen, so this stops before the network and leaves the
-            // intake staged. Changing the photo set is the way forward, and is
-            // a different item that legitimately buys a run.
-            return .retained(.attemptNotPersisted)
+            // intake staged.
+            //
+            // It stops here permanently: the guard clears only when the
+            // record's minting scope equals this one, and a phone does not
+            // return to the key that departed. Changing the photo set does
+            // clear it, because `standsFor` is false for a different set and a
+            // fresh key is minted here, under this scope. That is a different
+            // item and legitimately buys a run, so it is also the one thing
+            // the seller can be told to do, which is why this retention is its
+            // own and not the generic retry.
+            return .retained(.attemptMintedUnderADepartedDeviceIdentity)
         }
         if let storedAttempt,
            storedAttemptMatches {

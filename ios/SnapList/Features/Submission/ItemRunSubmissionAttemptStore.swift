@@ -484,6 +484,69 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         )
     }
 
+    /// #935. Stamp the record inside `directory` with the scope that minted
+    /// it, so the scope it is about to arrive in can tell it is foreign.
+    ///
+    /// `wasMintedUnder` answers true for an unstamped record, which is right
+    /// for one at rest: the build that wrote it never carried this file out of
+    /// the directory that minted it. `adoptDepartingDeviceBundle` does carry
+    /// it, and is the only thing that ever does, so the record it moves is
+    /// stamped here rather than guessed at read time. Records that never move
+    /// keep their key.
+    ///
+    /// A record that already carries a stamp keeps it. A stamp that disagrees
+    /// with the directory it is sitting in means the record was carried before
+    /// and is still foreign to wherever it goes next, so overwriting it with
+    /// this hop's origin would launder exactly the fact it exists to record.
+    ///
+    /// The rewrite goes through the model rather than patching the file,
+    /// because the model is already the whole of what this record durably is:
+    /// `loadAttempt` returns it and `saveAttempt` rewrites the file from it, so
+    /// a field the model does not carry does not survive an ordinary save
+    /// either. A stamped record is by definition the current shape, so the
+    /// version it is written back at is the current one.
+    ///
+    /// Returns false when the record cannot be read, decoded, or written. The
+    /// caller then leaves it where it is: an unreadable record carried
+    /// unstamped would replay under the arriving principal, which is the second
+    /// run this whole path exists to prevent.
+    @discardableResult
+    nonisolated static func stampCarriedRecord(
+        in directory: URL,
+        mintedUnder scope: ItemRunSubmissionPrincipalScopeProof,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        let attemptURL = directory
+            .appendingPathComponent("attempt.json")
+            .standardizedFileURL
+        guard let data = try? Data(contentsOf: attemptURL),
+              let stored = try? JSONDecoder().decode(
+                  ItemRunSubmissionAttempt.self,
+                  from: data
+              ) else {
+            return false
+        }
+        guard stored.mintedUnderPrincipalScope == nil else {
+            return true
+        }
+        let stamped = ItemRunSubmissionAttempt(
+            idempotencyKey: stored.idempotencyKey,
+            photos: stored.photos,
+            voiceContext: stored.voiceContext,
+            guestRecoveryIdentity: stored.guestRecoveryIdentity,
+            mintedUnderPrincipalScope: scope.opaqueDigest
+        )
+        guard let encoded = try? JSONEncoder().encode(stamped) else {
+            return false
+        }
+        do {
+            try encoded.write(to: attemptURL, options: Self.writingOptions)
+        } catch {
+            return false
+        }
+        return true
+    }
+
     /// #540 owns this fixed durable layout:
     /// `<Application Support>/SnapList/NativeIntake/<opaque principal>`.
     /// Walking back only these named components recovers the same lexical trust

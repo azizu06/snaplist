@@ -138,16 +138,22 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     /// is created. This is what makes a stale key worse than useless after a
     /// device-identity rename rather than merely redundant.
     ///
-    /// A record with no stamp answers true. It was written before #935, and the
-    /// build that wrote it never moved this file out of the directory it was
-    /// minted in, so for every such record already at rest the answer is
-    /// correct. The one case it gets wrong is narrow and named: a record left
-    /// outstanding by a pre-#935 build, carried across a rename by a build that
-    /// has this, and retried. Closing that would mean refusing every record
-    /// written before the upgrade, which strands sellers whose scope never
-    /// changed at all — a strictly more common case, and one with nothing to
-    /// leak. The window is self-closing: the next submission any device makes
-    /// writes a stamped record.
+    /// A record with no stamp answers true, and that is a statement about
+    /// records that have not moved. The build that wrote an unstamped record
+    /// never carried this file out of the directory that minted it, so for one
+    /// still at rest there the answer is correct. Refusing every unstamped
+    /// record instead would strand sellers whose scope never changed at all, a
+    /// strictly more common case with nothing to leak.
+    ///
+    /// A carried record is the exception, and it is not left to this function
+    /// to guess. `NativeIntake.adoptDepartingDeviceBundle` is the only thing
+    /// that ever moves this file, it knows the record is crossing, and it
+    /// stamps an unstamped one with the scope it is leaving before the move.
+    /// So an unstamped record reaching this comparison has not travelled.
+    ///
+    /// Nothing about the stamp is self-closing on its own: the legacy
+    /// `prepareSubmission(photos:)` composition still passes no scope proof and
+    /// mints current-version records with no stamp for as long as it exists.
     func wasMintedUnder(
         _ scope: ItemRunSubmissionPrincipalScopeProof
     ) -> Bool {
@@ -385,6 +391,19 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     /// makes the item sendable, so this stays retryable — it just says which
     /// thing has to change first.
     case deviceIdentityUnavailable
+    /// #935. The stored attempt standing for these exact photos was minted
+    /// under a device identity this one replaced. Its key is idempotent only to
+    /// the principal that minted it, so presenting it here is not a replay and
+    /// minting a fresh one is a second run for one item; the only send that
+    /// spends nothing is the one that does not happen.
+    ///
+    /// Unlike every other retention here, nothing the seller waits for clears
+    /// it: the guard compares the record's minting scope against this one, and
+    /// the phone does not go back to the key that departed. Changing the photo
+    /// set does clear it, because a different set is a different submission
+    /// that mints its own key here, so this retention has to say so rather than
+    /// offer a retry.
+    case attemptMintedUnderADepartedDeviceIdentity
 }
 
 struct ItemRunAcceptance: Equatable, Sendable {

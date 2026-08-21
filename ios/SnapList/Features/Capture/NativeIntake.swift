@@ -735,13 +735,20 @@ actor NativeIntake {
     /// So the record arrives to be recognised as foreign and refuse the send.
     /// `ItemRunSubmissionAttempt` carries the scope it was minted under and the
     /// submission path stops before the network when that scope is not this
-    /// one. Changing the photo set is the way out, and the right one: a
-    /// different photo set is a different item and legitimately buys a run.
+    /// one. A record written before that stamp existed is stamped here, with
+    /// the scope it is leaving, because this is the only code that ever moves
+    /// the file and the only place that knows it is crossing. Changing the
+    /// photo set is the way out, and the right one: a different photo set is a
+    /// different item and legitimately buys a run.
     ///
     /// The record moves before `Current`, which is not arbitrary. If the record
     /// arrives and the photos do not, the arriving bundle is empty and there is
     /// nothing to submit; if the photos arrived without their record, the retry
-    /// would mint the second key this whole path exists to prevent.
+    /// would mint the second key this whole path exists to prevent. The two
+    /// moves are still not one atomic step, so `Current` is the only directory
+    /// whose presence in the arriving root abandons the carry; a record already
+    /// standing there is read as this call interrupted, and skips its own move
+    /// rather than leaving the seller's photos behind.
     private func adoptDepartingDeviceBundle(into arriving: Scope?, at root: URL) {
         guard let arriving,
               arriving.authority == .device,
@@ -752,37 +759,44 @@ actor NativeIntake {
         else {
             return
         }
-        let carried = ["ItemRunSubmission", "Current"].map {
-            (
-                source: departing.root.appendingPathComponent(
-                    $0,
-                    isDirectory: true
-                ),
-                destination: root.appendingPathComponent($0, isDirectory: true)
+        let record = (
+            source: departing.root.appendingPathComponent(
+                "ItemRunSubmission",
+                isDirectory: true
+            ),
+            destination: root.appendingPathComponent(
+                "ItemRunSubmission",
+                isDirectory: true
             )
-        }
+        )
+        let current = (
+            source: departing.root.appendingPathComponent(
+                "Current",
+                isDirectory: true
+            ),
+            destination: root.appendingPathComponent(
+                "Current",
+                isDirectory: true
+            )
+        )
         do {
-            for move in carried {
+            for path in [
+                record.source,
+                record.destination,
+                current.source,
+                current.destination,
+            ] {
                 try Self.validateContainedPath(
-                    move.source,
+                    path,
                     under: durableAnchor,
                     fileManager: fileManager
                 )
-                try Self.validateContainedPath(
-                    move.destination,
-                    under: durableAnchor,
-                    fileManager: fileManager
-                )
-                // An arriving scope that already owns either directory keeps
-                // both. A key that comes back is not authority to overwrite
-                // what it left behind, and a record it did not mint is not its
-                // record.
-                guard !fileManager.fileExists(atPath: move.destination.path)
-                else {
-                    return
-                }
             }
-            guard let current = carried.last,
+            // An arriving scope that already holds a bundle keeps it. A key
+            // that comes back is not authority to overwrite what it left
+            // behind, and there is no merge of two intakes that is not a guess
+            // about which photos the seller meant.
+            guard !fileManager.fileExists(atPath: current.destination.path),
                   fileManager.fileExists(atPath: current.source.path) else {
                 return
             }
@@ -791,10 +805,41 @@ actor NativeIntake {
                 under: durableAnchor,
                 fileManager: fileManager
             )
-            for move in carried
-            where fileManager.fileExists(atPath: move.source.path) {
-                try fileManager.moveItem(at: move.source, to: move.destination)
+            // The record's own destination check skips this one move rather
+            // than abandoning the adoption. The two moves are not atomic, so a
+            // record standing in the arriving root is most likely this call
+            // interrupted between them, and refusing the whole carry over it
+            // strands `Current` in a root the seller can no longer open until
+            // #545's sweep removes it: the photo loss #855 exists to prevent,
+            // caused by the record carry #935 added.
+            //
+            // Skipping costs the departing key, which is the pre-#935 outcome
+            // and bounded at one duplicate run. Losing the item is not
+            // bounded, and it is the seller's, not ours.
+            //
+            // Stamping before the move is what makes the arriving scope able
+            // to recognise the record as foreign, so a record that cannot be
+            // stamped is not carried at all: carried unstamped, it would be
+            // read as this scope's own and replayed.
+            if fileManager.fileExists(atPath: record.source.path),
+               !fileManager.fileExists(atPath: record.destination.path),
+               let departingProof = ItemRunSubmissionPrincipalScopeProof(
+                   filesystemRoot: departing.root
+               ),
+               LocalItemRunSubmissionAttemptStore.stampCarriedRecord(
+                   in: record.source,
+                   mintedUnder: departingProof,
+                   fileManager: fileManager
+               ) {
+                try fileManager.moveItem(
+                    at: record.source,
+                    to: record.destination
+                )
             }
+            try fileManager.moveItem(
+                at: current.source,
+                to: current.destination
+            )
         } catch {
             return
         }
