@@ -4,6 +4,7 @@ import {
   createListingReviewSaveRegenerator,
   createListingReviewSaver,
   listingReviewSaveIntentSchema,
+  ListingReviewCorrectionUnavailableError,
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
   ListingReviewSaveInProgressError,
@@ -143,6 +144,83 @@ describe("ListingReviewSaver", () => {
     expect(client.release).toHaveBeenCalledWith(
       expect.objectContaining({ runId, idempotencyKey }),
     );
+  });
+
+  it("maps a changed guided-correction authority to the public stale conflict", async () => {
+    const client = dataClient([{ state: "regeneration", snapshot }]);
+    const saver = createListingReviewSaver(client, {
+      regenerate: vi.fn(async () => {
+        throw new Error(
+          // Verbatim from the migrations, which raise this sentence with no
+          // trailing period. A copy that adds one matches nothing.
+          "Guided correction authorization failed: Guided correction authority changed",
+        );
+      }),
+    });
+
+    await expect(saver.save(operation)).rejects.toBeInstanceOf(
+      ListingReviewStaleError,
+    );
+  });
+
+  it.each([
+    [
+      "Guided correction authorization failed: The included guided correction is unavailable.",
+      "This item's included correction is already used."
+        + " Add, replace, or remove a photo to price it again.",
+      false,
+    ],
+    [
+      "Guided correction authorization failed: The included guided correction is"
+        + " unavailable: no settled run matches these photos.",
+      "SnapList cannot match this item to the run that priced it."
+        + " Scan it again to price it.",
+      true,
+    ],
+  ] as const)(
+    "tells the two included-correction refusals apart: %s",
+    async (message, refusal, reportable) => {
+      const client = dataClient([{ state: "regeneration", snapshot }]);
+      const saver = createListingReviewSaver(client, {
+        regenerate: vi.fn(async () => {
+          throw new Error(message);
+        }),
+      });
+
+      const error = await saver.save(operation).catch((thrown) => thrown);
+      expect(error).toBeInstanceOf(ListingReviewCorrectionUnavailableError);
+      expect((error as Error).message).toBe(refusal);
+      expect(
+        (error as ListingReviewCorrectionUnavailableError).reportable,
+      ).toBe(reportable);
+    },
+  );
+
+  it.each([
+    [
+      "Guided correction authorization failed: Legacy photo identity cannot prove same-photo correction.",
+      "This item was priced before SnapList could prove a correction reuses the"
+        + " same photos. Scan it again to price it.",
+    ],
+    [
+      "This item has no eBay listing to regenerate.",
+      "This item has no eBay listing to regenerate.",
+    ],
+    [
+      "This item has not been priced yet.",
+      "This item has not been priced yet.",
+    ],
+  ])("refuses a permanently unregenerable review: %s", async (message, refusal) => {
+    const client = dataClient([{ state: "regeneration", snapshot }]);
+    const saver = createListingReviewSaver(client, {
+      regenerate: vi.fn(async () => {
+        throw new Error(message);
+      }),
+    });
+
+    const error = await saver.save(operation).catch((thrown) => thrown);
+    expect(error).toBeInstanceOf(ListingReviewCorrectionUnavailableError);
+    expect((error as Error).message).toBe(refusal);
   });
 
   it.each([

@@ -59,7 +59,16 @@ alter table public.ai_item_credit_reservations
 -- model's photo guess to the grade they are holding. That lands in one save;
 -- two more absorb genuine second thoughts after re-reading the photos or eBay's
 -- condition guidance. Past that the seller is sampling the price surface, which
--- is the unbounded provider spend this cap exists to stop.
+-- is the repeated provider spend this cap exists to bound.
+--
+-- What it bounds precisely: COMPLETED reruns. The counter moves in
+-- `complete_guided_review_correction`, after the router and generation have
+-- already run, while the refusal below reads it at authorize time. A rerun that
+-- burns both and then fails before commit therefore leaves the counter
+-- untouched and does not count against the three. That is the same shape the
+-- pre-existing paid path has with `guided_correction_completed_at`, not
+-- something this migration introduces, so it is recorded rather than fixed --
+-- but the cap must not be described as a hard ceiling on provider calls.
 --
 -- Exceeding it refuses the save. It does NOT fall back to charging the included
 -- identity correction: the seller asked to restate condition, which is ground
@@ -334,8 +343,15 @@ begin
   --
   -- The mirror is dropped from the SCOPE diff only. `v_specifics_changed` above
   -- still sees the whole array, so a `Condition` specific that disagrees with
-  -- `p_condition` keeps forcing coherent regeneration rather than being
-  -- persisted as-is on an outbound path.
+  -- `p_condition` still forces a coherent regeneration.
+  --
+  -- Round 3 correction to what that buys. Regeneration does fire, but it is not
+  -- a guard on what leaves for eBay: `save_mobile_listing_review`'s finalize
+  -- branch overwrites `copy.itemSpecifics` from `p_specifics` verbatim
+  -- (`20260730060000_mobile_listing_review_save.sql:615-638`), so a `Condition`
+  -- specific that disagrees with `p_condition` still lands on the eBay copy.
+  -- That is pre-existing and out of scope here; the earlier wording claimed a
+  -- protection this path does not provide.
   v_identity_specifics_changed :=
     (v_normalized_current_specifics - 'condition')
       is distinct from (v_requested_specifics - 'condition');
@@ -538,10 +554,25 @@ begin
   order by reservation.settled_at desc
   limit 1
   for update of reservation;
+  -- #919 round 3 correction. This is NOT the spent-correction state raised
+  -- below, and it used to raise the identical sentence. Reaching here means no
+  -- SETTLED reservation matches this item's current photo-identity
+  -- fingerprint: either none was ever settled, or the fingerprint drifted away
+  -- from the one the run settled against. Telling that seller their included
+  -- correction was "already used" named a spend that never happened, and the
+  -- remedy that sentence carries -- change the photo set -- is what produces
+  -- the drift variant in the first place.
+  --
+  -- The sentence keeps the `included guided correction is unavailable`
+  -- substring on purpose. `public.authorize_mobile_guided_correction` delegates
+  -- here, and its route mapper (src/lib/mobile-api/guided-correction.ts:663)
+  -- matches on that substring, so widening the sentence must not drop the
+  -- mobile sharpen route back to an unmapped error.
   if not found then
     raise exception using
       errcode = 'P0001',
-      message = 'The included guided correction is unavailable.';
+      message = 'The included guided correction is unavailable:'
+        || ' no settled run matches these photos.';
   end if;
   -- #919 review round 3. Once the free condition reruns for this reservation
   -- are used up the save is refused outright. It is deliberately NOT downgraded
@@ -562,7 +593,7 @@ begin
         >= private.condition_only_rerun_allowance() then
     raise exception using
       errcode = 'P0001',
-      message = 'You have used every condition update for this item.'
+      message = 'A condition change alone cannot reprice this item again.'
         || ' Add, replace, or remove a photo to price it again.';
   end if;
   if not v_condition_only
@@ -832,14 +863,17 @@ begin
     -- satisfied by `v_cap`'s own locked, still-unconsumed row on every reachable
     -- path, so it could never be false. It is dropped rather than left standing
     -- as a guard that reads real and is not.
+    --
+    -- No `if not found` under this update. The authority check above matched
+    -- this same reservation row `for update`, and the where clause here is its
+    -- primary key with no further predicate, so the update always affects
+    -- exactly one row. A raise under it is the same shape as the `exists`
+    -- predicate dropped above: unreachable, and readable as a guard it is not.
+    -- The paid branch below keeps its raise because its where clause carries a
+    -- real once-only predicate that CAN fail.
     update public.ai_item_credit_reservations
     set condition_only_reruns = condition_only_reruns + 1, updated_at = v_now
     where id = v_cap.reservation_id;
-    -- The reservation was locked by the authority check above, so this is an
-    -- invariant assertion, not a race the caller can lose.
-    if not found then
-      raise exception using errcode = '55000', message = 'Guided correction completion was already recorded.';
-    end if;
   else
     update public.ai_item_credit_reservations
     set guided_correction_completed_at = v_now, updated_at = v_now
