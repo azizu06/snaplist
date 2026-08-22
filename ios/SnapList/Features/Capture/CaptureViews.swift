@@ -444,6 +444,14 @@ private enum ScanReviewFocusTarget: Hashable {
     case reviewButton
 }
 
+/// Pure seam for the circle-to-capsule morph's curve, so a plain unit test can assert Reduced
+/// Motion drops to an instant swap without rendering `ScanReviewButton` (#1009 owner refinement 2).
+enum ScanReviewMorphAnimation {
+    static func curve(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)
+    }
+}
+
 /// The Review opener, expressed once for both Scan camera surfaces.
 ///
 /// The live and recovery surfaces show the same control with the same styling, the same
@@ -453,7 +461,12 @@ private enum ScanReviewFocusTarget: Hashable {
 ///
 /// #1009 reshapes this from a name-driven capsule to a fixed-size circle that mirrors the
 /// library opener (48pt) with a photo-count badge, so it can sit beside the shutter and
-/// library in one row without a growing label ever contesting that row's width.
+/// library in one row without a growing label ever contesting that row's width. Owner
+/// refinement 2 reopens exactly that width question at the five-photo cap only: Review
+/// morphs into a labeled capsule there. It still sits in the row's trailing
+/// `.frame(maxWidth: .infinity, alignment: .trailing)` region, so it grows leftward from a
+/// pinned trailing edge rather than displacing the shutter — verified at accessibility5 by
+/// `testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive`.
 ///
 /// Not `private`: a unit test renders it alone to inspect its resolved button style (#856).
 struct ScanReviewButton: View {
@@ -463,6 +476,7 @@ struct ScanReviewButton: View {
     let review: () -> Void
 
     @AccessibilityFocusState private var focusedScanControl: ScanReviewFocusTarget?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Owner refinement to #1009 AC3: the circle only takes the accent fill
     /// once the seller has hit the cap. Below it, Review keeps the same
@@ -475,27 +489,16 @@ struct ScanReviewButton: View {
 
     var body: some View {
         Button(action: review) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                .frame(width: 48, height: 48)
-                .background(
-                    isAtPhotoCap
-                        ? SnapListColorToken.action.color
-                        : SnapListColorToken.cameraControlFill.color.opacity(0.66)
-                )
-                .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
-                .clipShape(.circle)
-                .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
-                .overlay(alignment: .topTrailing) { countBadge }
+            content
                 .accessibilityHidden(true)
         }
-        // This circle is the control's whole affordance. Left on `.automatic`,
-        // iOS paints a second filled shape behind it for a seller with Button
-        // Shapes on, which reads as an overlay sitting on the icon (#856).
+        // This circle/capsule is the control's whole affordance. Left on
+        // `.automatic`, iOS paints a second filled shape behind it for a
+        // seller with Button Shapes on, which reads as an overlay sitting on
+        // the icon (#856).
         .buttonStyle(.plain)
-        .frame(width: 48, height: 48)
-        .contentShape(.circle)
+        .frame(minWidth: 48, minHeight: 48)
+        .contentShape(Rectangle())
         .accessibilityLabel(
             photoCount == 1
                 ? "Review 1 photo"
@@ -510,6 +513,53 @@ struct ScanReviewButton: View {
         .onAppear(perform: consumeReviewFocusIfPossible)
         .onChange(of: returnFocus) { _, _ in
             consumeReviewFocusIfPossible()
+        }
+        .animation(
+            ScanReviewMorphAnimation.curve(reduceMotion: reduceMotion),
+            value: isAtPhotoCap
+        )
+    }
+
+    /// Owner refinement 2 to #1009: at the five-photo cap Review morphs from
+    /// the fixed circle into an accent-filled capsule carrying its own label,
+    /// so the control that always meant "go review" reads, at the one moment
+    /// nothing else fits, as "you're done — go look."
+    ///
+    /// The capsule sits in the row's trailing equal-flex region beside the
+    /// library opener's leading one (#864); a device screenshot at
+    /// `accessibility5` showed that split holding steady width for width —
+    /// the shutter never moves — but an uncapped "Review" label past that
+    /// share truncated to "R…" rather than growing further. Capping the
+    /// label's own Dynamic Type ceiling keeps it legible and whole; letting
+    /// the row's own centering guarantee break instead was not the trade.
+    @ViewBuilder
+    private var content: some View {
+        if isAtPhotoCap {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 17, weight: .semibold))
+                Text("Review")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 48)
+            .background(SnapListColorToken.action.color)
+            .overlay { Capsule().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
+            .clipShape(.capsule)
+            .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
+        } else {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 48, height: 48)
+                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
+                .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
+                .clipShape(.circle)
+                .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
+                .overlay(alignment: .topTrailing) { countBadge }
         }
     }
 

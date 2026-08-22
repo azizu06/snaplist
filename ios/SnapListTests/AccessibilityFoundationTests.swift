@@ -82,6 +82,14 @@ final class AccessibilityFoundationTests: XCTestCase {
         XCTAssertTrue(configuration.usesZeroNetworkFixtures)
     }
 
+    /// Owner refinement 2 to #1009: Review morphs into a capsule at the
+    /// five-photo cap. Reduced Motion must drop that morph to an instant
+    /// swap, not merely a shorter animation.
+    func testScanReviewCapsuleMorphHonorsReducedMotion() {
+        XCTAssertNil(ScanReviewMorphAnimation.curve(reduceMotion: true))
+        XCTAssertNotNil(ScanReviewMorphAnimation.curve(reduceMotion: false))
+    }
+
     func testLiveAndRecoveryReviewControlsShareApprovedAccessibilityPriority() {
         for context in ScanReviewAccessibilityPriority.allCases {
             XCTAssertEqual(

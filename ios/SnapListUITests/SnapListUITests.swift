@@ -2145,6 +2145,52 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    /// Owner refinement 2 to #1009: at the five-photo cap, Review morphs from
+    /// the fixed 48pt circle into a labeled capsule. The circle's whole reason
+    /// for existing (per the doc comment on `ScanReviewButton`) was to keep a
+    /// growing label from ever contesting the shutter-centering guarantee
+    /// #864 established with two `.frame(maxWidth: .infinity)` regions flanking
+    /// a fixed-size shutter — that guarantee holds only as long as neither
+    /// region's content grows past the other's equal share. Reintroducing a
+    /// text-bearing capsule at the cap is exactly the case that could break it,
+    /// worst-case at `accessibility5` where "Review" sets in the largest type.
+    /// This asserts the shutter does not move, at both sizes, rather than
+    /// trusting that the flex regions "absorb" arbitrary growth.
+    func testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive() {
+        for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
+            let label = arguments.isEmpty ? "default" : "accessibility5"
+
+            let belowCap = launch(extraArguments: ["--visual-state=CAM-03"] + arguments)
+            let belowCapShutter = belowCap.buttons["scan.shutter"]
+            XCTAssertTrue(belowCapShutter.waitForExistence(timeout: 3), label)
+            let belowCapShutterMidX = belowCapShutter.frame.midX
+            belowCap.terminate()
+
+            let atCap = launch(extraArguments: ["--visual-state=CAM-04"] + arguments)
+            let shutter = atCap.buttons["scan.shutter"]
+            let library = atCap.buttons["scan.library"]
+            let review = atCap.buttons["scan.review"]
+            for control in [shutter, library, review] {
+                XCTAssertTrue(control.waitForExistence(timeout: 3), "\(label) \(control.identifier)")
+            }
+
+            let receipt = "\(label): library=\(library.frame) shutter=\(shutter.frame) " +
+                "review=\(review.frame) belowCapShutterMidX=\(belowCapShutterMidX)"
+
+            // The capsule is meant to grow: it is not the 48pt circle anymore.
+            XCTAssertGreaterThan(review.frame.width, 60, receipt)
+            XCTAssertGreaterThanOrEqual(review.frame.height, 44, receipt)
+
+            XCTAssertEqual(shutter.frame.midX, belowCapShutterMidX, accuracy: 2, receipt)
+            XCTAssertFalse(library.frame.intersects(shutter.frame), receipt)
+            XCTAssertFalse(review.frame.intersects(shutter.frame), receipt)
+            XCTAssertLessThan(library.frame.maxX, shutter.frame.minX, receipt)
+            XCTAssertLessThan(shutter.frame.maxX, review.frame.minX, receipt)
+
+            atCap.terminate()
+        }
+    }
+
     /// #885. Zoom is offered only when the back camera actually pairs an ultra
     /// wide with a wide lens. The simulator has no camera at all, so its honest
     /// result is no control rather than a `.5x` the hardware would refuse.
