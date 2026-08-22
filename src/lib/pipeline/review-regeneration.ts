@@ -281,6 +281,13 @@ export interface RegenerateReviewListingDependencies {
   }) => Promise<{ copy: ListingCopy; model: string }>;
   beforeModelWork?: () => Promise<void>;
   randomUUID?: () => string;
+  /**
+   * Observes a post-completion provider-usage write failure (#820 item 1).
+   * The correction has already committed by the time this can fire, so it is
+   * never rethrown — without it, a capability-fence failure on the writer RPC
+   * leaves no trace anywhere and the percentile artifact silently under-reports.
+   */
+  onProviderUsageError?: (error: unknown) => void;
 }
 
 export interface RegenerateReviewListingResult {
@@ -370,6 +377,15 @@ export async function regenerateReviewListing(
   await reportPostCompletionProviderUsage(
     { capabilityToken: capability.token, usage: measured.usage },
     store.recordProviderUsage?.bind(store),
+    deps.onProviderUsageError
+      ? (error) =>
+          deps.onProviderUsageError!(
+            new Error(
+              `Review regeneration provider usage recording failed for run ${runId}.`,
+              { cause: error },
+            ),
+          )
+      : undefined,
   );
 
   const override =

@@ -523,6 +523,7 @@ interface ListingReviewSaveRegeneratorDependencies {
   regenerate?: RegenerateListing;
   now?: () => number;
   tokenGenerator?: () => string;
+  onProviderUsageError?: (error: unknown) => void;
 }
 
 function stringAttribute(
@@ -615,7 +616,10 @@ export function createListingReviewSaveRegenerator(
             operation.intent.expectedReviewRevision,
           corrections,
         },
-        { randomUUID: () => operation.idempotencyKey },
+        {
+          randomUUID: () => operation.idempotencyKey,
+          onProviderUsageError: dependencies.onProviderUsageError,
+        },
       );
     },
   };
@@ -669,6 +673,7 @@ export function createConfiguredSupabaseListingReviewSaver(input: {
   publishableKey: string;
   supabaseURL: string;
   completionClient: GuidedCorrectionCompletionRpcClient;
+  onProviderUsageError?: (error: unknown) => void;
 }): ListingReviewSaver {
   if (!input.publishableKey.startsWith("sb_publishable_")) {
     throw new Error(
@@ -685,6 +690,7 @@ export function createConfiguredSupabaseListingReviewSaver(input: {
     createListingReviewSaveRegenerator({
       clientForBearer,
       completionClient: input.completionClient,
+      onProviderUsageError: input.onProviderUsageError,
     }),
   );
 }

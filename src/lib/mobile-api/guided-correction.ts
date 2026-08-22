@@ -317,6 +317,13 @@ export interface GuidedCorrectionDependencies {
     attributes: ExtractedAttributes;
   }) => Promise<{ copy: ListingCopy; model: string }>;
   newRunId?: () => string;
+  /**
+   * Observes a post-completion provider-usage write failure (#820 item 1).
+   * The correction has already committed by the time this can fire, so it is
+   * never rethrown — without it, a capability-fence failure on the writer RPC
+   * leaves no trace anywhere and the percentile artifact silently under-reports.
+   */
+  onProviderUsageError?: (error: unknown) => void;
 }
 
 async function defaultGenerateListing(args: {
@@ -582,6 +589,15 @@ export function createGuidedCorrectionService(
           { capabilityToken: capability.token, usage: measured.usage },
           client.recordProviderUsage
             ? (report) => client.recordProviderUsage!(operation, report)
+            : undefined,
+          dependencies.onProviderUsageError
+            ? (error) =>
+                dependencies.onProviderUsageError!(
+                  new Error(
+                    `Guided correction provider usage recording failed for run ${runId}.`,
+                    { cause: error },
+                  ),
+                )
             : undefined,
         );
         return prepared.receipt;
@@ -915,6 +931,7 @@ export function createConfiguredSupabaseGuidedCorrector(input: {
   completionClient: GuidedCorrectionCompletionRpcClient;
   publishableKey: string;
   supabaseURL: string;
+  onProviderUsageError?: (error: unknown) => void;
 }): GuidedCorrector {
   if (!input.publishableKey.startsWith("sb_publishable_")) {
     throw new Error(
@@ -929,5 +946,6 @@ export function createConfiguredSupabaseGuidedCorrector(input: {
       }),
       input.completionClient,
     ),
+    { onProviderUsageError: input.onProviderUsageError },
   );
 }

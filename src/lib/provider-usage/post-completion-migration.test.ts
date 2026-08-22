@@ -27,6 +27,21 @@ const contract = readFileSync(
   "utf8",
 );
 
+const WRITER_SIGNATURE =
+  "create or replace function public.record_guided_correction_provider_usage";
+
+/** The writer function's own body, not the whole migration (#820 item 2). */
+function writerFunctionBody(): string {
+  const start = migration.indexOf(WRITER_SIGNATURE);
+  const nextFunctionStart = migration.indexOf(
+    "create or replace function",
+    start + WRITER_SIGNATURE.length,
+  );
+  return nextFunctionStart > -1
+    ? migration.slice(start, nextFunctionStart)
+    : migration.slice(start);
+}
+
 describe("post-completion provider usage migration", () => {
   it("adds no direct write surface to the cost table for any runtime role", () => {
     // The security property #716 established: `service_role` holds no
@@ -45,13 +60,32 @@ describe("post-completion provider usage migration", () => {
     expect(migration).toMatch(
       /create or replace function public\.record_guided_correction_provider_usage/i,
     );
-    expect(migration).toMatch(/security definer[\s\S]*?set search_path = ''/i);
+    // Anchored to THIS function's body, not the migration as a whole: the
+    // migration's first `security definer` belongs to
+    // `private.provider_usage_initial_snapshot_is_strict`, six lines in, whose
+    // own `set search_path = ''` two lines later would otherwise satisfy an
+    // unanchored match even if the writer's own clause were deleted (#820
+    // item 2). See the positive control below.
+    expect(writerFunctionBody()).toMatch(
+      /security definer[\s\S]*?set search_path = ''/i,
+    );
     expect(migration).toMatch(
       /revoke all on function public\.record_guided_correction_provider_usage\(text, jsonb\)\s+from public, anon, authenticated/i,
     );
     expect(migration).toMatch(
       /grant execute on function public\.record_guided_correction_provider_usage\(text, jsonb\)\s+to service_role/i,
     );
+  });
+
+  it("is anchored: a writer stripped of its own search_path clause fails the property above", () => {
+    // Positive control (#820 item 2). Without this, a zero match against the
+    // mutated body would be equally consistent with an assertion that can
+    // never fail — this proves it CAN fail for the property it names.
+    const mutated = writerFunctionBody().replace(
+      /set search_path = ''/,
+      "-- search_path clause removed for the control",
+    );
+    expect(mutated).not.toMatch(/security definer[\s\S]*?set search_path = ''/i);
   });
 
   it("derives tenant, item, and run from the stored capability rather than the caller", () => {

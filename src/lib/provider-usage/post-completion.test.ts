@@ -135,4 +135,56 @@ describe("reportPostCompletionProviderUsage", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it("reports a rejected recorder's failure to onError before swallowing it", async () => {
+    const onError = vi.fn();
+    const failure = new Error("writer unavailable");
+
+    await reportPostCompletionProviderUsage(
+      report,
+      async () => {
+        throw failure;
+      },
+      onError,
+    );
+
+    expect(onError).toHaveBeenCalledWith(failure);
+  });
+
+  it("reports a synchronously-thrown recorder failure to onError too", async () => {
+    const onError = vi.fn();
+    const failure = new Error("writer unavailable");
+
+    await reportPostCompletionProviderUsage(
+      report,
+      () => {
+        throw failure;
+      },
+      onError,
+    );
+
+    expect(onError).toHaveBeenCalledWith(failure);
+  });
+
+  it("never lets a broken onError escape the swallow", async () => {
+    await expect(
+      reportPostCompletionProviderUsage(
+        report,
+        async () => {
+          throw new Error("writer unavailable");
+        },
+        () => {
+          throw new Error("logger is also broken");
+        },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not call onError when the recorder succeeds", async () => {
+    const onError = vi.fn();
+
+    await reportPostCompletionProviderUsage(report, async () => undefined, onError);
+
+    expect(onError).not.toHaveBeenCalled();
+  });
 });

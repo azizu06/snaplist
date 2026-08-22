@@ -59,6 +59,8 @@ function configuredListingReviewSave() {
     publishableKey,
     supabaseURL,
     completionClient: createInternalGuidedCorrectionCompletionRpcClient(),
+    onProviderUsageError: (error) =>
+      logServerError("mobile-api.listing-review-save.provider-usage", error),
   });
 }
 
@@ -73,6 +75,8 @@ function configuredGuidedCorrection() {
     completionClient: createInternalGuidedCorrectionCompletionRpcClient(),
     publishableKey,
     supabaseURL,
+    onProviderUsageError: (error) =>
+      logServerError("mobile-api.guided-correction.provider-usage", error),
   });
 }
 
