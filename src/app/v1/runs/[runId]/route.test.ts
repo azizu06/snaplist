@@ -295,6 +295,7 @@ describe("production mobile durable-run route composition", () => {
       supabaseURL: "https://project.supabase.co",
       publishableKey: "sb_publishable_release",
       completionClient: expect.objectContaining({ rpc: expect.any(Function) }),
+      onProviderUsageError: expect.any(Function),
     });
     expect(saveListingReview).toHaveBeenCalledWith(
       expect.objectContaining({
