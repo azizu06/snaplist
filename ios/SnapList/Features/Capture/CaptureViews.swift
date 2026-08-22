@@ -462,11 +462,15 @@ enum ScanReviewMorphAnimation {
 /// #1009 reshapes this from a name-driven capsule to a fixed-size circle that mirrors the
 /// library opener (48pt) with a photo-count badge, so it can sit beside the shutter and
 /// library in one row without a growing label ever contesting that row's width. Owner
-/// refinement 2 reopens exactly that width question at the five-photo cap only: Review
-/// morphs into a labeled capsule there. It still sits in the row's trailing
+/// refinement 2 reopened exactly that width question at the five-photo cap only: Review
+/// morphed into a labeled capsule there. It still sits in the row's trailing
 /// `.frame(maxWidth: .infinity, alignment: .trailing)` region, so it grows leftward from a
 /// pinned trailing edge rather than displacing the shutter — verified at accessibility5 by
-/// `testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive`.
+/// `testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive`. Refinement 3 amends
+/// that: the label is gone. The capsule is a fixed, modestly wider shape carrying only the
+/// chevron, so nothing in it can ever contest Dynamic Type again — the shape change alone
+/// is the affordance. The accessibility label still says "Review N photos" at every count;
+/// only the visible glyph dropped.
 ///
 /// Not `private`: a unit test renders it alone to inspect its resolved button style (#856).
 struct ScanReviewButton: View {
@@ -520,36 +524,25 @@ struct ScanReviewButton: View {
         )
     }
 
-    /// Owner refinement 2 to #1009: at the five-photo cap Review morphs from
-    /// the fixed circle into an accent-filled capsule carrying its own label,
-    /// so the control that always meant "go review" reads, at the one moment
-    /// nothing else fits, as "you're done — go look."
-    ///
-    /// The capsule sits in the row's trailing equal-flex region beside the
-    /// library opener's leading one (#864); a device screenshot at
-    /// `accessibility5` showed that split holding steady width for width —
-    /// the shutter never moves — but an uncapped "Review" label past that
-    /// share truncated to "R…" rather than growing further. Capping the
-    /// label's own Dynamic Type ceiling keeps it legible and whole; letting
-    /// the row's own centering guarantee break instead was not the trade.
+    /// Owner refinement 3 to #1009 (amending refinement 2, which added a
+    /// "Review" label here and is gone): at the five-photo cap Review morphs
+    /// from the fixed 48pt circle into an accent-filled capsule holding only
+    /// the chevron, modestly wider than the circle so the shape change reads
+    /// as the affordance without any text that Dynamic Type could ever grow.
+    /// It still sits in the row's trailing equal-flex region beside the
+    /// library opener's leading one (#864), so it grows leftward from a
+    /// pinned trailing edge rather than displacing the shutter.
     @ViewBuilder
     private var content: some View {
         if isAtPhotoCap {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 17, weight: .semibold))
-                Text("Review")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-            }
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-            .padding(.horizontal, 18)
-            .frame(minHeight: 48)
-            .background(SnapListColorToken.action.color)
-            .overlay { Capsule().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
-            .clipShape(.capsule)
-            .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 76, height: 48)
+                .background(SnapListColorToken.action.color)
+                .overlay { Capsule().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
+                .clipShape(.capsule)
+                .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
         } else {
             Image(systemName: "chevron.right")
                 .font(.system(size: 17, weight: .semibold))

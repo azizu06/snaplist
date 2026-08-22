@@ -2145,18 +2145,20 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
-    /// Owner refinement 2 to #1009: at the five-photo cap, Review morphs from
-    /// the fixed 48pt circle into a labeled capsule. The circle's whole reason
+    /// Owner refinement 3 to #1009 (amending refinement 2's labeled capsule,
+    /// now text-free): at the five-photo cap, Review morphs from the fixed
+    /// 48pt circle into a wider icon-only capsule. The circle's whole reason
     /// for existing (per the doc comment on `ScanReviewButton`) was to keep a
     /// growing label from ever contesting the shutter-centering guarantee
     /// #864 established with two `.frame(maxWidth: .infinity)` regions flanking
-    /// a fixed-size shutter — that guarantee holds only as long as neither
-    /// region's content grows past the other's equal share. Reintroducing a
-    /// text-bearing capsule at the cap is exactly the case that could break it,
-    /// worst-case at `accessibility5` where "Review" sets in the largest type.
-    /// This asserts the shutter does not move, at both sizes, rather than
-    /// trusting that the flex regions "absorb" arbitrary growth.
+    /// a fixed-size shutter. Refinement 2 found that guarantee holds even for
+    /// a wider capsule at `accessibility5`; this asserts the same, plus that
+    /// the icon-only capsule's width is fixed rather than still text-driven —
+    /// dropping the label was supposed to remove Dynamic Type from this
+    /// control entirely, not just make its effect harder to see.
     func testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive() {
+        var widthBySize: [String: CGFloat] = [:]
+
         for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
             let label = arguments.isEmpty ? "default" : "accessibility5"
 
@@ -2177,9 +2179,17 @@ final class SnapListUITests: XCTestCase {
             let receipt = "\(label): library=\(library.frame) shutter=\(shutter.frame) " +
                 "review=\(review.frame) belowCapShutterMidX=\(belowCapShutterMidX)"
 
-            // The capsule is meant to grow: it is not the 48pt circle anymore.
+            // Wider than the 48pt circle, but a fixed shape now, not a
+            // text-driven one — refinement 3 dropped the label specifically
+            // so nothing in this capsule could grow with Dynamic Type.
             XCTAssertGreaterThan(review.frame.width, 60, receipt)
+            XCTAssertLessThan(review.frame.width, 100, receipt)
             XCTAssertGreaterThanOrEqual(review.frame.height, 44, receipt)
+            widthBySize[label] = review.frame.width
+
+            // The accessibility label keeps saying "Review N photos" even
+            // though the visible glyph is icon-only.
+            XCTAssertEqual(review.label, "Review 5 photos", receipt)
 
             XCTAssertEqual(shutter.frame.midX, belowCapShutterMidX, accuracy: 2, receipt)
             XCTAssertFalse(library.frame.intersects(shutter.frame), receipt)
@@ -2189,6 +2199,13 @@ final class SnapListUITests: XCTestCase {
 
             atCap.terminate()
         }
+
+        XCTAssertEqual(
+            widthBySize["default"] ?? -1,
+            widthBySize["accessibility5"] ?? -2,
+            accuracy: 1,
+            "The icon-only capsule must not change width with Dynamic Type: \(widthBySize)"
+        )
     }
 
     /// #885. Zoom is offered only when the back camera actually pairs an ultra
