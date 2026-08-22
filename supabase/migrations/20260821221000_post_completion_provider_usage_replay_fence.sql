@@ -24,10 +24,21 @@
 alter table private.guided_correction_completion_capabilities
   add column provider_usage_payload jsonb;
 
+-- NOT VALID, permanently. Any environment holding a completion recorded
+-- before this migration has `provider_usage_recorded_at` set with
+-- `provider_usage_payload` null -- the payload was never captured, so no
+-- VALIDATE step can ever make that row satisfy the pairing. A plain CHECK
+-- validates every existing row at apply time and would abort the migration
+-- on first contact with such a row (repo precedent for NOT VALID in exactly
+-- this situation: 20260713003000:61,97; 20260731040000:127,129;
+-- 20260811123000:103,109). NOT VALID still enforces the pairing on every
+-- INSERT/UPDATE from here forward -- the writer below only ever sets both
+-- columns together -- so this is a one-time grandfather for pre-migration
+-- rows, not a hole for new ones.
 alter table private.guided_correction_completion_capabilities
   add constraint guided_correction_capability_usage_payload_check check (
     (provider_usage_recorded_at is null) = (provider_usage_payload is null)
-  );
+  ) not valid;
 
 comment on column
   private.guided_correction_completion_capabilities.provider_usage_payload is
@@ -108,8 +119,19 @@ begin
   -- refused with the same conflict the running path raises for the identical
   -- failure mode, instead of silently reporting success for content that
   -- never landed.
+  --
+  -- A stored payload of null means this capability was recorded before this
+  -- migration shipped -- back when the writer accepted every replay
+  -- unconditionally and never captured one to compare against. That payload
+  -- cannot be reconstructed after the fact, so a null stored payload is
+  -- accepted rather than compared: the old contract for a pre-migration
+  -- completion was "any replay succeeds," and this keeps honoring it for
+  -- those rows instead of newly rejecting them. `p_usage = null` would
+  -- itself evaluate to sql null here, which is not true, so this has to be
+  -- its own branch rather than folding into the equality check below.
   if v_cap.provider_usage_recorded_at is not null then
-    if p_usage = v_cap.provider_usage_payload then
+    if v_cap.provider_usage_payload is null
+      or p_usage = v_cap.provider_usage_payload then
       return true;
     end if;
     raise exception using

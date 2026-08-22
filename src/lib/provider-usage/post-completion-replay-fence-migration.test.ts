@@ -41,6 +41,37 @@ describe("post-completion provider usage replay fence migration", () => {
     );
   });
 
+  it("adds the pairing constraint NOT VALID, with no VALIDATE step (round 1 P1)", () => {
+    // A plain CHECK validates every existing row at apply time. Any
+    // environment holding a pre-migration completion has recorded_at set
+    // with payload null -- that pairing can never be satisfied after the
+    // fact, so a plain (non-NOT VALID) constraint would abort the migration
+    // on first contact with such a row, and no later VALIDATE step can fix
+    // it either. This is a permanent grandfather, not a staged rollout.
+    const constraintStart = migration.indexOf(
+      "add constraint guided_correction_capability_usage_payload_check",
+    );
+    expect(constraintStart).toBeGreaterThan(-1);
+    const constraintEnd = migration.indexOf(";", constraintStart);
+    const constraint = migration.slice(constraintStart, constraintEnd);
+    expect(constraint).toMatch(/\)\s*not valid\s*$/i);
+    expect(migration).not.toMatch(
+      /validate constraint guided_correction_capability_usage_payload_check/i,
+    );
+  });
+
+  it("is anchored: a constraint without NOT VALID fails the property above", () => {
+    // Positive control (#820 item 2 pattern).
+    const constraintStart = migration.indexOf(
+      "add constraint guided_correction_capability_usage_payload_check",
+    );
+    const constraintEnd = migration.indexOf(";", constraintStart);
+    const mutated = migration
+      .slice(constraintStart, constraintEnd)
+      .replace(/\s*not valid\s*$/i, "");
+    expect(mutated).not.toMatch(/\)\s*not valid\s*$/i);
+  });
+
   it("compares a replay against the recorded payload instead of assuming success", () => {
     const body = writerFunctionBody();
     const fenceStart = body.indexOf(
@@ -55,11 +86,42 @@ describe("post-completion provider usage replay fence migration", () => {
     expect(conflictRaise).toBeGreaterThan(fenceStart);
     const fence = body.slice(fenceStart, fenceEnd);
 
-    expect(fence).toContain("if p_usage = v_cap.provider_usage_payload then");
+    expect(fence).toContain("if v_cap.provider_usage_payload is null");
+    expect(fence).toContain("or p_usage = v_cap.provider_usage_payload then");
     expect(fence).toContain("return true;");
     expect(fence).toMatch(
       /raise exception using\s+errcode = '55000',\s+message = 'Provider usage conflicts with the durable run receipt';/,
     );
+  });
+
+  it("accepts a replay against a legacy null stored payload instead of rejecting it (round 1 P1)", () => {
+    // A null stored payload means this capability was recorded before this
+    // migration shipped, back when the writer captured no payload to compare
+    // against. p_usage = null evaluates to SQL null (not true), so without
+    // the explicit "is null" branch every replay of a pre-migration
+    // completion would fall through to the 55000 raise -- a regression
+    // versus the old unconditional-success behavior for exactly those rows.
+    const body = writerFunctionBody();
+    const acceptStart = body.indexOf(
+      "if v_cap.provider_usage_payload is null",
+    );
+    const acceptEnd = body.indexOf("return true;", acceptStart);
+    expect(acceptStart).toBeGreaterThan(-1);
+    expect(acceptEnd).toBeGreaterThan(acceptStart);
+    expect(body.slice(acceptStart, acceptEnd)).toContain(
+      "or p_usage = v_cap.provider_usage_payload then",
+    );
+  });
+
+  it("is anchored: dropping the null-payload branch loses the accept condition above", () => {
+    // Positive control (#820 item 2 pattern).
+    const body = writerFunctionBody();
+    const mutated = body.replace(
+      "if v_cap.provider_usage_payload is null\n      or p_usage = v_cap.provider_usage_payload then",
+      "if p_usage = v_cap.provider_usage_payload then",
+    );
+    expect(mutated).not.toContain("if v_cap.provider_usage_payload is null");
+    expect(mutated).toContain("if p_usage = v_cap.provider_usage_payload then");
   });
 
   it("matches the running path's own conflict errcode and message for the same failure mode", () => {
