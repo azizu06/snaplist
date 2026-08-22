@@ -1065,7 +1065,28 @@ final class ListingReviewUITests: XCTestCase {
             let value = stringValue(of: color)
             XCTAssertTrue(value.contains(typed), "\(receipt), value=\(value)")
 
-            app.buttons["listing-review.keyboard-done"].tap()
+            // #950: tapping "Done" this soon after the keyboard finished
+            // appearing can race its show animation. XCUITest then computes
+            // an invalid `{-1, -1}` hit point for the still-settling
+            // keyboard accessory button, the synthesized tap never reaches
+            // it, and no timeout on the dismiss wait below would help — the
+            // Done tap itself was a no-op. Waiting for `isHittable` first
+            // (not just existence, which is already true) lets the
+            // animation finish before the tap fires.
+            let done = app.buttons["listing-review.keyboard-done"]
+            XCTAssertTrue(
+                XCTWaiter().wait(
+                    for: [
+                        XCTNSPredicateExpectation(
+                            predicate: NSPredicate(format: "isHittable == true"),
+                            object: done
+                        )
+                    ],
+                    timeout: 3
+                ) == .completed,
+                receipt
+            )
+            done.tap()
             XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3), receipt)
         }
     }
