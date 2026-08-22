@@ -745,6 +745,7 @@ struct AppShellView: View {
                 forceReducedMotion: configuration.forceReducedMotion,
                 activationListingReviewOpened: {
                     activationListingReviewPresented = true
+                    advanceActivationGuidance(for: .openedProcessing)
                 },
                 activationListingReviewDismissed: {
                     activationListingReviewPresented = false
@@ -769,7 +770,24 @@ struct AppShellView: View {
             router: router,
             store: trophyWallStore,
             repository: trophyWallHistoryRepository,
-            refreshState: $trophyWallCollectionRefreshState
+            refreshState: $trophyWallCollectionRefreshState,
+            runStore: runStore,
+            listingReviewStore: listingReviewStore,
+            correctionAvailable: configuration.listingReviewCorrectionAvailable,
+            forceReducedMotion: configuration.forceReducedMotion,
+            activationListingReviewOpened: {
+                activationListingReviewPresented = true
+                advanceActivationGuidance(for: .openedProcessing)
+            },
+            activationListingReviewDismissed: {
+                activationListingReviewPresented = false
+            },
+            activationGuestClaimPresentationChanged: {
+                activationGuestClaimPresented = $0
+            },
+            activationListingReviewInteraction: {
+                advanceActivationGuidance(for: .editedListing)
+            }
         )
     }
 
@@ -858,6 +876,7 @@ struct AppShellView: View {
                     forceReducedMotion: configuration.forceReducedMotion,
                     activationListingReviewOpened: {
                         activationListingReviewPresented = true
+                        advanceActivationGuidance(for: .openedProcessing)
                     },
                     activationListingReviewDismissed: {
                         activationListingReviewPresented = false
@@ -890,35 +909,6 @@ struct AppShellView: View {
                 )
             case .localRecovery:
                 EmptyView()
-            case .run(let runID):
-                RunDetailView(
-                    runID: runID,
-                    store: runStore,
-                    listingReviewStore: listingReviewStore,
-                    correctionAvailable:
-                        configuration.listingReviewCorrectionAvailable,
-                    forceReducedMotion: configuration.forceReducedMotion,
-                    goToTrophyWall: {
-                        router.reset(tab: .trophyWall)
-                        router.selectedTab = .trophyWall
-                    },
-                    startNewItem: {
-                        router.reset(tab: .scan)
-                        router.selectedTab = .scan
-                    },
-                    activationProcessingOpened: {
-                        advanceActivationGuidance(for: .openedProcessing)
-                    },
-                    activationListingReviewOpened: {
-                        activationListingReviewPresented = true
-                    },
-                    activationListingReviewDismissed: {
-                        activationListingReviewPresented = false
-                    },
-                    activationListingReviewInteraction: {
-                        advanceActivationGuidance(for: .editedListing)
-                    }
-                )
             }
         case .future(let boundary):
             switch FutureDestinationPresentation.resolve(boundary) {
@@ -2195,19 +2185,40 @@ enum TrophyWallPendingCardRecovery: Equatable {
 
 @MainActor
 struct TrophyWallFeatureView: View {
+    @Environment(\.appDependencies) private var dependencies
+
     @Bindable var router: AppRouter
     @Bindable var store: TrophyWallStore
     let repository: any TrophyWallRunHistoryRepository
     @Binding var refreshState: TrophyWallCollectionRefreshState
+    @Bindable var runStore: RunDetailStore
+    @Bindable var listingReviewStore: ListingReviewStore
+    let correctionAvailable: Bool
+    let forceReducedMotion: Bool
+    let activationListingReviewOpened: () -> Void
+    let activationListingReviewDismissed: () -> Void
+    let activationGuestClaimPresentationChanged: (Bool) -> Void
+    let activationListingReviewInteraction: () -> Void
+
+    /// #963: a settled tile opens its own listing surface, not the Processing
+    /// row's stack — so it carries its own presentation hosts rather than
+    /// sharing `ProcessingListingReviewSurface`'s.
+    @State private var guestClaimPresentation =
+        ProcessingGuestClaimPresentationHost()
+    @State private var listingReviewPresentation =
+        ListingReviewPresentationHost()
 
     var body: some View {
+        @Bindable var listingReviewPresentation = listingReviewPresentation
         TrophyWallView(
             store: store,
             openProcessing: {
                 router.navigate(to: .home(.processing))
             },
             openAccount: { router.navigate(to: .settings) },
-            openRun: { router.navigate(to: .home(.run($0))) },
+            openListing: { runID in
+                await openListing(runID)
+            },
             onScan: {
                 router.reset(tab: .scan)
                 router.selectedTab = .scan
@@ -2218,6 +2229,102 @@ struct TrophyWallFeatureView: View {
             guard router.selectedTab == .trophyWall else { return }
             await store.recoverCollection(using: repository)
         }
+        .navigationDestination(
+            isPresented: Binding(
+                get: { guestClaimPresentation.isPresented },
+                set: { isPresented in
+                    if !isPresented {
+                        guestClaimPresentation.dismiss()
+                        activationGuestClaimPresentationChanged(false)
+                    }
+                }
+            )
+        ) {
+            if let context = guestClaimPresentation.context {
+                ProcessingGuestClaimSurface(
+                    context: context,
+                    dependencies: dependencies,
+                    forceReducedMotion: forceReducedMotion,
+                    backToProcessing: {
+                        guestClaimPresentation.dismiss()
+                        activationGuestClaimPresentationChanged(false)
+                    },
+                    continueToListingReview: { listing in
+                        Task { await openClaimedListing(listing) }
+                    },
+                    startNewItem: {
+                        guestClaimPresentation.dismiss()
+                        activationGuestClaimPresentationChanged(false)
+                        router.reset(tab: .scan)
+                        router.selectedTab = .scan
+                    }
+                )
+            }
+        }
+        .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
+            ListingReviewView(
+                store: listingReviewStore,
+                correctionAvailable: correctionAvailable,
+                forceReducedMotion: forceReducedMotion,
+                dismissReview: { listingReviewPresentation.dismiss() },
+                goToTrophyWall: {
+                    router.reset(tab: .trophyWall)
+                    router.selectedTab = .trophyWall
+                },
+                startNewItem: {
+                    router.reset(tab: .scan)
+                    router.selectedTab = .scan
+                },
+                activationInteraction: activationListingReviewInteraction
+            )
+        }
+        .onChange(of: listingReviewPresentation.isPresented) { _, isPresented in
+            if !isPresented {
+                activationListingReviewDismissed()
+            }
+        }
+    }
+
+    private func openListing(_ runID: UUID) async -> ProcessingActionOutcome {
+        let executor = ProcessingActionExecutor(
+            runStore: runStore,
+            listingReviewStore: listingReviewStore,
+            guestClaimPresentation: guestClaimPresentation,
+            listingReviewPresentation: listingReviewPresentation,
+            applyRetryResult: { _ in false },
+            selectScan: {
+                router.reset(tab: .scan)
+                router.selectedTab = .scan
+            }
+        )
+        let outcome = await executor.execute(.review(runID: runID))
+        switch outcome {
+        case .presentedGuestClaim:
+            activationGuestClaimPresentationChanged(true)
+        case .presentedReview:
+            activationListingReviewOpened()
+        default:
+            break
+        }
+        return outcome
+    }
+
+    private func openClaimedListing(
+        _ listing: ClaimedGuestListing
+    ) async {
+        guard let context = guestClaimPresentation.takeClaimed(listing) else {
+            return
+        }
+        guard await listingReviewPresentation.open(
+                context.review,
+                expecting: context.review.binding,
+                using: listingReviewStore
+              ) else {
+            activationGuestClaimPresentationChanged(false)
+            return
+        }
+        activationListingReviewOpened()
+        activationGuestClaimPresentationChanged(false)
     }
 }
 
@@ -2308,16 +2415,16 @@ private struct ProcessingListingReviewSurface: View {
                     applyRetryResult: { store.applyRetryResult($0) },
                     selectScan: onScan
                 )
-                Task {
-                    switch await executor.execute(action) {
-                    case .presentedGuestClaim:
-                        activationGuestClaimPresentationChanged(true)
-                    case .presentedReview:
-                        activationListingReviewOpened()
-                    default:
-                        break
-                    }
+                let outcome = await executor.execute(action)
+                switch outcome {
+                case .presentedGuestClaim:
+                    activationGuestClaimPresentationChanged(true)
+                case .presentedReview:
+                    activationListingReviewOpened()
+                default:
+                    break
                 }
+                return outcome
             },
             onScan: onScan,
             onTryAgain: onTryAgain,

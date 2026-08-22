@@ -33,10 +33,12 @@ enum FutureBoundary: String, Hashable {
 /// draft, listing, listings, and orders were removed with the seller-operations
 /// surface: a destination that no longer exists as a case cannot be constructed
 /// by any view, which is a stronger guarantee than hiding the entry points.
+/// `run`, the run-status intermediate card, was removed the same way (#963):
+/// every tap that used to land on it now opens its listing surface directly or
+/// acts inline, so nothing constructs it any more.
 enum HomeRoute: Hashable {
     case processing
     case localRecovery(TrophyWallLogicalIdentity)
-    case run(UUID)
 }
 
 enum AppRoute: Hashable {
@@ -207,18 +209,24 @@ final class AppRouter {
         presentedFullScreen = .guidedCamera
     }
 
+    /// #963: the deep link still names one run, but there is no longer a
+    /// status screen to name it to — opening a specific run is now an async,
+    /// server-authorized action (`processingReviewRoute`), not a typed route a
+    /// synchronous URL handler can push. Processing is where that run already
+    /// lives, so the link surfaces the seller there rather than reviving a
+    /// removed destination.
     @discardableResult
     func open(_ url: URL) -> Bool {
         guard let deepLink = RunDeepLink(url: url) else { return false }
         switch deepLink {
-        case .run(let runID):
+        case .run:
             selectedTab = .trophyWall
             presentedFullScreen = nil
             // The account boundary lives beside the typed path rather than on it
             // (#799), so `setPath` no longer clears it. Left presented, the sheet
-            // covers the run the deep link just brought forward.
+            // covers the screen the deep link just brought forward.
             presentedAccountEntry = false
-            setPath([.home(.run(runID))], for: .trophyWall)
+            setPath([.home(.processing)], for: .trophyWall)
         }
         return true
     }

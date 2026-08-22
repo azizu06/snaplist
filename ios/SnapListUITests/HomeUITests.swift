@@ -42,11 +42,14 @@ final class HomeUITests: XCTestCase {
     }
 
     /// Trophy Wall is the seller's one return destination, and the tile is how
-    /// they reach the listing their photos produced. Every Run Detail test used
-    /// to enter by deep link, which is exactly why a tile that opened nothing
-    /// shipped unnoticed (#866), so this one enters the way a seller does.
-    func testRunDetailUsesSystemBackAndReturnsToTrophyWall() {
-        let app = launch("HOME-01")
+    /// they reach the listing their photos produced. #963 removed the
+    /// intermediate run-status card the tile used to push: a tap now opens
+    /// Listing Review directly, and dismissing it returns to the same wall.
+    func testSettledTileOpensListingReviewDirectlyAndReturnsToTrophyWall() {
+        let app = launch(
+            "HOME-01",
+            extraArguments: ["--run-detail-fixture=reviewable"]
+        )
         let wall = app.otherElements["trophy.wall"]
         XCTAssertTrue(wall.waitForExistence(timeout: 3))
 
@@ -58,11 +61,10 @@ final class HomeUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(tile.frame.height, 44)
         tile.tap()
 
-        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
-        let back = app.buttons["Back"]
-        XCTAssertTrue(back.exists)
-        back.tap()
+        XCTAssertTrue(app.otherElements["listing-review"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
 
+        app.buttons["listing-review.back"].tap()
         XCTAssertTrue(wall.waitForExistence(timeout: 3))
     }
 
@@ -71,7 +73,10 @@ final class HomeUITests: XCTestCase {
     func testWallTilesStayTappableAtTheLargestAccessibilitySize() {
         let app = launch(
             "HOME-01",
-            extraArguments: ["--dynamic-type=accessibility5"]
+            extraArguments: [
+                "--run-detail-fixture=reviewable",
+                "--dynamic-type=accessibility5",
+            ]
         )
         let grid = app.scrollViews["trophy.wall.grid"]
         XCTAssertTrue(grid.waitForExistence(timeout: 5))
@@ -82,176 +87,34 @@ final class HomeUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(tile.frame.height, 44)
         tile.tap()
 
-        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["listing-review"].waitForExistence(timeout: 5))
     }
 
-    func testRunDetailShowsFactualUnavailableState() {
-        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=unavailable"])
-        app.openRunDetail()
-
-        XCTAssertTrue(app.staticTexts["Run unavailable"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["We couldn’t load this run."].exists)
-    }
-
-    func testRunDetailShowsLoadedItemAndStageTruth() {
-        let app = launch("RUN-02", extraArguments: ["--run-detail-fixture=loaded"])
-
-        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Processing"].exists)
-        XCTAssertTrue(app.staticTexts["Researching pricing evidence"].exists)
-        XCTAssertFalse(app.staticTexts["Finding recent sold comps"].exists)
-    }
-
-    func testFailedRunStatusDominatesStaleActiveStageCopy() {
-        assertTerminalRunStatus(
-            fixture: "failed",
-            heading: "Run failed",
-            status: "Failed"
-        )
-    }
-
-    func testCanceledRunStatusDominatesStaleActiveStageCopy() {
-        assertTerminalRunStatus(
-            fixture: "canceled",
-            heading: "Run canceled",
-            status: "Canceled",
-            expectsStoppedCopy: true
-        )
-    }
-
-    func testFailedRunDetailKeepsMaximumSellerSafeFailureReachableAtAccessibilityType() {
+    /// A ready item whose draft the server refuses to load must say so where
+    /// the seller already is, never by resurrecting an intermediate screen.
+    func testSettledTileSurfacesUnavailableInlineWhenTheDraftCannotLoad() {
         let app = launch(
             "HOME-01",
-            extraArguments: [
-                "--run-detail-fixture=failed",
-                "--dynamic-type=accessibility5",
-            ]
+            extraArguments: ["--run-detail-fixture=unavailable"]
         )
         let wall = app.otherElements["trophy.wall"]
         XCTAssertTrue(wall.waitForExistence(timeout: 3))
-        app.openRunDetail()
 
-        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
-        let scroll = app.scrollViews["run.detail.scroll"]
-        XCTAssertTrue(
-            scroll.waitForExistence(timeout: 3),
-            "Run Detail must expose vertically reachable content."
+        let tile = app.firstSettledWallTile
+        XCTAssertTrue(tile.waitForExistence(timeout: 3))
+        tile.tap()
+
+        let becameUnavailable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "label CONTAINS %@",
+                "Listing unavailable. Try again."
+            ),
+            object: tile
         )
-
-        let detail = app.staticTexts.matching(
-            NSPredicate(
-                format: "label BEGINSWITH %@ AND label ENDSWITH %@",
-                "Keep your photos",
-                "All retry guidance is shown."
-            )
-        ).firstMatch
-        XCTAssertTrue(detail.waitForExistence(timeout: 3))
-        XCTAssertEqual(detail.label.count, 500)
-
-        let initialMaximumY = detail.frame.maxY
-        let viewport = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 8)
-        for _ in 0..<12 where detail.frame.maxY > viewport.maxY {
-            scroll.swipeUp()
-        }
-
-        XCTAssertLessThan(
-            detail.frame.maxY,
-            initialMaximumY,
-            "Maximum-length detail must move through the Run Detail viewport."
-        )
-        XCTAssertGreaterThan(detail.frame.maxY, viewport.minY)
-        XCTAssertLessThanOrEqual(
-            detail.frame.maxY,
-            viewport.maxY,
-            "The final line of the complete seller-safe detail must be reachable."
-        )
-
-        let back = app.buttons["Back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 3))
-        back.tap()
-        XCTAssertTrue(
-            waitForDisappearance(of: app.otherElements["run.detail"]),
-            "System Back must finish dismissing Run Detail before the wall is asserted."
-        )
-        XCTAssertTrue(wall.waitForExistence(timeout: 3))
-    }
-
-    func testCompletedRunOffersReviewCopyOnlyWhenServerAllowsIt() {
-        let unavailable = launch(
-            "HOME-01",
-            extraArguments: ["--run-detail-fixture=completed"]
-        )
-        unavailable.openRunDetail()
-
-        XCTAssertTrue(unavailable.staticTexts["Run completed"].waitForExistence(timeout: 3))
-        XCTAssertTrue(unavailable.staticTexts["Review unavailable"].exists)
-        XCTAssertFalse(unavailable.staticTexts["Ready to review"].exists)
-        XCTAssertFalse(unavailable.staticTexts["Working on your item"].exists)
-        unavailable.terminate()
-
-        let reviewable = launch(
-            "HOME-01",
-            extraArguments: ["--run-detail-fixture=reviewable"]
-        )
-        reviewable.openRunDetail()
-
-        XCTAssertTrue(reviewable.staticTexts["Run completed"].waitForExistence(timeout: 3))
-        XCTAssertTrue(reviewable.staticTexts["Ready to review"].exists)
-        XCTAssertFalse(reviewable.staticTexts["Review unavailable"].exists)
-    }
-
-    func testRunDetailRefreshIsAccessibleAndReplacesServerTruth() {
-        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=refresh"])
-        app.openRunDetail()
-        XCTAssertTrue(app.staticTexts["Researching pricing evidence"].waitForExistence(timeout: 3))
-
-        let refresh = app.buttons["Refresh"]
-        XCTAssertTrue(refresh.exists)
-        XCTAssertTrue(refresh.isHittable)
-        XCTAssertGreaterThanOrEqual(refresh.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(refresh.frame.height, 44)
-        refresh.tap()
-
-        XCTAssertTrue(app.staticTexts["Writing your listing"].waitForExistence(timeout: 3))
-    }
-
-    func testExactCustomRunDeepLinkOpensDetailAndBackReturnsHome() {
-        // Every wait here is a view a navigation this test drove has to bring
-        // back, so all three go through the shared budget. A literal here is a
-        // bet on runner speed, which is what flaked this test on ui-2 (#710).
-        let navigation = UINavigationReturnBoundary()
-        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=loaded"])
-        let wall = app.otherElements["trophy.wall"]
-        XCTAssertTrue(navigation.restored(wall))
-
-        app.openRunDetail()
-
-        XCTAssertTrue(navigation.restored(app.staticTexts["Canon AE-1 film camera"]))
-        app.buttons["Back"].tap()
-        XCTAssertTrue(navigation.restored(wall))
-    }
-
-    func testRun02VisualStateUsesTheCanonicalDetailRouteShell() {
-        let app = launch("RUN-02")
-
-        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].exists)
-        XCTAssertTrue(app.buttons["Refresh"].isHittable)
-    }
-
-    func testRun02RouteShellReflowsAtAccessibility3WithReducedMotion() {
-        let app = launch(
-            "RUN-02",
-            extraArguments: ["--dynamic-type=accessibility3", "--reduced-motion"]
-        )
-
-        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].exists)
-
-        let refresh = app.buttons["Refresh"]
-        XCTAssertTrue(refresh.isHittable)
-        XCTAssertGreaterThanOrEqual(refresh.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(refresh.frame.height, 44)
+        XCTAssertEqual(XCTWaiter.wait(for: [becameUnavailable], timeout: 3), .completed)
+        XCTAssertFalse(app.otherElements["listing-review"].exists)
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+        XCTAssertTrue(wall.waitForExistence(timeout: 2))
     }
 
     func testEmptyWallScanActionSelectsTheScanDestination() {
@@ -487,10 +350,12 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(disclosure.isHittable)
         disclosure.tap()
 
-        let retryingRow = app.buttons[
+        // Type-agnostic: retrying/not-listed rows are plain accessibility
+        // elements, not buttons — they have nowhere direct to go (#963).
+        let retryingRow = app.descendants(matching: .any)[
             "trophy.processing.row.run.\(retryingRunID)"
         ]
-        let staticFailureRow = app.buttons[
+        let staticFailureRow = app.descendants(matching: .any)[
             "trophy.processing.row.run.\(staticFailureRunID)"
         ]
         XCTAssertTrue(retryingRow.waitForExistence(timeout: 3))
@@ -617,9 +482,10 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 
-    /// The row that cannot be finished still owes the seller the screen that
-    /// explains why and offers Retry, so only the ready state changed.
-    func testProcessingUnreadyRowBodyStillOpensItsExactRunDetail() {
+    /// #963: a needs-retry row acts inline. The row's whole body is the same
+    /// control as its trailing Retry pill, not a push to an intermediate
+    /// screen, so a tap anywhere on it retries in place.
+    func testProcessingUnreadyRowBodyRetriesInlineAndNeverOpensRunDetail() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--fixture=trophy-processing",
@@ -629,13 +495,32 @@ final class HomeUITests: XCTestCase {
         app.launchAfterRetiringPriorInstance()
 
         let runID = "37500000-0000-4000-8000-000000000004"
-        let row = app.buttons["trophy.processing.row.run.\(runID)"]
+        // Type-agnostic: the row is a button while needs-retry, then a plain
+        // accessibility element once retrying (#963 rows are not controls
+        // outside an actionable state).
+        let row = app.descendants(matching: .any)[
+            "trophy.processing.row.run.\(runID)"
+        ]
         XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            row.label,
+            "Canon AE-1 film camera, needs retry. The last attempt did not finish."
+        )
 
         row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
 
-        let detail = app.otherElements["run.detail"]
-        XCTAssertTrue(detail.waitForExistence(timeout: 3))
+        let projectsRetryingTruth = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "label == %@",
+                "Canon AE-1 film camera, retrying."
+            ),
+            object: row
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [projectsRetryingTruth], timeout: 3),
+            .completed
+        )
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
         XCTAssertFalse(app.otherElements["listing-review"].exists)
     }
 
@@ -675,7 +560,11 @@ final class HomeUITests: XCTestCase {
         app.launchAfterRetiringPriorInstance()
 
         let retryRunID = "37500000-0000-4000-8000-000000000004"
-        let retryRow = app.buttons["trophy.processing.row.run.\(retryRunID)"]
+        // Type-agnostic: retries leave the row a plain accessibility element,
+        // not a button (#963).
+        let retryRow = app.descendants(matching: .any)[
+            "trophy.processing.row.run.\(retryRunID)"
+        ]
         let retry = app.buttons["trophy.processing.action.retry.\(retryRunID)"]
         let reviewRow = app.buttons[
             "trophy.processing.row.run.37500000-0000-4000-8000-000000000003"
@@ -962,28 +851,6 @@ final class HomeUITests: XCTestCase {
         return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
     }
 
-    private func assertTerminalRunStatus(
-        fixture: String,
-        heading: String,
-        status: String,
-        expectsStoppedCopy: Bool = false
-    ) {
-        let app = launch(
-            "HOME-01",
-            extraArguments: ["--run-detail-fixture=\(fixture)"]
-        )
-        app.openRunDetail()
-
-        XCTAssertTrue(app.staticTexts[heading].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts[status].exists)
-        XCTAssertFalse(app.staticTexts["Working on your item"].exists)
-        XCTAssertFalse(app.staticTexts["Researching pricing evidence"].exists)
-        if expectsStoppedCopy {
-            XCTAssertTrue(app.staticTexts["Processing stopped"].exists)
-            XCTAssertFalse(app.staticTexts["You canceled this run"].exists)
-        }
-    }
-
     private func scrollUntilFullyVisible(
         _ scrollView: XCUIElement,
         element: XCUIElement,
@@ -1058,15 +925,6 @@ final class HomeUITests: XCTestCase {
 }
 
 private extension XCUIApplication {
-    /// The deep link is kept for the cases that are about a specific run rather
-    /// than about reaching one: the run-detail fixtures resolve against this
-    /// exact identifier, and no wall tile carries it. Reaching Run Detail the
-    /// way a seller does is covered by tapping
-    /// `firstSettledWallTile` instead.
-    func openRunDetail() {
-        open(URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!)
-    }
-
     /// The first HOME-01 tile. Its run id comes from the fixture wall, so a
     /// missing element here means the tile carries no run destination at all.
     var firstSettledWallTile: XCUIElement {

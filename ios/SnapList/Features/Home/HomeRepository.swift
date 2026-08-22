@@ -100,6 +100,29 @@ enum TrophyWallStoreFactory {
                 )
             )
         }
+        // RUN-02. #963 retired the dedicated run-status route in favor of
+        // opening the shared Processing surface directly, which reads its rows
+        // from `TrophyWallStore` rather than from `RunDetailStore`. The card's
+        // identity and stage mirror `DurableRun.loadedDetail` so the two
+        // fixtures describe the same run.
+        if configuration.visualState == .runDetail {
+            return TrophyWallStore(
+                principalScope: principalScope,
+                repository: TrophyWallInitialRepository(
+                    cards: [
+                        .accepted(
+                            principalScope: principalScope,
+                            runID: UUID(
+                                uuidString: "20800000-0000-4000-8000-000000000020"
+                            )!,
+                            state: .workingPricing,
+                            itemName: "Canon AE-1 film camera",
+                            lastMeaningfulUpdateAt: fixtureNewestUpdate
+                        ),
+                    ]
+                )
+            )
+        }
 #endif
         return TrophyWallStore(
             principalScope: principalScope,

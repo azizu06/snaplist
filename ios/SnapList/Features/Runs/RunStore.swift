@@ -1,19 +1,9 @@
 import Foundation
 import Observation
 
-enum RunDetailLoadState: Equatable, Sendable {
-    case idle
-    case loading
-    case loaded(DurableRun)
-    case unavailable
-}
-
 @MainActor
 @Observable
 final class RunDetailStore {
-    private(set) var state: RunDetailLoadState = .idle
-    private(set) var isRetrying = false
-
     private let service: any RunServing
     private let tokenProvider: any BearerTokenProviding
     private let guestRecoveryCredentials:
@@ -22,8 +12,6 @@ final class RunDetailStore {
         any GuestClaimAuthorityStoring
     private let now: @Sendable () -> Date
     private let funnelAnalytics: any FunnelAnalyticsEventSinking
-    private var requestedRunID: UUID?
-    private var requestGeneration = 0
     private var emittedListingReadyRunIDs: Set<UUID> = []
     private var retryIdempotencyKeys: [UUID: UUID] = [:]
     private var processingRetryRunIDs: Set<UUID> = []
@@ -48,16 +36,6 @@ final class RunDetailStore {
         self.funnelAnalytics = funnelAnalytics
     }
 
-    func load(runID: UUID) async {
-        requestedRunID = runID
-        await startFetch(runID: runID)
-    }
-
-    func refresh() async {
-        guard let requestedRunID else { return }
-        await startFetch(runID: requestedRunID)
-    }
-
     /// Resolves only the server-authorized review binding for a Processing
     /// action. Unlike `load`, this deliberately does not change the Run Detail
     /// presentation state: Processing must not navigate through `.run(runID)`
@@ -74,9 +52,11 @@ final class RunDetailStore {
         }
     }
 
-    /// Selects the exact Processing Review route without adopting Run Detail.
-    /// A signed-out guest must preserve the durable recovery tuple and claim it
-    /// before the principal-bound Listing Review store is allowed to open.
+    /// The one path every seller-facing surface uses to reach a run's listing
+    /// directly — Processing rows, settled Trophy Wall tiles, and (#963) the
+    /// removed run-status card's former callers alike. A signed-out guest must
+    /// preserve the durable recovery tuple and claim it before the
+    /// principal-bound Listing Review store is allowed to open.
     func processingReviewRoute(
         for runID: UUID
     ) async -> ProcessingReviewRoute? {
@@ -93,6 +73,9 @@ final class RunDetailStore {
                 return nil
             }
             guard token.hasPrefix(GuestCapabilityToken.prefix) else {
+                if emittedListingReadyRunIDs.insert(run.id).inserted {
+                    funnelAnalytics.record(.listingReadyToReview, eventID: run.id)
+                }
                 return .listingReview(review)
             }
             guard run.status == .succeeded,
@@ -145,6 +128,9 @@ final class RunDetailStore {
                 authority,
                 listingID: listingID
             )
+            if emittedListingReadyRunIDs.insert(run.id).inserted {
+                funnelAnalytics.record(.listingReadyToReview, eventID: run.id)
+            }
             return .guestClaim(
                 ProcessingGuestClaimContext(
                     authority: authority,
@@ -188,36 +174,6 @@ final class RunDetailStore {
         }
     }
 
-    func retry() async {
-        guard !isRetrying,
-              case .loaded(let run) = state,
-              run.legalActions.canRetry else { return }
-        isRetrying = true
-        defer { isRetrying = false }
-        let generation = requestGeneration
-        let key = retryIdempotencyKeys[run.id] ?? UUID()
-        retryIdempotencyKeys[run.id] = key
-        do {
-            let token = try await tokenProvider.bearerToken()
-            let retried = try await service.retryRun(
-                id: run.id,
-                idempotencyKey: key,
-                bearerToken: token
-            )
-            guard retried.id == run.id else {
-                throw RunAPIError.invalidResponse
-            }
-            retryIdempotencyKeys[run.id] = nil
-            guard generation == requestGeneration,
-                  requestedRunID == run.id else { return }
-            state = .loaded(retried)
-        } catch {
-            guard generation == requestGeneration,
-                  requestedRunID == run.id else { return }
-            state = .loaded(run)
-        }
-    }
-
     private static func isCanonicalProcessingRetry(_ run: DurableRun) -> Bool {
         switch (run.status, run.stage) {
         case (.queued, .queued),
@@ -229,81 +185,6 @@ final class RunDetailStore {
             true
         default:
             false
-        }
-    }
-
-    private func startFetch(runID: UUID) async {
-        requestGeneration += 1
-        let generation = requestGeneration
-        state = .loading
-        do {
-            let token = try await tokenProvider.bearerToken()
-            let run = try await service.fetchRun(id: runID, bearerToken: token)
-            guard generation == requestGeneration, requestedRunID == runID else { return }
-            guard run.id == runID else { throw RunAPIError.invalidResponse }
-            if let credential = try await guestRecoveryCredentials
-                .credential(runID: runID) {
-                if !token.hasPrefix(GuestCapabilityToken.prefix) {
-                    try await guestClaimAuthorities.purge(
-                        recoveryID: credential.recoveryID
-                    )
-                    try await guestRecoveryCredentials.purge(
-                        recoveryID: credential.recoveryID
-                    )
-                } else if run.status == .failed || run.status == .canceled {
-                    try await guestClaimAuthorities.purge(
-                        recoveryID: credential.recoveryID
-                    )
-                    try await guestRecoveryCredentials.purge(
-                        recoveryID: credential.recoveryID
-                    )
-                } else if run.status == .succeeded {
-                    guard let completedAt = run.timestamps.completedAt,
-                          let completed = Self.date(from: completedAt) else {
-                        throw RunAPIError.invalidResponse
-                    }
-                    let expiresAt = completed.addingTimeInterval(24 * 60 * 60)
-                    if expiresAt <= now() {
-                        try await guestClaimAuthorities.purge(
-                            recoveryID: credential.recoveryID
-                        )
-                        try await guestRecoveryCredentials.purge(
-                            recoveryID: credential.recoveryID
-                        )
-                    } else {
-                        try await guestRecoveryCredentials.setExpiry(
-                            recoveryID: credential.recoveryID,
-                            expiresAt: expiresAt
-                        )
-                        guard let binding = run.review?.binding else {
-                            throw RunAPIError.invalidResponse
-                        }
-                        guard let authority = GuestClaimAuthorityAssembler
-                            .assemble(
-                                credential: credential,
-                                binding: binding
-                            ) else {
-                            throw RunAPIError.invalidResponse
-                        }
-                        try await guestClaimAuthorities.save(
-                            authority,
-                            listingID: binding.listingID
-                        )
-                    }
-                }
-            }
-            state = .loaded(run)
-            if run.legalActions.canOpenReview,
-               run.review != nil,
-               emittedListingReadyRunIDs.insert(run.id).inserted {
-                funnelAnalytics.record(.listingReadyToReview, eventID: run.id)
-            }
-        } catch is CancellationError {
-            guard generation == requestGeneration else { return }
-            state = .idle
-        } catch {
-            guard generation == requestGeneration else { return }
-            state = .unavailable
         }
     }
 
@@ -346,12 +227,18 @@ enum RunDetailStoreFactory {
             case .completed:
                 service = FixtureRunService(runs: [.completedDetail])
             case .reviewable:
-                let review = configuration.fixture == .trophyProcessing
-                    ? ListingReviewLaunchFixture.processingReview()
-                    : (configuration.listingReviewFixture ?? .loaded).review
-                let run = configuration.fixture == .trophyProcessing
-                    ? DurableRun.processingReviewableDetail(review: review)
-                    : DurableRun.reviewableDetail(review: review)
+                let run: DurableRun
+                if configuration.fixture == .trophyProcessing {
+                    run = DurableRun.processingReviewableDetail(
+                        review: ListingReviewLaunchFixture.processingReview()
+                    )
+                } else {
+                    run = DurableRun.trophyWallReviewableDetail(
+                        review: ListingReviewLaunchFixture.trophyWallReview(
+                            variant: configuration.listingReviewFixture ?? .loaded
+                        )
+                    )
+                }
                 service = FixtureRunService(
                     runs: [run]
                 )
@@ -435,16 +322,6 @@ private extension DurableRun {
     )
     static let canceledDetail = fixture(status: .canceled, stage: .generating)
     static let completedDetail = fixture(status: .succeeded, stage: .completed)
-    static func reviewableDetail(
-        review: ListingReviewResult
-    ) -> DurableRun {
-        fixture(
-            status: .succeeded,
-            stage: .completed,
-            canOpenReview: true,
-            review: review
-        )
-    }
 
     static func processingReviewableDetail(
         review: ListingReviewResult
@@ -457,6 +334,27 @@ private extension DurableRun {
                 uuidString: "37500000-0000-4000-8000-000000000009"
             )!,
             itemName: "Vintage Pyrex bowl set",
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            review: review
+        )
+    }
+
+    /// #963: the first HOME-01 settled Trophy Wall tile, matching the id
+    /// `TrophyWallStoreFactory.fixtureCards` gives that tile so tapping it can
+    /// resolve to a run this fixture service can actually serve.
+    static func trophyWallReviewableDetail(
+        review: ListingReviewResult
+    ) -> DurableRun {
+        fixture(
+            id: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000021"
+            )!,
+            itemID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000029"
+            )!,
+            itemName: "DualSense controller",
             status: .succeeded,
             stage: .completed,
             canOpenReview: true,
