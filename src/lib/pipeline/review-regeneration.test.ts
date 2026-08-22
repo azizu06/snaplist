@@ -719,11 +719,13 @@ describe("regenerateReviewListing", () => {
     );
   });
 
-  it("returns the seller's correction even when the usage record cannot be written", async () => {
+  it("returns the seller's correction even when the usage record cannot be written, but reports the failure", async () => {
     const persistence = store();
+    const writerFailure = new Error("provider usage writer is unavailable");
     persistence.recordProviderUsage = vi.fn(async () => {
-      throw new Error("provider usage writer is unavailable");
+      throw writerFailure;
     });
+    const onProviderUsageError = vi.fn();
 
     const result = await regenerateReviewListing(
       persistence,
@@ -744,12 +746,19 @@ describe("regenerateReviewListing", () => {
         priceItem: async () => soldPrice,
         generateListing: async () => ({ copy: generated, model: "resolved-listing" }),
         randomUUID: () => "00000000-0000-4000-8000-000000000131",
+        onProviderUsageError,
       },
     );
 
     expect(persistence.commit).toHaveBeenCalledTimes(1);
     expect(result.runId).toBe("00000000-0000-4000-8000-000000000131");
     expect(result.listing).toEqual(generated);
+    // A bookkeeping outage must not vanish without a trace (#820 item 1).
+    expect(onProviderUsageError).toHaveBeenCalledTimes(1);
+    const reported = onProviderUsageError.mock.calls[0]![0] as Error;
+    expect(reported).toBeInstanceOf(Error);
+    expect(reported.message).toContain("00000000-0000-4000-8000-000000000131");
+    expect(reported.cause).toBe(writerFailure);
   });
 
   it("wires the Supabase store to report a correction's spend", async () => {

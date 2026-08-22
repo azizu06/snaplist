@@ -79,19 +79,25 @@ export async function recordGuidedCorrectionProviderUsage(
  * seller's confirmed work is worse than telemetry that is occasionally missing.
  *
  * The recorder is invoked INSIDE the try so a synchronous throw is swallowed
- * too, not only a rejected promise.
+ * too, not only a rejected promise. `onError` is best-effort observation, not
+ * enforcement (#820 item 1): a failure there is swallowed too, so a broken
+ * logger can never do what a broken writer already cannot.
  */
 export async function reportPostCompletionProviderUsage(
   report: PostCompletionProviderUsage,
   record:
     | ((report: PostCompletionProviderUsage) => Promise<void> | void)
     | undefined,
+  onError?: (error: unknown) => void,
 ): Promise<void> {
   if (!record) return;
   try {
     await record(report);
-  } catch {
-    // Deliberately silent at this seam: the caller owns error reporting, and a
-    // missing usage row is a known, documented gap in the percentile artifact.
+  } catch (error) {
+    try {
+      onError?.(error);
+    } catch {
+      // See above: observation can never gain the power to break the swallow.
+    }
   }
 }

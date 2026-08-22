@@ -117,6 +117,8 @@ interface Harness {
   priceItem: ReturnType<typeof vi.fn>;
   /** What each completed correction reported spending at paid providers (#724). */
   providerUsageReports: PostCompletionProviderUsage[];
+  /** Provider-usage write failures observed after the correction committed (#820). */
+  providerUsageErrors: unknown[];
   /**
    * What `get_mobile_listing_review` would project for this item after every
    * commit above — the durable review the native client renders next.
@@ -220,6 +222,7 @@ function harness(
   const owner = input.owner ?? OWNER;
   const commits: GuidedCorrectionCommit[] = [];
   const providerUsageReports: PostCompletionProviderUsage[] = [];
+  const providerUsageErrors: unknown[] = [];
   // Both fakes report through the registry's usage middleware, so the assertions
   // below prove the correction's paid work runs inside an open usage scope
   // rather than that a number was passed along by hand.
@@ -452,6 +455,7 @@ function harness(
       generateListing,
       priceItem,
       newRunId: () => newRunIds.shift() ?? LATER_RUN_ID,
+      onProviderUsageError: (error) => providerUsageErrors.push(error),
     }),
     pricingEvidence: {
       async forItem({ userId, itemId }) {
@@ -466,6 +470,7 @@ function harness(
     commits,
     priceItem,
     providerUsageReports,
+    providerUsageErrors,
     readBackIdentity: () => ({ ...durableIdentity }),
     readBackListing: () => structuredClone(durableListing),
     rlsTokens,
@@ -1044,9 +1049,10 @@ describe("POST /v1/runs/{runId}/sharpen — provider spend", () => {
     ]);
   });
 
-  it("keeps the seller's correction when the usage record cannot be written", async () => {
-    const { handler, commits, providerUsageReports } = harness({
-      providerUsageError: new Error("provider usage writer is unavailable"),
+  it("keeps the seller's correction when the usage record cannot be written, but reports the failure", async () => {
+    const writerFailure = new Error("provider usage writer is unavailable");
+    const { handler, commits, providerUsageReports, providerUsageErrors } = harness({
+      providerUsageError: writerFailure,
     });
 
     const response = await handler(correctionRequest(OWNER_TOKEN));
@@ -1056,6 +1062,15 @@ describe("POST /v1/runs/{runId}/sharpen — provider spend", () => {
     expect(response.status).toBe(200);
     expect(commits).toHaveLength(1);
     expect(providerUsageReports).toEqual([]);
+    // ...but it must not vanish without a trace (#820 item 1): the failure
+    // reaches the server log with the run identified and the original cause.
+    expect(providerUsageErrors).toHaveLength(1);
+    const reported = providerUsageErrors[0];
+    expect(reported).toBeInstanceOf(Error);
+    // The message names the correction's OWN new run id, not the run being
+    // corrected — that's the id the completion, and any retry, is keyed on.
+    expect((reported as Error).message).toContain(NEXT_RUN_ID);
+    expect((reported as Error).cause).toBe(writerFailure);
   });
 
   it("replays a completed correction without recording its spend twice", async () => {
