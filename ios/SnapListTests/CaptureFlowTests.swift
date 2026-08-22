@@ -9714,7 +9714,7 @@ final class CaptureFlowTests: XCTestCase {
 
     // MARK: - Button Shapes (#856)
 
-    /// Left on `.automatic`, iOS paints a second filled shape behind the capsule this
+    /// Left on `.automatic`, iOS paints a second filled shape behind the circle this
     /// control already draws for itself whenever a seller has Accessibility > Display &
     /// Text Size > Button Shapes on.
     func testScanReviewButtonCarriesAnExplicitNonAutomaticButtonStyle() {
@@ -9729,7 +9729,34 @@ final class CaptureFlowTests: XCTestCase {
 
         XCTAssertTrue(
             rendered.contains("PlainButtonStyle"),
-            "scan.review resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+            "scan.review resolves to .automatic, so Button Shapes doubles its circle: \(rendered)"
+        )
+    }
+
+    /// #1009 owner refinement: the circle only takes the accent fill once the
+    /// seller has hit the five-photo cap. Below the cap it keeps the same
+    /// translucent camera-control fill the gallery circle uses.
+    func testScanReviewButtonFillsWithAccentOnlyAtTheFivePhotoCap() {
+        for count in 1...4 {
+            XCTAssertFalse(
+                ScanReviewButton(
+                    photoCount: count,
+                    priority: .live,
+                    returnFocus: .constant(nil),
+                    review: {}
+                ).isAtPhotoCap,
+                "\(count) photos is below the cap."
+            )
+        }
+
+        XCTAssertTrue(
+            ScanReviewButton(
+                photoCount: 5,
+                priority: .live,
+                returnFocus: .constant(nil),
+                review: {}
+            ).isAtPhotoCap,
+            "Five photos is the cap."
         )
     }
 

@@ -2109,13 +2109,14 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(capped.buttons["scan.library"].label, "Library")
     }
 
-    /// #885. The reference arranges the bottom row as flash, shutter, library,
-    /// and leaves the top row holding nothing but the close control.
+    /// #885. The reference arranged the bottom row as flash, shutter, library,
+    /// with Review sharing the strip's row above it.
     ///
-    /// Review used to own the bottom-right slot the library now takes. It does
-    /// not disappear: it moves up beside the staged-photo strip it acts on,
-    /// which is the row directly above and still inside thumb reach.
-    func testIssue885ScanBottomRowIsFlashShutterLibraryWithReviewMovedAboveIt() {
+    /// #1009 moves flash up beside the close control and gives Review the
+    /// library's old symmetry partner: gallery, shutter, and Review now share
+    /// one bottom row in that order, with Review a fixed-size circle rather
+    /// than a name-driven capsule.
+    func testIssue1009ScanBottomRowIsGalleryShutterReviewWithFlashMovedToTheTopBar() {
         let app = launch(extraArguments: ["--visual-state=CAM-03"])
         let close = app.buttons["scan.close"]
         let flash = app.buttons["scan.flash"]
@@ -2130,13 +2131,14 @@ final class SnapListUITests: XCTestCase {
         let receipt = "close=\(close.frame) flash=\(flash.frame) " +
             "shutter=\(shutter.frame) library=\(library.frame) review=\(review.frame)"
 
-        XCTAssertLessThan(flash.frame.midX, shutter.frame.midX, receipt)
-        XCTAssertLessThan(shutter.frame.midX, library.frame.midX, receipt)
-        XCTAssertEqual(flash.frame.midY, shutter.frame.midY, accuracy: 24, receipt)
+        XCTAssertLessThan(library.frame.midX, shutter.frame.midX, receipt)
+        XCTAssertLessThan(shutter.frame.midX, review.frame.midX, receipt)
         XCTAssertEqual(library.frame.midY, shutter.frame.midY, accuracy: 24, receipt)
+        XCTAssertEqual(review.frame.midY, shutter.frame.midY, accuracy: 24, receipt)
 
-        XCTAssertLessThan(review.frame.maxY, shutter.frame.minY, receipt)
-        XCTAssertGreaterThan(flash.frame.minY, close.frame.maxY, receipt)
+        XCTAssertEqual(flash.frame.midY, close.frame.midY, accuracy: 24, receipt)
+        XCTAssertLessThan(flash.frame.maxY, shutter.frame.minY, receipt)
+        XCTAssertGreaterThan(flash.frame.midX, close.frame.midX, receipt)
 
         for control in [flash, shutter, library] {
             XCTAssertFalse(control.frame.intersects(review.frame), receipt)
@@ -2291,9 +2293,9 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
-    /// #885. Moving three controls onto one row and adding a fourth above it is
-    /// exactly the change that breaks touch targets at large text, so every
-    /// control the issue touches is measured at AX5 rather than at the default
+    /// #885, extended by #1009. Rearranging controls across rows is exactly
+    /// the change that breaks touch targets at large text, so every control
+    /// either issue touched is measured at AX5 rather than at the default
     /// size: on screen, at least 44pt on both axes, and not overlapping anything
     /// a seller could be aiming at instead.
     ///
@@ -2367,36 +2369,38 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
-    /// #954. The bottom control area is three compact rows with photos staged:
-    /// the zoom capsule, then the thumbnail strip with Review beside it, then
-    /// flash, shutter and library.
+    /// #954, updated by #1009. The bottom control area is three compact rows
+    /// with photos staged: the zoom capsule, then the centered thumbnail
+    /// strip, then gallery, shutter, and Review sharing one row.
     ///
-    /// On the parent commit it was four — the strip carrying a "N of 5" capsule,
-    /// Review alone, the zoom capsule alone, then the shutter row — and at
-    /// accessibility3 the capsule wrapped into a three-line stack that ran into
-    /// the framing bracket above it. The owner specified the arrangement: the
-    /// count capsule is deleted, and the zoom capsule keeps a line of its own
-    /// directly above the strip, anchored near the shutter it changes.
+    /// On the #954 parent commit it was four — the strip carrying a "N of 5"
+    /// capsule, Review alone, the zoom capsule alone, then the shutter row —
+    /// and at accessibility3 the capsule wrapped into a three-line stack that
+    /// ran into the framing bracket above it. The owner specified the
+    /// arrangement: the count capsule is deleted, and the zoom capsule keeps a
+    /// line of its own directly above the strip, anchored near the shutter it
+    /// changes.
+    ///
+    /// #1009 moves flash out of this block entirely, up beside the close
+    /// button, and turns Review into a fixed 48pt circle rather than a
+    /// name-driven capsule. Flash plays no part in this measurement, and the
+    /// accessibility-size wrap #954 allowed for Review's growing name has
+    /// nothing left to wrap: three rows is now the count at every Dynamic
+    /// Type size, including AX5, which is the point of making Review
+    /// fixed-size in the first place.
     ///
     /// A row is derived from the rendered frames rather than declared, so this
     /// cannot be satisfied by renesting the same bands: the bottom controls are
     /// sorted by `minY` and grouped by overlapping vertical extent. Giving
-    /// Review a line of its own back, or reintroducing the count, produces a
-    /// fourth band whatever the view tree looks like.
-    ///
-    /// Accessibility sizes are allowed the honest degradation the owner named:
-    /// Review may wrap beneath the strip, because five thumbnails hold 265pt of
-    /// the 372pt gutter at every text size and Review's name does not stop
-    /// growing. Overlap and clipping are failures at every size; only the row
-    /// count relaxes, and only there.
+    /// Review a line of its own, or reintroducing the count, produces a fourth
+    /// band whatever the view tree looks like.
     ///
     /// Activation guidance is parked on another surface for the same reason
     /// `testIssue885EveryMovedScanControlKeepsA44ptTargetAtAX5` parks it: the
     /// ACT-01 coach mark docks over this band, and letting it fail here would
     /// be failing for #914 rather than for this contract.
-    func testIssue954StagedScanControlsFitTwoRowsAtEveryDynamicTypeSize() {
+    func testIssue954StagedScanControlsFitThreeRowsAtEveryDynamicTypeSize() {
         for typeSize in ["xSmall", "medium", "accessibility3", "accessibility5"] {
-            let isAccessibility = typeSize.hasPrefix("accessibility")
             let app = launch(extraArguments: [
                 "--visual-state=CAM-04",
                 "--scan-zoom=dual-wide",
@@ -2410,10 +2414,9 @@ final class SnapListUITests: XCTestCase {
             let lastPhoto = app.descendants(matching: .any)["scan.photo-5"]
             let zoom = app.descendants(matching: .any)["scan.zoom"]
             let review = app.buttons["scan.review"]
-            let flash = app.buttons["scan.flash"]
             let shutter = app.buttons["scan.shutter"]
             let library = app.buttons["scan.library"]
-            let bottom = [zoom, firstPhoto, lastPhoto, review, flash, shutter, library]
+            let bottom = [zoom, firstPhoto, lastPhoto, review, shutter, library]
 
             for element in bottom {
                 XCTAssertTrue(
@@ -2456,22 +2459,11 @@ final class SnapListUITests: XCTestCase {
                 "The staged strip must sit above the shutter row. \(receipt)"
             )
 
-            let rows = scanStagedRowCount(of: bottom)
-            if isAccessibility {
-                // Review wraps beneath the strip here, which is the degradation
-                // the owner allowed. Four bands is the ceiling even so.
-                XCTAssertLessThanOrEqual(
-                    rows,
-                    4,
-                    "The bottom controls must not exceed four rows. \(receipt)"
-                )
-            } else {
-                XCTAssertEqual(
-                    rows,
-                    3,
-                    "The bottom controls must render in three rows. \(receipt)"
-                )
-            }
+            XCTAssertEqual(
+                scanStagedRowCount(of: bottom),
+                3,
+                "The bottom controls must render in three rows. \(receipt)"
+            )
 
             for (index, element) in bottom.enumerated() {
                 for other in bottom.dropFirst(index + 1) {
@@ -2551,12 +2543,12 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(firstPhoto.frame.size.width, 45, accuracy: 0.5)
         XCTAssertEqual(firstPhoto.frame.size.height, 57, accuracy: 0.5)
         XCTAssertEqual(secondPhoto.frame.minX - firstPhoto.frame.maxX, 10, accuracy: 0.5)
-        // #954 put review back beside the strip rather than on a line of its
-        // own, so the two now share a band: each one's top sits above the
-        // other's bottom, and they are separated horizontally instead.
-        XCTAssertLessThan(review.frame.minY, firstPhoto.frame.maxY)
-        XCTAssertLessThan(firstPhoto.frame.minY, review.frame.maxY)
-        XCTAssertLessThanOrEqual(firstPhoto.frame.maxX, review.frame.minX)
+        // #1009 moved review off the strip's row into the gallery/shutter/
+        // review row, so it now shares a band with library and shutter
+        // instead of with the strip above it.
+        XCTAssertLessThanOrEqual(firstPhoto.frame.maxY, review.frame.minY)
+        XCTAssertLessThan(library.frame.minY, review.frame.maxY)
+        XCTAssertLessThan(review.frame.minY, library.frame.maxY)
         // The row that used to hold review alone is gone, so the shutter row
         // follows the strip directly. Pinning the gap keeps the reclaimed
         // height from quietly reappearing as padding.
@@ -2620,11 +2612,10 @@ final class SnapListUITests: XCTestCase {
         }
 
         XCTAssertLessThanOrEqual(firstPhoto.frame.maxY, library.frame.minY)
-        // #954 put Review beside the strip rather than under it, so the two
-        // now share a band instead of stacking. What still has to hold is that
-        // they do not run into each other.
+        // #1009 put Review in the gallery/shutter/review row rather than
+        // beside the strip, so the strip must sit above it, not beside it.
         XCTAssertFalse(firstPhoto.frame.intersects(review.frame))
-        XCTAssertLessThanOrEqual(firstPhoto.frame.maxX, review.frame.minX)
+        XCTAssertLessThanOrEqual(firstPhoto.frame.maxY, review.frame.minY)
 
         // The dock's absence is scoped to the live preview, not a permanent
         // side effect of having visited Scan: leaving capture must bring it
@@ -2674,7 +2665,8 @@ final class SnapListUITests: XCTestCase {
             XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, frameReceipt)
         }
 
-        // #885 put flash on this row, so it joins the pairs that must stay apart.
+        // #1009 moved flash to the top bar beside close, so it no longer
+        // shares this row — it still joins the pairs that must stay apart.
         let bottomStack = [flash, shutter, library, review]
         for (index, control) in bottomStack.enumerated() {
             for other in bottomStack.dropFirst(index + 1) {

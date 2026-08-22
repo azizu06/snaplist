@@ -451,6 +451,10 @@ private enum ScanReviewFocusTarget: Hashable {
 /// from Photo Review. Each surface still supplies its own sort-priority case, which is the one
 /// input that is allowed to differ, even though `.live` and `.recovery` both resolve to 40 today.
 ///
+/// #1009 reshapes this from a name-driven capsule to a fixed-size circle that mirrors the
+/// library opener (48pt) with a photo-count badge, so it can sit beside the shutter and
+/// library in one row without a growing label ever contesting that row's width.
+///
 /// Not `private`: a unit test renders it alone to inspect its resolved button style (#856).
 struct ScanReviewButton: View {
     let photoCount: Int
@@ -460,39 +464,65 @@ struct ScanReviewButton: View {
 
     @AccessibilityFocusState private var focusedScanControl: ScanReviewFocusTarget?
 
+    /// Owner refinement to #1009 AC3: the circle only takes the accent fill
+    /// once the seller has hit the cap. Below it, Review keeps the same
+    /// translucent camera-control fill the gallery circle uses, so the icon
+    /// — never itself changing — is the only affordance, and the fill is what
+    /// tells the seller they are out of room.
+    var isAtPhotoCap: Bool {
+        photoCount >= CapturePhotoLimits.maxPhotoCount
+    }
+
     var body: some View {
-        Button("Review", action: review)
-            // The capsule shares its row with the shutter and the library
-            // opener, so at the accessibility sizes the label had less width
-            // than the word and SwiftUI hyphenated it into "Re-view".
-            .snapListFitsFixedSlot()
-            // The capsule below is this control's whole affordance. Left on
-            // `.automatic`, iOS paints a second filled shape behind it for a
-            // seller with Button Shapes on, which reads as an overlay sitting
-            // on the label (#856).
-            .buttonStyle(.plain)
-            .font(.subheadline.weight(.semibold))
+        Button(action: review) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 48, height: 48)
+                .background(
+                    isAtPhotoCap
+                        ? SnapListColorToken.action.color
+                        : SnapListColorToken.cameraControlFill.color.opacity(0.66)
+                )
+                .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
+                .clipShape(.circle)
+                .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
+                .overlay(alignment: .topTrailing) { countBadge }
+                .accessibilityHidden(true)
+        }
+        // This circle is the control's whole affordance. Left on `.automatic`,
+        // iOS paints a second filled shape behind it for a seller with Button
+        // Shapes on, which reads as an overlay sitting on the icon (#856).
+        .buttonStyle(.plain)
+        .frame(width: 48, height: 48)
+        .contentShape(.circle)
+        .accessibilityLabel(
+            photoCount == 1
+                ? "Review 1 photo"
+                : "Review \(photoCount) photos"
+        )
+        .accessibilityIdentifier("scan.review")
+        .accessibilitySortPriority(priority.value)
+        .accessibilityFocused(
+            $focusedScanControl,
+            equals: .reviewButton
+        )
+        .onAppear(perform: consumeReviewFocusIfPossible)
+        .onChange(of: returnFocus) { _, _ in
+            consumeReviewFocusIfPossible()
+        }
+    }
+
+    private var countBadge: some View {
+        Text("\(photoCount)")
+            .font(.caption2.weight(.bold))
             .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-            .padding(.horizontal, 18)
-            .frame(minHeight: 48)
-            .background(SnapListColorToken.action.color)
-            .clipShape(.capsule)
-            .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
-            .accessibilityLabel(
-                photoCount == 1
-                    ? "Review 1 photo"
-                    : "Review \(photoCount) photos"
-            )
-            .accessibilityIdentifier("scan.review")
-            .accessibilitySortPriority(priority.value)
-            .accessibilityFocused(
-                $focusedScanControl,
-                equals: .reviewButton
-            )
-            .onAppear(perform: consumeReviewFocusIfPossible)
-            .onChange(of: returnFocus) { _, _ in
-                consumeReviewFocusIfPossible()
-            }
+            .frame(minWidth: 20, minHeight: 20)
+            .background(SnapListColorToken.inkPrimary.color)
+            .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.9), lineWidth: 1) }
+            .clipShape(.circle)
+            .offset(x: 6, y: -6)
+            .accessibilityHidden(true)
     }
 
     private func consumeReviewFocusIfPossible() {
@@ -538,10 +568,9 @@ enum ScanReturnFocusPolicy {
 /// whatever occupies it — the staged strip when photos are staged, the shutter
 /// row when none are.
 ///
-/// Measured rather than summed because the staged region is one row at most
-/// text sizes and two once Review wraps beneath the strip, and `ViewThatFits`
-/// decides which by measurement. A constant would be right at the sizes it was
-/// read off and wrong at the rest, which is the shape of #954's own defect.
+/// Measured rather than summed because every row's own height varies with
+/// Dynamic Type. A constant would be right at the sizes it was read off and
+/// wrong at the rest, which is the shape of #954's own defect.
 private struct ScanBottomStackTopPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = .greatestFiniteMagnitude
 
@@ -631,9 +660,13 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             .accessibilityHidden(true)
 
             VStack(spacing: 0) {
+                // #1009 moves flash up beside the close button, so the bottom
+                // row can pair the gallery and Review symmetrically around
+                // the shutter instead of carrying a third control of its own.
                 HStack {
                     closeButton
                     Spacer(minLength: 0)
+                    flashButton
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 8)
@@ -645,11 +678,10 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                 // rather than drifting up to the close button.
                 //
                 // It cannot share the staged row: five thumbnails hold 265pt of
-                // the 372pt gutter at every text size, and the capsule and
-                // Review together want more than the 107pt left over well before
-                // accessibility sizes. That three-way squeeze is the collision
-                // #954 exists to remove, so the capsule keeps its own line and
-                // the strip keeps Review.
+                // the 372pt gutter at every text size, which was already most
+                // of it before Review moved into the bottom row (#1009). That
+                // squeeze is the collision #954 exists to remove, so the
+                // capsule keeps its own line and the strip keeps to itself.
                 //
                 // `fixedSize` because ".5x" is two glyph groups: a squeezed
                 // capsule wraps into a stack rather than truncating, and grows
@@ -753,40 +785,16 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         )
     }
 
-    /// The strip and Review on one line, or stacked when that line cannot hold
-    /// them.
+    /// The staged strip, centered in its own row above the shutter row.
     ///
-    /// Five thumbnails hold 265pt of the 372pt gutter at every text size, so
-    /// whether Review fits beside them is purely a question of how wide its
-    /// name has grown. #885 answered that by giving Review a permanent line of
-    /// its own, but it was sharing the strip with the count capsule then;
-    /// deleting the capsule returns the width that collision needed.
-    ///
-    /// `ViewThatFits` measures rather than guesses, so the single line survives
-    /// exactly as far as it actually fits and the stack takes over the moment
-    /// it does not — no Dynamic Type threshold to keep in sync, and no size at
-    /// which the two overlap. Neither candidate scrolls, so both report an
-    /// honest ideal width and the wide one cannot claim to fit when it does
-    /// not.
+    /// Review used to share this row and drove a `ViewThatFits` single-line/
+    /// stacked split, because five thumbnails hold 265pt of the 372pt gutter
+    /// at every text size and whether Review's name fit beside them was a
+    /// live question. #1009 moves Review into the bottom gallery/shutter/
+    /// review row as a fixed-size circle, so nothing here competes with the
+    /// strip for width anymore and the split is gone: the strip just centers.
     private var stagedControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 0) {
-                photoProgress
-                // 8pt, not a comfortable gutter: five thumbnails and Review
-                // together want 355pt of the 372pt available at medium, so the
-                // gap between them is the entire margin the single-line branch
-                // has to work with. A roomier one costs the line itself.
-                Spacer(minLength: 8)
-                reviewButton
-            }
-
-            VStack(alignment: .trailing, spacing: 12) {
-                photoProgress
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                reviewButton
-            }
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: dynamicTypeSize)
+        photoProgress
     }
 
     /// How far above the screen's bottom edge the framing corners should end.
@@ -794,9 +802,8 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     /// One rule at every text size and every staged count: 18pt of daylight
     /// above whatever row the bottom control stack starts with. That is the
     /// staged strip once photos are staged and the shutter row before then, and
-    /// the strip's row count varies with how wide Review's name grew, so the
-    /// position is read from the rendered frames rather than summed from
-    /// constants (#954).
+    /// the zoom row's own height varies with Dynamic Type, so the position is
+    /// read from the rendered frames rather than summed from constants (#954).
     ///
     /// `nil` until both measurements have landed, which leaves the corners on
     /// their base inset for the first layout pass.
@@ -817,18 +824,26 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     // asymmetrically at accessibility sizes instead of colliding.
     //
     // #885 swapped the occupants (flash left, library right, review moved above the row)
-    // and kept the technique, which is why both side controls are fixed-size circles now
-    // and the guarantee costs nothing.
+    // and kept the technique. #1009 swaps them again — gallery left, Review right, flash
+    // moved up beside the close button — and Review is now a fixed-size circle rather than
+    // a name-driven capsule, so both side regions stay fixed-size at every Dynamic Type
+    // size and the guarantee still costs nothing. Review's region stays flexible even at
+    // zero staged photos, when it renders nothing, so the shutter does not drift off center
+    // the moment the first photo lands.
     private var cameraControls: some View {
         HStack {
-            flashButton
+            libraryControl()
+                .disabled(!isLibraryEnabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             shutterButton
 
-            libraryControl()
-                .disabled(!isLibraryEnabled)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            Group {
+                if !thumbnailURLs.isEmpty {
+                    reviewButton
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 18)
     }
@@ -959,21 +974,21 @@ private struct ScanPhotoProgressRow: View {
     let removePhoto: (StagedCapturePhoto.ID) -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            HStack(spacing: 11) {
-                ForEach(Array(thumbnailURLs.enumerated()), id: \.offset) { index, url in
-                    ScanPhotoThumbnail(
-                        url: url,
-                        index: index,
-                        count: thumbnailURLs.count,
-                        remove: {
-                            guard photoIDs.indices.contains(index) else { return }
-                            removePhoto(photoIDs[index])
-                        }
-                    )
-                }
+        // No trailing `Spacer`: #1009 gives the strip its own row with
+        // nothing left to justify against, so its natural width is exactly
+        // the thumbnail cluster's, which is what lets the row center it.
+        HStack(spacing: 11) {
+            ForEach(Array(thumbnailURLs.enumerated()), id: \.offset) { index, url in
+                ScanPhotoThumbnail(
+                    url: url,
+                    index: index,
+                    count: thumbnailURLs.count,
+                    remove: {
+                        guard photoIDs.indices.contains(index) else { return }
+                        removePhoto(photoIDs[index])
+                    }
+                )
             }
-            Spacer(minLength: 0)
         }
     }
 }
