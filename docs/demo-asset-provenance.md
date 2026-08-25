@@ -41,7 +41,8 @@ shippable electronics / gaming / collectibles / streetwear resale story.
 
 The following previous high-salience assets were retired from the runtime demo
 catalog and removed in issue #248. Four benchmark-only images remain outside
-the runtime catalog because native pricing tests reference them directly:
+the runtime catalog because `scripts/mobile-runtime-pipeline-benchmark.ts` and
+`Dockerfile.mobile-runtime-proof` reference them directly:
 
 - `public/demo/book.jpg`
 - `public/demo/camera.jpg`
