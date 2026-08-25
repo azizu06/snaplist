@@ -412,7 +412,6 @@ src/lib/supabase/server-rpc-auth.ts
 src/lib/supabase/server.ts
 src/lib/supabase/tenant-server.ts
 src/lib/supabase/test-users.ts
-src/lib/ui/dates.ts
 src/lib/ui/format.ts
 src/lib/ui/item-label.ts
 src/lib/ui/publish-eligibility.ts
