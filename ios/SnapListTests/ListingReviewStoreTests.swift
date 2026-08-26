@@ -1768,3 +1768,30 @@ private actor ListingReviewSaveGateService: ListingReviewServing {
         saveRequests
     }
 }
+
+final class ListingReviewConditionTests: XCTestCase {
+    func testSellerLabelNamesEveryConditionCaseExactly() {
+        XCTAssertEqual(ListingReviewCondition.new.sellerLabel, "New")
+        XCTAssertEqual(ListingReviewCondition.likeNew.sellerLabel, "Like New")
+        XCTAssertEqual(ListingReviewCondition.veryGood.sellerLabel, "Very Good")
+        XCTAssertEqual(ListingReviewCondition.good.sellerLabel, "Good")
+        XCTAssertEqual(ListingReviewCondition.acceptable.sellerLabel, "Acceptable")
+        XCTAssertEqual(ListingReviewCondition.fair.sellerLabel, "Fair")
+        XCTAssertEqual(ListingReviewCondition.poor.sellerLabel, "Poor")
+        XCTAssertEqual(ListingReviewCondition.forParts.sellerLabel, "For Parts")
+    }
+
+    func testRawValuesMatchTheTaxonomyEncodingEachConditionRoundTrips() throws {
+        XCTAssertEqual(ListingReviewCondition.likeNew.rawValue, "like-new")
+        XCTAssertEqual(ListingReviewCondition.veryGood.rawValue, "very-good")
+        XCTAssertEqual(ListingReviewCondition.forParts.rawValue, "for-parts")
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(
+            ListingReviewCondition.self,
+            from: Data("\"for-parts\"".utf8)
+        )
+        XCTAssertEqual(decoded, .forParts)
+        XCTAssertEqual(decoded.sellerLabel, "For Parts")
+    }
+}
