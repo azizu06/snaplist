@@ -63,10 +63,6 @@ const STAGE_INDEX: Record<PipelineProgressStage, number> = {
   completed: 5,
 };
 
-export function isPipelineProgressTerminal(status: PipelineProgressStatus): boolean {
-  return status === "succeeded" || status === "failed" || status === "canceled";
-}
-
 export function pipelineProgressView(run: PipelineProgressRun): PipelineProgressView {
   if (
     run.retention_cleaned_at !== null

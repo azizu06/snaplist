@@ -1,5 +1,4 @@
 export {
-  isPipelineProgressTerminal,
   pipelineProgressSteps,
   pipelineProgressView,
   type PipelineProgressRun,
