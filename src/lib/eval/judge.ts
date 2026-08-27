@@ -61,9 +61,6 @@ export type JudgeFn = (args: {
   attributes: ExtractedAttributes;
 }) => Promise<JudgeScores>;
 
-/** Judge model default; overridable via `EVAL_JUDGE_MODEL` (env-configurable everything). */
-export const DEFAULT_JUDGE_MODEL = "gpt-5.6-terra";
-
 // ---------------------------------------------------------------------------
 // Offline heuristic judge (the default — keeps `pnpm eval` fully offline)
 // ---------------------------------------------------------------------------
