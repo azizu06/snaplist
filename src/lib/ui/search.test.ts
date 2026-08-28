@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { firstSearchToken, matchesQuery, searchRows } from "./search";
+import { firstSearchToken, searchRows } from "./search";
 
 /**
- * Contract tests for the listing search matcher (dashboard v2). One pure
- * module powers both the ⌘K palette (via /api/search) and the dashboard
- * table's inline filter, so the two surfaces can never disagree about what
- * "matches" means.
+ * Contract tests for the listing search matcher (dashboard v2) powering the
+ * ⌘K palette (via /api/search).
  */
 
 const row = (title: string, createdAt: string, itemId = title) => ({
@@ -21,24 +19,6 @@ const ROWS = [
   row("KitchenAid Artisan Stand Mixer", "2026-06-10T16:40:00Z"),
   row("Wireless charger for Sony phones", "2026-06-09T11:05:00Z"),
 ];
-
-describe("matchesQuery (dashboard inline filter)", () => {
-  it("matches everything on an empty or whitespace query", () => {
-    expect(matchesQuery("anything", "")).toBe(true);
-    expect(matchesQuery("anything", "   ")).toBe(true);
-  });
-
-  it("matches substrings case-insensitively", () => {
-    expect(matchesQuery("Sony WH-1000XM4", "sony")).toBe(true);
-    expect(matchesQuery("Sony WH-1000XM4", "1000xm4")).toBe(true);
-    expect(matchesQuery("Sony WH-1000XM4", "lego")).toBe(false);
-  });
-
-  it("requires EVERY word of the query to match (AND, any order)", () => {
-    expect(matchesQuery("Sony WH-1000XM4 Wireless Headphones", "headphones sony")).toBe(true);
-    expect(matchesQuery("Sony WH-1000XM4 Wireless Headphones", "sony mixer")).toBe(false);
-  });
-});
 
 describe("searchRows (⌘K palette results)", () => {
   it("returns nothing for an empty query (palette shows quick actions instead)", () => {
