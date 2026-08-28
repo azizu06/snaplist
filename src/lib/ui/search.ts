@@ -1,18 +1,11 @@
 /**
- * Listing search matcher (dashboard v2). One pure module powers both the ⌘K
- * command palette and the dashboard table's inline filter so the two
- * surfaces share one definition of "matches": every whitespace-separated
- * query token must appear in the title, case-insensitively, in any order.
+ * Listing search matcher (dashboard v2) powering the ⌘K command palette's
+ * ranking: every whitespace-separated query token must appear in the title,
+ * case-insensitively, in any order.
  */
 
 function tokens(query: string): string[] {
   return query.toLowerCase().split(/\s+/).filter(Boolean);
-}
-
-/** AND-of-substrings match; an empty query matches everything. */
-export function matchesQuery(title: string, query: string): boolean {
-  const t = title.toLowerCase();
-  return tokens(query).every((tok) => t.includes(tok));
 }
 
 /**
