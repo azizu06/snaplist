@@ -17,14 +17,15 @@ export function matchesQuery(title: string, query: string): boolean {
 
 /**
  * The one token the /api/search route pushes down into its Postgres ilike
- * filter (PostgREST `.or()` syntax breaks on `,()"` and `%_*\` are pattern
- * metacharacters — stripped rather than escaped; the in-process matcher
- * still applies the FULL query afterwards). Empty result = skip the DB
- * filter and fall back to recency-bounded candidates.
+ * filter (PostgREST `.or()` syntax breaks on `,.()"` — `.` delimits
+ * column.operator.value — and `%_*\` are pattern metacharacters — stripped
+ * rather than escaped; the in-process matcher still applies the FULL query
+ * afterwards). Empty result = skip the DB filter and fall back to
+ * recency-bounded candidates.
  */
 export function firstSearchToken(query: string): string {
   const first = query.toLowerCase().split(/\s+/).filter(Boolean)[0] ?? "";
-  return first.replace(/[,()"%_*\\]/g, "");
+  return first.replace(/[,.()"%_*\\]/g, "");
 }
 
 export interface SearchableRow {

@@ -97,4 +97,12 @@ describe("firstSearchToken (the token pushed down to the DB filter)", () => {
     expect(firstSearchToken("")).toBe("");
     expect(firstSearchToken("%*()")).toBe("");
   });
+
+  it("strips periods, which delimit column.operator.value in the pushed-down .or() filter", () => {
+    // A literal "." in the token collides with the column.operator.value
+    // delimiter the route's `.or()` string uses (see route.ts) — left in,
+    // it would corrupt the filter instead of matching the brand literally.
+    expect(firstSearchToken("L.L.Bean jacket")).toBe("llbean");
+    expect(firstSearchToken("...")).toBe("");
+  });
 });
