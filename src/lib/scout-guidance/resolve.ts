@@ -20,6 +20,7 @@ export class ScoutGuidanceContractError extends Error {
       | "missing-substitution"
       | "untrusted-substitution"
       | "invalid-substitution"
+      | "unexpected-substitution"
       | "invalid-locale"
       | "unsupported-contract-version"
       | "unsupported-state",
@@ -295,7 +296,12 @@ function validatedSubstitutions(
   const allowedKeys = new Set(definition.substitutions.map((rule) => rule.key));
   const unexpectedKey = Object.keys(provided).find((key) => !allowedKeys.has(key));
   if (unexpectedKey) {
-    throw new Error(`Substitution ${unexpectedKey} is not allowed for this guidance state.`);
+    throw new ScoutGuidanceContractError(
+      "unexpected-substitution",
+      state,
+      unexpectedKey,
+      `Substitution ${unexpectedKey} is not allowed for this guidance state.`,
+    );
   }
 
   return Object.fromEntries(
