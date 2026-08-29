@@ -131,6 +131,33 @@ describe("resolveScoutGuidance", () => {
     expect(capturedPhotoCount.value).toBe(5);
   });
 
+  it("rejects an undeclared substitution key with the same stable contract error as every other validation failure", () => {
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "capture.photo-count",
+        locale: "en-US",
+        substitutions: {
+          capturedPhotoCount: verifiedCapturedPhotoCount({
+            id: CAPTURE_SESSION_ID,
+            photos: [{ id: PHOTO_ID_1 }, { id: PHOTO_ID_2 }],
+          }),
+          undeclaredKey: verifiedCapturedPhotoCount({
+            id: CAPTURE_SESSION_ID,
+            photos: [{ id: PHOTO_ID_1 }],
+          }),
+        } as unknown as ResolveScoutGuidanceRequest["substitutions"],
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "unexpected-substitution",
+        state: "capture.photo-count",
+        substitutionKey: "undeclaredKey",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
   it("rejects a missing required substitution with a stable contract error", () => {
     expect(() =>
       resolveScoutGuidance({
