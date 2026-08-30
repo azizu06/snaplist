@@ -393,10 +393,10 @@ struct ListingReviewView: View {
         snapshot: ListingReviewResult,
         draft: ListingReviewDraft
     ) -> some View {
-        ListingReviewInlineField(
+        let pending = draft.sellerPriceOverride != snapshot.pricing.sellerPriceOverride
+        return ListingReviewInlineField(
             label: "Price",
-            pending: draft.sellerPriceOverride
-                != snapshot.pricing.sellerPriceOverride
+            pending: pending
         ) {
             TextField("Price", text: $priceText)
                 .focused($focusedField, equals: .price)
@@ -425,7 +425,9 @@ struct ListingReviewView: View {
                         ? "Suggested price"
                         : "Your price"
                 )
-                .accessibilityValue(priceText)
+                .accessibilityValue(
+                    priceText + (pending ? ", edited, not saved yet" : "")
+                )
                 .accessibilityIdentifier("listing-review.price")
         }
         .overlay {
