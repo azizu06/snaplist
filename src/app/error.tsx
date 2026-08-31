@@ -42,8 +42,7 @@ export default function Error({
           Something went wrong on our end
         </h1>
         <p className="max-w-[42ch] text-[15px] leading-relaxed text-muted text-pretty">
-          The page hit an unexpected error. Trying again usually clears it. Your
-          items and listings are safe.
+          The page hit an unexpected error. Trying again usually clears it.
         </p>
         {error.digest ? (
           <p className="mt-1 text-[12px] text-faint" data-nums>
@@ -64,7 +63,7 @@ export default function Error({
           href="/"
           className="inline-flex items-center justify-center rounded-lg border border-border-strong bg-surface px-4 py-2.5 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
         >
-          Go to your listings
+          Back to home
         </Link>
       </div>
     </main>

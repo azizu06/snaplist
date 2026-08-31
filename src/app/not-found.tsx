@@ -29,8 +29,7 @@ export default function NotFound() {
           We couldn&apos;t find that page
         </h1>
         <p className="max-w-[42ch] text-[15px] leading-relaxed text-muted text-pretty">
-          The link may be broken or the listing may have moved. Your items and
-          listings are safe in your shop.
+          The link may be broken or the page may have moved.
         </p>
       </div>
 
@@ -38,12 +37,6 @@ export default function NotFound() {
         <Link
           href="/"
           className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover motion-safe:active:scale-[0.98]"
-        >
-          Go to your listings
-        </Link>
-        <Link
-          href="/"
-          className="inline-flex items-center justify-center rounded-lg border border-border-strong bg-surface px-4 py-2.5 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
         >
           Back to home
         </Link>
