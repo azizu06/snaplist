@@ -14,6 +14,10 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 - [0008 — Lean native launch, entitlement, credits, and marketplace authority](./adr/0008-native-launch-entitlement-credits-and-ebay-authority.md)
 - [0009 — Provider-neutral mobile API and worker runtime](./adr/0009-provider-neutral-mobile-api-and-worker-runtime.md)
 - [0010 — Evaluation-gated listing-example retrieval](./adr/0010-evaluation-gated-listing-example-retrieval.md)
+- [0011 — Optional short seller voice context](./adr/0011-optional-short-seller-voice-context.md)
+- [0012 — Lean-MVP retention and deletion matrix](./adr/0012-lean-mvp-retention-and-deletion-matrix.md)
+- [0013 — Debug builds authenticate against the production Clerk instance](./adr/0013-debug-builds-use-the-production-clerk-instance.md)
+- [0014 — DEL-03's fact-line order and the deletion flow's apostrophe glyph](./adr/0014-del-03-fact-line-order-and-apostrophe.md)
 
 ## Engineering workflow — [`agents/`](./agents)
 
@@ -36,6 +40,7 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 
 - [eBay production setup](./ebay-production.md)
 - [eBay sandbox setup](./ebay-sandbox.md)
+- [eBay listing sync (ingest-only conflict detection)](./ebay-listing-sync.md)
 - [Sold-comps egress and operator smoke](./sold-comps-egress.md)
 
 ## Operations & planning
