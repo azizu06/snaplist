@@ -65,9 +65,11 @@ function isPublicIpv4([first, second]: number[]): boolean {
     first === 0
     || first === 10
     || first === 127
+    || (first === 100 && second >= 64 && second <= 127)
     || (first === 169 && second === 254)
     || (first === 172 && second >= 16 && second <= 31)
     || (first === 192 && second === 168)
+    || first >= 224
   );
 }
 
