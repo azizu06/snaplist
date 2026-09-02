@@ -1,4 +1,5 @@
-import type { StatusTone } from "@/lib/ui/status";
+/** Semantic tone for the progress badge; mirrors the shared status-color vocabulary (issue #40). */
+export type StatusTone = "success" | "success-solid" | "warning" | "danger" | "info" | "neutral";
 
 export type PipelineProgressStatus =
   | "queued"

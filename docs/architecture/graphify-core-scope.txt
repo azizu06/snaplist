@@ -415,7 +415,6 @@ src/lib/supabase/test-users.ts
 src/lib/ui/format.ts
 src/lib/ui/item-label.ts
 src/lib/ui/search.ts
-src/lib/ui/status.ts
 src/lib/unit-economics/calculate.ts
 src/lib/unit-economics/schema.ts
 src/lib/upload-staging/index.ts
