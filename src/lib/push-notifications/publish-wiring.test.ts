@@ -26,17 +26,19 @@ const {
   publishListingToEbayAndNotify,
   tenantRpc,
 } = vi.hoisted(() => ({
-  adminRpc: vi.fn(async (..._args: unknown[]) => ({ data: false, error: null })),
-  createEbayAdapterForUser: vi.fn(async (..._args: unknown[]) => ({
+  adminRpc: vi.fn(async () => ({ data: false, error: null })),
+  createEbayAdapterForUser: vi.fn(async () => ({
     kind: "adapter",
   })),
-  createMobileEbayPublishService: vi.fn((..._args: unknown[]) => ({
-    publish: vi.fn(),
-  })),
-  publishListingToEbayAndNotify: vi.fn(async (..._args: unknown[]) => ({
-    ebayStatus: "published",
-  })),
-  tenantRpc: vi.fn(async (..._args: unknown[]) => ({ data: false, error: null })),
+  createMobileEbayPublishService: vi.fn((...args: unknown[]) => {
+    void args;
+    return { publish: vi.fn() };
+  }),
+  publishListingToEbayAndNotify: vi.fn(async (...args: unknown[]) => {
+    void args;
+    return { ebayStatus: "published" };
+  }),
+  tenantRpc: vi.fn(async () => ({ data: false, error: null })),
 }));
 
 vi.mock("@/lib/marketplace/ebay", async (importOriginal) => ({
@@ -164,7 +166,7 @@ describe("publish entry points", () => {
       | { pushFor?: (client: unknown) => unknown }
       | undefined;
     expect(typeof dependencies?.pushFor).toBe("function");
-    const clientRpc = vi.fn(async (..._args: unknown[]) => ({ data: false, error: null }));
+    const clientRpc = vi.fn(async () => ({ data: false, error: null }));
     const push = dependencies!.pushFor!({ rpc: clientRpc });
     expect(isDispatcher(push)).toBe(true);
     expect(await firesThroughToTheStore(push, clientRpc)).toBe(true);

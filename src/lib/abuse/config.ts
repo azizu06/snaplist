@@ -40,7 +40,8 @@ export function tierLimits(
  * The caller's tier. Everyone is `free` until billing (#64) lands and flips paid
  * subscribers — this is the single seam that issue will set; nothing else changes.
  */
-export function resolveTier(_userId: string): Tier {
+export function resolveTier(userId: string): Tier {
+  void userId;
   return "free";
 }
 

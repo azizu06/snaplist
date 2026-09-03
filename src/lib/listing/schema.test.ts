@@ -7,7 +7,9 @@ import {
 import { itemSpecificsToPairs } from "./schema.testing";
 import { fallbackEbayListing } from "./generate";
 
-function needsValidatedEbayListing(_listing: EbayListing): void {}
+function needsValidatedEbayListing(listing: EbayListing): void {
+  void listing;
+}
 
 /**
  * The model-facing item-specifics representation (issue #691).
