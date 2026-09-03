@@ -35,4 +35,32 @@ describe("seller-visible copy contract (#243)", () => {
       ]),
     ).toContain("unsupported-title-fact");
   });
+
+  it.each([
+    ["undefined", undefined],
+    ["empty string", ""],
+    ["whitespace only", "   "],
+  ])("treats %s as no safe core value", (_label, value) => {
+    expect(safeSellerCoreValue(value)).toBeUndefined();
+  });
+
+  it("trims a safe core value instead of returning it verbatim", () => {
+    expect(safeSellerCoreValue("  Sony WH-1000XM4  ")).toBe("Sony WH-1000XM4");
+  });
+
+  it("refuses a core value that itself violates the copy contract", () => {
+    expect(safeSellerCoreValue("Sony – headphones")).toBeUndefined();
+  });
+
+  it("allows a title built only from connective words, even with no factual core", () => {
+    expect(sellerTitleViolations("The Condition", [])).not.toContain(
+      "unsupported-title-fact",
+    );
+  });
+
+  it("flags every title word as unsupported when no core value backs any of them", () => {
+    expect(sellerTitleViolations("Vintage Rolex Watch", [])).toContain(
+      "unsupported-title-fact",
+    );
+  });
 });
