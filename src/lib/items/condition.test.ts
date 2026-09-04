@@ -3,7 +3,9 @@ import {
   canonicalizeCondition,
   isItemCondition,
   isPricedItemCondition,
+  ITEM_CONDITIONS,
   normalizeConditionAlias,
+  PRICED_ITEM_CONDITIONS,
 } from "./condition";
 
 /**
@@ -73,5 +75,43 @@ describe("isPricedItemCondition", () => {
 
   it("excludes for-parts, which has no pricing factor", () => {
     expect(isPricedItemCondition("for-parts")).toBe(false);
+  });
+});
+
+/**
+ * #798's actual failure mode was the composition `isItemCondition(canonicalizeCondition(x))`
+ * (see src/lib/pipeline/persist.ts, review-regeneration.ts, and the ISBN/depreciation
+ * pricing providers, which all chain the two functions rather than calling either alone).
+ * The suites above only test each function in isolation, so a future taxonomy value added
+ * to ITEM_CONDITIONS/PRICED_ITEM_CONDITIONS without a matching canonicalizeCondition alias
+ * could silently reintroduce the #798 class of bug without failing any existing test.
+ */
+describe("canonicalizeCondition composed with isItemCondition/isPricedItemCondition", () => {
+  it("every taxonomy value survives canonicalization and is still recognized", () => {
+    for (const condition of ITEM_CONDITIONS) {
+      expect(isItemCondition(canonicalizeCondition(condition))).toBe(true);
+    }
+  });
+
+  it("every priced taxonomy value survives canonicalization and is still recognized", () => {
+    for (const condition of PRICED_ITEM_CONDITIONS) {
+      expect(isPricedItemCondition(canonicalizeCondition(condition))).toBe(true);
+    }
+  });
+
+  it("messy model-authored aliases (the #798 shape) canonicalize into recognized values", () => {
+    const messyToCanonical: Record<string, string> = {
+      Good: "good",
+      "  ACCEPTABLE  ": "acceptable",
+      "Like_New": "like-new",
+      "VERY-GOOD": "very-good",
+      "For Parts": "for-parts",
+    };
+
+    for (const [messy, expectedCanonical] of Object.entries(messyToCanonical)) {
+      const canonical = canonicalizeCondition(messy);
+      expect(canonical).toBe(expectedCanonical);
+      expect(isItemCondition(canonical)).toBe(true);
+    }
   });
 });
