@@ -216,7 +216,7 @@ jobs:
       - name: Check out trusted workflow tooling
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ github.sha }}
           path: workflow-tooling
 
       - name: Check out exact test target
