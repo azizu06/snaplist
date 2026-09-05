@@ -591,7 +591,7 @@ final class ListingReviewStoreTests: XCTestCase {
             XCTAssertEqual(
                 ListingReviewSpecificEditing.mode(
                     forSpecificNamed: name,
-                    correctionAvailable: true
+                    correctionAvailability: .offered
                 ),
                 .guidedCorrection,
                 name

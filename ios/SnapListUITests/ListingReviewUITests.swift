@@ -1298,8 +1298,38 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(app.textViews["listing-review.specific.color"].exists)
     }
 
+    func testReleaseEquivalentConfigurationLeavesIdentitySpecificsEditableWithNoFalseSpentClaim() {
+        // No `--listing-review-fixture` means `listingReviewFixture` is nil
+        // the same way it structurally always is in Release, where guided
+        // correction was never offered at all — never spent, so the seller
+        // must not see a disabled field or a claim that they used it.
+        let app = launch(fixture: nil, resetDraft: true)
+        _ = openReview(in: app)
+        openItemSpecifics(in: app)
+
+        let brand = app.textViews["listing-review.specific.brand"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        XCTAssertTrue(brand.isEnabled)
+        XCTAssertFalse(app.buttons["listing-review.specific.brand"].exists)
+        brand.tap()
+        brand.typeText(" Co")
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(
+            String(describing: brand.value as Any).contains("Co")
+        )
+
+        XCTAssertFalse(
+            app.staticTexts["listing-review.specifics.correction-spent"].exists,
+            "A build that never offered guided correction cannot claim the seller has used it."
+        )
+    }
+
     private func launch(
-        fixture: String = "loaded",
+        // `nil` omits `--listing-review-fixture` entirely, which is how a UI
+        // test reaches the Release-equivalent configuration: no fixture is
+        // ever set outside DEBUG, so `LaunchConfiguration.listingReviewFixture`
+        // is structurally nil in Release the same way it is here.
+        fixture: String? = "loaded",
         resetDraft: Bool,
         extraArguments: [String] = []
     ) -> XCUIApplication {
@@ -1309,8 +1339,8 @@ final class ListingReviewUITests: XCTestCase {
             "--zero-network-fixtures",
             "--reset-onboarding-progress",
             "--run-detail-fixture=reviewable",
-            "--listing-review-fixture=\(fixture)",
-        ] + (resetDraft ? ["--reset-listing-review-draft"] : [])
+        ] + (fixture.map { ["--listing-review-fixture=\($0)"] } ?? [])
+            + (resetDraft ? ["--reset-listing-review-draft"] : [])
             + extraArguments
         app.launchAfterRetiringPriorInstance()
         return app

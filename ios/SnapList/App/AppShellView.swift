@@ -741,7 +741,7 @@ struct AppShellView: View {
                 },
                 runStore: runStore,
                 listingReviewStore: listingReviewStore,
-                correctionAvailable: configuration.listingReviewCorrectionAvailable,
+                correctionAvailability: configuration.listingReviewCorrectionAvailability,
                 forceReducedMotion: configuration.forceReducedMotion,
                 activationListingReviewOpened: {
                     activationListingReviewPresented = true
@@ -773,7 +773,7 @@ struct AppShellView: View {
             refreshState: $trophyWallCollectionRefreshState,
             runStore: runStore,
             listingReviewStore: listingReviewStore,
-            correctionAvailable: configuration.listingReviewCorrectionAvailable,
+            correctionAvailability: configuration.listingReviewCorrectionAvailability,
             forceReducedMotion: configuration.forceReducedMotion,
             activationListingReviewOpened: {
                 activationListingReviewPresented = true
@@ -871,8 +871,8 @@ struct AppShellView: View {
                     repository: trophyWallHistoryRepository,
                     runStore: runStore,
                     listingReviewStore: listingReviewStore,
-                    correctionAvailable:
-                        configuration.listingReviewCorrectionAvailable,
+                    correctionAvailability:
+                        configuration.listingReviewCorrectionAvailability,
                     forceReducedMotion: configuration.forceReducedMotion,
                     activationListingReviewOpened: {
                         activationListingReviewPresented = true
@@ -2193,7 +2193,7 @@ struct TrophyWallFeatureView: View {
     @Binding var refreshState: TrophyWallCollectionRefreshState
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
-    let correctionAvailable: Bool
+    let correctionAvailability: ListingReviewCorrectionAvailability
     let forceReducedMotion: Bool
     let activationListingReviewOpened: () -> Void
     let activationListingReviewDismissed: () -> Void
@@ -2264,7 +2264,7 @@ struct TrophyWallFeatureView: View {
         .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
             ListingReviewView(
                 store: listingReviewStore,
-                correctionAvailable: correctionAvailable,
+                correctionAvailability: correctionAvailability,
                 forceReducedMotion: forceReducedMotion,
                 dismissReview: { listingReviewPresentation.dismiss() },
                 goToTrophyWall: {
@@ -2336,7 +2336,7 @@ private struct TrophyWallProcessingDestinationView: View {
     let repository: any TrophyWallRunHistoryRepository
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
-    let correctionAvailable: Bool
+    let correctionAvailability: ListingReviewCorrectionAvailability
     let forceReducedMotion: Bool
     let activationListingReviewOpened: () -> Void
     let activationListingReviewDismissed: () -> Void
@@ -2362,7 +2362,7 @@ private struct TrophyWallProcessingDestinationView: View {
             onRefresh: { await store.refreshCollection(using: repository) },
             runStore: runStore,
             listingReviewStore: listingReviewStore,
-            correctionAvailable: correctionAvailable,
+            correctionAvailability: correctionAvailability,
             forceReducedMotion: forceReducedMotion,
             activationListingReviewOpened: activationListingReviewOpened,
             activationListingReviewDismissed: activationListingReviewDismissed,
@@ -2387,7 +2387,7 @@ private struct ProcessingListingReviewSurface: View {
     let onRefresh: () async -> Void
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
-    let correctionAvailable: Bool
+    let correctionAvailability: ListingReviewCorrectionAvailability
     let forceReducedMotion: Bool
     let activationListingReviewOpened: () -> Void
     let activationListingReviewDismissed: () -> Void
@@ -2464,7 +2464,7 @@ private struct ProcessingListingReviewSurface: View {
         .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
             ListingReviewView(
                 store: listingReviewStore,
-                correctionAvailable: correctionAvailable,
+                correctionAvailability: correctionAvailability,
                 forceReducedMotion: forceReducedMotion,
                 dismissReview: { listingReviewPresentation.dismiss() },
                 goToTrophyWall: goToTrophyWall,

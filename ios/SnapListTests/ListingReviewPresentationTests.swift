@@ -102,27 +102,24 @@ final class ListingReviewPresentationTests: XCTestCase {
 
     func testTheEditingRouteSendsOnlyNonIdentitySpecificsToAnInPlaceField() {
         // The route is the whole contract. A reserved identity key can never
-        // resolve to an in-place edit, because a typed value would bypass the
-        // pricing rerun, the composite confidence, and the generator.
-        XCTAssertEqual(
-            ListingReviewSpecificEditing.mode(
-                forSpecificNamed: "Color",
-                correctionAvailable: true
-            ),
-            .inPlace
-        )
-        XCTAssertEqual(
-            ListingReviewSpecificEditing.mode(
-                forSpecificNamed: "Color",
-                correctionAvailable: false
-            ),
-            .inPlace
-        )
+        // resolve to an in-place edit while guided correction is offered and
+        // unspent, because a typed value would bypass the pricing rerun, the
+        // composite confidence, and the listing generator.
+        for availability in ListingReviewCorrectionAvailability.allCases {
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: "Color",
+                    correctionAvailability: availability
+                ),
+                .inPlace,
+                String(describing: availability)
+            )
+        }
         for reserved in ["Brand", "model", "Condition", "ISBN", "upc", "Category", "Type"] {
             XCTAssertEqual(
                 ListingReviewSpecificEditing.mode(
                     forSpecificNamed: reserved,
-                    correctionAvailable: true
+                    correctionAvailability: .offered
                 ),
                 .guidedCorrection,
                 reserved
@@ -130,9 +127,22 @@ final class ListingReviewPresentationTests: XCTestCase {
             XCTAssertEqual(
                 ListingReviewSpecificEditing.mode(
                     forSpecificNamed: reserved,
-                    correctionAvailable: false
+                    correctionAvailability: .spent
                 ),
                 .spent,
+                reserved
+            )
+            // A build that never offers guided correction at all (Release,
+            // or a DEBUG launch with no `listingReviewFixture`) cannot
+            // strand the identity key with no route in at all — it must
+            // fall back to the same in-place editing every other field
+            // gets, not the disabled/spent field.
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: reserved,
+                    correctionAvailability: .notOffered
+                ),
+                .inPlace,
                 reserved
             )
         }
@@ -168,7 +178,7 @@ final class ListingReviewPresentationTests: XCTestCase {
             XCTAssertEqual(
                 ListingReviewSpecificEditing.mode(
                     forSpecificNamed: padded,
-                    correctionAvailable: true
+                    correctionAvailability: .offered
                 ),
                 .guidedCorrection,
                 padded

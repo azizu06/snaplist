@@ -27,14 +27,33 @@ extension ListingReviewCondition: CaseIterable {
     ]
 }
 
+/// Whether guided correction can be entered for a reserved identity specific
+/// in this build.
+///
+/// A `Bool` cannot carry this: "the seller already spent their one guided
+/// correction" and "this build never offered guided correction at all" both
+/// used to collapse to `false`, which sent every identity specific to the
+/// same disabled field carrying the same "you have used yours" claim — false
+/// in the second case, since nothing was ever spent.
+enum ListingReviewCorrectionAvailability: Equatable, CaseIterable {
+    /// Guided correction is offered and the seller has not spent it.
+    case offered
+    /// Guided correction was offered and the seller has already spent it.
+    case spent
+    /// This build does not offer guided correction at all — every Release
+    /// build, and any DEBUG launch with no `listingReviewFixture`.
+    case notOffered
+}
+
 /// How a single item specific may be changed.
 ///
-/// A reserved identity key never resolves to `inPlace`. Typing over brand,
-/// model, condition, ISBN, UPC, category, or type would change what the item is
+/// A reserved identity key resolves to `inPlace` only when guided correction
+/// is not offered in this build at all. Typing over brand, model, condition,
+/// ISBN, UPC, category, or type would otherwise change what the item is
 /// without rerunning the pricing router, the composite confidence, and the
-/// listing generator, which the coherent-correction contract requires to happen
-/// together. Those keys route to guided correction instead, and once the
-/// correction is spent they have no route at all.
+/// listing generator, which the coherent-correction contract requires to
+/// happen together. Those keys route to guided correction instead, and once
+/// the correction is spent they have no route at all.
 enum ListingReviewSpecificEditing: Equatable {
     case inPlace
     case guidedCorrection
@@ -42,12 +61,16 @@ enum ListingReviewSpecificEditing: Equatable {
 
     static func mode(
         forSpecificNamed name: String,
-        correctionAvailable: Bool
+        correctionAvailability: ListingReviewCorrectionAvailability
     ) -> ListingReviewSpecificEditing {
         guard ListingReviewDraft.isIdentitySpecificName(name) else {
             return .inPlace
         }
-        return correctionAvailable ? .guidedCorrection : .spent
+        switch correctionAvailability {
+        case .offered: return .guidedCorrection
+        case .spent: return .spent
+        case .notOffered: return .inPlace
+        }
     }
 }
 
@@ -133,12 +156,19 @@ extension ListingReviewFixture {
 
 extension LaunchConfiguration {
     /// Guided correction has no interior yet — Fix item pushes a typed
-    /// boundary card owned by #212. Withholding the entry point unless a
-    /// fixture asks for it keeps that placeholder out of a real launch, where
-    /// every field is already inline-editable and the footer offers Done
-    /// alone (#989).
+    /// boundary card owned by #212. A build with no `listingReviewFixture` —
+    /// every Release build, and any DEBUG launch that did not ask for one —
+    /// withholds the entry point entirely: every identity specific stays
+    /// inline-editable like every other field, and the footer offers Done
+    /// alone (#989). A DEBUG fixture can additionally simulate an already-
+    /// spent correction via `.correctionUnavailable`.
+    var listingReviewCorrectionAvailability: ListingReviewCorrectionAvailability {
+        guard let fixture = listingReviewFixture else { return .notOffered }
+        return fixture.correctionAvailable ? .offered : .spent
+    }
+
     var listingReviewCorrectionAvailable: Bool {
-        listingReviewFixture?.correctionAvailable ?? false
+        listingReviewCorrectionAvailability == .offered
     }
 }
 
