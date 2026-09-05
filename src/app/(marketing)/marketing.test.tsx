@@ -705,6 +705,14 @@ describe("feature explorer semantics", () => {
     expect($('.mkt-explorer__slide[data-active="true"]').length).toBe(1);
   });
 
+  it("keeps the tabpanel keyboard-reachable since its contents are all decorative", () => {
+    // WAI-ARIA APG: a tabpanel with no focusable descendants must itself be
+    // tabbable (tabindex="0"), or a keyboard/screen-reader user can operate
+    // the tablist but can never move focus into what it controls.
+    const $ = load(renderToStaticMarkup(<LandingPage />));
+    expect($('[role="tabpanel"]').attr("tabindex")).toBe("0");
+  });
+
   it("ships one Scout clip per step, named for the step", () => {
     // The component builds the src from the step id, so a renamed or reordered
     // step silently 404s rather than failing anywhere visible. Reading the
