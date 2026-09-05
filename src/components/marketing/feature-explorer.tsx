@@ -202,6 +202,11 @@ export function FeatureExplorer() {
           id="mkt-feature-panel"
           role="tabpanel"
           aria-labelledby={`mkt-feature-tab-${FEATURE_STEPS[active].id}`}
+          // Every descendant here is decorative (screens, the Scout clip, the
+          // phone chrome), so the panel itself must be tabbable per the
+          // WAI-ARIA APG tabs pattern, or a keyboard/screen-reader user can
+          // never move focus into what the tablist controls.
+          tabIndex={0}
           className="mkt-explorer__panel"
         >
           <div className="mkt-explorer__frame">
