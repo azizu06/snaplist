@@ -35,6 +35,15 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
   transport, authentication, idempotency, error, and callback interfaces.
 - [Superseded scraper worker spec](./architecture/scraper-worker-spec.md) — historical
   RabbitMQ/Go analysis retained for context; not the implementation plan.
+- [Graphify core-product scope](./architecture/graphify-core-product.md) — how to classify and
+  regenerate the Graphify impact receipt required on every PR touching
+  `graphify-core-scope.txt` (see AGENTS.md).
+
+## Runbooks — [`runbooks/`](./runbooks)
+
+- [Durable pipeline operations](./runbooks/durable-pipeline-operations.md)
+- [App Attest extensionless rollback](./runbooks/app-attest-extensionless-rollback.md)
+- [Sold-comp activation](./runbooks/sold-comp-activation.md)
 
 ## Marketplace integration
 
