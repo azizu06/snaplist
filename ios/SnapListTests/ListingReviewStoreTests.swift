@@ -858,6 +858,86 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertTrue(invalidRequests.isEmpty)
     }
 
+    func testSetFallbackIdentitySpecificFallsBackToTheOriginalSuggestedValueWhenClearedEmpty() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        let changed = await store.setFallbackIdentitySpecific(
+            name: "Brand",
+            value: "Bose"
+        )
+        XCTAssertTrue(changed)
+        XCTAssertEqual(
+            store.draft?.specifics.first { $0.name == "Brand" }?.value,
+            "Bose"
+        )
+
+        // Clearing back to empty must fall back to the run's original
+        // suggested value, not whatever the draft was holding before this
+        // call — otherwise the seller could never undo a typo back to the
+        // AI's own identification.
+        let clearedToEmpty = await store.setFallbackIdentitySpecific(
+            name: "Brand",
+            value: ""
+        )
+        XCTAssertTrue(clearedToEmpty)
+        XCTAssertEqual(
+            store.draft?.specifics.first { $0.name == "Brand" }?.value,
+            "Sony"
+        )
+    }
+
+    func testSetFallbackIdentitySpecificTrimsSurroundingWhitespace() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        let changed = await store.setFallbackIdentitySpecific(
+            name: "Brand",
+            value: "  Bose  "
+        )
+        XCTAssertTrue(changed)
+        XCTAssertEqual(
+            store.draft?.specifics.first { $0.name == "Brand" }?.value,
+            "Bose"
+        )
+    }
+
+    func testSetFallbackIdentitySpecificRefusesNonIdentityNames() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+        let originalDraft = try XCTUnwrap(store.draft)
+
+        // The new semantic setter exists to reach identity specifics only.
+        // A non-identity name must fall through to the ordinary in-place
+        // path instead, the same way `setSpecific` refuses identity names.
+        let accepted = await store.setFallbackIdentitySpecific(
+            name: "Color",
+            value: "Red"
+        )
+
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(store.draft, originalDraft)
+        XCTAssertFalse(store.isDirty)
+    }
+
     /// #951. Every 409 except the stale-review sentence used to reach the
     /// seller as `ListingReviewCopy.saveFailed` — "Please try again." — so
     /// #943's permanent refusals told the seller to repeat the one request
