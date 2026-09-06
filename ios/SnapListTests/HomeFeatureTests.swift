@@ -2894,7 +2894,7 @@ private struct TrophyWallFeatureTestRoot: View {
             refreshState: $driver.refreshState,
             runStore: runStore,
             listingReviewStore: listingReviewStore,
-            correctionAvailable: false,
+            correctionAvailability: .notOffered,
             forceReducedMotion: false,
             activationListingReviewOpened: {},
             activationListingReviewDismissed: {},

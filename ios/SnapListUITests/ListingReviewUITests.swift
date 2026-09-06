@@ -1298,8 +1298,66 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(app.textViews["listing-review.specific.color"].exists)
     }
 
+    func testReleaseEquivalentConfigurationLeavesIdentitySpecificsEditableWithNoFalseSpentClaim() {
+        // No `--listing-review-fixture` means `listingReviewFixture` is nil
+        // the same way it structurally always is in Release, where guided
+        // correction was never offered at all — never spent, so the seller
+        // must not see a disabled field or a claim that they used it.
+        let app = launch(fixture: nil, resetDraft: true)
+        _ = openReview(in: app)
+        openItemSpecifics(in: app)
+
+        let brand = app.textViews["listing-review.specific.brand"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        XCTAssertTrue(brand.isEnabled)
+        XCTAssertFalse(app.buttons["listing-review.specific.brand"].exists)
+        brand.tap()
+        brand.typeText(" Co")
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(
+            String(describing: brand.value as Any).contains("Co")
+        )
+
+        XCTAssertFalse(
+            app.staticTexts["listing-review.specifics.correction-spent"].exists,
+            "A build that never offered guided correction cannot claim the seller has used it."
+        )
+
+        let condition = app.textViews["listing-review.specific.condition"]
+        XCTAssertTrue(condition.waitForExistence(timeout: 3))
+        condition.tap()
+        condition.press(forDuration: 1.0)
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 2))
+        selectAll.tap()
+        condition.typeText("Like New")
+        app.buttons["listing-review.keyboard-done"].tap()
+
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertFalse(anyElement("listing-review.unsaved", in: app).exists)
+        openItemSpecifics(in: app)
+        let reopenedBrand = app.textViews["listing-review.specific.brand"]
+        XCTAssertTrue(reopenedBrand.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            String(describing: reopenedBrand.value as Any).contains("Co"),
+            "The fallback identity edit must survive leaving and re-entering Item specifics."
+        )
+        let reopenedCondition =
+            app.textViews["listing-review.specific.condition"]
+        XCTAssertTrue(reopenedCondition.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            String(describing: reopenedCondition.value as Any)
+                .contains("like-new"),
+            "A supported condition display label must survive as its typed condition value."
+        )
+    }
+
     private func launch(
-        fixture: String = "loaded",
+        // `nil` omits `--listing-review-fixture` entirely, which is how a UI
+        // test reaches the Release-equivalent configuration: no fixture is
+        // ever set outside DEBUG, so `LaunchConfiguration.listingReviewFixture`
+        // is structurally nil in Release the same way it is here.
+        fixture: String? = "loaded",
         resetDraft: Bool,
         extraArguments: [String] = []
     ) -> XCUIApplication {
@@ -1309,8 +1367,8 @@ final class ListingReviewUITests: XCTestCase {
             "--zero-network-fixtures",
             "--reset-onboarding-progress",
             "--run-detail-fixture=reviewable",
-            "--listing-review-fixture=\(fixture)",
-        ] + (resetDraft ? ["--reset-listing-review-draft"] : [])
+        ] + (fixture.map { ["--listing-review-fixture=\($0)"] } ?? [])
+            + (resetDraft ? ["--reset-listing-review-draft"] : [])
             + extraArguments
         app.launchAfterRetiringPriorInstance()
         return app

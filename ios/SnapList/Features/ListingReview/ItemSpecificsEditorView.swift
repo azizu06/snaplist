@@ -9,7 +9,7 @@ private struct ListingReviewIdentityDrawerTarget: Hashable, Identifiable {
 
 struct ItemSpecificsEditorView: View {
     @Bindable var store: ListingReviewStore
-    let correctionAvailable: Bool
+    let correctionAvailability: ListingReviewCorrectionAvailability
     /// Owned by the review screen. This one is pushed, so anything it held
     /// itself would be gone before the seller ever reached Done.
     let inlineEdits: ListingReviewInlineEdits
@@ -83,7 +83,7 @@ struct ItemSpecificsEditorView: View {
 
         switch ListingReviewSpecificEditing.mode(
             forSpecificNamed: specific.name,
-            correctionAvailable: correctionAvailable
+            correctionAvailability: correctionAvailability
         ) {
         case .inPlace:
             ListingReviewInlineTextField(
@@ -91,7 +91,10 @@ struct ItemSpecificsEditorView: View {
                 value: specific.value,
                 pending: pending,
                 identifier: identifier,
-                field: .specific(specific.name),
+                field: correctionAvailability == .notOffered
+                    && store.isIdentitySpecific(specific.name)
+                    ? .fallbackIdentitySpecific(specific.name)
+                    : .specific(specific.name),
                 edits: inlineEdits,
                 focusValue: specific.name,
                 focus: $focusedField
@@ -102,12 +105,12 @@ struct ItemSpecificsEditorView: View {
                 label: specific.name,
                 value: specific.value,
                 identifier: identifier,
-                hint: correctionAvailable
+                hint: correctionAvailability == .offered
                     ? "Opens guided correction"
                     : "Guided correction unavailable",
                 accessory: .identity,
                 pending: pending,
-                enabled: correctionAvailable
+                enabled: correctionAvailability == .offered
             ) {
                 returnFocusName = specific.name
                 drawer = ListingReviewIdentityDrawerTarget(
@@ -157,7 +160,7 @@ struct ItemSpecificsEditorView: View {
     }
 
     private var spentIdentityLine: String? {
-        guard !correctionAvailable else { return nil }
+        guard correctionAvailability == .spent else { return nil }
         let names = (store.draft?.specifics ?? [])
             .map(\.name)
             .filter(store.isIdentitySpecific)

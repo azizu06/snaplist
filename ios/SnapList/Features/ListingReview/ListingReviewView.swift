@@ -28,7 +28,7 @@ private enum ListingReviewInlineFocus: Hashable {
 @MainActor
 struct ListingReviewView: View {
     @Bindable var store: ListingReviewStore
-    let correctionAvailable: Bool
+    let correctionAvailability: ListingReviewCorrectionAvailability
     let forceReducedMotion: Bool
     let dismissReview: () -> Void
     let goToTrophyWall: () -> Void
@@ -769,7 +769,7 @@ struct ListingReviewView: View {
             // did. Fix item stays — it opens guided correction, a materially
             // different action from typing in place — but without it Done is
             // the only thing left for the footer to offer.
-            if correctionAvailable {
+            if correctionAvailability == .offered {
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(spacing: 10) {
                         secondaryButton
@@ -803,7 +803,7 @@ struct ListingReviewView: View {
         case .specifics:
             ItemSpecificsEditorView(
                 store: store,
-                correctionAvailable: correctionAvailable,
+                correctionAvailability: correctionAvailability,
                 inlineEdits: inlineEdits
             )
         case .sold(let index):
@@ -888,7 +888,7 @@ struct ListingReviewView: View {
         return date.formatted(date: .omitted, time: .shortened)
     }
 
-    // #989: only reachable when `correctionAvailable`, so the footer that
+    // #989: only reachable when `correctionAvailability == .offered`, so the footer that
     // builds this never has to choose between Fix item and Edit details —
     // Edit details is gone and Done alone covers everywhere it applied.
     private var secondaryButton: some View {

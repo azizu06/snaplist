@@ -591,7 +591,7 @@ final class ListingReviewStoreTests: XCTestCase {
             XCTAssertEqual(
                 ListingReviewSpecificEditing.mode(
                     forSpecificNamed: name,
-                    correctionAvailable: true
+                    correctionAvailability: .offered
                 ),
                 .guidedCorrection,
                 name
@@ -645,6 +645,297 @@ final class ListingReviewStoreTests: XCTestCase {
             ["Sony", "WH-1000XM4", "very-good", "Midnight"]
         )
         XCTAssertTrue(store.isDirty)
+    }
+
+    func testReleaseEquivalentFallbackIdentityEditsReachTheSemanticDraftAndSaveRequest() async throws {
+        let cases: [(
+            name: String,
+            originalValue: String,
+            editedValue: String,
+            initialCondition: ListingReviewCondition,
+            expectedCondition: ListingReviewCondition
+        )] = [
+            ("Brand", "Sony", "Bose", .veryGood, .veryGood),
+            ("Model", "WH-1000XM4", "QuietComfort 45", .veryGood, .veryGood),
+            ("Condition", "very-good", "acceptable", .veryGood, .acceptable),
+            ("ISBN", "9780135957059", "9780306406157", .veryGood, .veryGood),
+            ("UPC", "012345678905", "036000291452", .veryGood, .veryGood),
+            ("Category", "Electronics", "Audio", .veryGood, .veryGood),
+            ("Type", "Headphones", "Speakers", .veryGood, .veryGood),
+        ]
+
+        for identityCase in cases {
+            let snapshot = try Self.makeSnapshot(
+                condition: identityCase.initialCondition,
+                specifics: [
+                    ListingReviewSpecific(
+                        name: identityCase.name,
+                        value: identityCase.originalValue
+                    ),
+                    ListingReviewSpecific(name: "Color", value: "Black"),
+                ]
+            )
+            let service = ListingReviewRecordingService(
+                saves: [.success(Self.receipt(for: snapshot))],
+                reloads: [.success(snapshot)]
+            )
+            let store = makeStore(service: service)
+            let opened = await store.open(snapshot)
+            XCTAssertTrue(opened, identityCase.name)
+            let originalDraft = try XCTUnwrap(store.draft)
+            let edits = ListingReviewInlineEdits()
+            edits.typed[
+                .fallbackIdentitySpecific(identityCase.name)
+            ] = identityCase.editedValue
+
+            await edits.flush(into: store)
+
+            let stagedDraft = try XCTUnwrap(store.draft)
+            XCTAssertNotEqual(stagedDraft, originalDraft, identityCase.name)
+            XCTAssertEqual(
+                stagedDraft.specifics.first {
+                    $0.name == identityCase.name
+                }?.value,
+                identityCase.editedValue,
+                identityCase.name
+            )
+            XCTAssertEqual(
+                stagedDraft.condition,
+                identityCase.expectedCondition,
+                identityCase.name
+            )
+            XCTAssertTrue(store.isDirty, identityCase.name)
+
+            let outcome = await store.done()
+            XCTAssertEqual(
+                outcome,
+                .saved(Self.receipt(for: snapshot)),
+                identityCase.name
+            )
+            let requests = await service.recordedSaveRequests()
+            XCTAssertEqual(requests.count, 1, identityCase.name)
+            XCTAssertEqual(
+                requests.first?.expectedRevision,
+                snapshot.binding.reviewRevision,
+                identityCase.name
+            )
+            XCTAssertEqual(
+                requests.first?.draft.specifics.first {
+                    $0.name == identityCase.name
+                }?.value,
+                identityCase.editedValue,
+                identityCase.name
+            )
+            XCTAssertEqual(
+                requests.first?.draft.condition,
+                identityCase.expectedCondition,
+                identityCase.name
+            )
+        }
+    }
+
+    func testFallbackConditionAcceptsSupportedRawValuesAndDisplayLabelsWithoutFalseCommit() async throws {
+        let canonicalCases: [(
+            input: String,
+            expected: ListingReviewCondition
+        )] = ListingReviewCondition.allCases.flatMap { condition in
+            [
+                (input: condition.rawValue, expected: condition),
+                (input: condition.sellerLabel, expected: condition),
+            ]
+        }
+        let normalizationCases: [(
+            input: String,
+            expected: ListingReviewCondition
+        )] = [
+            (" New ", .new),
+            ("  lIkE   nEw  ", .likeNew),
+            ("VERY GOOD", .veryGood),
+            ("GOOD", .good),
+            ("\tAcceptable\n", .acceptable),
+            (" Poor ", .poor),
+            ("FOR   PARTS", .forParts),
+            ("LIKE-NEW", .likeNew),
+        ]
+        let validCases = canonicalCases + normalizationCases
+
+        for conditionCase in validCases {
+            let initial: ListingReviewCondition =
+                conditionCase.expected == .good ? .poor : .good
+            let snapshot = try Self.makeSnapshot(
+                condition: initial,
+                specifics: [
+                    ListingReviewSpecific(
+                        name: "Condition",
+                        value: initial.rawValue
+                    ),
+                    ListingReviewSpecific(name: "Color", value: "Black"),
+                ]
+            )
+            let service = ListingReviewRecordingService(
+                saves: [.success(Self.receipt(for: snapshot))],
+                reloads: [.success(snapshot)]
+            )
+            let store = makeStore(service: service)
+            let opened = await store.open(snapshot)
+            XCTAssertTrue(opened, conditionCase.input)
+            let edits = ListingReviewInlineEdits()
+            let field = ListingReviewInlineEdit
+                .fallbackIdentitySpecific("Condition")
+            edits.typed[field] = conditionCase.input
+
+            await edits.flush(into: store)
+
+            XCTAssertNil(edits.typed[field], conditionCase.input)
+            XCTAssertEqual(
+                store.draft?.condition,
+                conditionCase.expected,
+                conditionCase.input
+            )
+            XCTAssertEqual(
+                store.draft?.specifics.first {
+                    $0.name == "Condition"
+                }?.value,
+                conditionCase.expected.rawValue,
+                conditionCase.input
+            )
+            XCTAssertTrue(store.isDirty, conditionCase.input)
+            let outcome = await store.done()
+            XCTAssertEqual(
+                outcome,
+                .saved(Self.receipt(for: snapshot)),
+                conditionCase.input
+            )
+            let requests = await service.recordedSaveRequests()
+            XCTAssertEqual(requests.count, 1, conditionCase.input)
+            XCTAssertEqual(
+                requests.first?.expectedRevision,
+                snapshot.binding.reviewRevision,
+                conditionCase.input
+            )
+            XCTAssertEqual(
+                requests.first?.draft.condition,
+                conditionCase.expected,
+                conditionCase.input
+            )
+            XCTAssertEqual(
+                requests.first?.draft.specifics.first {
+                    $0.name == "Condition"
+                }?.value,
+                conditionCase.expected.rawValue,
+                conditionCase.input
+            )
+        }
+
+        let invalidSnapshot = try Self.makeSnapshot(
+            condition: .good,
+            specifics: [
+                ListingReviewSpecific(name: "Condition", value: "good"),
+                ListingReviewSpecific(name: "Color", value: "Black"),
+            ]
+        )
+        let invalidService = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(invalidSnapshot)]
+        )
+        let invalidStore = makeStore(service: invalidService)
+        let invalidOpened = await invalidStore.open(invalidSnapshot)
+        XCTAssertTrue(invalidOpened)
+        let originalDraft = try XCTUnwrap(invalidStore.draft)
+        let invalidEdits = ListingReviewInlineEdits()
+        let invalidField = ListingReviewInlineEdit
+            .fallbackIdentitySpecific("Condition")
+        invalidEdits.typed[invalidField] = "Like-ish New"
+
+        await invalidEdits.flush(into: invalidStore)
+
+        XCTAssertEqual(invalidStore.draft, originalDraft)
+        XCTAssertFalse(invalidStore.isDirty)
+        XCTAssertEqual(invalidEdits.typed[invalidField], "Like-ish New")
+        let invalidOutcome = await invalidStore.done()
+        XCTAssertEqual(invalidOutcome, .dismissedWithoutWrite)
+        let invalidRequests = await invalidService.recordedSaveRequests()
+        XCTAssertTrue(invalidRequests.isEmpty)
+    }
+
+    func testSetFallbackIdentitySpecificFallsBackToTheOriginalSuggestedValueWhenClearedEmpty() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        let changed = await store.setFallbackIdentitySpecific(
+            name: "Brand",
+            value: "Bose"
+        )
+        XCTAssertTrue(changed)
+        XCTAssertEqual(
+            store.draft?.specifics.first { $0.name == "Brand" }?.value,
+            "Bose"
+        )
+
+        // Clearing back to empty must fall back to the run's original
+        // suggested value, not whatever the draft was holding before this
+        // call — otherwise the seller could never undo a typo back to the
+        // AI's own identification.
+        let clearedToEmpty = await store.setFallbackIdentitySpecific(
+            name: "Brand",
+            value: ""
+        )
+        XCTAssertTrue(clearedToEmpty)
+        XCTAssertEqual(
+            store.draft?.specifics.first { $0.name == "Brand" }?.value,
+            "Sony"
+        )
+    }
+
+    func testSetFallbackIdentitySpecificTrimsSurroundingWhitespace() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        let changed = await store.setFallbackIdentitySpecific(
+            name: "Brand",
+            value: "  Bose  "
+        )
+        XCTAssertTrue(changed)
+        XCTAssertEqual(
+            store.draft?.specifics.first { $0.name == "Brand" }?.value,
+            "Bose"
+        )
+    }
+
+    func testSetFallbackIdentitySpecificRefusesNonIdentityNames() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+        let originalDraft = try XCTUnwrap(store.draft)
+
+        // The new semantic setter exists to reach identity specifics only.
+        // A non-identity name must fall through to the ordinary in-place
+        // path instead, the same way `setSpecific` refuses identity names.
+        let accepted = await store.setFallbackIdentitySpecific(
+            name: "Color",
+            value: "Red"
+        )
+
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(store.draft, originalDraft)
+        XCTAssertFalse(store.isDirty)
     }
 
     /// #951. Every 409 except the stale-review sentence used to reach the
@@ -1236,7 +1527,9 @@ final class ListingReviewStoreTests: XCTestCase {
         photoURL: String =
             "https://media.snaplist.dev/items/550-cover.jpg",
         sellerPriceOverride: Decimal? = nil,
-        soldMatches: Int = 0
+        soldMatches: Int = 0,
+        condition: ListingReviewCondition = .veryGood,
+        specifics: [ListingReviewSpecific]? = nil
     ) throws -> ListingReviewResult {
         // One match carries every fact and one carries none, so a payload with
         // comps behind it exercises both shapes the read contract allows: the
@@ -1268,6 +1561,12 @@ final class ListingReviewStoreTests: XCTestCase {
             ]
             return match
         }
+        let listingSpecifics = specifics ?? [
+            ListingReviewSpecific(name: "Brand", value: "Sony"),
+            ListingReviewSpecific(name: "Model", value: "WH-1000XM4"),
+            ListingReviewSpecific(name: "Condition", value: "very-good"),
+            ListingReviewSpecific(name: "Color", value: "Black"),
+        ]
         let object: [String: Any] = [
             "schemaVersion": 1,
             "binding": [
@@ -1288,13 +1587,10 @@ final class ListingReviewStoreTests: XCTestCase {
             "listing": [
                 "title": title,
                 "description": "Clean, fully working headphones with case and charging cable.",
-                "condition": "very-good",
-                "specifics": [
-                    ["name": "Brand", "value": "Sony"],
-                    ["name": "Model", "value": "WH-1000XM4"],
-                    ["name": "Condition", "value": "very-good"],
-                    ["name": "Color", "value": "Black"],
-                ],
+                "condition": condition.rawValue,
+                "specifics": listingSpecifics.map {
+                    ["name": $0.name, "value": $0.value]
+                },
             ],
             "pricing": [
                 "suggestedPrice": 145,
