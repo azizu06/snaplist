@@ -1,4 +1,4 @@
-# CI (issues #18, #1026): typecheck → lint → unit/contract tests → offline eval → build,
+# CI (issues #18, #1026, #1036): typecheck → lint → migration audit → unit/contract tests → offline eval → build,
 # plus the pgTAP database contracts (issue #496) and the Docker image build.
 # Runs with NO secrets: no API keys, no hosted database. `verify` is offline by
 # construction; `database` builds a throwaway local Postgres from the branch's
@@ -32,6 +32,10 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm lint
+
+      # Fail fast with a focused diagnostic when migration filenames are
+      # malformed or reuse an existing 14-digit version.
+      - run: pnpm audit:migrations
 
       # This job intentionally has no Supabase stack. DB/RLS coverage is
       # enforced by the database job after it provisions its local API.
