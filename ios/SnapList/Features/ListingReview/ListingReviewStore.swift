@@ -211,9 +211,25 @@ final class ListingReviewStore {
         await stage(draft, announcement: "Description updated. Unsaved changes.")
     }
 
-    func setCondition(_ value: ListingReviewCondition) async {
+    func setCondition(
+        _ value: ListingReviewCondition,
+        mirroredSpecificName: String? = nil
+    ) async {
         guard var draft else { return }
         draft.condition = value
+        if let mirroredSpecificName,
+           let index = draft.specifics.firstIndex(where: {
+               $0.name.caseInsensitiveCompare(mirroredSpecificName)
+                   == .orderedSame
+           }),
+           ListingReviewDraft.saveContractKey(
+               for: draft.specifics[index].name
+           ) == "reserved:condition" {
+            draft.specifics[index] = ListingReviewSpecific(
+                name: draft.specifics[index].name,
+                value: value.rawValue
+            )
+        }
         await stage(
             draft,
             announcement: "Condition set to \(value.sellerLabel)."
@@ -242,6 +258,50 @@ final class ListingReviewStore {
             draft,
             announcement: "\(name) updated. Unsaved changes."
         )
+    }
+
+    func setFallbackIdentitySpecific(
+        name: String,
+        value: String
+    ) async -> Bool {
+        guard var draft,
+              let index = draft.specifics.firstIndex(where: {
+                  $0.name.caseInsensitiveCompare(name) == .orderedSame
+              }),
+              ListingReviewDraft.isIdentitySpecificName(
+                  draft.specifics[index].name
+              ) else {
+            return false
+        }
+        let suggested = snapshot?.listing.specifics.first(where: {
+            $0.name.caseInsensitiveCompare(name) == .orderedSame
+        })?.value
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stagedValue = normalized.isEmpty
+            ? (suggested ?? draft.specifics[index].value)
+            : normalized
+        if ListingReviewDraft.saveContractKey(for: name)
+            == "reserved:condition" {
+            guard let condition = ListingReviewCondition.matchingFallbackInput(
+                stagedValue
+            ) else {
+                return false
+            }
+            await setCondition(
+                condition,
+                mirroredSpecificName: draft.specifics[index].name
+            )
+            return true
+        }
+        draft.specifics[index] = ListingReviewSpecific(
+            name: draft.specifics[index].name,
+            value: stagedValue
+        )
+        await stage(
+            draft,
+            announcement: "\(name) updated. Unsaved changes."
+        )
+        return true
     }
 
     func setSellerPriceOverride(_ value: Decimal?) async {

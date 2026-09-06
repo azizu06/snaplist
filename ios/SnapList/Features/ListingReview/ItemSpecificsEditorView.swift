@@ -91,7 +91,10 @@ struct ItemSpecificsEditorView: View {
                 value: specific.value,
                 pending: pending,
                 identifier: identifier,
-                field: .specific(specific.name),
+                field: correctionAvailability == .notOffered
+                    && store.isIdentitySpecific(specific.name)
+                    ? .fallbackIdentitySpecific(specific.name)
+                    : .specific(specific.name),
                 edits: inlineEdits,
                 focusValue: specific.name,
                 focus: $focusedField

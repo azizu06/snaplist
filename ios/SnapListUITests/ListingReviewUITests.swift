@@ -1322,6 +1322,34 @@ final class ListingReviewUITests: XCTestCase {
             app.staticTexts["listing-review.specifics.correction-spent"].exists,
             "A build that never offered guided correction cannot claim the seller has used it."
         )
+
+        let condition = app.textViews["listing-review.specific.condition"]
+        XCTAssertTrue(condition.waitForExistence(timeout: 3))
+        condition.tap()
+        condition.press(forDuration: 1.0)
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 2))
+        selectAll.tap()
+        condition.typeText("Like New")
+        app.buttons["listing-review.keyboard-done"].tap()
+
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertFalse(anyElement("listing-review.unsaved", in: app).exists)
+        openItemSpecifics(in: app)
+        let reopenedBrand = app.textViews["listing-review.specific.brand"]
+        XCTAssertTrue(reopenedBrand.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            String(describing: reopenedBrand.value as Any).contains("Co"),
+            "The fallback identity edit must survive leaving and re-entering Item specifics."
+        )
+        let reopenedCondition =
+            app.textViews["listing-review.specific.condition"]
+        XCTAssertTrue(reopenedCondition.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            String(describing: reopenedCondition.value as Any)
+                .contains("like-new"),
+            "A supported condition display label must survive as its typed condition value."
+        )
     }
 
     private func launch(

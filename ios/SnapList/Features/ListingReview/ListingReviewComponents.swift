@@ -25,6 +25,22 @@ extension ListingReviewCondition: CaseIterable {
         .poor,
         .forParts,
     ]
+
+    static func matchingFallbackInput(
+        _ value: String
+    ) -> ListingReviewCondition? {
+        func normalized(_ value: String) -> String {
+            value
+                .split(whereSeparator: \.isWhitespace)
+                .joined(separator: " ")
+                .lowercased()
+        }
+        let candidate = normalized(value)
+        return allCases.first {
+            normalized($0.rawValue) == candidate
+                || normalized($0.sellerLabel) == candidate
+        }
+    }
 }
 
 /// Whether guided correction can be entered for a reserved identity specific
@@ -113,9 +129,17 @@ enum ListingReviewStoreFactory {
                 review = ListingReviewLaunchFixture.processingReview()
             } else if configuration.fixture == .trophyWall
                 || configuration.visualState == .trophyWallSettled {
-                review = ListingReviewLaunchFixture.trophyWallReview(variant: fixture)
+                review = ListingReviewLaunchFixture.trophyWallReview(
+                    variant: fixture,
+                    includesConditionSpecific:
+                        configuration.listingReviewFixture == nil
+                )
             } else {
-                review = fixture.review
+                review = configuration.listingReviewFixture == nil
+                    ? ListingReviewLaunchFixture.review(
+                        includesConditionSpecific: true
+                    )
+                    : fixture.review
             }
             return ListingReviewStore(
                 service: ListingReviewFixtureService(
@@ -282,6 +306,7 @@ enum ListingReviewLaunchFixture {
     static func review(
         matchCount: Int = 3,
         usesLongText: Bool = false,
+        includesConditionSpecific: Bool = false,
         runID: UUID = Self.runID,
         itemID: UUID = UUID(
             uuidString: "20800000-0000-4000-8000-000000000021"
@@ -348,6 +373,19 @@ enum ListingReviewLaunchFixture {
             }
             return match
         }
+        var specifics = [
+            ["name": "Brand", "value": "Sony"],
+            ["name": "Type", "value": "Wireless controller"],
+            ["name": "Platform", "value": "PlayStation 5"],
+            ["name": "Color", "value": "White"],
+            ["name": "Connectivity", "value": "Wireless"],
+        ]
+        if includesConditionSpecific {
+            specifics.insert(
+                ["name": "Condition", "value": "good"],
+                at: 2
+            )
+        }
         let object: [String: Any] = [
             "schemaVersion": 1,
             "binding": [
@@ -373,13 +411,7 @@ enum ListingReviewLaunchFixture {
                 "title": title,
                 "description": description,
                 "condition": "good",
-                "specifics": [
-                    ["name": "Brand", "value": "Sony"],
-                    ["name": "Type", "value": "Wireless controller"],
-                    ["name": "Platform", "value": "PlayStation 5"],
-                    ["name": "Color", "value": "White"],
-                    ["name": "Connectivity", "value": "Wireless"],
-                ],
+                "specifics": specifics,
             ],
             "pricing": [
                 "suggestedPrice": 58,
@@ -429,7 +461,8 @@ enum ListingReviewLaunchFixture {
     /// route used to exercise, so tests that need a specific review shape can
     /// still ask for one while entering through the tile a seller actually taps.
     static func trophyWallReview(
-        variant: ListingReviewFixture = .loaded
+        variant: ListingReviewFixture = .loaded,
+        includesConditionSpecific: Bool = false
     ) -> ListingReviewResult {
         let matchCount: Int
         switch variant {
@@ -443,6 +476,7 @@ enum ListingReviewLaunchFixture {
         return review(
             matchCount: matchCount,
             usesLongText: variant == .longText,
+            includesConditionSpecific: includesConditionSpecific,
             runID: UUID(
                 uuidString: "37500000-0000-4000-8000-000000000021"
             )!,
@@ -762,6 +796,7 @@ enum ListingReviewInlineEdit: Hashable {
     case title
     case description
     case specific(String)
+    case fallbackIdentitySpecific(String)
 
     /// Dictionaries have no order, and a flush that writes in a different
     /// order each time is a flush that cannot be tested.
@@ -770,6 +805,7 @@ enum ListingReviewInlineEdit: Hashable {
         case .title: "0"
         case .description: "1"
         case .specific(let name): "2\(name)"
+        case .fallbackIdentitySpecific(let name): "3\(name)"
         }
     }
 }
@@ -788,25 +824,34 @@ final class ListingReviewInlineEdits {
 
     /// Sends every pending value through the store's own write path.
     ///
-    /// Identity specifics never appear here. They have no typed field, and
-    /// `setSpecific` refuses them regardless, so the coherent-correction seam
-    /// holds even if one ever did.
+    /// Fallback identity specifics carry their own field token and use the
+    /// store's guarded semantic path. Ordinary specifics still use
+    /// `setSpecific`, which refuses every reserved identity name.
     func flush(into store: ListingReviewStore) async {
         for (field, text) in typed.sorted(by: { $0.key.sortKey < $1.key.sortKey }) {
+            let accepted: Bool
             switch field {
             case .title:
                 await store.setTitle(text)
+                accepted = true
             case .description:
                 await store.setDescription(text)
+                accepted = true
             case .specific(let name):
                 await store.setSpecific(name: name, value: text)
+                accepted = true
+            case .fallbackIdentitySpecific(let name):
+                accepted = await store.setFallbackIdentitySpecific(
+                    name: name,
+                    value: text
+                )
             }
             // Each write suspends, and the field stays on screen and typable
             // while it does. Clearing unconditionally would throw away
             // whatever the seller typed during the await, and the field
             // would then snap back to the value that was in flight. Clear
             // only the value that was actually sent.
-            if typed[field] == text {
+            if accepted, typed[field] == text {
                 typed[field] = nil
             }
         }
