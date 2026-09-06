@@ -1,7 +1,7 @@
 # SnapList — Agent Guide
 
-Read `PRD.md` first — it is the source of truth for *what* we build and *why*. This file is *how*
-to work in the repo. `PROJECT_BRIEF.md` is origin/narrative context only and is superseded by the PRD
+Read the relevant `PRD.md` sections before product decisions or behavior changes; it is the
+source of truth for *what* we build and *why*. This file is *how* to work in the repo. `PROJECT_BRIEF.md` is origin/narrative context only and is superseded by the PRD
 where they disagree.
 
 ## What this is
