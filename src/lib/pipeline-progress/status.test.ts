@@ -121,4 +121,25 @@ describe("pipeline progress steps", () => {
       ),
     ).toBe(true);
   });
+
+  it("holds the stalled stage current on a failed run, same shape as running", () => {
+    // pipelineProgressView renders this same run as "Needs retry" with a
+    // danger tone, but the steps list has no failure state of its own — it
+    // falls through to the same STAGE_INDEX lookup as "running"/"retrying".
+    // This pins that fallthrough as a known, intentional contract rather
+    // than an accident nothing would catch if it changed.
+    expect(
+      pipelineProgressSteps({ ...BASE, status: "failed", stage: "generating" }).map(
+        (step) => step.state,
+      ),
+    ).toEqual(["complete", "complete", "complete", "current", "upcoming"]);
+  });
+
+  it("holds the stalled stage current on a canceled run", () => {
+    expect(
+      pipelineProgressSteps({ ...BASE, status: "canceled", stage: "queued" }).map(
+        (step) => step.state,
+      ),
+    ).toEqual(["current", "upcoming", "upcoming", "upcoming", "upcoming"]);
+  });
 });
