@@ -107,7 +107,8 @@ enum VoiceNotePresentation {
     static func recordingAccessibilityLabel(
         elapsed: TimeInterval
     ) -> String {
-        "Recording, \(Int(max(elapsed, 0))) seconds of 15"
+        let cap = Int(VoiceNotePresentation.maximumDuration)
+        return "Recording, \(Int(max(elapsed, 0))) seconds of \(cap)"
     }
 
     static func playbackAccessibilityLabel(isPlaying: Bool) -> String {
@@ -118,7 +119,10 @@ enum VoiceNotePresentation {
 @MainActor
 protocol VoiceNoteAudioClient: AnyObject {
     var permission: VoiceNoteMicrophonePermission { get }
-    var recordingSnapshot: VoiceNoteRecordingSnapshot { get }
+    /// Returns every envelope frame produced since the previous call and
+    /// clears them. Draining is the point, so it is a method: reading twice in
+    /// one tick would silently discard frames.
+    func drainRecordingSnapshot() -> VoiceNoteRecordingSnapshot
     var playbackSnapshot: VoiceNotePlaybackSnapshot { get }
     var interruptionHandler: (() -> Void)? { get set }
     var routeChangeHandler: (() -> Void)? { get set }
@@ -412,7 +416,7 @@ final class VoiceNoteStore {
             return
         }
 
-        let snapshot = audio.recordingSnapshot
+        let snapshot = audio.drainRecordingSnapshot()
         for meterLevel in snapshot.meterLevels {
             liveMeterSamples = VoiceNoteWaveformGeometry
                 .appendingLiveMeterSample(meterLevel, to: liveMeterSamples)
@@ -464,7 +468,9 @@ final class VoiceNoteStore {
 
     func save() {
         if case .recording = phase {
-            let snapshot = audio.recordingSnapshot
+            // The take is ending, so any frames still pending are discarded
+            // with it; only the elapsed time matters here.
+            let snapshot = audio.drainRecordingSnapshot()
             audio.stopRecording()
             provisionalDuration = min(
                 max(snapshot.elapsed, 0),

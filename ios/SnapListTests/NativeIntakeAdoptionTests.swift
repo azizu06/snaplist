@@ -821,6 +821,10 @@ private final class NativeIntakeAdoptionVoiceAudio: VoiceNoteAudioClient {
     var playbackFinishedHandler: (() -> Void)?
     var recordingFinishedHandler: ((VoiceNoteRecordingCompletion) -> Void)?
 
+    func drainRecordingSnapshot() -> VoiceNoteRecordingSnapshot {
+        recordingSnapshot
+    }
+
     func requestPermission() async -> VoiceNoteMicrophonePermission {
         permission
     }

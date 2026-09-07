@@ -185,6 +185,115 @@ final class VoiceNoteTests: XCTestCase {
         )
     }
 
+    func testStartingANewTakeRetiresTheCachedWaveformOfTheFileItWillReplace() throws {
+        // The saved note commits to one fixed file name, and two takes that
+        // both reach the 15 s cap write the same byte count, so the file's own
+        // metadata is not enough to retire a stale shape.
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("snaplist-waveform-cache-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let savedURL = directory.appendingPathComponent("voice-note.wav")
+
+        // A whole-second date so restoring it later reproduces the stored
+        // value exactly; the filesystem does not keep every fraction.
+        let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try Self.writeVoiceNoteFile(at: savedURL, loudFirst: true)
+        try FileManager.default.setAttributes(
+            [.modificationDate: fixedDate],
+            ofItemAtPath: savedURL.path
+        )
+        let byteCount = try FileManager.default.attributesOfItem(
+            atPath: savedURL.path
+        )[.size] as? NSNumber
+
+        let adapter = AVFoundationVoiceNoteAudioClient(
+            audioSession: VoiceNoteAudioSessionStub(),
+            recorderFactory: { _, _ in VoiceNoteRecorderStub() }
+        )
+        let loudFirstBars = adapter.savedWaveform(for: savedURL, barCount: 4)
+        XCTAssertGreaterThan(
+            loudFirstBars.first ?? 0,
+            loudFirstBars.last ?? 1
+        )
+
+        // Rewrite the same path with the opposite shape, then restore the byte
+        // count and modification date the first take had.
+        try Self.writeVoiceNoteFile(at: savedURL, loudFirst: false)
+        try FileManager.default.setAttributes(
+            [.modificationDate: fixedDate],
+            ofItemAtPath: savedURL.path
+        )
+        XCTAssertEqual(
+            (try FileManager.default.attributesOfItem(
+                atPath: savedURL.path
+            )[.size] as? NSNumber),
+            byteCount,
+            "The two takes must be the same size for this to test the cache."
+        )
+        XCTAssertEqual(
+            adapter.savedWaveform(for: savedURL, barCount: 4),
+            loudFirstBars,
+            "Same path, same size, same date still reads as the same asset."
+        )
+
+        try adapter.startRecording(
+            to: directory.appendingPathComponent("provisional.wav")
+        )
+        let quietFirstBars = adapter.savedWaveform(for: savedURL, barCount: 4)
+        adapter.stopRecording()
+
+        XCTAssertLessThan(
+            quietFirstBars.first ?? 1,
+            quietFirstBars.last ?? 0,
+            "A new take must retire the shape of the file it will replace."
+        )
+    }
+
+    private static func writeVoiceNoteFile(
+        at url: URL,
+        loudFirst: Bool
+    ) throws {
+        try? FileManager.default.removeItem(at: url)
+        let sampleRate = 16_000.0
+        let frameCount = AVAudioFrameCount(4_000)
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        )
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(
+                pcmFormat: try XCTUnwrap(format),
+                frameCapacity: frameCount
+            )
+        )
+        buffer.frameLength = frameCount
+        let channel = try XCTUnwrap(buffer.floatChannelData)[0]
+        for frame in 0..<Int(frameCount) {
+            let inFirstHalf = frame < Int(frameCount) / 2
+            let isLoud = inFirstHalf == loudFirst
+            let phase = 2 * Double.pi * 300 * Double(frame) / sampleRate
+            channel[frame] = Float(sin(phase)) * (isLoud ? 0.8 : 0.001)
+        }
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsFloatKey: false
+            ]
+        )
+        try file.write(from: buffer)
+    }
+
     func testRecorderCompletionEventTransitionsAtHardLimitWithoutPostStopPolling() async {
         let audio = VoiceNoteAudioClientStub(permission: .allowed)
         let files = VoiceNoteFileStoreStub()
@@ -640,6 +749,12 @@ final class VoiceNoteTests: XCTestCase {
             "Recording, 7 seconds of 15"
         )
         XCTAssertEqual(
+            VoiceNotePresentation.recordingAccessibilityLabel(elapsed: 7.8),
+            "Recording, 7 seconds of "
+                + "\(Int(VoiceNotePresentation.maximumDuration))",
+            "The spoken cap follows the domain constant, not a literal."
+        )
+        XCTAssertEqual(
             VoiceNotePresentation.recordingAccessibilityOrder,
             [.cancel, .elapsed, .save]
         )
@@ -823,6 +938,10 @@ private final class VoiceNoteAudioClientStub: VoiceNoteAudioClient {
 
     init(permission: VoiceNoteMicrophonePermission) {
         self.permission = permission
+    }
+
+    func drainRecordingSnapshot() -> VoiceNoteRecordingSnapshot {
+        recordingSnapshot
     }
 
     func requestPermission() async -> VoiceNoteMicrophonePermission {

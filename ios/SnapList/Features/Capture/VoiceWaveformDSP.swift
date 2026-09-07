@@ -64,13 +64,17 @@ enum VoiceWaveformAnalyzer {
         guard samples.count >= 2, sampleRate > 0 else {
             return 0
         }
-        var difference = [Float](repeating: 0, count: samples.count - 1)
-        vDSP.subtract(
-            samples[1...],
-            samples[..<(samples.count - 1)],
-            result: &difference
-        )
-        let differenceRootMeanSquare = vDSP.rootMeanSquare(difference)
+        // Accumulated in place rather than through a difference vector: this
+        // runs on the audio tap thread, where a per-buffer heap allocation is
+        // the one cost worth avoiding.
+        var sumOfSquares = Float(0)
+        for index in 1..<samples.count {
+            let difference = samples[index] - samples[index - 1]
+            sumOfSquares += difference * difference
+        }
+        let differenceRootMeanSquare = (
+            sumOfSquares / Float(samples.count - 1)
+        ).squareRoot()
         guard differenceRootMeanSquare.isFinite else {
             return 0
         }
