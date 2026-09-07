@@ -331,7 +331,7 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         await staleVoiceStore.startRecording()
         voiceAudio.recordingSnapshot = .init(
             elapsed: 4,
-            averagePower: -20
+            meterLevels: [0.6]
         )
         staleVoiceStore.save()
         await voiceGate.waitUntilRequested()
@@ -814,10 +814,8 @@ private final class NativeIntakeAdoptionGate {
 @MainActor
 private final class NativeIntakeAdoptionVoiceAudio: VoiceNoteAudioClient {
     var permission: VoiceNoteMicrophonePermission = .allowed
-    var recordingSnapshot = VoiceNoteRecordingSnapshot(
-        elapsed: 0,
-        averagePower: -60
-    )
+    var recordingSnapshot = VoiceNoteRecordingSnapshot(elapsed: 0)
+    var playbackSnapshot = VoiceNotePlaybackSnapshot()
     var interruptionHandler: (() -> Void)?
     var routeChangeHandler: (() -> Void)?
     var playbackFinishedHandler: (() -> Void)?
@@ -832,6 +830,7 @@ private final class NativeIntakeAdoptionVoiceAudio: VoiceNoteAudioClient {
     func startPlaying(_: URL) throws {}
     func pausePlaying() {}
     func stopPlaying() {}
+    func savedWaveform(for _: URL, barCount _: Int) -> [Double] { [] }
 }
 
 private final class NativeIntakeAdoptionVoiceFiles: VoiceNoteFileStoring {

@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class VoiceNoteTests: XCTestCase {
-    func testRecordingMeterDrivesVisiblyDistinctRollingWaveformGeometry() async {
+    func testRecordingMeterAdvancesTheRollingWaveformOncePerTapFrame() async {
         let audio = VoiceNoteAudioClientStub(permission: .allowed)
         let store = VoiceNoteStore(
             audio: audio,
@@ -13,49 +13,175 @@ final class VoiceNoteTests: XCTestCase {
         )
         await store.startRecording()
 
+        XCTAssertEqual(
+            store.liveMeterSamples,
+            VoiceNoteWaveformGeometry.emptyLiveMeterSamples
+        )
+
+        // One poll carries every envelope frame produced since the previous
+        // one, so the bars travel at tap rate instead of at poll rate.
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 0.1,
-            averagePower: -160
+            meterLevels: [0.05, 0.4, 0.95, 0.2, 0.62]
         )
         store.refreshRecording()
-        guard case .recording(_, let quietLevel) = store.phase else {
-            return XCTFail("Recording meter must publish a quiet level.")
+
+        XCTAssertEqual(
+            store.liveMeterSamples.count,
+            VoiceNoteWaveformGeometry.liveBarCount
+        )
+        XCTAssertEqual(
+            Array(store.liveMeterSamples.suffix(5)),
+            [0.05, 0.4, 0.95, 0.2, 0.62]
+        )
+        guard case .recording(let elapsed, let level) = store.phase else {
+            return XCTFail("A live meter frame must publish a recording phase.")
         }
-        let quietSamples = VoiceNoteWaveformGeometry
-            .appendingLiveMeterSample(
-                quietLevel,
-                to: VoiceNoteWaveformGeometry.emptyLiveMeterSamples
-            )
-        let silence = VoiceNoteWaveformGeometry.liveMeterBarHeights(
-            samples: quietSamples
+        XCTAssertEqual(elapsed, 0.1, accuracy: 0.0001)
+        XCTAssertEqual(
+            level,
+            0.62,
+            accuracy: 0.0001,
+            "The published level is the newest frame, not a poll-rate average."
         )
 
-        var speechSamples = quietSamples
-        for sampleIndex in 1...VoiceNoteWaveformGeometry.liveBarCount {
-            audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
-                elapsed: Double(sampleIndex + 1) / 10,
-                averagePower: -12
-            )
-            store.refreshRecording()
-            guard case .recording(_, let speechLevel) = store.phase else {
-                return XCTFail("Recording meter must publish a speech level.")
-            }
-            speechSamples = VoiceNoteWaveformGeometry
-                .appendingLiveMeterSample(
-                    speechLevel,
-                    to: speechSamples
-                )
-        }
-        let speech = VoiceNoteWaveformGeometry.liveMeterBarHeights(
-            samples: speechSamples
+        let heights = VoiceNoteWaveformGeometry.liveMeterBarHeights(
+            samples: store.liveMeterSamples
         )
-
-        XCTAssertEqual(silence.count, 27)
-        XCTAssertEqual(silence, Array(repeating: 4, count: 27))
+        XCTAssertEqual(heights.count, VoiceNoteWaveformGeometry.liveBarCount)
         XCTAssertGreaterThan(
-            speech.min() ?? 0,
-            24,
-            "Speech must produce an unmistakably taller live waveform than silence."
+            (heights.max() ?? 0) - (heights.min() ?? 0),
+            20,
+            "One utterance must span visibly different bar heights."
+        )
+
+        // A poll that finds no new frames must hold the trail still rather than
+        // shifting silence into it.
+        let held = store.liveMeterSamples
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 0.2,
+            meterLevels: []
+        )
+        store.refreshRecording()
+        XCTAssertEqual(store.liveMeterSamples, held)
+
+        await store.startRecording()
+        XCTAssertEqual(
+            store.liveMeterSamples,
+            VoiceNoteWaveformGeometry.emptyLiveMeterSamples,
+            "A new take must start from an empty trail."
+        )
+    }
+
+    func testSavedNoteWaveformIsReadFromTheRecordedFileAndClearsWithIt() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        audio.stubbedSavedWaveform = [0.2, 0.9, 0.1]
+        let files = VoiceNoteFileStoreStub()
+        let prior = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/prior-voice-note.wav"),
+            duration: 8
+        )
+        let store = VoiceNoteStore(
+            savedNote: prior,
+            audio: audio,
+            files: files
+        )
+
+        XCTAssertEqual(store.savedNoteWaveform, [0.2, 0.9, 0.1])
+        XCTAssertEqual(audio.savedWaveformRequests.map(\.url), [prior.url])
+        XCTAssertEqual(
+            audio.savedWaveformRequests.map(\.barCount),
+            [VoiceNoteWaveformGeometry.savedBarCount]
+        )
+
+        audio.stubbedSavedWaveform = [1, 0.5]
+        store.publishCommittedVoice(
+            NativeIntake.Voice(
+                id: UUID(),
+                mediaURL: URL(fileURLWithPath: "/tmp/committed-voice-note.wav"),
+                duration: 9
+            )
+        )
+        XCTAssertEqual(store.savedNoteWaveform, [1, 0.5])
+        XCTAssertEqual(
+            audio.savedWaveformRequests.map(\.url).last,
+            URL(fileURLWithPath: "/tmp/committed-voice-note.wav")
+        )
+
+        await store.deleteSavedNote()
+        XCTAssertEqual(
+            store.savedNoteWaveform,
+            [],
+            "Deleting the note must delete its drawn shape too."
+        )
+    }
+
+    func testPlaybackPlayheadTracksCurrentTimeAndRestsWhenPlaybackStops() {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let saved = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/saved-voice-note.wav"),
+            duration: 12
+        )
+        let store = VoiceNoteStore(
+            savedNote: saved,
+            audio: audio,
+            files: VoiceNoteFileStoreStub()
+        )
+
+        XCTAssertEqual(store.playbackProgress, 0)
+        audio.playbackSnapshot = VoiceNotePlaybackSnapshot(
+            currentTime: 3,
+            duration: 12
+        )
+        store.refreshPlayback()
+        XCTAssertEqual(
+            store.playbackProgress,
+            0,
+            "A note that is not playing must not move the head."
+        )
+
+        store.togglePlayback()
+        store.refreshPlayback()
+        XCTAssertEqual(store.playbackProgress, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(
+            VoiceWaveformPlayhead.playedBarCount(
+                progress: store.playbackProgress,
+                barCount: VoiceNoteWaveformGeometry.savedBarCount
+            ),
+            6
+        )
+
+        // Pause retains the player, so the head stays where the seller left it.
+        store.togglePlayback()
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+        XCTAssertEqual(store.playbackProgress, 0.25, accuracy: 0.0001)
+
+        store.togglePlayback()
+        store.handlePlaybackFinished()
+        XCTAssertEqual(
+            store.playbackProgress,
+            0,
+            "A finished note must rewind the head."
+        )
+
+        store.togglePlayback()
+        audio.playbackSnapshot = VoiceNotePlaybackSnapshot(
+            currentTime: 6,
+            duration: 0
+        )
+        store.refreshPlayback()
+        XCTAssertEqual(
+            store.playbackProgress,
+            0.5,
+            accuracy: 0.0001,
+            "An unknown player duration must fall back to the saved duration."
+        )
+
+        store.handleInterruption()
+        XCTAssertEqual(
+            store.playbackProgress,
+            0,
+            "An interruption stops the player, so the head returns to the start."
         )
     }
 
@@ -67,13 +193,13 @@ final class VoiceNoteTests: XCTestCase {
         await store.startRecording()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 14.9,
-            averagePower: -24
+            meterLevels: [0.7]
         )
         store.refreshRecording()
 
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 0,
-            averagePower: -160
+            meterLevels: [0]
         )
         audio.finishRecordingAtTimeLimit()
 
@@ -165,20 +291,20 @@ final class VoiceNoteTests: XCTestCase {
         await store.startRecording()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 14.9,
-            averagePower: -24
+            meterLevels: [0.7]
         )
         store.refreshRecording()
 
         XCTAssertEqual(
             store.phase,
-            .recording(elapsed: 14.9, level: 0.6)
+            .recording(elapsed: 14.9, level: 0.7)
         )
         XCTAssertNil(store.savedNote)
         XCTAssertEqual(files.committedURLs, [])
 
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 15,
-            averagePower: -12
+            meterLevels: [0.7]
         )
         store.refreshRecording()
 
@@ -221,7 +347,7 @@ final class VoiceNoteTests: XCTestCase {
         await store.rerecord()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 4,
-            averagePower: -20
+            meterLevels: [0.7]
         )
         store.save()
 
@@ -247,7 +373,7 @@ final class VoiceNoteTests: XCTestCase {
         await store.rerecord()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 4,
-            averagePower: -20
+            meterLevels: [0.7]
         )
         store.refreshRecording()
         files.discardError = .removalFailed
@@ -271,7 +397,7 @@ final class VoiceNoteTests: XCTestCase {
         await store.rerecord()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 2,
-            averagePower: -20
+            meterLevels: [0.7]
         )
         files.commitError = .writeFailed
         store.save()
@@ -311,7 +437,7 @@ final class VoiceNoteTests: XCTestCase {
         await emptyStore.startRecording()
         emptyAudio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 4,
-            averagePower: -20
+            meterLevels: [0.7]
         )
         emptyFiles.discardError = .removalFailed
 
@@ -341,7 +467,7 @@ final class VoiceNoteTests: XCTestCase {
         await priorFixture.store.rerecord()
         priorFixture.audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 3,
-            averagePower: -20
+            meterLevels: [0.7]
         )
         priorFixture.files.discardError = .removalFailed
 
@@ -413,7 +539,7 @@ final class VoiceNoteTests: XCTestCase {
         await store.rerecord()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 3,
-            averagePower: -18
+            meterLevels: [0.7]
         )
         store.save()
         let replacement = try XCTUnwrap(store.savedNote)
@@ -655,6 +781,8 @@ private final class VoiceNoteRecorderStub: VoiceNoteRecording {
 @MainActor
 private final class VoiceNotePlayerStub: VoiceNotePlaying {
     weak var delegate: AVAudioPlayerDelegate?
+    var currentTime: TimeInterval = 0
+    var duration: TimeInterval = 0
     private(set) var playCount = 0
     private(set) var pauseCount = 0
 
@@ -679,8 +807,11 @@ private final class VoiceNoteAudioClientStub: VoiceNoteAudioClient {
     var permission: VoiceNoteMicrophonePermission
     var recordingSnapshot = VoiceNoteRecordingSnapshot(
         elapsed: 0,
-        averagePower: -160
+        meterLevels: [0]
     )
+    var playbackSnapshot = VoiceNotePlaybackSnapshot()
+    var stubbedSavedWaveform: [Double] = []
+    private(set) var savedWaveformRequests: [SavedWaveformRequest] = []
     let provisionalURL = URL(fileURLWithPath: "/tmp/provisional.wav")
     var playedURLs: [URL] = []
     var pauseCount = 0
@@ -708,6 +839,18 @@ private final class VoiceNoteAudioClientStub: VoiceNoteAudioClient {
     }
     func stopPlaying() {
         stopPlayingCount += 1
+    }
+
+    func savedWaveform(for url: URL, barCount: Int) -> [Double] {
+        savedWaveformRequests.append(
+            SavedWaveformRequest(url: url, barCount: barCount)
+        )
+        return stubbedSavedWaveform
+    }
+
+    struct SavedWaveformRequest: Equatable {
+        let url: URL
+        let barCount: Int
     }
 
     func finishRecordingAtTimeLimit() {
