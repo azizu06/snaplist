@@ -21,12 +21,63 @@ enum FloatingDockMetrics {
     }
 }
 
+/// #1049: how far, and how, downward Trophy Wall scroll shrinks the dock.
+/// A pure function of offset (not a direction/velocity state machine) so
+/// "scroll up restores" and "scroll-to-top ends at full scale" hold by
+/// construction rather than needing separate tracking.
+enum DockScrollScalePolicy {
+    static let fullScale: CGFloat = 1.0
+    /// The issue's illustrative floor (0.72) would shrink the dock's 52pt
+    /// destinations to 37.4pt, under Apple's 44pt minimum touch target.
+    /// 0.85 keeps both destination dimensions at 44.2pt (52 * 0.85) while
+    /// still reading as a clear Instagram-style shrink.
+    static let floorScale: CGFloat = 0.85
+    static let travelPoints: CGFloat = 120
+
+    /// `downwardOffset` is the scroll surface's content offset measured from
+    /// the top: 0 (or negative, during top overscroll) at rest, increasing as
+    /// the seller scrolls down.
+    static func scale(forDownwardOffset downwardOffset: CGFloat, reduceMotion: Bool) -> CGFloat {
+        let clampedOffset = min(max(downwardOffset, 0), travelPoints)
+        guard !reduceMotion else {
+            return clampedOffset > 0 ? floorScale : fullScale
+        }
+        let progress = clampedOffset / travelPoints
+        return fullScale - progress * (fullScale - floorScale)
+    }
+}
+
+/// Shared between the Trophy Wall scroll surface (which reports offset) and
+/// the dock composition in `AppShellView` (which reads `scale`). Delivered
+/// through the environment, defaulted to a standalone instance, so neither
+/// side needs threading through every intermediate view's initializer.
+@Observable
+final class DockScrollScaleModel {
+    private(set) var scale: CGFloat = DockScrollScalePolicy.fullScale
+
+    func reportDownwardScrollOffset(_ offset: CGFloat, reduceMotion: Bool) {
+        scale = DockScrollScalePolicy.scale(forDownwardOffset: offset, reduceMotion: reduceMotion)
+    }
+}
+
+private struct DockScrollScaleModelKey: EnvironmentKey {
+    static let defaultValue = DockScrollScaleModel()
+}
+
+extension EnvironmentValues {
+    var dockScrollScale: DockScrollScaleModel {
+        get { self[DockScrollScaleModelKey.self] }
+        set { self[DockScrollScaleModelKey.self] = newValue }
+    }
+}
+
 /// The one approved dock: exactly the two primary destinations, rendered the
 /// same way on every screen that shows it. It iterates `PrimaryTab` rather than
 /// a parallel dock enum so a destination cannot exist in one list and not the
 /// other.
 struct FloatingDock: View {
     let selectedTab: PrimaryTab
+    var scale: CGFloat = DockScrollScalePolicy.fullScale
     let select: (PrimaryTab) -> Void
 
     var body: some View {
@@ -45,6 +96,7 @@ struct FloatingDock: View {
             RoundedRectangle(cornerRadius: FloatingDockMetrics.cornerRadius)
                 .stroke(SnapListColorToken.inkPrimary.color.opacity(0.08), lineWidth: 1)
         }
+        .scaleEffect(scale, anchor: .bottom)
     }
 
     private func tabButton(_ tab: PrimaryTab) -> some View {
@@ -87,11 +139,12 @@ extension View {
     func floatingDock(
         selectedTab: PrimaryTab,
         isVisible: Bool = true,
+        scale: CGFloat = DockScrollScalePolicy.fullScale,
         select: @escaping (PrimaryTab) -> Void
     ) -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
             if isVisible {
-                FloatingDock(selectedTab: selectedTab, select: select)
+                FloatingDock(selectedTab: selectedTab, scale: scale, select: select)
                     .padding(.bottom, FloatingDockMetrics.bottomInset(for: selectedTab))
                     .transition(.opacity)
             }

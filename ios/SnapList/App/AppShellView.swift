@@ -58,6 +58,7 @@ struct AppShellView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
+    @State private var dockScrollScale = DockScrollScaleModel()
     @State private var isDeleteAccountFlowPresented = false
     @State private var hasConsumedMountedFirstValueDirectScanCommand = false
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
@@ -641,9 +642,11 @@ struct AppShellView: View {
         // unconfigured default and reported a refusal while every screen looked
         // right. `AccountDeletionUITests` is what catches this.
         .environment(\.accountDeletionDependencies, accountDeletionDependencies)
+        .environment(\.dockScrollScale, dockScrollScale)
         .floatingDock(
             selectedTab: router.selectedTab,
             isVisible: shellChromeProjection.showsDock,
+            scale: dockScrollScale.scale,
             select: router.select
         )
         .animation(
