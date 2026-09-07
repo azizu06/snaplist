@@ -18,11 +18,10 @@ export default function NotFound() {
 
       <div className="flex flex-col items-center gap-3">
         <span
-          aria-hidden
           className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.16em] text-faint"
           data-nums
         >
-          <span className="h-[2px] w-6 rounded-full bg-accent" />
+          <span aria-hidden className="h-[2px] w-6 rounded-full bg-accent" />
           Error 404
         </span>
         <h1 className="font-display text-[clamp(26px,6vw,34px)] font-bold leading-tight tracking-tight text-fg-strong text-balance">
