@@ -4104,7 +4104,7 @@ struct PhotoReviewView: View {
         let slideDirection: PhotoReviewHeroSlideDirection =
             direction == .next ? .next : .previous
         var didNavigate = false
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) {
+        withAnimation(.easeOut(duration: 0.24)) {
             heroSlideDirection = slideDirection
             didNavigate = store.selectPhotoForNavigation(id: targetPhoto.id)
         }
