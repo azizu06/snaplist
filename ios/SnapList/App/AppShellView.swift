@@ -646,7 +646,14 @@ struct AppShellView: View {
         .floatingDock(
             selectedTab: router.selectedTab,
             isVisible: shellChromeProjection.showsDock,
-            scale: dockScrollScale.scale,
+            // #1049: the model is a single shared instance so Trophy Wall's
+            // scroll observation never has to thread through every
+            // intermediate initializer, but that means a shrink from Trophy
+            // Wall scroll would otherwise persist onto Scan after a tab
+            // switch. Scan has no scroll surface to report a reset offset,
+            // so the dock composition call is where full scale is enforced
+            // for every screen but Trophy Wall.
+            scale: router.selectedTab == .trophyWall ? dockScrollScale.scale : DockScrollScalePolicy.fullScale,
             select: router.select
         )
         .animation(
