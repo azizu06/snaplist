@@ -2208,6 +2208,122 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
+    /// #1045. The shutter must land on the surface's own horizontal center at
+    /// both CAM-02 (empty, library-only side slot) and CAM-03 (staged,
+    /// library + review side slots) — the frozen contract's binary criterion
+    /// that #864/#885/#1009's `.frame(maxWidth: .infinity)` two-region
+    /// technique failed to hold once one side's `Group` rendered nothing.
+    func testIssue1045ShutterStaysHorizontallyCenteredEmptyAndStaged() {
+        for state in ["CAM-02", "CAM-03"] {
+            for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
+                let label = "\(state) \(arguments.isEmpty ? "default" : "accessibility5")"
+                let app = launch(extraArguments: ["--visual-state=\(state)"] + arguments)
+                let shutter = app.buttons["scan.shutter"]
+                XCTAssertTrue(shutter.waitForExistence(timeout: 3), label)
+
+                let receipt = "\(label): shutter=\(shutter.frame) " +
+                    "window=\(app.windows.firstMatch.frame)"
+                XCTAssertEqual(
+                    shutter.frame.midX,
+                    app.windows.firstMatch.frame.midX,
+                    accuracy: 1,
+                    receipt
+                )
+                app.terminate()
+            }
+        }
+    }
+
+    /// #1045. The frozen contract bans a numeric photo counter anywhere on the
+    /// capture surface — the "3" the review circle used to badge at CAM-03,
+    /// and whatever the cap state would have shown — while VoiceOver may still
+    /// speak the count through the Review control's accessibility label.
+    func testIssue1045CaptureSurfaceHasNoNumericPhotoCountText() {
+        let staged = launch(extraArguments: ["--visual-state=CAM-03"])
+        let stagedReview = staged.buttons["scan.review"]
+        XCTAssertTrue(stagedReview.waitForExistence(timeout: 3))
+        XCTAssertFalse(staged.staticTexts["3"].exists, "no numeric badge at CAM-03")
+        XCTAssertEqual(stagedReview.label, "Review 3 photos")
+        staged.terminate()
+
+        let capped = launch(extraArguments: ["--visual-state=CAM-04"])
+        let cappedReview = capped.buttons["scan.review"]
+        XCTAssertTrue(cappedReview.waitForExistence(timeout: 3))
+        XCTAssertFalse(capped.staticTexts["5"].exists, "no numeric badge at CAM-04")
+        XCTAssertEqual(cappedReview.label, "Review 5 photos")
+        capped.terminate()
+    }
+
+    /// #1045. Library and Review sit in fixed, equal-width side slots a fixed
+    /// gap from the shutter, so their offset from its center is the same
+    /// constant in both the empty state (library only) and the staged state
+    /// (library + review), and meaningfully smaller than the old full-bleed
+    /// `.frame(maxWidth: .infinity)` regions produced.
+    func testIssue1045LibraryAndReviewSitAtAMatchingReducedOffsetFromTheShutter() {
+        let empty = launch(extraArguments: ["--visual-state=CAM-02"])
+        let emptyShutter = empty.buttons["scan.shutter"]
+        let emptyLibrary = empty.buttons["scan.library"]
+        XCTAssertTrue(emptyShutter.waitForExistence(timeout: 3))
+        XCTAssertTrue(emptyLibrary.waitForExistence(timeout: 3))
+        let emptyOffset = emptyShutter.frame.midX - emptyLibrary.frame.midX
+        let emptyReceipt = "CAM-02: shutter=\(emptyShutter.frame) library=\(emptyLibrary.frame)"
+        empty.terminate()
+
+        let staged = launch(extraArguments: ["--visual-state=CAM-03"])
+        let shutter = staged.buttons["scan.shutter"]
+        let library = staged.buttons["scan.library"]
+        let review = staged.buttons["scan.review"]
+        for control in [shutter, library, review] {
+            XCTAssertTrue(control.waitForExistence(timeout: 3), control.identifier)
+        }
+        let stagedReceipt = "CAM-03: shutter=\(shutter.frame) library=\(library.frame) " +
+            "review=\(review.frame) emptyOffset=\(emptyOffset)"
+
+        let stagedLibraryOffset = shutter.frame.midX - library.frame.midX
+        let reviewOffset = review.frame.midX - shutter.frame.midX
+
+        XCTAssertEqual(stagedLibraryOffset, emptyOffset, accuracy: 1, stagedReceipt)
+        XCTAssertEqual(reviewOffset, emptyOffset, accuracy: 1, stagedReceipt)
+        // The old two-region design let a control's midX drift more than
+        // 150pt from the shutter's; the fixed-slot design keeps it tight.
+        XCTAssertLessThan(emptyOffset, 110, emptyReceipt)
+        XCTAssertLessThan(reviewOffset, 110, stagedReceipt)
+        XCTAssertFalse(library.frame.intersects(shutter.frame), stagedReceipt)
+        XCTAssertFalse(review.frame.intersects(shutter.frame), stagedReceipt)
+        staged.terminate()
+    }
+
+    /// #1045 owner correction 3: the staged strip's height is reserved from
+    /// the first frame, so the framing corners and the shutter must land at
+    /// the identical frame whether zero or three photos are staged — proven
+    /// here across two separate launches rather than one live transition,
+    /// since the simulator has no camera and a shutter tap in a fixture
+    /// launch is a no-op.
+    func testIssue1045FramingCornersAndShutterDoNotMoveWhenPhotosAreStaged() {
+        let empty = launch(extraArguments: ["--visual-state=CAM-02"])
+        let emptyCorners = empty.otherElements["scan.framing-corners"]
+        let emptyShutter = empty.buttons["scan.shutter"]
+        XCTAssertTrue(emptyCorners.waitForExistence(timeout: 3))
+        XCTAssertTrue(emptyShutter.waitForExistence(timeout: 3))
+        let emptyCornersFrame = emptyCorners.frame
+        let emptyShutterFrame = emptyShutter.frame
+        empty.terminate()
+
+        let staged = launch(extraArguments: ["--visual-state=CAM-03"])
+        let stagedCorners = staged.otherElements["scan.framing-corners"]
+        let stagedShutter = staged.buttons["scan.shutter"]
+        XCTAssertTrue(stagedCorners.waitForExistence(timeout: 3))
+        XCTAssertTrue(stagedShutter.waitForExistence(timeout: 3))
+
+        let receipt = "emptyCorners=\(emptyCornersFrame) stagedCorners=\(stagedCorners.frame) " +
+            "emptyShutter=\(emptyShutterFrame) stagedShutter=\(stagedShutter.frame)"
+        XCTAssertEqual(stagedCorners.frame.minY, emptyCornersFrame.minY, accuracy: 1, receipt)
+        XCTAssertEqual(stagedCorners.frame.maxY, emptyCornersFrame.maxY, accuracy: 1, receipt)
+        XCTAssertEqual(stagedShutter.frame.midX, emptyShutterFrame.midX, accuracy: 1, receipt)
+        XCTAssertEqual(stagedShutter.frame.midY, emptyShutterFrame.midY, accuracy: 1, receipt)
+        staged.terminate()
+    }
+
     /// #885. Zoom is offered only when the back camera actually pairs an ultra
     /// wide with a wide lens. The simulator has no camera at all, so its honest
     /// result is no control rather than a `.5x` the hardware would refuse.
