@@ -206,6 +206,49 @@ final class CaptureSessionRecoveryTests: XCTestCase {
         XCTAssertEqual(CaptureSessionResumption.lastAction(for: session), .start)
     }
 
+    /// Leaving and re-entering the live surface tears the old preview layer
+    /// down while the new one is already binding, so two claims are
+    /// outstanding at once. The first release must not hand the session back:
+    /// starting it there would run the second layer's `setSession:` against a
+    /// running session, which is the graph rebuild the claim exists to stop.
+    func testAnOverlappingPreviewRebuildKeepsTheSessionClaimedUntilTheLastBindingEnds() {
+        let session = AVCaptureSession()
+
+        let afterTheFirstRelease = AVFoundationCaptureCamera.sessionQueue.sync {
+            () -> CaptureSessionResumption.Action in
+            CaptureSessionResumption.setWantsToRun(true, for: session)
+            CaptureSessionResumption.beginPreviewBinding(for: session)
+            CaptureSessionResumption.beginPreviewBinding(for: session)
+            return CaptureSessionResumption.endPreviewBinding(for: session)
+        }
+        XCTAssertEqual(afterTheFirstRelease, .none)
+
+        let afterTheLastRelease = AVFoundationCaptureCamera.sessionQueue.sync {
+            CaptureSessionResumption.endPreviewBinding(for: session)
+        }
+        XCTAssertEqual(afterTheLastRelease, .start)
+    }
+
+    /// The same overlap driven through the real entry points, so the scenario
+    /// the issue reports is covered end to end and not only at the claim.
+    func testTearingDownOnePreviewWhileBindingTheNextLeavesTheNewLayerOnARunningSession() {
+        let session = AVCaptureSession()
+        let outgoingLayer = AVCaptureVideoPreviewLayer()
+        outgoingLayer.session = session
+        let incomingLayer = AVCaptureVideoPreviewLayer()
+        AVFoundationCaptureCamera.sessionQueue.sync {
+            CaptureSessionResumption.setWantsToRun(true, for: session)
+        }
+
+        CameraPreviewSessionDetachment.detach(outgoingLayer)
+        CameraPreviewSessionAttachment.attach(session, to: incomingLayer)
+        drainCaptureQueues()
+
+        XCTAssertNil(outgoingLayer.session)
+        XCTAssertTrue(incomingLayer.session === session)
+        XCTAssertEqual(CaptureSessionResumption.lastAction(for: session), .start)
+    }
+
     // MARK: - Helpers
 
     /// A detach hops session queue to main and back, so drain the pair enough

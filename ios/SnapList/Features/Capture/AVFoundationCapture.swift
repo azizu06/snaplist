@@ -41,12 +41,25 @@ enum CaptureSessionResumption {
     private final class Intent {
         var wantsToRun = false
         var hasUnrecoveredInterruption = false
-        var isBindingPreview = false
+        /// Preview bindings in flight. Leaving and re-entering the live
+        /// surface overlaps a detach and an attach, so the claim has to nest:
+        /// a single flag would let the detach's release hand the session back
+        /// to `resume` while the attach's `setSession:` is still queued for the
+        /// main thread, which is the running-session graph rebuild the binding
+        /// exists to prevent.
+        var previewBindings = 0
+        var isBindingPreview: Bool { previewBindings > 0 }
         var lastAction: Action = .none
         var onResume: (() -> Void)?
     }
 
     /// Keys are weak, so an intent dies with the session it describes.
+    ///
+    /// Every read and write of this table, and of the `Intent` it hands back,
+    /// is confined to `AVFoundationCaptureCamera.sessionQueue` — the same
+    /// serial queue every session mutation runs on. `NSMapTable` is not
+    /// synchronised, so a caller reaching this state from anywhere else is a
+    /// data race, not merely a stale read.
     private static let intents =
         NSMapTable<AVCaptureSession, Intent>.weakToStrongObjects()
 
@@ -67,10 +80,6 @@ enum CaptureSessionResumption {
             // recover from.
             intent.hasUnrecoveredInterruption = false
         }
-    }
-
-    static func wantsToRun(_ session: AVCaptureSession) -> Bool {
-        intent(for: session).wantsToRun
     }
 
     static func recordInterruption(for session: AVCaptureSession) {
@@ -120,14 +129,18 @@ enum CaptureSessionResumption {
         if session.isRunning {
             session.stopRunning()
         }
-        intent.isBindingPreview = true
+        intent.previewBindings += 1
     }
 
-    /// Releases the claim `beginPreviewBinding` took and puts the session back
-    /// into the state the app asked for.
+    /// Releases one claim `beginPreviewBinding` took and, once the last one is
+    /// gone, puts the session back into the state the app asked for. An
+    /// outstanding claim still standing means `resume` stands down, so an
+    /// overlapping detach cannot start the session under an attach that has
+    /// not bound its layer yet.
     @discardableResult
     static func endPreviewBinding(for session: AVCaptureSession) -> Action {
-        intent(for: session).isBindingPreview = false
+        let intent = intent(for: session)
+        intent.previewBindings = max(0, intent.previewBindings - 1)
         return resume(session)
     }
 
