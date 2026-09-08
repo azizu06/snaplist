@@ -13,7 +13,15 @@ enum TrophyWallGridMetrics {
     static let tileAspectRatio: CGFloat = 4.0 / 5.0
     static let gutterPoints: CGFloat = 12
     static let tileCornerRadiusPoints: CGFloat = 12
-    static let bottomPaddingPoints: CGFloat = 132
+    /// #1057: derived from the dock's own metrics rather than a hand-guessed
+    /// literal, so this clearance cannot drift from what the floating dock
+    /// actually occupies over the wall. `containerHeight(for:)` already folds
+    /// in the dock's own bottom inset (it's the dock's full composed height,
+    /// the same value `SettingsView` uses for its identical clearance) —
+    /// adding it again here would double-count once `bottomInset(for:)`
+    /// stops being a universal 0.
+    static let bottomPaddingPoints: CGFloat =
+        FloatingDockMetrics.containerHeight(for: .trophyWall)
     /// The translucent date chip overlaid on the tile's photo (#960): its
     /// corner radius and its inset from the tile's own edges.
     static let dateChipCornerRadiusPoints: CGFloat = 8

@@ -76,3 +76,33 @@ final class DockScrollScalePolicyTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(compactHeight, 44)
     }
 }
+
+/// #1057: the fallback decision `SnapListShape` makes is a pure function of
+/// availability, not a live `#available` check, so both branches are
+/// assertable on every OS the suite happens to run on — including the iOS 17
+/// fallback the acceptance criteria calls out by name.
+final class SnapListShapePolicyTests: XCTestCase {
+    func testConcentricAvailableChoosesTheConcentricKind() {
+        XCTAssertEqual(
+            SnapListShapePolicy.kind(minimumRadius: 22, isConcentricAvailable: true),
+            .concentric(minimum: 22)
+        )
+    }
+
+    func testConcentricUnavailableFallsBackToTheFixedRoundedRect() {
+        XCTAssertEqual(
+            SnapListShapePolicy.kind(minimumRadius: 22, isConcentricAvailable: false),
+            .roundedRect(cornerRadius: 22)
+        )
+    }
+}
+
+final class ScrollEdgeEffectPolicyTests: XCTestCase {
+    /// Locks the two approved surfaces to `.soft`, named per #1057's PR
+    /// rather than inline at each call site, so a future scroll surface
+    /// cannot silently disagree with the ones already reviewed.
+    func testApprovedSurfacesRequestTheSoftStyle() {
+        XCTAssertEqual(ScrollEdgeEffectPolicy.trophyWallBottomStyle, .soft)
+        XCTAssertEqual(ScrollEdgeEffectPolicy.settingsBottomStyle, .soft)
+    }
+}

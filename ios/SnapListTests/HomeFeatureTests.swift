@@ -72,7 +72,14 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(TrophyWallGridMetrics.tileAspectRatio, 4.0 / 5.0)
         XCTAssertEqual(TrophyWallGridMetrics.gutterPoints, 12)
         XCTAssertEqual(TrophyWallGridMetrics.tileCornerRadiusPoints, 12)
-        XCTAssertEqual(TrophyWallGridMetrics.bottomPaddingPoints, 132)
+        // #1057: derived from the dock's own metrics rather than a
+        // hand-guessed literal, so the clearance cannot drift from what the
+        // floating dock actually occupies. `containerHeight(for:)` already
+        // folds in `bottomInset(for:)`; asserting both here would double it.
+        XCTAssertEqual(
+            TrophyWallGridMetrics.bottomPaddingPoints,
+            FloatingDockMetrics.containerHeight(for: .trophyWall)
+        )
 
         let columns = TrophyWallView.gridColumns
         XCTAssertEqual(columns.count, TrophyWallGridMetrics.columnCount)

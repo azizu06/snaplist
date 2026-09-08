@@ -691,6 +691,9 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
         }
+        // #1057: root only, so the concentric dock corners derive from the
+        // device's own display corner rather than a nested frame.
+        .snapListConcentricContainerShape()
     }
 
     /// Keeps the typed navigation stack mounted before the seller chooses the

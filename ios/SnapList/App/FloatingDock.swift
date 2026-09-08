@@ -88,12 +88,12 @@ struct FloatingDock: View {
         }
         .padding(FloatingDockMetrics.contentPadding)
         .background {
-            RoundedRectangle(cornerRadius: FloatingDockMetrics.cornerRadius)
+            SnapListShape(minimumRadius: FloatingDockMetrics.cornerRadius)
                 .fill(SnapListColorToken.canvas.color)
                 .shadow(color: .black.opacity(0.12), radius: 22, y: 8)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: FloatingDockMetrics.cornerRadius)
+            SnapListShape(minimumRadius: FloatingDockMetrics.cornerRadius)
                 .stroke(SnapListColorToken.inkPrimary.color.opacity(0.08), lineWidth: 1)
         }
         .scaleEffect(scale, anchor: .bottom)
@@ -121,7 +121,7 @@ struct FloatingDock: View {
                     ? SnapListColorToken.actionTint.color
                     : Color.clear
             )
-            .clipShape(.rect(cornerRadius: 16))
+            .clipShape(SnapListShape(minimumRadius: 16))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -136,17 +136,36 @@ extension View {
     /// a dock composes it through here, so placement and identifiers cannot
     /// drift between them the way the Scan camera's own segmented control once
     /// did.
+    ///
+    /// #1057: `safeAreaBar` (iOS 26) replaces `safeAreaInset` here because
+    /// `scrollEdgeEffectStyle` only fades a scroll surface's content under
+    /// chrome that is itself declared through `safeAreaBar` — a plain
+    /// `safeAreaInset` view is invisible to that coordination, so Trophy
+    /// Wall's and Settings' `.snapListScrollEdgeEffect` calls had no floating
+    /// bar to fade content under. iOS 17 keeps `safeAreaInset`, its only
+    /// option, with today's hard-clip unchanged.
+    @ViewBuilder
     func floatingDock(
         selectedTab: PrimaryTab,
         isVisible: Bool = true,
         scale: CGFloat = DockScrollScalePolicy.fullScale,
         select: @escaping (PrimaryTab) -> Void
     ) -> some View {
-        safeAreaInset(edge: .bottom, spacing: 0) {
-            if isVisible {
-                FloatingDock(selectedTab: selectedTab, scale: scale, select: select)
-                    .padding(.bottom, FloatingDockMetrics.bottomInset(for: selectedTab))
-                    .transition(.opacity)
+        if #available(iOS 26.0, *) {
+            safeAreaBar(edge: .bottom, spacing: 0) {
+                if isVisible {
+                    FloatingDock(selectedTab: selectedTab, scale: scale, select: select)
+                        .padding(.bottom, FloatingDockMetrics.bottomInset(for: selectedTab))
+                        .transition(.opacity)
+                }
+            }
+        } else {
+            safeAreaInset(edge: .bottom, spacing: 0) {
+                if isVisible {
+                    FloatingDock(selectedTab: selectedTab, scale: scale, select: select)
+                        .padding(.bottom, FloatingDockMetrics.bottomInset(for: selectedTab))
+                        .transition(.opacity)
+                }
             }
         }
     }
