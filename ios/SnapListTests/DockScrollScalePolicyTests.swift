@@ -106,3 +106,16 @@ final class ScrollEdgeEffectPolicyTests: XCTestCase {
         XCTAssertEqual(ScrollEdgeEffectPolicy.settingsBottomStyle, .soft)
     }
 }
+
+/// #1059: the policy seam Reduced Motion tests against, since the live
+/// selection-change animation only exists on the iOS 26 render tree (no
+/// unit-testable surface of its own).
+final class DockGlassMotionPolicyTests: XCTestCase {
+    func testAnimatesTheSelectionMorphWhenMotionIsNotReduced() {
+        XCTAssertTrue(DockGlassMotionPolicy.shouldAnimateSelectionMorph(reduceMotion: false))
+    }
+
+    func testSkipsTheSelectionMorphAnimationWhenMotionIsReduced() {
+        XCTAssertFalse(DockGlassMotionPolicy.shouldAnimateSelectionMorph(reduceMotion: true))
+    }
+}
