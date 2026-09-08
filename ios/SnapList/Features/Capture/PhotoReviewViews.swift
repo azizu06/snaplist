@@ -3919,7 +3919,7 @@ struct PhotoReviewView: View {
     }
 
     private var countPill: some View {
-        Text("\(store.photos.count) of 5")
+        Text("\(store.photos.count) of \(PhotoReviewCapacityPolicy.photoLimit)")
             .font(
                 .system(
                     size: reviewCountSize,
