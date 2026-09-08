@@ -9804,6 +9804,85 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    // MARK: - #1046 voice note scrim/sheet transitions and hero slide
+
+    func testVoiceNoteScrimTransitionIsOpacityWhileSheetTransitionIsMove() {
+        let scrim = String(
+            reflecting: PhotoReviewVoiceNoteTransitionPolicy.scrimTransition
+        )
+        let sheet = String(
+            reflecting: PhotoReviewVoiceNoteTransitionPolicy.sheetTransition
+        )
+
+        XCTAssertNotEqual(
+            scrim,
+            sheet,
+            "The scrim and sheet must not share one transition."
+        )
+        XCTAssertTrue(
+            scrim.contains("OpacityTransition"),
+            "Scrim: \(scrim)"
+        )
+        XCTAssertTrue(
+            sheet.contains("MoveTransition"),
+            "Sheet: \(sheet)"
+        )
+    }
+
+    func testHeroSlideDirectionMapsNextToTrailingInsertionAndLeadingRemoval() {
+        XCTAssertEqual(
+            PhotoReviewHeroSlidePolicy.insertionEdge(for: .next),
+            .trailing
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroSlidePolicy.removalEdge(for: .next),
+            .leading
+        )
+    }
+
+    func testHeroSlideDirectionMapsPreviousToLeadingInsertionAndTrailingRemoval() {
+        XCTAssertEqual(
+            PhotoReviewHeroSlidePolicy.insertionEdge(for: .previous),
+            .leading
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroSlidePolicy.removalEdge(for: .previous),
+            .trailing
+        )
+    }
+
+    func testHeroSlideTransitionCrossfadesUnderReducedMotionRegardlessOfDirection() {
+        let next = String(
+            reflecting: PhotoReviewHeroSlidePolicy.transition(
+                for: .next,
+                reduceMotion: true
+            )
+        )
+        let previous = String(
+            reflecting: PhotoReviewHeroSlidePolicy.transition(
+                for: .previous,
+                reduceMotion: true
+            )
+        )
+
+        XCTAssertTrue(next.contains("OpacityTransition"), next)
+        XCTAssertTrue(previous.contains("OpacityTransition"), previous)
+    }
+
+    func testHeroSlideTransitionMovesWhenMotionIsNotReduced() {
+        let rendered = String(
+            reflecting: PhotoReviewHeroSlidePolicy.transition(
+                for: .next,
+                reduceMotion: false
+            )
+        )
+
+        XCTAssertFalse(
+            rendered.contains("OpacityTransition"),
+            "Full motion must push, not crossfade: \(rendered)"
+        )
+    }
+
     func testPhotoReviewHeroIsMeasurablyTallerThanTheOriginalThreeHundredPointContract() async {
         XCTAssertGreaterThan(
             PhotoReviewV5VisualContract.heroHeight,
