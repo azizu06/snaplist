@@ -964,6 +964,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         )
         .accessibilityIdentifier("scan.shutter")
         .accessibilitySortPriority(50)
+        .activationSpotlightTarget(.scanShutter, action: takePhoto)
     }
 
     private var reviewButton: some View {

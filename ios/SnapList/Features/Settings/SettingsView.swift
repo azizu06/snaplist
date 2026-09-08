@@ -155,12 +155,14 @@ struct SettingsView: View {
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("settings.selling.marketplaces")
                             .accessibilityHint("Opens your connected eBay account")
+                            .activationSpotlightTarget(.settingsMarketplaces)
                         } else {
                             valueRow(
                                 "Connected marketplaces",
                                 sellingPresentation.marketplaceValue
                             )
                             .accessibilityIdentifier("settings.selling.marketplaces")
+                            .activationSpotlightTarget(.settingsMarketplaces)
                         }
                     }
                     settingsCardDivider

@@ -19,7 +19,14 @@ enum ActivationGuidanceState: String, Codable, CaseIterable, Equatable, Hashable
     case act05 = "ACT-05"
     case act06 = "ACT-06"
     case act07 = "ACT-07"
+    case act08 = "ACT-08"
+    case act09 = "ACT-09"
 
+    /// Fixtures name a *spine* position. ACT-08 and ACT-09 are contextual marks
+    /// (see `ActivationContextualMarkPolicy`) that never occupy
+    /// `ActivationGuidanceProgress.state`, so naming one here would set a
+    /// progress state the machine has no transitions for. They are reached by
+    /// arriving at their surface instead.
     init?(fixtureValue: String) {
         switch fixtureValue {
         case "scan", Self.act01.rawValue: self = .act01
@@ -43,6 +50,8 @@ enum ActivationGuidanceState: String, Codable, CaseIterable, Equatable, Hashable
         case .act04: .act04
         case .act05, .act07: nil
         case .act06: .act06
+        case .act08: .act08
+        case .act09: .act09
         }
     }
 }
@@ -71,8 +80,71 @@ enum ActivationGuidanceSurface: Equatable {
     case photoReview
     case trophyWall
     case listingReview
+    case settings
 }
 
+/// Which surface the seller is actually looking at.
+///
+/// #1056: this used to live inside `AppShellView` as a computed property that
+/// read the selected tab and the full-screen presentation only. Settings is
+/// *pushed* onto the selected tab's stack, so that resolver kept answering
+/// `.trophyWall` while Settings covered the screen and the shell drew the
+/// Trophy Wall coach mark on top of it, anchored to chrome that was no longer
+/// visible. The stack is now part of the input, and the top of the stack — not
+/// the tab beneath it — names the surface.
+enum ActivationSurfaceResolutionPolicy {
+    static func surface(
+        hasPhotoReviewSession: Bool,
+        selectedTab: PrimaryTab,
+        pushedPath: [AppRoute],
+        presentedFullScreen: AppFullScreen?
+    ) -> ActivationGuidanceSurface? {
+        // Photo Review hosts above both tab stacks, so it answers first.
+        if hasPhotoReviewSession { return .photoReview }
+
+        if let top = pushedPath.last {
+            switch top {
+            case .settings:
+                return .settings
+            case .home, .future:
+                // Processing, local recovery and the future boundaries carry no
+                // activation mark of their own. Inheriting the tab's mark is
+                // exactly the defect, so they resolve to nothing.
+                return nil
+            }
+        }
+
+        if selectedTab == .trophyWall, presentedFullScreen == nil {
+            return .trophyWall
+        }
+        if selectedTab == .scan,
+           presentedFullScreen == nil || presentedFullScreen == .guidedCamera {
+            return .scan
+        }
+        return nil
+    }
+}
+
+/// The ordering activation guidance actually has, stated once so a reader does
+/// not have to reconstruct it from `ActivationGuidanceProgress.advance`.
+///
+/// **Spine (sequential, one at a time, drives completion).** ACT-01 Scan →
+/// ACT-02 Photo Review → ACT-02B Photo Review voice note → ACT-03 Trophy Wall →
+/// ACT-04 Listing Review, which requests completion. ACT-05/ACT-07 are the
+/// terminal recorded-completion states and draw nothing; ACT-06 is the ACT-01
+/// re-entry variant.
+///
+/// **Contextual (#1056: ACT-08, ACT-09).** These are not spine positions. They
+/// fire the first time their own surface appears, are acknowledged once each in
+/// `ActivationGuidanceProgress.acknowledgedContextualMarks`, and never gate the
+/// spine or completion — a seller who never opens Settings still finishes
+/// activation at ACT-04. When a spine mark and a contextual mark are both
+/// eligible on the same surface the spine wins, so the Trophy Wall shows
+/// ACT-03 first and the processing-clock mark straight after it.
+///
+/// Both contextual marks live inside the activation presentation window: once
+/// activation is complete nothing draws, which is the same rule every other
+/// mark follows.
 enum ActivationCoachMark: Equatable, Hashable {
     case act01
     case act02
@@ -80,6 +152,11 @@ enum ActivationCoachMark: Equatable, Hashable {
     case act03
     case act04
     case act06
+    /// Trophy Wall header clock, first Trophy Wall visit. Works with an empty
+    /// wall: the clock is header chrome, not a card.
+    case act08
+    /// Settings `Connected marketplaces` row, first Settings open.
+    case act09
 
     init?(state: ActivationGuidanceState, surface: ActivationGuidanceSurface) {
         switch (state, surface) {
@@ -89,6 +166,8 @@ enum ActivationCoachMark: Equatable, Hashable {
         case (.act03, .trophyWall): self = .act03
         case (.act04, .listingReview): self = .act04
         case (.act06, .scan): self = .act06
+        case (.act08, .trophyWall): self = .act08
+        case (.act09, .settings): self = .act09
         default: return nil
         }
     }
@@ -101,6 +180,8 @@ enum ActivationCoachMark: Equatable, Hashable {
         case .act03: .act03
         case .act04: .act04
         case .act06: .act06
+        case .act08: .act08
+        case .act09: .act09
         }
     }
 
@@ -111,11 +192,64 @@ enum ActivationCoachMark: Equatable, Hashable {
         case .act02B: "Tap to record, then Save."
         case .act03: "Work continues after you leave."
         case .act04: "Every field here is yours to change."
+        case .act08: "Tap here to see items still processing."
+        case .act09: "Link eBay here when you're ready to publish."
         }
     }
 
     var isDarkSurface: Bool {
         self == .act01 || self == .act06
+    }
+
+    /// Whether this mark is one of the contextual ones, and therefore
+    /// acknowledged on its own rather than by advancing the spine.
+    var isContextual: Bool {
+        ActivationContextualMarkPolicy.mark(for: self) != nil
+    }
+}
+
+/// The contextual marks and the one surface each belongs to. Kept as a total
+/// function over surfaces so a new surface has to answer the question
+/// explicitly rather than inherit a mark.
+enum ActivationContextualMarkPolicy {
+    static func mark(
+        for surface: ActivationGuidanceSurface
+    ) -> ActivationCoachMark? {
+        switch surface {
+        case .trophyWall: .act08
+        case .settings: .act09
+        case .scan, .photoReview, .listingReview: nil
+        }
+    }
+
+    static func mark(for coachMark: ActivationCoachMark) -> ActivationCoachMark? {
+        switch coachMark {
+        case .act08, .act09: coachMark
+        case .act01, .act02, .act02B, .act03, .act04, .act06: nil
+        }
+    }
+}
+
+/// Which mark, if any, the shell should draw. The spine answers first; the
+/// surface's contextual mark answers only when the spine has nothing to say
+/// here, and only until it has been acknowledged once.
+enum ActivationCoachMarkResolutionPolicy {
+    static func coachMark(
+        progress: ActivationGuidanceProgress,
+        surface: ActivationGuidanceSurface?
+    ) -> ActivationCoachMark? {
+        guard let surface else { return nil }
+        if !progress.hasAcknowledgedCurrentState,
+           let spine = ActivationCoachMark(
+            state: progress.state,
+            surface: surface
+           ) {
+            return spine
+        }
+        guard let contextual = ActivationContextualMarkPolicy.mark(for: surface),
+              !progress.acknowledgedContextualMarks.contains(contextual.state)
+        else { return nil }
+        return contextual
     }
 }
 
@@ -183,6 +317,17 @@ enum ActivationCoachMarkAnchorPolicy {
                 bottomInset: 84,
                 tailHorizontalOffset: 91
             )
+        case .act08, .act09:
+            // The contextual marks name a control that is not docked to the
+            // bottom of the screen, so their bubble is placed against the
+            // spotlight cutout instead
+            // (`ActivationSpotlightBubblePlacementPolicy`). This value is the
+            // fallback the shell uses only while that frame has not arrived.
+            return .init(
+                tailEdge: .bottom,
+                bottomInset: 24,
+                tailHorizontalOffset: 0
+            )
         }
     }
 }
@@ -221,6 +366,10 @@ enum ActivationGuidanceAssetPolicy {
             (staticName, motionName) = ("ActivationScoutACT04", "act-04")
         case .act05, .act07:
             (staticName, motionName) = (nil, nil)
+        case .act08, .act09:
+            // #1056 adds no new Scout clips. Both contextual marks reuse the
+            // bundled ACT-03 composition, which is the Trophy Wall Scout.
+            (staticName, motionName) = ("ActivationScoutACT03", "act-03")
         case .act06:
             // ACT-06 deliberately retains the original v4.0 static composition.
             (staticName, motionName) = ("ActivationScoutACT06", nil)
@@ -607,6 +756,29 @@ struct ActivationGuidanceProgress: Codable, Equatable {
     var state: ActivationGuidanceState = .act01
     var hasAcknowledgedCurrentState = false
     var isCompletionPending = false
+    /// #1056. The contextual marks (ACT-08, ACT-09) are one-shot per seller and
+    /// carry no spine position, so they are recorded here rather than in
+    /// `state`. Stored as states so one persisted record covers both kinds.
+    var acknowledgedContextualMarks: Set<ActivationGuidanceState> = []
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case hasAcknowledgedCurrentState
+        case isCompletionPending
+        case acknowledgedContextualMarks
+    }
+
+    /// Acknowledges a contextual mark. Returns whether anything changed, so the
+    /// caller only writes to the store on a real transition.
+    @discardableResult
+    mutating func acknowledgeContextualMark(
+        _ coachMark: ActivationCoachMark
+    ) -> Bool {
+        guard ActivationContextualMarkPolicy.mark(for: coachMark) != nil else {
+            return false
+        }
+        return acknowledgedContextualMarks.insert(coachMark.state).inserted
+    }
 
     static var recordedInstall: Self {
         var progress = Self(state: .act05)
@@ -672,6 +844,40 @@ struct ActivationGuidanceProgress: Codable, Equatable {
         self.state = state
         hasAcknowledgedCurrentState = false
         isCompletionPending = false
+    }
+}
+
+/// #1056 migration. Swift's synthesized `Decodable` throws on a key that is not
+/// in the payload, and `UserDefaultsActivationGuidanceProgressStore.load` turns
+/// any decode failure into a fresh `.init()`. Adding
+/// `acknowledgedContextualMarks` with a synthesized decoder would therefore
+/// have silently reset every seller who was mid-flow when the build shipped —
+/// back to ACT-01 on Scan. Decoding field by field keeps an older record
+/// exactly where it was and defaults only what it could not have carried.
+///
+/// Written in an extension on purpose: an `init(from:)` in the type body would
+/// suppress the memberwise initialiser this type is constructed with elsewhere.
+extension ActivationGuidanceProgress {
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            state: try container.decodeIfPresent(
+                ActivationGuidanceState.self,
+                forKey: .state
+            ) ?? .act01,
+            hasAcknowledgedCurrentState: try container.decodeIfPresent(
+                Bool.self,
+                forKey: .hasAcknowledgedCurrentState
+            ) ?? false,
+            isCompletionPending: try container.decodeIfPresent(
+                Bool.self,
+                forKey: .isCompletionPending
+            ) ?? false,
+            acknowledgedContextualMarks: try container.decodeIfPresent(
+                Set<ActivationGuidanceState>.self,
+                forKey: .acknowledgedContextualMarks
+            ) ?? []
+        )
     }
 }
 

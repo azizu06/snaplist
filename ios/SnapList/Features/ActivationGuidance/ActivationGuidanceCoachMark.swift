@@ -6,6 +6,10 @@ struct ActivationGuidanceCoachMark: View {
     let dismiss: () -> Void
     let isCompleting: Bool
     let usesStaticScoutRendering: Bool
+    /// #1056. A contextual mark is anchored to its own cutout rather than to
+    /// the bottom of the screen, so the shell hands the geometry down instead
+    /// of the domain policy deciding it. `nil` keeps the approved anchor.
+    var placementOverride: ActivationSpotlightBubblePlacement? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -68,9 +72,15 @@ struct ActivationGuidanceCoachMark: View {
     /// The one anchor contract, shared by the normal and Reduced Motion
     /// compositions: Activation v1.1 keeps the tail as the anchor in both.
     var anchor: ActivationCoachMarkAnchor {
-        ActivationCoachMarkAnchorPolicy.anchor(
+        let approved = ActivationCoachMarkAnchorPolicy.anchor(
             for: coachMark,
             reduceMotion: reduceMotion
+        )
+        guard let placementOverride else { return approved }
+        return ActivationCoachMarkAnchor(
+            tailEdge: placementOverride.tailEdge,
+            bottomInset: approved.bottomInset,
+            tailHorizontalOffset: placementOverride.tailHorizontalOffset
         )
     }
 

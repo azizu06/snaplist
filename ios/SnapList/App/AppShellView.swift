@@ -85,6 +85,11 @@ struct AppShellView: View {
     @State private var activationProgress = ActivationGuidanceProgress()
     @State private var activationListingReviewPresented = false
     @State private var activationGuestClaimPresented = false
+    /// #1056. The spotlight's own state: the bubble's frame, so the touch gate
+    /// can let its Got it button through, and the registry a spotlit control
+    /// publishes its action to for the accessibility stand-in.
+    @State private var activationBubbleFrame: CGRect?
+    @State private var activationSpotlightActions = ActivationSpotlightActionRegistry()
     private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
     private let activationGuestCompletionStore =
         UserDefaultsActivationGuidanceGuestCompletionStore()
@@ -263,8 +268,16 @@ struct AppShellView: View {
             }
         }
         .fixtureAccessibilityOverrides(configuration)
-        .overlay(alignment: .bottom) {
-            activationGuidanceOverlay
+        .environment(\.activationSpotlightActions, activationSpotlightActions)
+        // While a mark is up the surface behind it is out of the accessibility
+        // tree; the mark's own elements — its line, the spotlit control's
+        // stand-in, and Got it — are the way forward.
+        .accessibilityHidden(activationCoachMark != nil)
+        .overlayPreferenceValue(ActivationSpotlightTargetPreferenceKey.self) { anchors in
+            GeometryReader { geometry in
+                activationGuidanceOverlay(anchors: anchors, geometry: geometry)
+            }
+            .ignoresSafeArea()
         }
         // Issue #891. Attached here rather than inside the shell so a push that
         // lands during onboarding still has somewhere to draw; the bottom is
@@ -1037,44 +1050,126 @@ struct AppShellView: View {
     }
 
     private var activationFallbackSurface: ActivationGuidanceSurface? {
-        if photoReviewHost.session != nil {
-            return .photoReview
-        }
-        if router.selectedTab == .trophyWall,
-           router.presentedFullScreen == nil {
-            return .trophyWall
-        }
-        if router.selectedTab == .scan,
-           router.presentedFullScreen == nil
-                || router.presentedFullScreen == .guidedCamera {
-            return .scan
-        }
-        return nil
+        // #1056: the pushed stack is an input. Reading only the tab is what let
+        // the Trophy Wall mark draw on top of pushed Settings.
+        ActivationSurfaceResolutionPolicy.surface(
+            hasPhotoReviewSession: photoReviewHost.session != nil,
+            selectedTab: router.selectedTab,
+            pushedPath: router.selectedPath,
+            presentedFullScreen: router.presentedFullScreen
+        )
     }
 
     private var activationCoachMark: ActivationCoachMark? {
-        guard shouldPresentActivation,
-              !activationProgress.hasAcknowledgedCurrentState,
-              let surface = activationSurface else { return nil }
-        return ActivationCoachMark(
-            state: activationProgress.state,
-            surface: surface
+        guard shouldPresentActivation else { return nil }
+        return ActivationCoachMarkResolutionPolicy.coachMark(
+            progress: activationProgress,
+            surface: activationSurface
         )
     }
 
     @ViewBuilder
-    private var activationGuidanceOverlay: some View {
+    private func activationGuidanceOverlay(
+        anchors: [ActivationSpotlightTarget: Anchor<CGRect>],
+        geometry: GeometryProxy
+    ) -> some View {
         if let coachMark = activationCoachMark {
-            ActivationGuidanceCoachMark(
-                coachMark: coachMark,
-                dismiss: dismissActivationGuidance,
-                isCompleting: isCompletingActivation,
-                usesStaticScoutRendering: configuration.usesStaticScoutRendering
+            let bounds = CGRect(origin: .zero, size: geometry.size)
+            let presentation = ActivationSpotlightPolicy.presentation(
+                for: coachMark,
+                targetFrame: ActivationSpotlightTargetPolicy
+                    .target(for: coachMark)
+                    .flatMap { anchors[$0] }
+                    .map { geometry[$0] },
+                bounds: bounds
             )
-            .padding(.horizontal, 18)
-            .padding(.bottom, activationBottomInset)
+
+            ZStack(alignment: .topLeading) {
+                if presentation.isBlocking {
+                    ActivationSpotlightScrim(
+                        coachMark: coachMark,
+                        cutout: presentation.cutout,
+                        dismissFrame: activationBubbleFrame,
+                        reduceMotion: reduceMotion,
+                        targetTouched: {
+                            activationSpotlightTargetTouched(coachMark)
+                        }
+                    )
+                }
+
+                activationCoachMarkBubble(
+                    coachMark,
+                    presentation: presentation,
+                    bounds: bounds,
+                    safeAreaBottom: geometry.safeAreaInsets.bottom
+                )
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .coordinateSpace(name: Self.activationSpotlightSpace)
+            .onPreferenceChange(ActivationBubbleFramePreferenceKey.self) { frame in
+                activationBubbleFrame = frame
+            }
         }
     }
+
+    private static let activationSpotlightSpace = "activation-spotlight"
+
+    /// The bubble keeps its approved bottom-docked anchor for every mark the
+    /// design package placed there. A mark whose control is not docked to the
+    /// bottom — the Trophy Wall clock, the Settings row — is placed against its
+    /// own cutout instead.
+    @ViewBuilder
+    private func activationCoachMarkBubble(
+        _ coachMark: ActivationCoachMark,
+        presentation: ActivationSpotlightPresentation,
+        bounds: CGRect,
+        safeAreaBottom: CGFloat
+    ) -> some View {
+        let placement = coachMark.isContextual
+            ? presentation.cutout.map {
+                ActivationSpotlightBubblePlacementPolicy.placement(
+                    cutout: $0,
+                    bounds: bounds,
+                    horizontalPadding: Self.activationBubbleHorizontalPadding
+                )
+            }
+            : nil
+
+        ActivationGuidanceCoachMark(
+            coachMark: coachMark,
+            dismiss: dismissActivationGuidance,
+            isCompleting: isCompletingActivation,
+            usesStaticScoutRendering: configuration.usesStaticScoutRendering,
+            placementOverride: placement
+        )
+        .padding(.horizontal, Self.activationBubbleHorizontalPadding)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ActivationBubbleFramePreferenceKey.self,
+                    value: proxy.frame(
+                        in: .named(Self.activationSpotlightSpace)
+                    )
+                )
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: placement?.topInset == nil ? .bottom : .top
+        )
+        .padding(
+            .top,
+            placement?.topInset ?? 0
+        )
+        .padding(
+            .bottom,
+            placement.map { $0.bottomInset ?? 0 }
+                ?? (activationBottomInset + safeAreaBottom)
+        )
+    }
+
+    private static let activationBubbleHorizontalPadding: CGFloat = 18
 
     private var activationBottomInset: CGFloat {
         guard let coachMark = activationCoachMark else { return 24 }
@@ -1119,7 +1214,33 @@ struct AppShellView: View {
     }
 
     private func dismissActivationGuidance() {
+        guard let coachMark = activationCoachMark else { return }
+        guard !coachMark.isContextual else {
+            acknowledgeActivationContextualMark(coachMark)
+            return
+        }
         advanceActivationGuidance(for: .gotIt)
+    }
+
+    /// A touch inside the cutout reaches the real control, which runs its own
+    /// action and — for a spine mark — advances through the hook that action
+    /// already calls. A contextual mark has no such hook, so tapping its
+    /// control is what retires it.
+    private func activationSpotlightTargetTouched(
+        _ coachMark: ActivationCoachMark
+    ) {
+        guard coachMark.isContextual else { return }
+        acknowledgeActivationContextualMark(coachMark)
+    }
+
+    private func acknowledgeActivationContextualMark(
+        _ coachMark: ActivationCoachMark
+    ) {
+        guard shouldPresentActivation,
+              activationProgress.acknowledgeContextualMark(coachMark) else {
+            return
+        }
+        saveActivationProgress()
     }
 
     private func advanceActivationGuidance(for action: ActivationGuidanceAction) {

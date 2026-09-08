@@ -68,6 +68,10 @@ struct TrophyWallView: View {
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .accessibilityLabel("Processing")
                 .accessibilityIdentifier("trophy.wall.processing")
+                .activationSpotlightTarget(
+                    .trophyWallProcessing,
+                    action: openProcessing
+                )
 
                 Button(action: openAccount) {
                     Text(accountInitials)

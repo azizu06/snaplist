@@ -3593,6 +3593,9 @@ struct PhotoReviewView: View {
                                         voiceRow(openBoundary)
                                             .frame(width: contentWidth)
                                             .photoReviewLayoutLandmark(.voiceNote)
+                                            .activationSpotlightTarget(
+                                                .photoReviewVoiceNote
+                                            )
                                         Spacer(minLength: 0)
                                     }
                                     .padding(
@@ -4223,6 +4226,7 @@ struct PhotoReviewView: View {
                 thumbnailStripViewportWidth = width
             }
             .photoReviewLayoutLandmark(.thumbnailStrip)
+            .activationSpotlightTarget(.photoReviewThumbnailStrip)
         }
     }
 

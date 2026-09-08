@@ -190,7 +190,10 @@ final class OnboardingFlowTests: XCTestCase {
         ))
     }
 
-    func testActivationGuidanceDeclaresTheFullApprovedEightStateSet() {
+    /// Eight approved spine states plus #1056's two contextual marks, which
+    /// are states so one persisted record covers both kinds but never occupy
+    /// `ActivationGuidanceProgress.state`.
+    func testActivationGuidanceDeclaresTheFullApprovedStateSet() {
         XCTAssertEqual(
             ActivationGuidanceState.allCases.map(\.rawValue),
             [
@@ -202,6 +205,8 @@ final class OnboardingFlowTests: XCTestCase {
                 "ACT-05",
                 "ACT-06",
                 "ACT-07",
+                "ACT-08",
+                "ACT-09",
             ]
         )
     }
@@ -847,6 +852,8 @@ final class OnboardingFlowTests: XCTestCase {
             .act05: .none,
             .act06: .staticImage(name: "ActivationScoutACT06"),
             .act07: .none,
+            .act08: .staticImage(name: "ActivationScoutACT03"),
+            .act09: .staticImage(name: "ActivationScoutACT03"),
         ]
 
         XCTAssertEqual(Set(expected.keys), Set(ActivationGuidanceState.allCases))
