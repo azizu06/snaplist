@@ -9,6 +9,14 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    /// The photo-count pill reads `PhotoReviewCapacityPolicy.photoLimit`, not a
+    /// literal — this pins that constant to the domain's `CapturePhotoLimits`
+    /// so the two can never drift apart (hub audit finding on #1051).
+    func testPhotoReviewCapacityPolicyLimitMatchesCaptureDomainLimit() {
+        XCTAssertEqual(PhotoReviewCapacityPolicy.photoLimit, CapturePhotoLimits.maxPhotoCount)
+        XCTAssertEqual(PhotoReviewCapacityPolicy.photoLimit, 5)
+    }
+
     func testPhotoReviewFixtureMaterializesDecodableImagesBeforeConstruction() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(

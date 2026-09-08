@@ -1959,7 +1959,7 @@ final class TrophyWallDomainTests: XCTestCase {
             TrophyWallProcessingView.CollectionMessage(
                 heading: "Nothing is processing.",
                 action: .scan(label: "Scan an item"),
-                scoutImageName: "ScoutUncertain",
+                scoutImageName: "ScoutReassurance",
                 scoutAccessibilityLabel: "Scout, the SnapList camera helper"
             )
         )
@@ -2511,6 +2511,7 @@ final class TrophyWallDomainTests: XCTestCase {
             let host = HostedTrophyWallTestWindow(
                 rootView: TrophyWallView(
                     store: store,
+                    accountInitials: "S",
                     openProcessing: {},
                     openAccount: {},
                     openListing: { _ in .presentedReview },
@@ -2556,6 +2557,7 @@ final class TrophyWallDomainTests: XCTestCase {
 
         let exhaustedWall = TrophyWallView(
             store: settledStore,
+            accountInitials: "S",
             openProcessing: {},
             openAccount: {},
             openListing: { _ in .presentedReview },
@@ -2605,7 +2607,7 @@ final class TrophyWallDomainTests: XCTestCase {
                 .init(
                     heading: "Nothing is processing.",
                     action: .scan(label: "Scan an item"),
-                    scoutImageName: "ScoutUncertain",
+                    scoutImageName: "ScoutReassurance",
                     scoutAccessibilityLabel: "Scout"
                 ),
                 "trophy.processing.collection.scan"
@@ -2894,6 +2896,7 @@ private struct TrophyWallFeatureTestRoot: View {
             refreshState: $driver.refreshState,
             runStore: runStore,
             listingReviewStore: listingReviewStore,
+            accountInitials: "S",
             correctionAvailability: .notOffered,
             forceReducedMotion: false,
             activationListingReviewOpened: {},

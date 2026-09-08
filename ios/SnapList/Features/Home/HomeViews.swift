@@ -26,6 +26,11 @@ struct TrophyWallView: View {
     )
 
     @Bindable var store: TrophyWallStore
+    /// Derived once via `AccountInitials.from` through the same
+    /// `SettingsProfile.current(configuration:)` path Settings itself uses,
+    /// so the header can never show a different answer than Settings does
+    /// for the same signed-in seller (#1051).
+    let accountInitials: String
     let openProcessing: () -> Void
     let openAccount: () -> Void
     /// #963: a settled tile opens its listing surface directly rather than an
@@ -65,7 +70,7 @@ struct TrophyWallView: View {
                 .accessibilityIdentifier("trophy.wall.processing")
 
                 Button(action: openAccount) {
-                    Text("A")
+                    Text(accountInitials)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .frame(width: 36, height: 36)
@@ -517,7 +522,14 @@ struct TrophyWallProcessingView: View {
         let scoutAccessibilityLabel: String
 
         var scout: TrophyWallScout {
-            scoutImageName == "ScoutRetryReview" ? .recovery : .uncertainty
+            switch scoutImageName {
+            case "ScoutRetryReview":
+                .recovery
+            case "ScoutReassurance":
+                .reassurance
+            default:
+                .uncertainty
+            }
         }
     }
 
@@ -543,7 +555,7 @@ struct TrophyWallProcessingView: View {
     private static let emptyCollectionMessage = CollectionMessage(
         heading: "Nothing is processing.",
         action: .scan(label: "Scan an item"),
-        scoutImageName: "ScoutUncertain",
+        scoutImageName: "ScoutReassurance",
         scoutAccessibilityLabel: scoutAccessibilityLabel
     )
     static let unavailableCollectionMessage = CollectionMessage(
@@ -958,8 +970,6 @@ private struct TrophyWallNoticeStripView: View {
 }
 
 struct TrophyWallCollectionMessageView: View {
-    private static let scoutHeight: CGFloat = 150
-
     let message: TrophyWallProcessingView.CollectionMessage
     let onScan: () -> Void
     let onTryAgain: () -> Void
@@ -967,12 +977,16 @@ struct TrophyWallCollectionMessageView: View {
     @ScaledMetric(relativeTo: .title3) private var headingSize = 18
 
     var body: some View {
-        VStack(spacing: 20) {
+        // Shares `TrophyWallEmptyMetrics` with `TrophyWallEmptyView` so the two
+        // Trophy Wall empty states read as distinct clips of one system rather
+        // than two screens that happen to look alike (#1051).
+        VStack(spacing: TrophyWallEmptyMetrics.contentSpacing) {
             TrophyWallScoutView(
                 scout: message.scout,
-                height: Self.scoutHeight,
+                height: TrophyWallEmptyMetrics.scoutHeight,
                 accessibilityLabel: message.scoutAccessibilityLabel
             )
+                .padding(.bottom, TrophyWallEmptyMetrics.scoutOpticalBottomInset)
 
             Text(message.heading)
                 .font(.system(size: headingSize, weight: .bold))
@@ -983,9 +997,8 @@ struct TrophyWallCollectionMessageView: View {
 
             action
         }
-        .padding(.horizontal, 34)
-        .padding(.top, 24)
-        .padding(.bottom, 104)
+        .padding(.horizontal, TrophyWallEmptyMetrics.horizontalPadding)
+        .padding(.bottom, TrophyWallEmptyMetrics.bottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.processing.collection")

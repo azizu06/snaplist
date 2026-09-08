@@ -43,6 +43,7 @@ ios/SnapList/Core/API/IncludedOfferRedemptionCoordinator.swift
 ios/SnapList/Core/API/MobileAPIClient.swift
 ios/SnapList/Core/API/MobileAPIModels.swift
 ios/SnapList/Core/API/PushDeviceTokenClient.swift
+ios/SnapList/Core/AccountInitials.swift
 ios/SnapList/Core/Analytics/AnalyticsClient.swift
 ios/SnapList/Core/Analytics/AnalyticsContracts.swift
 ios/SnapList/Core/Analytics/AnalyticsPersistence.swift

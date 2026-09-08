@@ -1904,7 +1904,7 @@ final class PhotoReviewAccessibilityActionPresentation {
 /// Photo Review v1.1/v1.2 REV-03. One to five ordered photos, and at five the Add tile
 /// stays visible but stops being an action.
 enum PhotoReviewCapacityPolicy {
-    static let photoLimit = 5
+    static let photoLimit = CapturePhotoLimits.maxPhotoCount
 
     static func remainingCapacity(photoCount: Int) -> Int {
         max(0, photoLimit - photoCount)
@@ -3919,7 +3919,7 @@ struct PhotoReviewView: View {
     }
 
     private var countPill: some View {
-        Text("\(store.photos.count) of 5")
+        Text("\(store.photos.count) of \(PhotoReviewCapacityPolicy.photoLimit)")
             .font(
                 .system(
                     size: reviewCountSize,

@@ -2224,7 +2224,11 @@ struct SettingsProfile {
                 name: "Guest",
                 email: "Not signed in",
                 emailAddressID: nil,
-                initials: "G",
+                initials: AccountInitials.from(
+                    firstName: nil,
+                    lastName: nil,
+                    isSignedIn: false
+                ),
                 method: .emailCode
             )
         }
@@ -2235,7 +2239,11 @@ struct SettingsProfile {
             name: name.isEmpty ? "SnapList seller" : name,
             email: user.primaryEmailAddress?.emailAddress ?? "Signed in",
             emailAddressID: user.primaryEmailAddress?.id,
-            initials: [user.firstName?.first, user.lastName?.first].compactMap { $0 }.map(String.init).joined().uppercased().nonEmpty ?? "S",
+            initials: AccountInitials.from(
+                firstName: user.firstName,
+                lastName: user.lastName,
+                isSignedIn: true
+            ),
             method: apple ? .apple : .emailCode
         )
     }
