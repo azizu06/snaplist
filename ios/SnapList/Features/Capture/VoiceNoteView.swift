@@ -3,7 +3,9 @@ import UIKit
 
 enum VoiceNoteWaveformGeometry {
     static let liveBarCount = 27
+    static let savedBarCount = 24
     static let quietBarHeight: CGFloat = 4
+    static let savedQuietBarHeight: CGFloat = 5
 
     static var emptyLiveMeterSamples: [Double] {
         Array(repeating: 0, count: liveBarCount)
@@ -28,6 +30,21 @@ enum VoiceNoteWaveformGeometry {
     ) -> [CGFloat] {
         normalizedLiveMeterSamples(samples).map { sample in
             quietBarHeight + (28 * CGFloat(sample))
+        }
+    }
+
+    /// Bar heights for a saved note. An unreadable file yields no samples, and
+    /// a flat quiet baseline is the honest drawing of "we could not read it" —
+    /// never an invented pattern.
+    static func savedBarHeights(samples: [Double]) -> [CGFloat] {
+        guard !samples.isEmpty else {
+            return Array(
+                repeating: savedQuietBarHeight,
+                count: savedBarCount
+            )
+        }
+        return samples.map { sample in
+            max(savedQuietBarHeight, 30 * CGFloat(min(max(sample, 0), 1)))
         }
     }
 
@@ -132,22 +149,31 @@ struct VoiceNoteSheet: View {
                 )
             }
         }
+        // The playhead is progress, not decoration, so Reduced Motion keeps
+        // the same cadence instead of slowing it down.
+        .task(id: isPlayingSavedNote) {
+            guard isPlayingSavedNote, !usesStaticVoiceNoteFixture else {
+                return
+            }
+            while !Task.isCancelled, isPlayingSavedNote {
+                store.refreshPlayback()
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+        }
     }
 
     @ViewBuilder
     private var content: some View {
         switch store.phase {
-        case .recording(let elapsed, let level):
+        case .recording(let elapsed, _):
             recordingControls(
                 elapsed: elapsed,
-                level: level,
                 canSave: elapsed > 0,
                 isHeldTake: false
             )
         case .takeReady(let duration):
             recordingControls(
                 elapsed: duration,
-                level: 0.64,
                 canSave: true,
                 isHeldTake: true
             )
@@ -245,7 +271,6 @@ struct VoiceNoteSheet: View {
 
     private func recordingControls(
         elapsed: TimeInterval,
-        level: Double,
         canSave: Bool,
         isHeldTake: Bool
     ) -> some View {
@@ -276,12 +301,12 @@ struct VoiceNoteSheet: View {
                 )
 
                 VoiceNoteWaveform(
-                    level: level,
                     isLive: true,
                     reduceMotion: reduceMotion,
                     isHeldTake: isHeldTake,
-                    usesLiveMeterSamples:
-                        !usesStaticRecordingFixture && !isHeldTake
+                    samples: usesStaticRecordingFixture
+                        ? Self.staticLiveFixtureSamples
+                        : store.liveMeterSamples
                 )
                 .frame(maxWidth: .infinity, minHeight: 52)
 
@@ -360,11 +385,13 @@ struct VoiceNoteSheet: View {
                 )
 
                 VoiceNoteWaveform(
-                    level: 0.72,
                     isLive: false,
                     reduceMotion: true,
                     isHeldTake: false,
-                    usesLiveMeterSamples: false
+                    samples: usesStaticVoiceNoteFixture
+                        ? Self.staticSavedFixtureSamples
+                        : store.savedNoteWaveform,
+                    playbackProgress: store.playbackProgress
                 )
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .accessibilityHidden(
@@ -476,6 +503,37 @@ struct VoiceNoteSheet: View {
         return false
     }
 
+    /// The launch-argument fixtures replace the microphone and the player, so
+    /// they also replace the shapes those would have produced. Debug only.
+    private var usesStaticVoiceNoteFixture: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains {
+            $0.hasPrefix("--voice-note-")
+        }
+#else
+        false
+#endif
+    }
+
+    private static let staticLiveFixtureSamples: [Double] = [
+        0.72, 0.86, 0.92, 0.80, 0.74, 0.66,
+        0.14, 0.12, 0.42, 0.72, 0.88, 0.96,
+        1.00, 0.82, 0.68, 0.78, 0.92, 0.70,
+        0.56, 0.42, 0.34, 0.12, 0.46, 0.82,
+        0.98, 0.14, 0.10
+    ]
+
+    private static let staticSavedFixtureSamples: [Double] = [
+        0.72, 0.64, 0.16, 0.48, 0.82, 0.78,
+        0.36, 0.14, 0.76, 0.18, 0.14, 0.12,
+        0.10, 0.12, 0.66, 0.18, 0.36, 0.90,
+        1.00, 0.72, 0.54, 0.16, 0.70, 0.68
+    ]
+
+    private var isPlayingSavedNote: Bool {
+        store.phase == .saved(isPlaying: true)
+    }
+
     private var usesStaticRecordingFixture: Bool {
 #if DEBUG
         ProcessInfo.processInfo.arguments.contains(
@@ -526,29 +584,15 @@ struct VoiceNoteSheet: View {
 }
 
 private struct VoiceNoteWaveform: View {
-    let level: Double
     let isLive: Bool
     let reduceMotion: Bool
     let isHeldTake: Bool
-    let usesLiveMeterSamples: Bool
-
-    @State private var liveMeterSamples =
-        VoiceNoteWaveformGeometry.emptyLiveMeterSamples
-
-    private let livePattern: [Double] = [
-        0.72, 0.86, 0.92, 0.80, 0.74, 0.66,
-        0.14, 0.12, 0.42, 0.72, 0.88, 0.96,
-        1.00, 0.82, 0.68, 0.78, 0.92, 0.70,
-        0.56, 0.42, 0.34, 0.12, 0.46, 0.82,
-        0.98, 0.14, 0.10
-    ]
-
-    private let savedPattern: [Double] = [
-        0.72, 0.64, 0.16, 0.48, 0.82, 0.78,
-        0.36, 0.14, 0.76, 0.18, 0.14, 0.12,
-        0.10, 0.12, 0.66, 0.18, 0.36, 0.90,
-        1.00, 0.72, 0.54, 0.16, 0.70, 0.68
-    ]
+    /// The shape to draw: the rolling live-meter trail while recording, the
+    /// file-derived shape for a saved note. Empty draws a quiet baseline.
+    var samples: [Double] = []
+    /// How far playback has reached, `0...1`. Bars behind the head are drawn
+    /// in the active ink; the rest stay inactive.
+    var playbackProgress: Double = 0
 
     var body: some View {
         Group {
@@ -556,19 +600,17 @@ private struct VoiceNoteWaveform: View {
                 VoiceNoteHeldTakeWaveform()
             } else {
                 Canvas { context, size in
-                    let barHeights: [CGFloat]
-                    if usesLiveMeterSamples {
-                        barHeights = VoiceNoteWaveformGeometry
-                            .liveMeterBarHeights(samples: liveMeterSamples)
-                    } else {
-                        let pattern = isLive ? livePattern : savedPattern
-                        barHeights = pattern.map {
-                            barHeight(value: $0, isLive: isLive)
-                        }
-                    }
-                    let color = isLive
-                        ? SnapListColorToken.inkPrimary.color
-                        : SnapListColorToken.waveformInactive.color
+                    let barHeights = isLive
+                        ? VoiceNoteWaveformGeometry
+                            .liveMeterBarHeights(samples: samples)
+                        : VoiceNoteWaveformGeometry
+                            .savedBarHeights(samples: samples)
+                    let playedBarCount = isLive
+                        ? barHeights.count
+                        : VoiceWaveformPlayhead.playedBarCount(
+                            progress: playbackProgress,
+                            barCount: barHeights.count
+                        )
                     let barWidth: CGFloat = 4
                     let centerY = size.height / 2
                     let step = barHeights.count > 1
@@ -588,7 +630,11 @@ private struct VoiceNoteWaveform: View {
                                 roundedRect: rect,
                                 cornerRadius: barWidth / 2
                             ),
-                            with: .color(color)
+                            with: .color(
+                                index < playedBarCount
+                                    ? SnapListColorToken.inkPrimary.color
+                                    : SnapListColorToken.waveformInactive.color
+                            )
                         )
                     }
                 }
@@ -596,34 +642,10 @@ private struct VoiceNoteWaveform: View {
         }
         .animation(
             reduceMotion ? nil : .linear(duration: 0.1),
-            value: liveMeterSamples
+            value: samples
         )
-        .onChange(of: level, initial: true) { _, newLevel in
-            guard usesLiveMeterSamples else {
-                return
-            }
-            liveMeterSamples = VoiceNoteWaveformGeometry
-                .appendingLiveMeterSample(
-                    newLevel,
-                    to: liveMeterSamples
-                )
-        }
         .accessibilityHidden(true)
         .allowsHitTesting(false)
-    }
-
-    private func barHeight(
-        value: Double,
-        isLive: Bool
-    ) -> CGFloat {
-        if isLive {
-            let visibleLevel = max(level, 0.12)
-            return max(
-                4,
-                32 * value * (0.70 + (visibleLevel * 0.40))
-            )
-        }
-        return max(5, 30 * value)
     }
 }
 

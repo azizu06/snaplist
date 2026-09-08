@@ -40,6 +40,8 @@ extension AVAudioRecorder: VoiceNoteRecording {}
 @MainActor
 protocol VoiceNotePlaying: AnyObject {
     var delegate: AVAudioPlayerDelegate? { get set }
+    var currentTime: TimeInterval { get set }
+    var duration: TimeInterval { get }
 
     @discardableResult
     func prepareToPlay() -> Bool
@@ -71,6 +73,29 @@ final class AVFoundationVoiceNoteAudioClient:
     private var player: VoiceNotePlaying?
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
+    /// The engine that feeds the live meter. Nil means the input tap could not
+    /// run, and the recorder's own meter drives the envelope instead.
+    private var meterEngine: AVAudioEngine?
+    private var envelope = VoiceMeterEnvelope()
+    private var pendingMeterLevels: [Double] = []
+    private var savedWaveformCacheKey: SavedWaveformCacheKey?
+    private var savedWaveformCache: [Double] = []
+
+    /// A poll that arrives late must not replay a long backlog of bars, so the
+    /// trail keeps only about a second and a half of frames.
+    private static let maximumPendingMeterLevels = 64
+    private static let meterTapBufferSize: AVAudioFrameCount = 1024
+    /// `AVAudioRecorder` metering is read once per poll, not once per window.
+    private static let fallbackFrameDuration: TimeInterval = 0.1
+
+    /// A saved note commits to a fixed file name, so the URL alone goes stale
+    /// after a rerecord. Size and modification date make the key honest.
+    private struct SavedWaveformCacheKey: Equatable {
+        let url: URL
+        let byteCount: Int
+        let modifiedAt: Date?
+        let barCount: Int
+    }
 
     init(
         audioSession: VoiceNoteAudioSessionControlling =
@@ -144,18 +169,66 @@ final class AVFoundationVoiceNoteAudioClient:
         }
     }
 
-    var recordingSnapshot: VoiceNoteRecordingSnapshot {
+    func drainRecordingSnapshot() -> VoiceNoteRecordingSnapshot {
         guard let recorder else {
-            return VoiceNoteRecordingSnapshot(
-                elapsed: 0,
-                averagePower: -160
+            pendingMeterLevels = []
+            return VoiceNoteRecordingSnapshot(elapsed: 0)
+        }
+        if meterEngine == nil {
+            // Without an input tap there is one reading per poll instead of one
+            // per window. Folding it through the same envelope keeps the same
+            // adaptive floor and attack/release, only at a coarser rate.
+            recorder.updateMeters()
+            let decibels = max(
+                recorder.averagePower(forChannel: 0),
+                VoiceWaveformAnalyzer.silenceDecibels
+            )
+            pendingMeterLevels.append(
+                envelope.ingest(
+                    VoiceWaveformFrame(
+                        rootMeanSquare: pow(10, decibels / 20),
+                        decibels: decibels,
+                        brightness: envelope.tuning.brightnessPivot
+                    ),
+                    frameDuration: Self.fallbackFrameDuration
+                )
             )
         }
-        recorder.updateMeters()
+        let meterLevels = pendingMeterLevels
+        pendingMeterLevels = []
         return VoiceNoteRecordingSnapshot(
             elapsed: recorder.currentTime,
-            averagePower: recorder.averagePower(forChannel: 0)
+            meterLevels: meterLevels
         )
+    }
+
+    var playbackSnapshot: VoiceNotePlaybackSnapshot {
+        guard let player else {
+            return VoiceNotePlaybackSnapshot()
+        }
+        return VoiceNotePlaybackSnapshot(
+            currentTime: player.currentTime,
+            duration: player.duration
+        )
+    }
+
+    func savedWaveform(for url: URL, barCount: Int) -> [Double] {
+        let attributes = try? FileManager.default.attributesOfItem(
+            atPath: url.path
+        )
+        let key = SavedWaveformCacheKey(
+            url: url,
+            byteCount: (attributes?[.size] as? NSNumber)?.intValue ?? -1,
+            modifiedAt: attributes?[.modificationDate] as? Date,
+            barCount: barCount
+        )
+        if key == savedWaveformCacheKey {
+            return savedWaveformCache
+        }
+        let bars = Self.readBars(from: url, barCount: barCount)
+        savedWaveformCacheKey = key
+        savedWaveformCache = bars
+        return bars
     }
 
     func requestPermission() async -> VoiceNoteMicrophonePermission {
@@ -199,13 +272,144 @@ final class AVFoundationVoiceNoteAudioClient:
             throw AVFoundationVoiceNoteError.recordingCouldNotStart
         }
         self.recorder = recorder
+        // A new take will overwrite the saved note in place, and two takes that
+        // both reach the 15 s cap write the same byte count, so the file's own
+        // metadata cannot be the only thing that retires the cached shape.
+        savedWaveformCacheKey = nil
+        savedWaveformCache = []
+        startMeterTap()
     }
 
     func stopRecording() {
+        stopMeterTap()
         recorder?.delegate = nil
         recorder?.stop()
         recorder = nil
         deactivateSessionIfIdle()
+    }
+
+    /// Real amplitude for the live meter: RMS per input window at the engine's
+    /// own rate, rather than one averaged power reading per poll.
+    private func startMeterTap() {
+        envelope.reset()
+        pendingMeterLevels = []
+        guard permission == .allowed, meterEngine == nil else {
+            return
+        }
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        let sampleRate = format.sampleRate
+        guard sampleRate > 0, format.channelCount > 0 else {
+            return
+        }
+        input.installTap(
+            onBus: 0,
+            bufferSize: Self.meterTapBufferSize,
+            format: format
+        ) { [weak self] buffer, _ in
+            guard let samples = Self.monoSamples(from: buffer) else {
+                return
+            }
+            let frame = VoiceWaveformAnalyzer.analyze(
+                samples,
+                sampleRate: sampleRate
+            )
+            let frameDuration = TimeInterval(samples.count) / sampleRate
+            Task { @MainActor in
+                self?.ingestMeterFrame(frame, frameDuration: frameDuration)
+            }
+        }
+        do {
+            try engine.start()
+            meterEngine = engine
+        } catch {
+            input.removeTap(onBus: 0)
+        }
+    }
+
+    private func stopMeterTap() {
+        guard let meterEngine else {
+            return
+        }
+        meterEngine.inputNode.removeTap(onBus: 0)
+        meterEngine.stop()
+        self.meterEngine = nil
+    }
+
+    private func ingestMeterFrame(
+        _ frame: VoiceWaveformFrame,
+        frameDuration: TimeInterval
+    ) {
+        guard recorder != nil else {
+            return
+        }
+        pendingMeterLevels.append(
+            envelope.ingest(frame, frameDuration: frameDuration)
+        )
+        let overflow = pendingMeterLevels.count
+            - Self.maximumPendingMeterLevels
+        if overflow > 0 {
+            pendingMeterLevels.removeFirst(overflow)
+        }
+    }
+
+    private nonisolated static func readBars(
+        from url: URL,
+        barCount: Int
+    ) -> [Double] {
+        guard
+            let file = try? AVAudioFile(forReading: url),
+            file.length > 0,
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat,
+                frameCapacity: AVAudioFrameCount(file.length)
+            )
+        else {
+            return []
+        }
+        do {
+            try file.read(into: buffer)
+        } catch {
+            return []
+        }
+        guard let samples = monoSamples(from: buffer) else {
+            return []
+        }
+        return VoiceWaveformBucketing.bars(
+            from: samples,
+            barCount: barCount
+        )
+    }
+
+    private nonisolated static func monoSamples(
+        from buffer: AVAudioPCMBuffer
+    ) -> [Float]? {
+        let frameLength = Int(buffer.frameLength)
+        guard
+            frameLength > 0,
+            let channels = buffer.floatChannelData
+        else {
+            return nil
+        }
+        let channelCount = Int(buffer.format.channelCount)
+        guard channelCount > 1 else {
+            return Array(
+                UnsafeBufferPointer(start: channels[0], count: frameLength)
+            )
+        }
+        var mixed = [Float](repeating: 0, count: frameLength)
+        for channel in 0..<channelCount {
+            let source = channels[channel]
+            for index in 0..<frameLength {
+                mixed[index] += source[index]
+            }
+        }
+        let scale = 1 / Float(channelCount)
+        for index in 0..<frameLength {
+            mixed[index] *= scale
+        }
+        return mixed
     }
 
     func startPlaying(_ url: URL) throws {
