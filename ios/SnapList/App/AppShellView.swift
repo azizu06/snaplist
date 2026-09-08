@@ -2346,6 +2346,17 @@ enum TrophyWallPendingCardRecovery: Equatable {
     }
 }
 
+/// #1062: pure so the exact zoom-vs-push decision for the listing-review
+/// destination is unit-testable without standing up `TrophyWallFeatureView`'s
+/// private `@State`/`@Namespace`. The `#available(iOS 18, *)` gate itself
+/// stays at the call site — OS availability has no unit-testable value.
+enum TrophyWallZoomTransitionPolicy {
+    static func shouldZoom(reduceMotion: Bool, sourceRunID: UUID?) -> Bool {
+        TrophyWallMotionEnhancementPolicy.isEnabled(reduceMotion: reduceMotion)
+            && sourceRunID != nil
+    }
+}
+
 @MainActor
 struct TrophyWallFeatureView: View {
     @Environment(\.appDependencies) private var dependencies
@@ -2371,6 +2382,19 @@ struct TrophyWallFeatureView: View {
         ProcessingGuestClaimPresentationHost()
     @State private var listingReviewPresentation =
         ListingReviewPresentationHost()
+    /// #1062: shared between the settled tile (`.matchedTransitionSource`)
+    /// and listing review (`.navigationTransition(.zoom)`) so the two halves
+    /// of the same transition agree on which geometry to animate.
+    @Namespace private var zoomTransitionNamespace
+    /// The run the seller's own tap most recently opened, so the zoom knows
+    /// which tile it is zooming from. A guest-claim reopen never sets this —
+    /// there is no tile in that flow — so it falls back to the plain push.
+    @State private var zoomTransitionRunID: UUID?
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    private var reduceMotion: Bool {
+        systemReduceMotion || forceReducedMotion
+    }
 
     var body: some View {
         @Bindable var listingReviewPresentation = listingReviewPresentation
@@ -2388,7 +2412,8 @@ struct TrophyWallFeatureView: View {
                 router.reset(tab: .scan)
                 router.selectedTab = .scan
             },
-            onTryAgain: { refreshState.tryAgain() }
+            onTryAgain: { refreshState.tryAgain() },
+            namespace: zoomTransitionNamespace
         )
         .task(id: refreshState.taskID(tab: router.selectedTab)) {
             guard router.selectedTab == .trophyWall else { return }
@@ -2427,26 +2452,47 @@ struct TrophyWallFeatureView: View {
             }
         }
         .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
-            ListingReviewView(
-                store: listingReviewStore,
-                correctionAvailability: correctionAvailability,
-                forceReducedMotion: forceReducedMotion,
-                dismissReview: { listingReviewPresentation.dismiss() },
-                goToTrophyWall: {
-                    router.reset(tab: .trophyWall)
-                    router.selectedTab = .trophyWall
-                },
-                startNewItem: {
-                    router.reset(tab: .scan)
-                    router.selectedTab = .scan
-                },
-                activationInteraction: activationListingReviewInteraction
-            )
+            listingReviewDestination
         }
         .onChange(of: listingReviewPresentation.isPresented) { _, isPresented in
             if !isPresented {
                 activationListingReviewDismissed()
+                zoomTransitionRunID = nil
             }
+        }
+    }
+
+    /// #1062: iOS 17 has no `.navigationTransition`, and Reduced Motion (system
+    /// or forced) keeps the plain push even on iOS 18 — only a tile-initiated
+    /// open (a known `zoomTransitionRunID`) ever zooms.
+    @ViewBuilder
+    private var listingReviewDestination: some View {
+        let destination = ListingReviewView(
+            store: listingReviewStore,
+            correctionAvailability: correctionAvailability,
+            forceReducedMotion: forceReducedMotion,
+            dismissReview: { listingReviewPresentation.dismiss() },
+            goToTrophyWall: {
+                router.reset(tab: .trophyWall)
+                router.selectedTab = .trophyWall
+            },
+            startNewItem: {
+                router.reset(tab: .scan)
+                router.selectedTab = .scan
+            },
+            activationInteraction: activationListingReviewInteraction
+        )
+        if #available(iOS 18, *),
+           TrophyWallZoomTransitionPolicy.shouldZoom(
+               reduceMotion: reduceMotion,
+               sourceRunID: zoomTransitionRunID
+           ),
+           let zoomTransitionRunID {
+            destination.navigationTransition(
+                .zoom(sourceID: zoomTransitionRunID, in: zoomTransitionNamespace)
+            )
+        } else {
+            destination
         }
     }
 
@@ -2467,6 +2513,7 @@ struct TrophyWallFeatureView: View {
         case .presentedGuestClaim:
             activationGuestClaimPresentationChanged(true)
         case .presentedReview:
+            zoomTransitionRunID = runID
             activationListingReviewOpened()
         default:
             break
@@ -2593,7 +2640,8 @@ private struct ProcessingListingReviewSurface: View {
             },
             onScan: onScan,
             onTryAgain: onTryAgain,
-            onRefresh: onRefresh
+            onRefresh: onRefresh,
+            forceReducedMotion: forceReducedMotion
         )
         .navigationDestination(
             isPresented: Binding(

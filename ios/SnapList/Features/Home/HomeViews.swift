@@ -39,6 +39,10 @@ struct TrophyWallView: View {
     let openListing: (UUID) async -> ProcessingActionOutcome
     let onScan: () -> Void
     let onTryAgain: () -> Void
+    /// #1062: shared with the listing review destination so a settled tile's
+    /// zoom transition source matches the namespace the pushed screen zooms
+    /// into. Owned by the shell, threaded through unchanged.
+    let namespace: Namespace.ID
 
     @ScaledMetric(relativeTo: .title) private var titleSize = 28
     @Environment(\.dockScrollScale) private var dockScrollScale
@@ -226,7 +230,11 @@ struct TrophyWallView: View {
                         spacing: TrophyWallGridMetrics.gutterPoints
                     ) {
                         ForEach(store.settledTiles) { tile in
-                            TrophyWallSettledTileView(tile: tile, openListing: openListing)
+                            TrophyWallSettledTileView(
+                                tile: tile,
+                                openListing: openListing,
+                                namespace: namespace
+                            )
                         }
                     }
                     .padding(.horizontal, 16)
@@ -281,9 +289,27 @@ private extension View {
     }
 }
 
+private extension View {
+    /// #1062: iOS 17 has no `matchedTransitionSource`, so the tile is just
+    /// itself there — the plain push is the only navigation transition iOS 17
+    /// offers regardless.
+    @ViewBuilder
+    func matchedTransitionSourceIfAvailable(
+        id: UUID,
+        in namespace: Namespace.ID
+    ) -> some View {
+        if #available(iOS 18, *) {
+            matchedTransitionSource(id: id, in: namespace)
+        } else {
+            self
+        }
+    }
+}
+
 private struct TrophyWallSettledTileView: View {
     let tile: TrophyWallSettledTile
     let openListing: (UUID) async -> ProcessingActionOutcome
+    let namespace: Namespace.ID
 
     @ScaledMetric(relativeTo: .callout) private var dateChipHorizontalPadding: CGFloat = 8
     @ScaledMetric(relativeTo: .callout) private var dateChipVerticalPadding: CGFloat = 4
@@ -321,6 +347,12 @@ private struct TrophyWallSettledTileView: View {
                     : tile.accessibilityLabel
             )
             .accessibilityIdentifier(identifier)
+            // #1062: iOS 17 keeps the plain push — `matchedTransitionSource`
+            // is iOS 18+. Attaching it costs nothing when the destination
+            // never applies a matching `.zoom` (Reduced Motion): with no
+            // navigation transition to read it, the source id just sits
+            // unused.
+            .matchedTransitionSourceIfAvailable(id: runID, in: namespace)
         } else {
             surface
                 .accessibilityElement(children: .ignore)
@@ -585,6 +617,10 @@ struct TrophyWallProcessingView: View {
     let onScan: () -> Void
     let onTryAgain: () -> Void
     let onRefresh: () async -> Void
+    /// #1062: the fixture-forced flag `HomeScoutMotion` never had to combine,
+    /// because a screenshot proving the row symbol effects are off needs the
+    /// `--reduced-motion` launch argument, not just the system setting.
+    let forceReducedMotion: Bool
 
     @State private var refreshHost = TrophyWallProcessingRefreshHost()
 
@@ -597,7 +633,8 @@ struct TrophyWallProcessingView: View {
         onAction: @escaping (TrophyWallProcessingAction) async -> ProcessingActionOutcome,
         onScan: @escaping () -> Void,
         onTryAgain: @escaping () -> Void,
-        onRefresh: @escaping () async -> Void = {}
+        onRefresh: @escaping () async -> Void = {},
+        forceReducedMotion: Bool = false
     ) {
         self.rows = rows
         self.collectionOutcome = collectionOutcome
@@ -608,6 +645,7 @@ struct TrophyWallProcessingView: View {
         self.onScan = onScan
         self.onTryAgain = onTryAgain
         self.onRefresh = onRefresh
+        self.forceReducedMotion = forceReducedMotion
     }
 
     /// The seller's one way to ask Processing for fresh status. It reports
@@ -712,7 +750,8 @@ struct TrophyWallProcessingView: View {
                                 TrophyWallProcessingRowView(
                                     row: row,
                                     openRoute: openRoute,
-                                    onAction: onAction
+                                    onAction: onAction,
+                                    forceReducedMotion: forceReducedMotion
                                 )
 
                                 if row.id != presentation.visibleRows.last?.id {
@@ -1139,8 +1178,10 @@ private struct TrophyWallProcessingRowView: View {
     let row: TrophyWallProcessingRow
     let openRoute: (HomeRoute) -> Void
     let onAction: (TrophyWallProcessingAction) async -> ProcessingActionOutcome
+    let forceReducedMotion: Bool
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     /// #963: the server-authorized action this row last attempted and had
     /// rejected, so the row can say so where the seller is instead of pushing
     /// them to a status screen. A later successful attempt clears it.
@@ -1148,6 +1189,14 @@ private struct TrophyWallProcessingRowView: View {
 
     private var layout: TrophyWallProcessingRowMetrics.Layout {
         TrophyWallProcessingRowMetrics.layout(for: dynamicTypeSize)
+    }
+
+    /// #1062: the analyzing indicator's `.variableColor.iterative` and the
+    /// needs-retry chip's `.wiggle` both read this one gate.
+    private var showsMotionEnhancements: Bool {
+        TrophyWallMotionEnhancementPolicy.isEnabled(
+            reduceMotion: systemReduceMotion || forceReducedMotion
+        )
     }
 
     private var unavailableLabel: String? {
@@ -1255,27 +1304,64 @@ private struct TrophyWallProcessingRowView: View {
         Button {
             perform(action)
         } label: {
-            Text(action.label)
-                .snapListTypography(.status)
-                .foregroundStyle(action.foregroundColor)
-                .frame(minWidth: SnapListMetrics.minimumTouchTarget)
-                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                .padding(.horizontal, 10)
-                .background(action.backgroundColor)
-                .clipShape(.rect(cornerRadius: 12))
-                .overlay {
-                    if action.showsBorder {
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(
-                                SnapListColorToken.hairline.color,
-                                lineWidth: 1
-                            )
-                    }
+            HStack(spacing: 4) {
+                if case .retry = action {
+                    retryIcon
                 }
+                Text(action.label)
+                    .snapListTypography(.status)
+            }
+            .foregroundStyle(action.foregroundColor)
+            .frame(minWidth: SnapListMetrics.minimumTouchTarget)
+            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+            .padding(.horizontal, 10)
+            .background(action.backgroundColor)
+            .clipShape(.rect(cornerRadius: 12))
+            .overlay {
+                if action.showsBorder {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            SnapListColorToken.hairline.color,
+                            lineWidth: 1
+                        )
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
         .accessibilityIdentifier(action.accessibilityIdentifier)
+    }
+
+    /// #1062: the wall stays alive on the analyzing rows without borrowing
+    /// progress vocabulary — `sparkles` reads as "still working on this,"
+    /// never as a percentage or a spinner.
+    private var analyzingIndicator: some View {
+        let icon = Image(systemName: "sparkles")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .accessibilityHidden(true)
+        return Group {
+            if showsMotionEnhancements {
+                icon.symbolEffect(.variableColor.iterative, options: .repeating)
+            } else {
+                icon
+            }
+        }
+    }
+
+    /// `.wiggle` is iOS 18+; iOS 17 keeps the plain glyph regardless of
+    /// Reduced Motion.
+    private var retryIcon: some View {
+        let icon = Image(systemName: "arrow.clockwise")
+            .font(.system(size: 12, weight: .semibold))
+            .accessibilityHidden(true)
+        return Group {
+            if #available(iOS 18, *), showsMotionEnhancements {
+                icon.symbolEffect(.wiggle, options: .repeating)
+            } else {
+                icon
+            }
+        }
     }
 
     private var content: some View {
@@ -1290,11 +1376,16 @@ private struct TrophyWallProcessingRowView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if row.action == nil {
-                    Text(row.stateLabel)
-                        .snapListTypography(.status)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        if row.isAnalyzing {
+                            analyzingIndicator
+                        }
+                        Text(row.stateLabel)
+                            .snapListTypography(.status)
+                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 // #963: the "Ready / Review unavailable" defect used to be a
