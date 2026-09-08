@@ -782,6 +782,12 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .reportsBottomStackTop()
                     .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
             }
+            // #1058: kept as-is. These are fixed safe-area clearances on the
+            // control stack itself, not a device-size guess — the framing
+            // corners above measure this stack's resulting top edge
+            // (ScanBottomStackTopPreferenceKey) rather than assuming its
+            // height, so a hardcoded value here doesn't reintroduce the
+            // bucketed-geometry defect the issue targets.
             .safeAreaPadding(.top, 2)
             .safeAreaPadding(.bottom, 30)
         }
