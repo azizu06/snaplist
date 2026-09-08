@@ -2511,6 +2511,7 @@ final class TrophyWallDomainTests: XCTestCase {
             let host = HostedTrophyWallTestWindow(
                 rootView: TrophyWallView(
                     store: store,
+                    accountInitials: "S",
                     openProcessing: {},
                     openAccount: {},
                     openListing: { _ in .presentedReview },
@@ -2556,6 +2557,7 @@ final class TrophyWallDomainTests: XCTestCase {
 
         let exhaustedWall = TrophyWallView(
             store: settledStore,
+            accountInitials: "S",
             openProcessing: {},
             openAccount: {},
             openListing: { _ in .presentedReview },
@@ -2894,6 +2896,7 @@ private struct TrophyWallFeatureTestRoot: View {
             refreshState: $driver.refreshState,
             runStore: runStore,
             listingReviewStore: listingReviewStore,
+            accountInitials: "S",
             correctionAvailability: .notOffered,
             forceReducedMotion: false,
             activationListingReviewOpened: {},

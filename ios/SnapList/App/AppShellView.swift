@@ -773,6 +773,10 @@ struct AppShellView: View {
             refreshState: $trophyWallCollectionRefreshState,
             runStore: runStore,
             listingReviewStore: listingReviewStore,
+            // Same `SettingsProfile.current(configuration:)` path Settings
+            // itself calls, so the header can never show initials that
+            // disagree with the account screen (#1051).
+            accountInitials: SettingsProfile.current(configuration: configuration).initials,
             correctionAvailability: configuration.listingReviewCorrectionAvailability,
             forceReducedMotion: configuration.forceReducedMotion,
             activationListingReviewOpened: {
@@ -2193,6 +2197,7 @@ struct TrophyWallFeatureView: View {
     @Binding var refreshState: TrophyWallCollectionRefreshState
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
+    let accountInitials: String
     let correctionAvailability: ListingReviewCorrectionAvailability
     let forceReducedMotion: Bool
     let activationListingReviewOpened: () -> Void
@@ -2212,6 +2217,7 @@ struct TrophyWallFeatureView: View {
         @Bindable var listingReviewPresentation = listingReviewPresentation
         TrophyWallView(
             store: store,
+            accountInitials: accountInitials,
             openProcessing: {
                 router.navigate(to: .home(.processing))
             },
