@@ -47,6 +47,16 @@ enum DockScrollScalePolicy {
     }
 }
 
+/// #1059: gates the implicit `.animation` SwiftUI applies to the glass-wrapped
+/// dock row's layout/tint changes on selection. That live animation only
+/// exists in the iOS 26 view tree, so this pure seam is what the Reduced
+/// Motion acceptance criterion actually asserts against.
+enum DockGlassMotionPolicy {
+    static func shouldAnimateSelectionMorph(reduceMotion: Bool) -> Bool {
+        !reduceMotion
+    }
+}
+
 /// Shared between the Trophy Wall scroll surface (which reports offset) and
 /// the dock composition in `AppShellView` (which reads `scale`). Delivered
 /// through the environment, defaulted to a standalone instance, so neither
@@ -80,7 +90,58 @@ struct FloatingDock: View {
     var scale: CGFloat = DockScrollScalePolicy.fullScale
     let select: (PrimaryTab) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
     var body: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                glassBody
+            } else {
+                legacyBody
+            }
+        }
+        // `.scaleEffect` stays the outermost modifier, wrapping the whole
+        // composed `GlassEffectContainer` rather than an individual glass
+        // view inside it: scaling a glass view in place while it is still
+        // compositing would have it resample its own already-blurred output
+        // every scroll frame. Scaling the finished container instead just
+        // resizes the rendered result once per frame.
+        .scaleEffect(scale, anchor: .bottom)
+    }
+
+    /// `.glassEffect` is applied straight to the icon row's own content
+    /// (background is its documented contract: the row's foreground still
+    /// renders on top), never to a separately-sized decoy view. A decoy — a
+    /// bare `Color.clear` carrying the glass as a `.background`, or a second
+    /// glass shape nested per-button for the selection highlight — measurably
+    /// breaks that contract on-device: `GlassEffectContainer` composites every
+    /// `.glassEffect` descendant into one shared pass, and once two glass
+    /// shapes overlap in that pass (the bar's plus a per-button pill), the
+    /// icons sitting "on top of" either one get swallowed into the merge
+    /// instead of surviving as sharp foreground content. So the selected tab
+    /// keeps the pre-#1059 tinted **fill** for its highlight rather than a
+    /// second glass shape — the issue names this as an equally acceptable
+    /// choice ("whichever reads better"), and it sidesteps the bug entirely.
+    @available(iOS 26.0, *)
+    private var glassBody: some View {
+        GlassEffectContainer(spacing: FloatingDockMetrics.destinationSpacing) {
+            HStack(spacing: FloatingDockMetrics.destinationSpacing) {
+                ForEach(PrimaryTab.allCases) { tab in
+                    tabButton(tab)
+                }
+            }
+            .padding(FloatingDockMetrics.contentPadding)
+            .glassEffect(.regular, in: SnapListShape(minimumRadius: FloatingDockMetrics.cornerRadius))
+            .animation(
+                DockGlassMotionPolicy.shouldAnimateSelectionMorph(reduceMotion: systemReduceMotion)
+                    ? .default
+                    : nil,
+                value: selectedTab
+            )
+        }
+    }
+
+    private var legacyBody: some View {
         HStack(spacing: FloatingDockMetrics.destinationSpacing) {
             ForEach(PrimaryTab.allCases) { tab in
                 tabButton(tab)
@@ -96,7 +157,6 @@ struct FloatingDock: View {
             SnapListShape(minimumRadius: FloatingDockMetrics.cornerRadius)
                 .stroke(SnapListColorToken.inkPrimary.color.opacity(0.08), lineWidth: 1)
         }
-        .scaleEffect(scale, anchor: .bottom)
     }
 
     private func tabButton(_ tab: PrimaryTab) -> some View {
@@ -107,22 +167,14 @@ struct FloatingDock: View {
         } label: {
             Image(systemName: tab.systemImage(isSelected: isSelected))
                 .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
-            .foregroundStyle(
-                isSelected
-                    ? SnapListColorToken.action.color
-                    : SnapListColorToken.textTertiary.color
-            )
-            .frame(
-                width: FloatingDockMetrics.destinationWidth,
-                height: FloatingDockMetrics.destinationHeight(for: selectedTab)
-            )
-            .background(
-                isSelected
-                    ? SnapListColorToken.actionTint.color
-                    : Color.clear
-            )
-            .clipShape(SnapListShape(minimumRadius: 16))
-            .contentShape(.rect)
+                .foregroundStyle(isSelected ? SnapListColorToken.action.color : SnapListColorToken.textTertiary.color)
+                .frame(
+                    width: FloatingDockMetrics.destinationWidth,
+                    height: FloatingDockMetrics.destinationHeight(for: selectedTab)
+                )
+                .background(isSelected ? SnapListColorToken.actionTint.color : Color.clear)
+                .clipShape(SnapListShape(minimumRadius: 16))
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)
