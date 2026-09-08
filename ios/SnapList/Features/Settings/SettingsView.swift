@@ -284,6 +284,7 @@ struct SettingsView: View {
         // last visible row (the subscription ownership note, or the version
         // line for a seller without one) rests behind it instead of above it.
         .safeAreaPadding(.bottom, FloatingDockMetrics.containerHeight(for: .trophyWall))
+        .snapListScrollEdgeEffect(ScrollEdgeEffectPolicy.settingsBottomStyle, for: .bottom)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .background(SnapListColorToken.mutedSurface.color)

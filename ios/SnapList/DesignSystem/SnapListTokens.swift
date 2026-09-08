@@ -178,10 +178,8 @@ extension View {
 enum SnapListMetrics {
     static let minimumTouchTarget: CGFloat = 44
     static let screenGutter: CGFloat = 20
-    static let dockSideInset: CGFloat = 14
     static let dockBottomInset: CGFloat = 12
     static let dockHeight: CGFloat = 66
-    static let dockRadius: CGFloat = 26
     static let primaryButtonHeight: CGFloat = 54
     static let primaryButtonRadius: CGFloat = 27
     static let sheetRadius: CGFloat = 26
@@ -244,5 +242,124 @@ extension String {
             }
         }
         return display
+    }
+}
+
+// MARK: - Concentric corners (#1057)
+
+/// Which corner treatment `SnapListShape` renders. Pure and independent of a
+/// live `#available` check, so the fallback decision is unit-testable on any
+/// OS the test suite happens to run on.
+enum SnapListShapeKind: Equatable {
+    case concentric(minimum: CGFloat)
+    case roundedRect(cornerRadius: CGFloat)
+}
+
+enum SnapListShapePolicy {
+    static func kind(minimumRadius: CGFloat, isConcentricAvailable: Bool) -> SnapListShapeKind {
+        isConcentricAvailable
+            ? .concentric(minimum: minimumRadius)
+            : .roundedRect(cornerRadius: minimumRadius)
+    }
+}
+
+/// A container corner shape that derives its radius from the device's own
+/// display corner on iOS 26 (`ConcentricRectangle`) and falls back to the
+/// fixed `RoundedRectangle` iOS 17 has always rendered, so a floating surface
+/// stops guessing a device's corner radius as a constant.
+struct SnapListShape: Shape {
+    let minimumRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        switch SnapListShapePolicy.kind(
+            minimumRadius: minimumRadius,
+            isConcentricAvailable: Self.isConcentricAvailable
+        ) {
+        case .concentric(let minimum):
+            if #available(iOS 26.0, *) {
+                return ConcentricRectangle(corners: .concentric(minimum: .fixed(minimum)))
+                    .path(in: rect)
+            }
+            // Unreachable: `isConcentricAvailable` already gated this case on
+            // the same `#available` check. Kept so `path(in:)` type-checks
+            // without force-unwrapping the availability the switch already
+            // proved.
+            return RoundedRectangle(cornerRadius: minimum).path(in: rect)
+        case .roundedRect(let cornerRadius):
+            return RoundedRectangle(cornerRadius: cornerRadius).path(in: rect)
+        }
+    }
+
+    private static var isConcentricAvailable: Bool {
+        if #available(iOS 26.0, *) { true } else { false }
+    }
+}
+
+extension View {
+    /// Declares the app shell root's container shape on iOS 26, so every
+    /// descendant `ConcentricRectangle` (inside `SnapListShape`, used by the
+    /// floating dock and its selected pill) has a container geometry to
+    /// derive its radius against instead of guessing a device corner
+    /// constant. The plain `.rect` (`Shape where Self == Rectangle`) is
+    /// deliberate, not a fallback: `containerShape(_:)`'s concentric-corners
+    /// overload takes a `RoundedRectangularShape`, and `ConcentricRectangle`
+    /// does not conform to that protocol (verified against the iOS 26.5
+    /// `SwiftUICore` module interface — no public API constructs a
+    /// `RoundedRectangularShape` value with concentric corners). A plain
+    /// rectangle establishes the container frame; `ConcentricRectangle`
+    /// resolves its own radius against that ancestor. iOS 17 renders
+    /// unchanged: no container shape existed before iOS 26.
+    @ViewBuilder
+    func snapListConcentricContainerShape() -> some View {
+        if #available(iOS 26.0, *) {
+            containerShape(.rect)
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: - Scroll edge effects (#1057)
+
+/// The style `snapListScrollEdgeEffect` requests. A named wrapper rather than
+/// the system `ScrollEdgeEffectStyle` directly, so call sites and their tests
+/// still resolve on iOS 17, where the system type does not exist.
+enum SnapListScrollEdgeStyle: Equatable {
+    case soft
+    case hard
+}
+
+/// Which style each floating-chrome-adjacent scroll surface requests, named
+/// here rather than inline at each call site so a future surface cannot
+/// silently disagree with the two already approved.
+enum ScrollEdgeEffectPolicy {
+    static let trophyWallBottomStyle: SnapListScrollEdgeStyle = .soft
+    static let settingsBottomStyle: SnapListScrollEdgeStyle = .soft
+}
+
+@available(iOS 26.0, *)
+private extension SnapListScrollEdgeStyle {
+    var systemStyle: ScrollEdgeEffectStyle {
+        switch self {
+        case .soft: .soft
+        case .hard: .hard
+        }
+    }
+}
+
+extension View {
+    /// iOS 17 renders unchanged: no scroll edge effect existed before iOS 26,
+    /// and the caller's own `.safeAreaPadding` / bottom content padding
+    /// already carries the full clearance fix for that release.
+    @ViewBuilder
+    func snapListScrollEdgeEffect(
+        _ style: SnapListScrollEdgeStyle,
+        for edge: Edge.Set
+    ) -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectStyle(style.systemStyle, for: edge)
+        } else {
+            self
+        }
     }
 }

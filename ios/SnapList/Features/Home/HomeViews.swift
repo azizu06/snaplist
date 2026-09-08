@@ -235,6 +235,7 @@ struct TrophyWallView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .snapListScrollEdgeEffect(ScrollEdgeEffectPolicy.trophyWallBottomStyle, for: .bottom)
             .accessibilityIdentifier("trophy.wall.grid")
             .reportingDockScrollOffset(to: dockScrollScale, reduceMotion: reduceMotion)
         }
