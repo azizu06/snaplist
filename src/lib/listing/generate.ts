@@ -256,9 +256,9 @@ function listingViolatesSellerVoice(raw: RawEbayListing): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Title-length guarantee: deterministic truncation on a word boundary, with an
-// ellipsis when the cut lands mid-content. Applied unconditionally so the RETURNED
-// listing always satisfies the cap regardless of what the model produced.
+// Title-length guarantee: deterministic truncation on a word boundary, with no
+// ellipsis appended. Applied unconditionally so the RETURNED listing always
+// satisfies the cap regardless of what the model produced.
 // ---------------------------------------------------------------------------
 
 /**
