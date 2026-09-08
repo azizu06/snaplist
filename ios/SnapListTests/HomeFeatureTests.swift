@@ -1959,7 +1959,7 @@ final class TrophyWallDomainTests: XCTestCase {
             TrophyWallProcessingView.CollectionMessage(
                 heading: "Nothing is processing.",
                 action: .scan(label: "Scan an item"),
-                scoutImageName: "ScoutUncertain",
+                scoutImageName: "ScoutReassurance",
                 scoutAccessibilityLabel: "Scout, the SnapList camera helper"
             )
         )
@@ -2607,7 +2607,7 @@ final class TrophyWallDomainTests: XCTestCase {
                 .init(
                     heading: "Nothing is processing.",
                     action: .scan(label: "Scan an item"),
-                    scoutImageName: "ScoutUncertain",
+                    scoutImageName: "ScoutReassurance",
                     scoutAccessibilityLabel: "Scout"
                 ),
                 "trophy.processing.collection.scan"
