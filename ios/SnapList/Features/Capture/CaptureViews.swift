@@ -1376,6 +1376,18 @@ private struct FramingCorners: View {
     }
 
     var body: some View {
+        // The iOS 17 Canvas path draws its own fixed-radius elbow; iOS 26
+        // instead asks `ConcentricRectangle` to resolve the elbow's radius so
+        // it nests with whatever container corner (the display itself, absent
+        // any other ancestor) the system considers concentric, per #1058.
+        if #available(iOS 26.0, *) {
+            concentricBrackets
+        } else {
+            legacyBrackets
+        }
+    }
+
+    private var legacyBrackets: some View {
         Canvas { context, size in
             let color = SnapListColorToken.onDarkSurface.color.opacity(0.95)
             // A centered stroke would spill half its width past the canvas, so
@@ -1431,6 +1443,99 @@ private struct FramingCorners: View {
             )
         }
     }
+
+    /// Strokes the full frame with a concentric-cornered rectangle, then
+    /// reveals only an `length`-sized box at each corner so the result reads
+    /// as the same open bracket the Canvas path draws, but with a radius the
+    /// system — not a fixed literal — resolves for iOS 26.
+    @available(iOS 26.0, *)
+    private var concentricBrackets: some View {
+        GeometryReader { proxy in
+            let armBox = min(length + cornerRadius, min(proxy.size.width, proxy.size.height) / 2)
+            ConcentricRectangle(corners: .concentric(minimum: .fixed(cornerRadius)))
+                .stroke(
+                    SnapListColorToken.onDarkSurface.color.opacity(0.95),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+                )
+                .mask {
+                    ZStack {
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .topLeading)
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .topTrailing)
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .bottomLeading)
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .bottomTrailing)
+                    }
+                }
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func cornerRevealBox(_ box: CGFloat, in size: CGSize, alignment: Alignment) -> some View {
+        Rectangle()
+            .frame(width: box, height: box)
+            .frame(width: size.width, height: size.height, alignment: alignment)
+    }
+}
+
+/// Pure geometry for `ResponsiveFramingCorners`, pulled out so crafted sizes
+/// can be unit-tested without a live SwiftUI layout pass (#1058).
+///
+/// Every input here is either measured — the surface's own size, the space
+/// the caller's bottom control stack has already claimed — or a SwiftUI
+/// size class. There is no screen-size table: `verticalSizeClass` and
+/// `horizontalSizeClass` only differ from `.regular` in landscape or on
+/// larger idioms, so on every supported portrait phone the shape comes
+/// entirely from the measured `availableSize` and `bottomInset` (the latter
+/// already varies by device because the caller measured it against
+/// `ScanBottomStackTopPreferenceKey`), scaled continuously rather than
+/// jumping between two device-size buckets.
+enum ResponsiveFramingGeometry {
+    struct Layout: Equatable {
+        let size: CGSize
+        let center: CGPoint
+        let cornerRadius: CGFloat
+        let armLength: CGFloat
+        let lineWidth: CGFloat
+    }
+
+    /// Before the caller's `bottomEdgeAboveContainerBottom` preference has
+    /// landed, the corners still need somewhere to sit for that first pass.
+    /// Scaling the guess off the surface's own measured height keeps it
+    /// close to the eventual real value on every device, instead of two
+    /// device-size buckets landing on the identical guess.
+    static func fallbackBottomInset(
+        availableHeight: CGFloat,
+        verticalSizeClass: UserInterfaceSizeClass?
+    ) -> CGFloat {
+        availableHeight * (verticalSizeClass == .compact ? 0.30 : 0.34)
+    }
+
+    static func layout(
+        availableSize: CGSize,
+        bottomInset: CGFloat,
+        verticalSizeClass: UserInterfaceSizeClass?,
+        horizontalSizeClass: UserInterfaceSizeClass?
+    ) -> Layout {
+        let isCompactHeight = verticalSizeClass == .compact
+        let isCompactWidth = horizontalSizeClass != .regular
+
+        let horizontalInset = max(24, availableSize.width * (isCompactWidth ? 0.088 : 0.14))
+        let topInset = max(64, availableSize.height * (isCompactHeight ? 0.13 : 0.15))
+
+        let frameWidth = max(180, availableSize.width - horizontalInset * 2)
+        let frameHeight = max(140, availableSize.height - topInset - bottomInset)
+
+        let armLength = min(44, max(28, frameHeight * (isCompactHeight ? 0.075 : 0.09)))
+        let cornerRadius = min(16, max(10, armLength * 0.36))
+        let lineWidth = min(3.25, max(2.25, frameHeight * 0.0065))
+
+        return Layout(
+            size: CGSize(width: frameWidth, height: frameHeight),
+            center: CGPoint(x: availableSize.width / 2, y: topInset + frameHeight / 2),
+            cornerRadius: cornerRadius,
+            armLength: armLength,
+            lineWidth: lineWidth
+        )
+    }
 }
 
 private struct ResponsiveFramingCorners: View {
@@ -1450,26 +1555,30 @@ private struct ResponsiveFramingCorners: View {
     /// `additionalBottomInset`.
     var bottomEdgeAboveContainerBottom: CGFloat?
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     var body: some View {
         GeometryReader { proxy in
-            let isCompactHeight = proxy.size.height <= 700
-            let horizontalInset: CGFloat = proxy.size.width <= 375 ? 28 : 34
-            let topInset: CGFloat = isCompactHeight ? 112 : 140
-            let bottomInset: CGFloat = bottomEdgeAboveContainerBottom
-                ?? ((isCompactHeight ? 264 : 300) + additionalBottomInset)
-            FramingCorners(
-                length: isCompactHeight ? 34 : 42,
-                cornerRadius: isCompactHeight ? 12 : 15,
-                lineWidth: isCompactHeight ? 2.5 : 3
+            let bottomInset = bottomEdgeAboveContainerBottom ?? (
+                ResponsiveFramingGeometry.fallbackBottomInset(
+                    availableHeight: proxy.size.height,
+                    verticalSizeClass: verticalSizeClass
+                ) + additionalBottomInset
             )
-                .frame(
-                    width: max(180, proxy.size.width - (horizontalInset * 2)),
-                    height: max(140, proxy.size.height - topInset - bottomInset)
-                )
-                .position(
-                    x: proxy.size.width / 2,
-                    y: topInset + ((proxy.size.height - topInset - bottomInset) / 2)
-                )
+            let layout = ResponsiveFramingGeometry.layout(
+                availableSize: proxy.size,
+                bottomInset: bottomInset,
+                verticalSizeClass: verticalSizeClass,
+                horizontalSizeClass: horizontalSizeClass
+            )
+            FramingCorners(
+                length: layout.armLength,
+                cornerRadius: layout.cornerRadius,
+                lineWidth: layout.lineWidth
+            )
+                .frame(width: layout.size.width, height: layout.size.height)
+                .position(layout.center)
         }
     }
 }
