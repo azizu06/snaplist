@@ -3279,6 +3279,62 @@ enum PhotoReviewBackCoordinator {
     }
 }
 
+/// Photo Review's count pill, isolated from `PhotoReviewView`'s state wiring so a
+/// unit test can render it alone and inspect its resolved content transition
+/// (#1060), the same technique `ScanReviewButton` uses for its button style.
+struct PhotoReviewCountPill: View {
+    let count: Int
+    let limit: Int
+    var countTextSize: CGFloat = 13
+
+    var body: some View {
+        Text("\(count) of \(limit)")
+            .font(
+                .system(
+                    size: countTextSize,
+                    weight: .semibold,
+                    design: .default
+                )
+            )
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .contentTransition(.numericText(value: Double(count)))
+            .padding(.vertical, 5)
+            .padding(.horizontal, 9)
+            .background(
+                SnapListColorToken.quietFill.color,
+                in: RoundedRectangle(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.countRadius
+                )
+            )
+            .fixedSize()
+            .frame(minWidth: 52, minHeight: 44, alignment: .trailing)
+            .accessibilityIdentifier("photo-review.count")
+            .photoReviewLayoutLandmark(.countPill)
+    }
+}
+
+enum PhotoReviewSensoryFeedbackPolicy {
+    static func photoCountFeedback(
+        previousCount: Int,
+        currentCount: Int
+    ) -> SensoryFeedback? {
+        if currentCount > previousCount { return .increase }
+        if currentCount < previousCount { return .decrease }
+        return nil
+    }
+
+    static func reorderDropFeedback(
+        previousAnnouncement: String?,
+        currentAnnouncement: String?
+    ) -> SensoryFeedback? {
+        guard previousAnnouncement == nil, currentAnnouncement != nil else {
+            return nil
+        }
+        return .selection
+    }
+}
+
 @MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
@@ -3449,6 +3505,18 @@ struct PhotoReviewView: View {
         .onChange(of: focusStartListingRequest) { _, request in
             guard request != nil else { return }
             focusedStartListing = true
+        }
+        .sensoryFeedback(trigger: store.photos.count) { previous, current in
+            PhotoReviewSensoryFeedbackPolicy.photoCountFeedback(
+                previousCount: previous,
+                currentCount: current
+            )
+        }
+        .sensoryFeedback(trigger: dragPresentation.pendingAnnouncement) { previous, current in
+            PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
+                previousAnnouncement: previous,
+                currentAnnouncement: current
+            )
         }
         .onChange(of: dragPresentation.pendingFocusPhotoID) { _, photoID in
             guard photoID != nil,
@@ -3839,7 +3907,11 @@ struct PhotoReviewView: View {
                 HStack(spacing: 0) {
                     backControl
                     Spacer(minLength: 12)
-                    countPill
+                    PhotoReviewCountPill(
+                        count: store.photos.count,
+                        limit: PhotoReviewCapacityPolicy.photoLimit,
+                        countTextSize: reviewCountSize
+                    )
                 }
                 reviewTitle
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -3862,7 +3934,11 @@ struct PhotoReviewView: View {
                 HStack(spacing: 0) {
                     backControl
                     Spacer(minLength: 12)
-                    countPill
+                    PhotoReviewCountPill(
+                        count: store.photos.count,
+                        limit: PhotoReviewCapacityPolicy.photoLimit,
+                        countTextSize: reviewCountSize
+                    )
                 }
                 .padding(.leading, 8)
                 .padding(.trailing, 12)
@@ -3916,31 +3992,6 @@ struct PhotoReviewView: View {
             .tracking(-0.2)
             .foregroundStyle(SnapListColorToken.inkPrimary.color)
             .photoReviewLayoutLandmark(.title)
-    }
-
-    private var countPill: some View {
-        Text("\(store.photos.count) of \(PhotoReviewCapacityPolicy.photoLimit)")
-            .font(
-                .system(
-                    size: reviewCountSize,
-                    weight: .semibold,
-                    design: .default
-                )
-            )
-            .foregroundStyle(SnapListColorToken.textSecondary.color)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 9)
-            .background(
-                SnapListColorToken.quietFill.color,
-                in: RoundedRectangle(
-                    cornerRadius:
-                        PhotoReviewV5VisualContract.countRadius
-                )
-            )
-            .fixedSize()
-            .frame(minWidth: 52, minHeight: 44, alignment: .trailing)
-            .accessibilityIdentifier("photo-review.count")
-            .photoReviewLayoutLandmark(.countPill)
     }
 
     @ViewBuilder

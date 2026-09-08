@@ -403,6 +403,7 @@ struct ListingReviewView: View {
                 .keyboardType(.decimalPad)
                 .font(.title3.weight(.bold).monospacedDigit())
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .contentTransition(.numericText())
                 .multilineTextAlignment(.leading)
                 .textFieldStyle(.plain)
                 // #989: the box now spans the row like Title/Description, so

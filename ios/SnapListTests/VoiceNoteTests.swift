@@ -845,6 +845,40 @@ final class VoiceNoteTests: XCTestCase {
             )
         )
     }
+
+    // MARK: - Sensory feedback (#1060)
+
+    func testVoiceNoteSensoryFeedbackFiresStartWhenRecordingBegins() {
+        let feedback = VoiceNoteSensoryFeedbackPolicy.recordingFeedback(
+            previousPhase: .ready,
+            currentPhase: .recording(elapsed: 0, level: 0)
+        )
+        XCTAssertEqual(feedback, .start)
+    }
+
+    func testVoiceNoteSensoryFeedbackFiresStopWhenRecordingEnds() {
+        let feedback = VoiceNoteSensoryFeedbackPolicy.recordingFeedback(
+            previousPhase: .recording(elapsed: 3, level: 0.4),
+            currentPhase: .takeReady(duration: 3)
+        )
+        XCTAssertEqual(feedback, .stop)
+    }
+
+    func testVoiceNoteSensoryFeedbackDoesNotFireBetweenRecordingTicks() {
+        let feedback = VoiceNoteSensoryFeedbackPolicy.recordingFeedback(
+            previousPhase: .recording(elapsed: 1, level: 0.2),
+            currentPhase: .recording(elapsed: 2, level: 0.5)
+        )
+        XCTAssertNil(feedback)
+    }
+
+    func testVoiceNoteSensoryFeedbackDoesNotFireOnUnrelatedPhaseChange() {
+        let feedback = VoiceNoteSensoryFeedbackPolicy.recordingFeedback(
+            previousPhase: .takeReady(duration: 3),
+            currentPhase: .saved(isPlaying: false)
+        )
+        XCTAssertNil(feedback)
+    }
 }
 
 @MainActor

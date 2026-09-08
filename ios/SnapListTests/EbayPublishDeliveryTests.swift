@@ -946,6 +946,40 @@ final class EbayPublishDeliveryTests: XCTestCase {
             publishEligibility: .init(enabled: false, eligible: false)
         )
     }
+
+    // MARK: - Sensory feedback (#1060)
+
+    func testEbayPublishSensoryFeedbackFiresSuccessOnPublished() {
+        let feedback = EbayPublishSensoryFeedbackPolicy.resultFeedback(
+            previousScreen: .result(.publishing),
+            currentScreen: .result(.published)
+        )
+        XCTAssertEqual(feedback, .success)
+    }
+
+    func testEbayPublishSensoryFeedbackFiresErrorOnRefusal() {
+        let feedback = EbayPublishSensoryFeedbackPolicy.resultFeedback(
+            previousScreen: .result(.publishing),
+            currentScreen: .result(.sellerFixableRefusal(message: "Missing required item specifics."))
+        )
+        XCTAssertEqual(feedback, .error)
+    }
+
+    func testEbayPublishSensoryFeedbackDoesNotFireOnUnrelatedTransition() {
+        let feedback = EbayPublishSensoryFeedbackPolicy.resultFeedback(
+            previousScreen: .confirmation(.ready),
+            currentScreen: .result(.publishing)
+        )
+        XCTAssertNil(feedback)
+    }
+
+    func testEbayPublishSensoryFeedbackDoesNotFireWhenResultStateUnchanged() {
+        let feedback = EbayPublishSensoryFeedbackPolicy.resultFeedback(
+            previousScreen: .result(.published),
+            currentScreen: .result(.published)
+        )
+        XCTAssertNil(feedback)
+    }
 }
 
 private struct EbayPublishTestBearer: BearerTokenProviding {

@@ -10140,6 +10140,137 @@ final class CaptureFlowTests: XCTestCase {
         )
         wait(for: [detached], timeout: 5)
     }
+
+    // MARK: - Sensory feedback (#1060)
+
+    /// The shutter's `sensoryFeedback(trigger:)` closure delegates here, so the
+    /// mapping from a fired-capture count change to `.impact(weight: .medium)`
+    /// is unit-testable without rendering `ScanCameraView`.
+    func testShutterFeedbackFiresOnceWhenTheFireCountChanges() {
+        XCTAssertEqual(
+            ScanCaptureSensoryFeedbackPolicy.shutterFeedback(
+                previousShutterFireCount: 0,
+                currentShutterFireCount: 1
+            ),
+            .impact(weight: .medium)
+        )
+    }
+
+    /// A re-render with the same count (no new shutter tap) must not fire —
+    /// this is the "no double-fire on re-render" acceptance criterion.
+    func testShutterFeedbackDoesNotFireWhenTheFireCountIsUnchanged() {
+        XCTAssertNil(
+            ScanCaptureSensoryFeedbackPolicy.shutterFeedback(
+                previousShutterFireCount: 2,
+                currentShutterFireCount: 2
+            )
+        )
+    }
+
+    /// The photo-limit warning fires once when the limit is newly reached,
+    /// via the same announcement-count seam `consumePhotoLimitAnnouncement()`
+    /// already drives.
+    func testPhotoLimitFeedbackFiresOnceWhenTheAnnouncementCountChanges() {
+        XCTAssertEqual(
+            ScanCaptureSensoryFeedbackPolicy.photoLimitFeedback(
+                previousLimitAnnouncementCount: 0,
+                currentLimitAnnouncementCount: 1
+            ),
+            .warning
+        )
+    }
+
+    /// No warning fires on a passive re-render while already at the cap.
+    func testPhotoLimitFeedbackDoesNotFireWhenTheAnnouncementCountIsUnchanged() {
+        XCTAssertNil(
+            ScanCaptureSensoryFeedbackPolicy.photoLimitFeedback(
+                previousLimitAnnouncementCount: 1,
+                currentLimitAnnouncementCount: 1
+            )
+        )
+    }
+
+    // MARK: - Photo Review sensory feedback (#1060)
+
+    /// A photo landing (add) fires `.increase`.
+    func testPhotoCountFeedbackFiresIncreaseWhenAPhotoIsAdded() {
+        XCTAssertEqual(
+            PhotoReviewSensoryFeedbackPolicy.photoCountFeedback(
+                previousCount: 2,
+                currentCount: 3
+            ),
+            .increase
+        )
+    }
+
+    /// A photo leaving (remove) fires `.decrease`.
+    func testPhotoCountFeedbackFiresDecreaseWhenAPhotoIsRemoved() {
+        XCTAssertEqual(
+            PhotoReviewSensoryFeedbackPolicy.photoCountFeedback(
+                previousCount: 3,
+                currentCount: 2
+            ),
+            .decrease
+        )
+    }
+
+    /// Reordering never changes the count, so this seam fires nothing for it
+    /// — a passive re-render at the same count must not fire either.
+    func testPhotoCountFeedbackDoesNotFireWhenTheCountIsUnchanged() {
+        XCTAssertNil(
+            PhotoReviewSensoryFeedbackPolicy.photoCountFeedback(
+                previousCount: 3,
+                currentCount: 3
+            )
+        )
+    }
+
+    /// A drag reorder committing and posting its announcement fires `.selection`.
+    func testReorderDropFeedbackFiresSelectionWhenAnAnnouncementIsNewlyPosted() {
+        XCTAssertEqual(
+            PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
+                previousAnnouncement: nil,
+                currentAnnouncement: "Moved to position 2 of 4"
+            ),
+            .selection
+        )
+    }
+
+    /// Consuming the announcement back to `nil` is not a second event — this
+    /// is the "no double-fire on re-render" acceptance criterion for reorder.
+    func testReorderDropFeedbackDoesNotFireWhenTheAnnouncementIsConsumed() {
+        XCTAssertNil(
+            PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
+                previousAnnouncement: "Moved to position 2 of 4",
+                currentAnnouncement: nil
+            )
+        )
+    }
+
+    /// Two consecutive different announcements without an intervening `nil`
+    /// still count as one event each time a genuinely new one lands — but
+    /// once occupied by an unconsumed announcement, another non-nil value is
+    /// not itself a fresh "newly posted" transition from `nil`.
+    func testReorderDropFeedbackDoesNotFireWhenAnAnnouncementIsUnchanged() {
+        XCTAssertNil(
+            PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
+                previousAnnouncement: "Moved to position 2 of 4",
+                currentAnnouncement: "Moved to position 2 of 4"
+            )
+        )
+    }
+
+    /// The photo-count pill rolls its digits rather than cutting instantly.
+    func testPhotoReviewCountPillCarriesANumericTextContentTransition() {
+        let pill = PhotoReviewCountPill(count: 3, limit: 5)
+
+        let rendered = String(reflecting: type(of: pill.body))
+
+        XCTAssertTrue(
+            rendered.contains("ContentTransition"),
+            "Count pill should roll digits via .contentTransition(.numericText()): \(rendered)"
+        )
+    }
 }
 
 @MainActor

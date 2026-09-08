@@ -25,6 +25,15 @@ struct ScanCameraView: View {
     @AccessibilityFocusState private var focusedLibraryControl:
         ScanLibraryFocusConsumer.MountedLibraryControl?
     @State private var libraryItems: [PhotosPickerItem] = []
+    /// Bumped once per successful shutter reservation (#1060) — the
+    /// `sensoryFeedback(trigger:)` seam for the `.impact(weight: .medium)`
+    /// haptic. A guard failure (shutter disabled) never bumps it, so a
+    /// disabled tap fires nothing.
+    @State private var shutterFireCount = 0
+    /// Bumped once per newly queued photo-limit announcement (#1060), the
+    /// same one-shot signal `consumePhotoLimitAnnouncement()` already
+    /// guards, so the `.warning` haptic fires exactly once per limit reached.
+    @State private var photoLimitAnnouncementCount = 0
 
     var body: some View {
         Group {
@@ -66,6 +75,19 @@ struct ScanCameraView: View {
         .onChange(of: flow.stagedPhotos.count) { _, _ in
             guard let announcement = flow.consumePhotoLimitAnnouncement() else { return }
             UIAccessibility.post(notification: .announcement, argument: announcement)
+            photoLimitAnnouncementCount += 1
+        }
+        .sensoryFeedback(trigger: shutterFireCount) { previous, current in
+            ScanCaptureSensoryFeedbackPolicy.shutterFeedback(
+                previousShutterFireCount: previous,
+                currentShutterFireCount: current
+            )
+        }
+        .sensoryFeedback(trigger: photoLimitAnnouncementCount) { previous, current in
+            ScanCaptureSensoryFeedbackPolicy.photoLimitFeedback(
+                previousLimitAnnouncementCount: previous,
+                currentLimitAnnouncementCount: current
+            )
         }
     }
 
@@ -93,6 +115,7 @@ struct ScanCameraView: View {
             toggleFlash: flow.toggleFlash,
             takePhoto: {
                 guard let captureID = flow.reservePhotoCapture() else { return }
+                shutterFireCount += 1
                 Task { await flow.takePhoto(reservation: captureID) }
             },
             close: closeLiveCameraPreview,
@@ -576,6 +599,34 @@ enum ScanReturnFocusOutcome: Equatable {
     case none
     /// Move the accessibility cursor to the Review opener and consume the request.
     case focusReviewOpener
+}
+
+/// Pure feedback-event mapper for `ScanCameraView`'s `sensoryFeedback(trigger:)`
+/// closures (#1060), so the mapping from a state change to a feedback kind (or
+/// none) is unit-testable without rendering the camera surface.
+enum ScanCaptureSensoryFeedbackPolicy {
+    /// Fires once each time the shutter successfully reserves a capture.
+    /// A guard failure (shutter disabled) never bumps the trigger, so this
+    /// never fires for a disabled or double tap.
+    static func shutterFeedback(
+        previousShutterFireCount: Int,
+        currentShutterFireCount: Int
+    ) -> SensoryFeedback? {
+        currentShutterFireCount == previousShutterFireCount
+            ? nil
+            : .impact(weight: .medium)
+    }
+
+    /// Fires once when the five-photo limit is newly reached, not again on a
+    /// passive re-render while still at the cap.
+    static func photoLimitFeedback(
+        previousLimitAnnouncementCount: Int,
+        currentLimitAnnouncementCount: Int
+    ) -> SensoryFeedback? {
+        currentLimitAnnouncementCount == previousLimitAnnouncementCount
+            ? nil
+            : .warning
+    }
 }
 
 enum ScanReturnFocusPolicy {

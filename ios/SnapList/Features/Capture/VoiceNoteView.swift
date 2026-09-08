@@ -59,6 +59,24 @@ enum VoiceNoteWaveformGeometry {
     }
 }
 
+enum VoiceNoteSensoryFeedbackPolicy {
+    static func recordingFeedback(
+        previousPhase: VoiceNotePhase,
+        currentPhase: VoiceNotePhase
+    ) -> SensoryFeedback? {
+        let wasRecording = isRecording(previousPhase)
+        let isRecordingNow = isRecording(currentPhase)
+        if !wasRecording && isRecordingNow { return .start }
+        if wasRecording && !isRecordingNow { return .stop }
+        return nil
+    }
+
+    private static func isRecording(_ phase: VoiceNotePhase) -> Bool {
+        if case .recording = phase { return true }
+        return false
+    }
+}
+
 @MainActor
 struct VoiceNoteSheet: View {
     @Bindable var store: VoiceNoteStore
@@ -135,6 +153,12 @@ struct VoiceNoteSheet: View {
                 break
             }
             resolvePendingSaveDismissal()
+        }
+        .sensoryFeedback(trigger: store.phase) { previous, current in
+            VoiceNoteSensoryFeedbackPolicy.recordingFeedback(
+                previousPhase: previous,
+                currentPhase: current
+            )
         }
         .task(id: isRecording) {
             guard isRecording, !usesStaticRecordingFixture else {
