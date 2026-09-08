@@ -79,6 +79,11 @@ struct ActivationGuidanceCoachMark: View {
         guard let placementOverride else { return approved }
         return ActivationCoachMarkAnchor(
             tailEdge: placementOverride.tailEdge,
+            // Carried, not used: this view reads only `tailEdge` and
+            // `tailHorizontalOffset`. In the override path the shell positions
+            // the bubble against its cutout, so the approved bottom inset is
+            // kept only to complete the value — do not wire anything to it
+            // here expecting it to describe where the bubble actually sits.
             bottomInset: approved.bottomInset,
             tailHorizontalOffset: placementOverride.tailHorizontalOffset
         )

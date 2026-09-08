@@ -269,6 +269,10 @@ struct ListingReviewView: View {
             }
             .padding(.top, 9)
         }
+        // #1056. ACT-04's line names every field rather than one control, so
+        // the editable body is the spotlight's hole: the back button and the
+        // dock stay behind the scrim, the fields stay usable.
+        .activationSpotlightTarget(.listingReviewForm)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
                 .background(SnapListColorToken.canvas.color)

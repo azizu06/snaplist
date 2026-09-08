@@ -13,6 +13,11 @@ enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
     case photoReviewVoiceNote
     case trophyWallProcessing
     case settingsMarketplaces
+    /// The editable body of Listing Review. ACT-04's line names every field
+    /// rather than one control, so the whole form is the target: the scrim
+    /// still swallows the back button and the dock, and the fields the line
+    /// invites the seller to change keep working.
+    case listingReviewForm
 
     /// What VoiceOver reads for the spotlit control. While a mark is up the rest
     /// of the screen leaves the accessibility tree, so this element stands in
@@ -25,6 +30,22 @@ enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
         case .photoReviewVoiceNote: "Voice note"
         case .trophyWallProcessing: "Processing"
         case .settingsMarketplaces: "Connected marketplaces"
+        case .listingReviewForm: "Listing details"
+        }
+    }
+
+    /// Whether one accessibility element can stand in for everything inside the
+    /// cutout. It can for a single control; it cannot for Listing Review's
+    /// form, where the hole holds every editable field. That difference decides
+    /// whether the surface behind the mark leaves the accessibility tree: a
+    /// stand-in replaces one button honestly, but nothing can replace a form.
+    var standsInForOneControl: Bool {
+        switch self {
+        case .scanShutter, .photoReviewThumbnailStrip, .photoReviewVoiceNote,
+             .trophyWallProcessing, .settingsMarketplaces:
+            true
+        case .listingReviewForm:
+            false
         }
     }
 }
@@ -36,10 +57,6 @@ enum ActivationSpotlightMode: Equatable {
     /// Dim the surface with no hole. For a mark that states something rather
     /// than asking for an action, so Got it is the only way on.
     case dim
-    /// Draw the bubble and block nothing. For a mark whose instruction *is* the
-    /// whole surface: dimming a form to say "every field here is yours to
-    /// change" would block the very edit it invites.
-    case unblocked
 }
 
 enum ActivationSpotlightTargetPolicy {
@@ -50,8 +67,9 @@ enum ActivationSpotlightTargetPolicy {
         case .act02B: .spotlight(.photoReviewVoiceNote)
         // "Work continues after you leave" names no control.
         case .act03: .dim
-        // "Every field here is yours to change" names all of them.
-        case .act04: .unblocked
+        // "Every field here is yours to change" names all of them, so the
+        // whole editable form is the hole.
+        case .act04: .spotlight(.listingReviewForm)
         case .act08: .spotlight(.trophyWallProcessing)
         case .act09: .spotlight(.settingsMarketplaces)
         }
@@ -96,8 +114,7 @@ enum ActivationSpotlightGeometry {
 enum ActivationSpotlightPresentation: Equatable {
     /// No mark to draw.
     case hidden
-    /// The mark draws its bubble and blocks nothing. Either the mark asks for
-    /// the whole surface (`ActivationSpotlightMode.unblocked`), or it names a
+    /// The mark draws its bubble and blocks nothing, because it names a
     /// control that has not reported a frame yet — the view has not laid out,
     /// or the control is off screen. Failing open on a missing frame is
     /// deliberate: a scrim with no hole over the control a seller is being told
@@ -125,8 +142,6 @@ enum ActivationSpotlightPolicy {
     ) -> ActivationSpotlightPresentation {
         guard let coachMark else { return .hidden }
         switch ActivationSpotlightTargetPolicy.mode(for: coachMark) {
-        case .unblocked:
-            return .unanchored
         case .dim:
             return .spotlight(cutout: nil)
         case .spotlight:
@@ -136,6 +151,33 @@ enum ActivationSpotlightPolicy {
                     in: bounds
                   ) else { return .unanchored }
             return .spotlight(cutout: cutout)
+        }
+    }
+}
+
+/// Whether the surface behind a mark leaves the accessibility tree.
+///
+/// Two conditions have to hold together. The mark must actually be blocking —
+/// an unanchored mark blocks nothing, so hiding the screen under it would
+/// strand VoiceOver on a bubble with no way back. And the cutout must be
+/// something a single stand-in element can honestly replace; Listing Review's
+/// whole form is not, so that mark leaves the surface reachable.
+///
+/// The same answer governs the scrim's stand-in element, so the two can never
+/// disagree: the surface is hidden exactly when something replaces it.
+enum ActivationSpotlightAccessibilityPolicy {
+    static func hidesSurface(
+        for coachMark: ActivationCoachMark?,
+        anchoredTargets: Set<ActivationSpotlightTarget>
+    ) -> Bool {
+        guard let coachMark else { return false }
+        switch ActivationSpotlightTargetPolicy.mode(for: coachMark) {
+        case .dim:
+            // Nothing to reach through the scrim; Got it is the only way on.
+            return true
+        case .spotlight(let target):
+            guard anchoredTargets.contains(target) else { return false }
+            return target.standsInForOneControl
         }
     }
 }
@@ -225,6 +267,22 @@ struct ActivationSpotlightTargetPreferenceKey: PreferenceKey {
     }
 }
 
+/// Which spotlight targets are on screen and have reported a frame. The anchor
+/// preference above cannot be observed with `onPreferenceChange` — `Anchor` is
+/// only resolvable inside a `GeometryProxy` — so this plain, comparable set
+/// carries the same fact out to the root, where the accessibility decision is
+/// made before any geometry is available.
+struct ActivationSpotlightAnchoredTargetsKey: PreferenceKey {
+    static var defaultValue: Set<ActivationSpotlightTarget> { [] }
+
+    static func reduce(
+        value: inout Set<ActivationSpotlightTarget>,
+        nextValue: () -> Set<ActivationSpotlightTarget>
+    ) {
+        value.formUnion(nextValue())
+    }
+}
+
 /// The bubble's own frame in the overlay's coordinate space. The touch gate
 /// needs it so Got it stays reachable through the scrim.
 struct ActivationBubbleFramePreferenceKey: PreferenceKey {
@@ -263,6 +321,10 @@ final class ActivationSpotlightActionRegistry {
 }
 
 private struct ActivationSpotlightActionRegistryKey: EnvironmentKey {
+    // The isolation is on the default value, not the key: the registry itself
+    // is `@MainActor` because view lifecycle writes to it, and a static let of
+    // an isolated type has to be isolated too. The other environment keys in
+    // this app default to types with no isolation, so they need none.
     @MainActor
     static let defaultValue = ActivationSpotlightActionRegistry()
 }
@@ -286,6 +348,10 @@ private struct ActivationSpotlightTargetModifier: ViewModifier {
                 key: ActivationSpotlightTargetPreferenceKey.self,
                 value: .bounds
             ) { [target: $0] }
+            .preference(
+                key: ActivationSpotlightAnchoredTargetsKey.self,
+                value: [target]
+            )
             .onAppear {
                 guard let action else { return }
                 registry.register(target, action: action)
@@ -382,8 +448,10 @@ struct ActivationSpotlightScrim: View {
                 targetTouched: targetTouched
             )
 
-            if let cutout, let target {
-                // The accessibility stand-in for the spotlit control.
+            if let cutout, let target, target.standsInForOneControl {
+                // The accessibility stand-in for the spotlit control. It exists
+                // only when the surface behind it is hidden; a cutout the
+                // seller can still reach for real needs no stand-in.
                 Color.clear
                     .frame(width: cutout.width, height: cutout.height)
                     .position(x: cutout.midX, y: cutout.midY)

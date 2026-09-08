@@ -102,10 +102,9 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
 
     // MARK: - Spotlight mode and presentation
 
-    /// A blanket blocking scrim would contradict two of the approved lines.
-    /// ACT-03 states something rather than naming a control, and ACT-04's line
-    /// is about the whole form, so dimming it would block the very edit it
-    /// invites.
+    /// Every mark blocks the rest of its surface. ACT-03 is the one line that
+    /// states something rather than naming a control, so it dims with no hole;
+    /// ACT-04's line names every field, so the hole is the whole editable form.
     func testOnlyMarksThatNameOneControlCutAHole() {
         XCTAssertEqual(
             ActivationSpotlightTargetPolicy.mode(for: .act01),
@@ -126,7 +125,7 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
         XCTAssertEqual(ActivationSpotlightTargetPolicy.mode(for: .act03), .dim)
         XCTAssertEqual(
             ActivationSpotlightTargetPolicy.mode(for: .act04),
-            .unblocked
+            .spotlight(.listingReviewForm)
         )
         XCTAssertEqual(
             ActivationSpotlightTargetPolicy.mode(for: .act08),
@@ -138,7 +137,10 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
         )
 
         XCTAssertNil(ActivationSpotlightTargetPolicy.target(for: .act03))
-        XCTAssertNil(ActivationSpotlightTargetPolicy.target(for: .act04))
+        XCTAssertEqual(
+            ActivationSpotlightTargetPolicy.target(for: .act04),
+            .listingReviewForm
+        )
     }
 
     func testTheCutoutPadsTheControlAndStaysInsideTheSurface() {
@@ -225,10 +227,10 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
         XCTAssertEqual(
             ActivationSpotlightPolicy.presentation(
                 for: .act04,
-                targetFrame: CGRect(x: 10, y: 10, width: 40, height: 40),
+                targetFrame: CGRect(x: 0, y: 96, width: 393, height: 640),
                 bounds: bounds
             ),
-            .unanchored
+            .spotlight(cutout: CGRect(x: 0, y: 88, width: 393, height: 656))
         )
         XCTAssertTrue(
             ActivationSpotlightPolicy.presentation(
@@ -550,6 +552,62 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
                 XCTAssertEqual(anchor.tailEdge, .bottom)
                 XCTAssertEqual(anchor.tailHorizontalOffset, 0)
             }
+        }
+    }
+
+    // MARK: - Accessibility
+
+    /// The surface leaves the accessibility tree only when the mark really
+    /// blocks it and something honest replaces what it covers. A mark whose
+    /// control has not laid out blocks nothing, so hiding the screen under it
+    /// would strand VoiceOver on a bubble with no way back.
+    func testTheSurfaceIsHiddenOnlyWhenSomethingStandsInForIt() {
+        XCTAssertFalse(
+            ActivationSpotlightAccessibilityPolicy.hidesSurface(
+                for: nil,
+                anchoredTargets: []
+            )
+        )
+        // ACT-03 names no control, so Got it is the only way on and there is
+        // nothing behind the scrim to reach.
+        XCTAssertTrue(
+            ActivationSpotlightAccessibilityPolicy.hidesSurface(
+                for: .act03,
+                anchoredTargets: []
+            )
+        )
+        XCTAssertTrue(
+            ActivationSpotlightAccessibilityPolicy.hidesSurface(
+                for: .act08,
+                anchoredTargets: [.trophyWallProcessing]
+            )
+        )
+        // Same mark, control not on screen: not blocking, so not hidden.
+        XCTAssertFalse(
+            ActivationSpotlightAccessibilityPolicy.hidesSurface(
+                for: .act08,
+                anchoredTargets: [.settingsMarketplaces]
+            )
+        )
+        // ACT-04's hole is every field of the form. One stand-in element
+        // cannot replace them, so the form stays reachable.
+        XCTAssertFalse(
+            ActivationSpotlightAccessibilityPolicy.hidesSurface(
+                for: .act04,
+                anchoredTargets: [.listingReviewForm]
+            )
+        )
+    }
+
+    /// The hide decision and the scrim's stand-in read the same property, so a
+    /// target can never be hidden with nothing put in its place.
+    func testOnlyTheFormDeclinesToStandInForItself() {
+        for target in ActivationSpotlightTarget.allCases {
+            XCTAssertEqual(
+                target.standsInForOneControl,
+                target != .listingReviewForm,
+                "\(target)"
+            )
         }
     }
 }

@@ -90,6 +90,8 @@ struct AppShellView: View {
     /// publishes its action to for the accessibility stand-in.
     @State private var activationBubbleFrame: CGRect?
     @State private var activationSpotlightActions = ActivationSpotlightActionRegistry()
+    @State private var activationSpotlightAnchoredTargets:
+        Set<ActivationSpotlightTarget> = []
     private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
     private let activationGuestCompletionStore =
         UserDefaultsActivationGuidanceGuestCompletionStore()
@@ -269,10 +271,20 @@ struct AppShellView: View {
         }
         .fixtureAccessibilityOverrides(configuration)
         .environment(\.activationSpotlightActions, activationSpotlightActions)
-        // While a mark is up the surface behind it is out of the accessibility
-        // tree; the mark's own elements — its line, the spotlit control's
-        // stand-in, and Got it — are the way forward.
-        .accessibilityHidden(activationCoachMark != nil)
+        .onPreferenceChange(ActivationSpotlightAnchoredTargetsKey.self) { targets in
+            activationSpotlightAnchoredTargets = targets
+        }
+        // While a blocking mark is up the surface behind it is out of the
+        // accessibility tree; the mark's own elements — its line, the spotlit
+        // control's stand-in, and Got it — are the way forward. A mark whose
+        // control never reported a frame blocks nothing, and Listing Review's
+        // form has no honest stand-in, so both leave the surface reachable.
+        .accessibilityHidden(
+            ActivationSpotlightAccessibilityPolicy.hidesSurface(
+                for: activationCoachMark,
+                anchoredTargets: activationSpotlightAnchoredTargets
+            )
+        )
         .overlayPreferenceValue(ActivationSpotlightTargetPreferenceKey.self) { anchors in
             GeometryReader { geometry in
                 activationGuidanceOverlay(anchors: anchors, geometry: geometry)
@@ -1241,6 +1253,7 @@ struct AppShellView: View {
             return
         }
         saveActivationProgress()
+        retireActivationBubbleFrame()
     }
 
     private func advanceActivationGuidance(for action: ActivationGuidanceAction) {
@@ -1248,12 +1261,21 @@ struct AppShellView: View {
         switch activationProgress.advance(for: action) {
         case .completionRequested:
             saveActivationProgress()
+            retireActivationBubbleFrame()
             completeActivationGuidance()
         case .advanced, .completionRecorded:
             saveActivationProgress()
+            retireActivationBubbleFrame()
         case .unchanged:
             break
         }
+    }
+
+    /// The retired mark's bubble frame is a hole in the next mark's scrim until
+    /// the new bubble reports its own. Clearing it at the moment a mark retires
+    /// closes that window; the preference itself resets a frame later.
+    private func retireActivationBubbleFrame() {
+        activationBubbleFrame = nil
     }
 
     private func completeActivationGuidance() {

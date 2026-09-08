@@ -204,7 +204,7 @@ enum ActivationCoachMark: Equatable, Hashable {
     /// Whether this mark is one of the contextual ones, and therefore
     /// acknowledged on its own rather than by advancing the spine.
     var isContextual: Bool {
-        ActivationContextualMarkPolicy.mark(for: self) != nil
+        ActivationContextualMarkPolicy.isContextual(self)
     }
 }
 
@@ -222,10 +222,14 @@ enum ActivationContextualMarkPolicy {
         }
     }
 
-    static func mark(for coachMark: ActivationCoachMark) -> ActivationCoachMark? {
+    /// Named apart from `mark(for surface:)` because it answers a different
+    /// question — not "which mark does this surface own" but "is this mark one
+    /// of the contextual ones" — and an overload that returned its own argument
+    /// read like a lookup.
+    static func isContextual(_ coachMark: ActivationCoachMark) -> Bool {
         switch coachMark {
-        case .act08, .act09: coachMark
-        case .act01, .act02, .act02B, .act03, .act04, .act06: nil
+        case .act08, .act09: true
+        case .act01, .act02, .act02B, .act03, .act04, .act06: false
         }
     }
 }
@@ -774,7 +778,7 @@ struct ActivationGuidanceProgress: Codable, Equatable {
     mutating func acknowledgeContextualMark(
         _ coachMark: ActivationCoachMark
     ) -> Bool {
-        guard ActivationContextualMarkPolicy.mark(for: coachMark) != nil else {
+        guard ActivationContextualMarkPolicy.isContextual(coachMark) else {
             return false
         }
         return acknowledgedContextualMarks.insert(coachMark.state).inserted
