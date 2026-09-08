@@ -242,6 +242,17 @@ enum TrophyWallProcessingAction: Hashable {
     case scan(runID: UUID)
 }
 
+/// #1062: one gate for every non-essential motion this feature adds beyond
+/// SwiftUI's own default transition — the zoom navigation transition into
+/// listing review and both processing-row symbol effects — so Reduced Motion
+/// (system or the fixture-forced flag) turns all of it off through a single
+/// seam instead of three independent checks scattered across the views.
+enum TrophyWallMotionEnhancementPolicy {
+    static func isEnabled(reduceMotion: Bool) -> Bool {
+        !reduceMotion
+    }
+}
+
 /// Whether the seller's own refresh request is still in flight.
 enum TrophyWallProcessingRefreshState: Hashable {
     case idle
@@ -293,6 +304,10 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
     /// initializer outright rather than producing a row that answers wrong.
     let activation: TrophyWallProcessingRowActivation
     let action: TrophyWallProcessingAction?
+    /// #1062: the row's symbol-effect indicator reads this rather than
+    /// `action == nil`, because `.accepted` and `.notListed` are also
+    /// actionless without being active AI analysis.
+    let isAnalyzing: Bool
     let localCoverPhotoData: Data?
     let accessibilityLabel: String
     let accessibilityIdentifier: String
@@ -320,6 +335,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
         case .pendingUpload:
             stateLabel = "Pending upload"
             action = nil
+            isAnalyzing = false
             guard case .local(let logicalIdentity) = card.identity else {
                 return nil
             }
@@ -356,36 +372,43 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             case .accepted:
                 stateLabel = "Accepted"
                 action = nil
+                isAnalyzing = false
                 runActivation = .none
                 accessibilityLabel = "\(itemName), accepted."
             case .workingIdentifying:
                 stateLabel = "Identifying"
                 action = nil
+                isAnalyzing = true
                 runActivation = .none
                 accessibilityLabel = "\(itemName), working, identifying."
             case .workingGenerating:
                 stateLabel = "Writing listing"
                 action = nil
+                isAnalyzing = true
                 runActivation = .none
                 accessibilityLabel = "\(itemName), working, writing listing."
             case .workingPricing:
                 stateLabel = "Pricing"
                 action = nil
+                isAnalyzing = true
                 runActivation = .none
                 accessibilityLabel = "\(itemName), working, pricing."
             case .workingPersisting:
                 stateLabel = "Saving"
                 action = nil
+                isAnalyzing = true
                 runActivation = .none
                 accessibilityLabel = "\(itemName), working, saving."
             case .retrying:
                 stateLabel = "Retrying"
                 action = nil
+                isAnalyzing = true
                 runActivation = .none
                 accessibilityLabel = "\(itemName), retrying."
             case .readyToReview:
                 stateLabel = "Ready to review"
                 action = .review(runID: runID)
+                isAnalyzing = false
                 // The whole row reaches Listing Review, not just the pill
                 // (#897).
                 runActivation = .action(.review(runID: runID))
@@ -397,22 +420,26 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
                 // status screen. The row surfaces "unavailable" inline if the
                 // server still refuses.
                 action = .review(runID: runID)
+                isAnalyzing = false
                 runActivation = .action(.review(runID: runID))
                 accessibilityLabel =
                     "\(itemName), ready to review. Review is not available yet."
             case .needsRetryLocked(let detail):
                 stateLabel = "Needs retry · \(detail)"
                 action = .retry(runID: runID)
+                isAnalyzing = false
                 runActivation = .action(.retry(runID: runID))
                 accessibilityLabel = "\(itemName), needs retry. \(detail)"
             case .needsNewCapture(let detail):
                 stateLabel = "Needs retry · \(detail)"
                 action = .scan(runID: runID)
+                isAnalyzing = false
                 runActivation = .action(.scan(runID: runID))
                 accessibilityLabel = "\(itemName), needs retry. \(detail)"
             case .notListed(let detail):
                 stateLabel = detail
                 action = nil
+                isAnalyzing = false
                 runActivation = .none
                 accessibilityLabel = "\(itemName), not listed. \(detail)"
             case .pendingUpload, .publishedToEbay, .exportPrepared:
