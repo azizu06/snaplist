@@ -136,6 +136,23 @@ struct EbayPublishJourneyHost: View {
     }
 }
 
+enum EbayPublishSensoryFeedbackPolicy {
+    static func resultFeedback(
+        previousScreen: EbayPublishScreen,
+        currentScreen: EbayPublishScreen
+    ) -> SensoryFeedback? {
+        guard case .result(let currentState) = currentScreen else { return nil }
+        if case .result(let previousState) = previousScreen, previousState == currentState {
+            return nil
+        }
+        switch currentState {
+        case .published: return .success
+        case .unavailable, .sellerFixableRefusal, .ebaySideChanged: return .error
+        case .publishing, .outcomeNotYetKnown: return nil
+        }
+    }
+}
+
 @MainActor
 struct EbayPublishView: View {
     @Bindable var store: EbayPublishFlowStore
@@ -216,6 +233,12 @@ struct EbayPublishView: View {
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                 }
             }
+        }
+        .sensoryFeedback(trigger: store.screen) { previous, current in
+            EbayPublishSensoryFeedbackPolicy.resultFeedback(
+                previousScreen: previous,
+                currentScreen: current
+            )
         }
         .task { await store.load() }
     }

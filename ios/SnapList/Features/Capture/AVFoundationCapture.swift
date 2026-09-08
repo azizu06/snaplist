@@ -197,6 +197,35 @@ enum CaptureSessionResumption {
     }
 }
 
+/// Decides the photo output's per-shot flags from the device's own capability
+/// report, kept pure so the decision is unit-testable without a camera.
+///
+/// Sellers fire one to five shots back to back, and without these iOS 17
+/// flags each shot waits for the previous one to finish processing before the
+/// shutter frees up. Deferred photo delivery is deliberately absent: it hands
+/// back a proxy image and finishes the real one later, which would let the
+/// same shot answer the immutable photo-set fingerprint twice and break the
+/// guest allowance and correction-credit accounting that key off it.
+enum CapturePhotoOutputConfiguration {
+    struct Support {
+        let isResponsiveCaptureSupported: Bool
+        let isFastCapturePrioritizationSupported: Bool
+    }
+
+    struct Flags: Equatable {
+        var isResponsiveCaptureEnabled: Bool
+        var isFastCapturePrioritizationEnabled: Bool
+        var isAutoDeferredPhotoDeliveryEnabled = false
+    }
+
+    static func apply(supported: Support) -> Flags {
+        Flags(
+            isResponsiveCaptureEnabled: supported.isResponsiveCaptureSupported,
+            isFastCapturePrioritizationEnabled: supported.isFastCapturePrioritizationSupported
+        )
+    }
+}
+
 final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Sendable {
     let session = AVCaptureSession()
     private(set) var captureDevice: AVCaptureDevice?
@@ -482,6 +511,16 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
         }
         session.addInput(input)
         session.addOutput(photoOutput)
+
+        let photoOutputFlags = CapturePhotoOutputConfiguration.apply(
+            supported: CapturePhotoOutputConfiguration.Support(
+                isResponsiveCaptureSupported: photoOutput.isResponsiveCaptureSupported,
+                isFastCapturePrioritizationSupported: photoOutput.isFastCapturePrioritizationSupported
+            )
+        )
+        photoOutput.isResponsiveCaptureEnabled = photoOutputFlags.isResponsiveCaptureEnabled
+        photoOutput.isFastCapturePrioritizationEnabled = photoOutputFlags.isFastCapturePrioritizationEnabled
+        photoOutput.isAutoDeferredPhotoDeliveryEnabled = photoOutputFlags.isAutoDeferredPhotoDeliveryEnabled
 
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [

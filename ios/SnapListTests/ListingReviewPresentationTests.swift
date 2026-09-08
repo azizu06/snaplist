@@ -207,6 +207,33 @@ final class ListingReviewPresentationTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Numeric text transitions (#1060)
+
+    @MainActor
+    func testSoldCardCarriesANumericTextContentTransition() throws {
+        let match = try soldMatches([(4200, "USD")])[0]
+        let card = ListingReviewSoldCard(match: match, index: 0, total: 1, action: {})
+
+        let rendered = String(reflecting: type(of: card.body))
+
+        XCTAssertTrue(
+            rendered.contains("ContentTransition"),
+            "Sold price should roll digits via .contentTransition(.numericText()), not cut instantly: \(rendered)"
+        )
+    }
+
+    @MainActor
+    func testPriceFieldCarriesANumericTextContentTransition() {
+        let field = ListingReviewPriceValueText(priceText: .constant("58.00"))
+
+        let rendered = String(reflecting: type(of: field.body))
+
+        XCTAssertTrue(
+            rendered.contains("ContentTransition"),
+            "Editable price should roll digits via .contentTransition(.numericText()) when it changes programmatically: \(rendered)"
+        )
+    }
 }
 
 /// The clamp `ListingReviewInlineTextView` puts in front of caret placement.

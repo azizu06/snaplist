@@ -3279,6 +3279,64 @@ enum PhotoReviewBackCoordinator {
     }
 }
 
+/// Photo Review's count pill, isolated from `PhotoReviewView`'s state wiring so a
+/// unit test can render it alone and inspect its resolved content transition
+/// (#1060), the same technique `ScanReviewButton` uses for its button style.
+struct PhotoReviewCountPill: View {
+    let count: Int
+    let limit: Int
+    var countTextSize: CGFloat = 13
+
+    var body: some View {
+        Text("\(count) of \(limit)")
+            .font(
+                .system(
+                    size: countTextSize,
+                    weight: .semibold,
+                    design: .default
+                )
+            )
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .contentTransition(.numericText(value: Double(count)))
+            .padding(.vertical, 5)
+            .padding(.horizontal, 9)
+            .background(
+                SnapListColorToken.quietFill.color,
+                in: RoundedRectangle(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.countRadius
+                )
+            )
+            .fixedSize()
+            .frame(minWidth: 52, minHeight: 44, alignment: .trailing)
+            .accessibilityIdentifier("photo-review.count")
+            .photoReviewLayoutLandmark(.countPill)
+    }
+}
+
+enum PhotoReviewSensoryFeedbackPolicy {
+    static func photoCountFeedback(
+        previousCount: Int,
+        currentCount: Int
+    ) -> SensoryFeedback? {
+        if currentCount > previousCount { return .increase }
+        if currentCount < previousCount { return .decrease }
+        return nil
+    }
+
+    // A monotonic counter, incremented once per consumed drop announcement —
+    // like `shutterFireCount` and `photoLimitAnnouncementCount` — rather than
+    // a nil/non-nil check on the announcement itself, so two drops that land
+    // back-to-back before the first announcement is consumed cannot cause
+    // the second haptic to be silently swallowed.
+    static func reorderDropFeedback(
+        previousCount: Int,
+        currentCount: Int
+    ) -> SensoryFeedback? {
+        currentCount == previousCount ? nil : .selection
+    }
+}
+
 @MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
@@ -3316,6 +3374,7 @@ struct PhotoReviewView: View {
     @State private var accessibilityActionPresentation =
         PhotoReviewAccessibilityActionPresentation()
     @State private var dragPresentation = PhotoReviewDragPresentation()
+    @State private var reorderDropCount = 0
     @State private var thumbnailFrames: [StagedCapturePhoto.ID: CGRect] = [:]
     @State private var thumbnailStripViewportWidth: CGFloat = 0
 #if DEBUG
@@ -3450,6 +3509,18 @@ struct PhotoReviewView: View {
             guard request != nil else { return }
             focusedStartListing = true
         }
+        .sensoryFeedback(trigger: store.photos.count) { previous, current in
+            PhotoReviewSensoryFeedbackPolicy.photoCountFeedback(
+                previousCount: previous,
+                currentCount: current
+            )
+        }
+        .sensoryFeedback(trigger: reorderDropCount) { previous, current in
+            PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
+                previousCount: previous,
+                currentCount: current
+            )
+        }
         .onChange(of: dragPresentation.pendingFocusPhotoID) { _, photoID in
             guard photoID != nil,
                   let focusPhotoID = dragPresentation.consumeFocusPhotoID() else {
@@ -3462,6 +3533,7 @@ struct PhotoReviewView: View {
                   let announcement = dragPresentation.consumeAnnouncement() else {
                 return
             }
+            reorderDropCount += 1
             UIAccessibility.post(
                 notification: .announcement,
                 argument: announcement
@@ -3842,7 +3914,11 @@ struct PhotoReviewView: View {
                 HStack(spacing: 0) {
                     backControl
                     Spacer(minLength: 12)
-                    countPill
+                    PhotoReviewCountPill(
+                        count: store.photos.count,
+                        limit: PhotoReviewCapacityPolicy.photoLimit,
+                        countTextSize: reviewCountSize
+                    )
                 }
                 reviewTitle
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -3865,7 +3941,11 @@ struct PhotoReviewView: View {
                 HStack(spacing: 0) {
                     backControl
                     Spacer(minLength: 12)
-                    countPill
+                    PhotoReviewCountPill(
+                        count: store.photos.count,
+                        limit: PhotoReviewCapacityPolicy.photoLimit,
+                        countTextSize: reviewCountSize
+                    )
                 }
                 .padding(.leading, 8)
                 .padding(.trailing, 12)
@@ -3919,31 +3999,6 @@ struct PhotoReviewView: View {
             .tracking(-0.2)
             .foregroundStyle(SnapListColorToken.inkPrimary.color)
             .photoReviewLayoutLandmark(.title)
-    }
-
-    private var countPill: some View {
-        Text("\(store.photos.count) of \(PhotoReviewCapacityPolicy.photoLimit)")
-            .font(
-                .system(
-                    size: reviewCountSize,
-                    weight: .semibold,
-                    design: .default
-                )
-            )
-            .foregroundStyle(SnapListColorToken.textSecondary.color)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 9)
-            .background(
-                SnapListColorToken.quietFill.color,
-                in: RoundedRectangle(
-                    cornerRadius:
-                        PhotoReviewV5VisualContract.countRadius
-                )
-            )
-            .fixedSize()
-            .frame(minWidth: 52, minHeight: 44, alignment: .trailing)
-            .accessibilityIdentifier("photo-review.count")
-            .photoReviewLayoutLandmark(.countPill)
     }
 
     @ViewBuilder
