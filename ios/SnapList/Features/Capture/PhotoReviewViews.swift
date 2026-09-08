@@ -3324,14 +3324,16 @@ enum PhotoReviewSensoryFeedbackPolicy {
         return nil
     }
 
+    // A monotonic counter, incremented once per consumed drop announcement —
+    // like `shutterFireCount` and `photoLimitAnnouncementCount` — rather than
+    // a nil/non-nil check on the announcement itself, so two drops that land
+    // back-to-back before the first announcement is consumed cannot cause
+    // the second haptic to be silently swallowed.
     static func reorderDropFeedback(
-        previousAnnouncement: String?,
-        currentAnnouncement: String?
+        previousCount: Int,
+        currentCount: Int
     ) -> SensoryFeedback? {
-        guard previousAnnouncement == nil, currentAnnouncement != nil else {
-            return nil
-        }
-        return .selection
+        currentCount == previousCount ? nil : .selection
     }
 }
 
@@ -3372,6 +3374,7 @@ struct PhotoReviewView: View {
     @State private var accessibilityActionPresentation =
         PhotoReviewAccessibilityActionPresentation()
     @State private var dragPresentation = PhotoReviewDragPresentation()
+    @State private var reorderDropCount = 0
     @State private var thumbnailFrames: [StagedCapturePhoto.ID: CGRect] = [:]
     @State private var thumbnailStripViewportWidth: CGFloat = 0
 #if DEBUG
@@ -3512,10 +3515,10 @@ struct PhotoReviewView: View {
                 currentCount: current
             )
         }
-        .sensoryFeedback(trigger: dragPresentation.pendingAnnouncement) { previous, current in
+        .sensoryFeedback(trigger: reorderDropCount) { previous, current in
             PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
-                previousAnnouncement: previous,
-                currentAnnouncement: current
+                previousCount: previous,
+                currentCount: current
             )
         }
         .onChange(of: dragPresentation.pendingFocusPhotoID) { _, photoID in
@@ -3530,6 +3533,7 @@ struct PhotoReviewView: View {
                   let announcement = dragPresentation.consumeAnnouncement() else {
                 return
             }
+            reorderDropCount += 1
             UIAccessibility.post(
                 notification: .announcement,
                 argument: announcement

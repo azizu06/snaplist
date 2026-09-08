@@ -1488,7 +1488,7 @@ struct ListingReviewSoldCard: View {
                     .font(.headline.monospacedDigit())
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .contentTransition(
-                        .numericText(value: Double(truncating: match.soldPrice as NSDecimalNumber))
+                        .numericText(value: NSDecimalNumber(decimal: match.soldPrice).doubleValue)
                     )
 
                 Text(match.soldDateLabel)

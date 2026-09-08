@@ -10226,37 +10226,38 @@ final class CaptureFlowTests: XCTestCase {
     }
 
     /// A drag reorder committing and posting its announcement fires `.selection`.
-    func testReorderDropFeedbackFiresSelectionWhenAnAnnouncementIsNewlyPosted() {
+    func testReorderDropFeedbackFiresSelectionWhenTheCountAdvances() {
         XCTAssertEqual(
             PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
-                previousAnnouncement: nil,
-                currentAnnouncement: "Moved to position 2 of 4"
+                previousCount: 0,
+                currentCount: 1
             ),
             .selection
         )
     }
 
-    /// Consuming the announcement back to `nil` is not a second event — this
-    /// is the "no double-fire on re-render" acceptance criterion for reorder.
-    func testReorderDropFeedbackDoesNotFireWhenTheAnnouncementIsConsumed() {
+    /// A passive re-render at the same count must not fire — this is the
+    /// "no double-fire on re-render" acceptance criterion for reorder.
+    func testReorderDropFeedbackDoesNotFireWhenTheCountIsUnchanged() {
         XCTAssertNil(
             PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
-                previousAnnouncement: "Moved to position 2 of 4",
-                currentAnnouncement: nil
+                previousCount: 1,
+                currentCount: 1
             )
         )
     }
 
-    /// Two consecutive different announcements without an intervening `nil`
-    /// still count as one event each time a genuinely new one lands — but
-    /// once occupied by an unconsumed announcement, another non-nil value is
-    /// not itself a fresh "newly posted" transition from `nil`.
-    func testReorderDropFeedbackDoesNotFireWhenAnAnnouncementIsUnchanged() {
-        XCTAssertNil(
+    /// Two drops landing back-to-back before the first announcement is
+    /// consumed still each fire their own haptic, because the trigger is a
+    /// monotonic counter rather than a nil/non-nil check on the announcement
+    /// itself — the counter can't miss a second consecutive increment.
+    func testReorderDropFeedbackFiresAgainForABackToBackDrop() {
+        XCTAssertEqual(
             PhotoReviewSensoryFeedbackPolicy.reorderDropFeedback(
-                previousAnnouncement: "Moved to position 2 of 4",
-                currentAnnouncement: "Moved to position 2 of 4"
-            )
+                previousCount: 1,
+                currentCount: 2
+            ),
+            .selection
         )
     }
 

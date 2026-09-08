@@ -222,6 +222,18 @@ final class ListingReviewPresentationTests: XCTestCase {
             "Sold price should roll digits via .contentTransition(.numericText()), not cut instantly: \(rendered)"
         )
     }
+
+    @MainActor
+    func testPriceFieldCarriesANumericTextContentTransition() {
+        let field = ListingReviewPriceValueText(priceText: .constant("58.00"))
+
+        let rendered = String(reflecting: type(of: field.body))
+
+        XCTAssertTrue(
+            rendered.contains("ContentTransition"),
+            "Editable price should roll digits via .contentTransition(.numericText()) when it changes programmatically: \(rendered)"
+        )
+    }
 }
 
 /// The clamp `ListingReviewInlineTextView` puts in front of caret placement.

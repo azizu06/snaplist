@@ -136,7 +136,6 @@ struct EbayPublishJourneyHost: View {
     }
 }
 
-@MainActor
 enum EbayPublishSensoryFeedbackPolicy {
     static func resultFeedback(
         previousScreen: EbayPublishScreen,
@@ -154,6 +153,7 @@ enum EbayPublishSensoryFeedbackPolicy {
     }
 }
 
+@MainActor
 struct EbayPublishView: View {
     @Bindable var store: EbayPublishFlowStore
     let forceReducedMotion: Bool
