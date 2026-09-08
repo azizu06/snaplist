@@ -41,6 +41,8 @@ struct TrophyWallView: View {
     let onTryAgain: () -> Void
 
     @ScaledMetric(relativeTo: .title) private var titleSize = 28
+    @Environment(\.dockScrollScale) private var dockScrollScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -197,20 +199,79 @@ struct TrophyWallView: View {
 
         if presentation.showsGrid {
             ScrollView {
-                LazyVGrid(
-                    columns: Self.gridColumns,
-                    spacing: TrophyWallGridMetrics.gutterPoints
-                ) {
-                    ForEach(store.settledTiles) { tile in
-                        TrophyWallSettledTileView(tile: tile, openListing: openListing)
+                ZStack(alignment: .top) {
+                    if #unavailable(iOS 18) {
+                        // iOS 17 fallback for `onScrollGeometryChange`: a
+                        // zero-height marker anchored to the content's top
+                        // reports its own drift, in the ScrollView's own
+                        // (non-scrolling) coordinate space, as the seller
+                        // scrolls the content past it.
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: TrophyWallDockScrollOffsetKey.self,
+                                value: geometry.frame(
+                                    in: .named(TrophyWallDockScrollCoordinateSpace.name)
+                                ).minY
+                            )
+                        }
+                        .frame(height: 0)
                     }
+
+                    LazyVGrid(
+                        columns: Self.gridColumns,
+                        spacing: TrophyWallGridMetrics.gutterPoints
+                    ) {
+                        ForEach(store.settledTiles) { tile in
+                            TrophyWallSettledTileView(tile: tile, openListing: openListing)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, TrophyWallGridMetrics.bottomPaddingPoints)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, TrophyWallGridMetrics.bottomPaddingPoints)
             }
             .scrollIndicators(.hidden)
             .accessibilityIdentifier("trophy.wall.grid")
+            .reportingDockScrollOffset(to: dockScrollScale, reduceMotion: reduceMotion)
+        }
+    }
+}
+
+/// #1049: names the fixed (non-scrolling) reference frame the iOS 17 dock-scroll
+/// fallback measures against — the ScrollView's own bounds, not its content.
+private enum TrophyWallDockScrollCoordinateSpace {
+    static let name = "trophyWall.dockScroll"
+}
+
+private struct TrophyWallDockScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private extension View {
+    /// Reports the surface's downward scroll offset (0 at rest, increasing as
+    /// the seller scrolls down) to the shared dock-scale model. iOS 18 reads
+    /// the scroll geometry directly; iOS 17 falls back to the `PreferenceKey`
+    /// fed by the marker the caller places at the scrolled content's top.
+    @ViewBuilder
+    func reportingDockScrollOffset(
+        to model: DockScrollScaleModel,
+        reduceMotion: Bool
+    ) -> some View {
+        if #available(iOS 18, *) {
+            onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, newOffset in
+                model.reportDownwardScrollOffset(newOffset, reduceMotion: reduceMotion)
+            }
+        } else {
+            coordinateSpace(name: TrophyWallDockScrollCoordinateSpace.name)
+                .onPreferenceChange(TrophyWallDockScrollOffsetKey.self) { minY in
+                    model.reportDownwardScrollOffset(-minY, reduceMotion: reduceMotion)
+                }
         }
     }
 }

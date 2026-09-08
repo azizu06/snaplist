@@ -123,6 +123,52 @@ private enum PhotoReviewHeroNavigationDirection: CaseIterable, Hashable {
     }
 }
 
+/// #1046: the voice note overlay's two transitions, kept as named values so a
+/// test can compare them directly instead of rendering the sheet. The scrim
+/// cross-fades in place; the drawer slides — the iOS sheet convention the
+/// owner picked once the two stopped sharing one container.
+enum PhotoReviewVoiceNoteTransitionPolicy {
+    static let scrimTransition: AnyTransition = .opacity
+    static let sheetTransition: AnyTransition = .move(edge: .bottom)
+}
+
+/// #1046: which edge the hero's next photo enters from, and which edge the
+/// current one leaves toward. Kept out of the view so the direction-to-edge
+/// mapping and the Reduced Motion branch can be asserted directly.
+enum PhotoReviewHeroSlideDirection: Hashable {
+    case previous
+    case next
+}
+
+enum PhotoReviewHeroSlidePolicy {
+    static func insertionEdge(for direction: PhotoReviewHeroSlideDirection) -> Edge {
+        switch direction {
+        case .next: .trailing
+        case .previous: .leading
+        }
+    }
+
+    static func removalEdge(for direction: PhotoReviewHeroSlideDirection) -> Edge {
+        switch direction {
+        case .next: .leading
+        case .previous: .trailing
+        }
+    }
+
+    static func transition(
+        for direction: PhotoReviewHeroSlideDirection,
+        reduceMotion: Bool
+    ) -> AnyTransition {
+        guard !reduceMotion else {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .move(edge: insertionEdge(for: direction)),
+            removal: .move(edge: removalEdge(for: direction))
+        )
+    }
+}
+
 /// #883: what the hero says about where the seller is, and which moves it
 /// offers to VoiceOver and Switch Control now that no chevron carries either
 /// answer. Kept out of the view so both can be asserted directly.
@@ -3285,6 +3331,7 @@ struct PhotoReviewView: View {
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
     @State private var isVoiceNotePresented = false
+    @State private var heroSlideDirection: PhotoReviewHeroSlideDirection = .next
     @State private var submissionEffectConsumer =
         PhotoReviewSubmissionEffectConsumer()
     @State private var saveFailureAnnouncementConsumer =
@@ -3462,6 +3509,7 @@ struct PhotoReviewView: View {
                         .contentShape(.rect)
                         .onTapGesture {}
                         .accessibilityHidden(true)
+                        .transition(PhotoReviewVoiceNoteTransitionPolicy.scrimTransition)
 
                     VoiceNoteSheet(
                         store: voiceNoteStore,
@@ -3469,10 +3517,10 @@ struct PhotoReviewView: View {
                         dismissPresentation: dismissVoiceNotePresentation
                     )
                     .frame(maxWidth: .infinity)
+                    .transition(PhotoReviewVoiceNoteTransitionPolicy.sheetTransition)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
-                .transition(.move(edge: .bottom))
                 .zIndex(10)
             }
         }
@@ -3899,78 +3947,102 @@ struct PhotoReviewView: View {
     private func hero(width: CGFloat, height: CGFloat) -> some View {
         if let selectedPhoto,
            let selectedIndex = store.photos.firstIndex(where: { $0.id == selectedPhoto.id }) {
-            Button {
-                store.selectPhotoForActions(id: selectedPhoto.id)
-            } label: {
-                LocalCaptureImage(
-                    url: selectedPhoto.photoURL,
-                    maximumPixelSize: 1_200
-                )
-                .scaledToFill()
-                .frame(
+            ZStack(alignment: .bottom) {
+                heroImage(
+                    selectedPhoto: selectedPhoto,
+                    selectedIndex: selectedIndex,
                     width: width,
                     height: height
                 )
-                .clipped()
-                .clipShape(
-                    .rect(
-                        cornerRadius:
-                            PhotoReviewV5VisualContract.heroRadius
+                .id(selectedPhoto.id)
+                .transition(
+                    PhotoReviewHeroSlidePolicy.transition(
+                        for: heroSlideDirection,
+                        reduceMotion: reduceMotion
                     )
                 )
-                .overlay {
-                    RoundedRectangle(
-                        cornerRadius:
-                            PhotoReviewV5VisualContract.heroRadius
-                    )
-                    .stroke(
-                        SnapListColorToken.hairline.color,
-                        lineWidth: 1
-                    )
-                    .accessibilityHidden(true)
-                }
-                .accessibilityHidden(true)
+
+                heroPageIndicator(selectedIndex: selectedIndex)
             }
-            .buttonStyle(.plain)
             .frame(width: width, height: height)
-            .accessibilityLabel(
-                photoAccessibilityLabel(
-                    index: selectedIndex,
-                    isSelected: true,
-                    includesThumbnailActions: false
+            .clipped()
+        }
+    }
+
+    private func heroImage(
+        selectedPhoto: StagedCapturePhoto,
+        selectedIndex: Int,
+        width: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        Button {
+            store.selectPhotoForActions(id: selectedPhoto.id)
+        } label: {
+            LocalCaptureImage(
+                url: selectedPhoto.photoURL,
+                maximumPixelSize: 1_200
+            )
+            .scaledToFill()
+            .frame(
+                width: width,
+                height: height
+            )
+            .clipped()
+            .clipShape(
+                .rect(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.heroRadius
                 )
             )
-            .accessibilityIdentifier("photo-review.hero")
-            // #883: the chevrons were the path VoiceOver and Switch Control
-            // could take without a swipe gesture. They are gone from the photo,
-            // but the two named moves they carried stay on the hero itself, so
-            // nobody is left with the swipe as their only way forward.
-            .accessibilityActions {
-                if PhotoReviewHeroNavigationPolicy.hasSomewhereToGo(
-                    photoCount: store.photos.count
-                ) {
-                    ForEach(
-                        PhotoReviewHeroNavigationDirection.allCases,
-                        id: \.self
-                    ) { direction in
-                        Button(direction.accessibilityLabel) {
-                            navigateHero(direction)
-                        }
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.heroRadius
+                )
+                .stroke(
+                    SnapListColorToken.hairline.color,
+                    lineWidth: 1
+                )
+                .accessibilityHidden(true)
+            }
+            .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .frame(width: width, height: height)
+        .accessibilityLabel(
+            photoAccessibilityLabel(
+                index: selectedIndex,
+                isSelected: true,
+                includesThumbnailActions: false
+            )
+        )
+        .accessibilityIdentifier("photo-review.hero")
+        // #883: the chevrons were the path VoiceOver and Switch Control
+        // could take without a swipe gesture. They are gone from the photo,
+        // but the two named moves they carried stay on the hero itself, so
+        // nobody is left with the swipe as their only way forward.
+        .accessibilityActions {
+            if PhotoReviewHeroNavigationPolicy.hasSomewhereToGo(
+                photoCount: store.photos.count
+            ) {
+                ForEach(
+                    PhotoReviewHeroNavigationDirection.allCases,
+                    id: \.self
+                ) { direction in
+                    Button(direction.accessibilityLabel) {
+                        navigateHero(direction)
                     }
                 }
             }
-            // #883: the swipe outranks the hero's own tap. Under
-            // `simultaneousGesture` both fired on lift, and the tap's
-            // `selectPhotoForActions` carried the photo captured when the view
-            // last rendered, so every swipe advanced selection and then handed
-            // it straight back while opening Replace and Delete. The drag needs
-            // 24pt to recognize, so a tap still opens the actions row.
-            .highPriorityGesture(heroSwipeGesture)
-            .overlay(alignment: .bottom) {
-                heroPageIndicator(selectedIndex: selectedIndex)
-            }
-            .photoReviewLayoutLandmark(.hero)
         }
+        // #883: the swipe outranks the hero's own tap. Under
+        // `simultaneousGesture` both fired on lift, and the tap's
+        // `selectPhotoForActions` carried the photo captured when the view
+        // last rendered, so every swipe advanced selection and then handed
+        // it straight back while opening Replace and Delete. The drag needs
+        // 24pt to recognize, so a tap still opens the actions row.
+        .highPriorityGesture(heroSwipeGesture)
+        .photoReviewLayoutLandmark(.hero)
     }
 
     // #883 built this indicator here; #896 moved it to `SnapListPageDots` so
@@ -4029,7 +4101,14 @@ struct PhotoReviewView: View {
             return
         }
         let targetPhoto = store.photos[targetIndex]
-        guard store.selectPhotoForNavigation(id: targetPhoto.id) else {
+        let slideDirection: PhotoReviewHeroSlideDirection =
+            direction == .next ? .next : .previous
+        var didNavigate = false
+        withAnimation(.easeOut(duration: 0.24)) {
+            heroSlideDirection = slideDirection
+            didNavigate = store.selectPhotoForNavigation(id: targetPhoto.id)
+        }
+        guard didNavigate else {
             return
         }
         UIAccessibility.post(
