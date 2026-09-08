@@ -555,6 +555,24 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
         }
     }
 
+    /// The bubble keeps its approved tail everywhere it has a control to point
+    /// at. ACT-03 is the one mark that names none, and a tail aimed at empty
+    /// surface reads as a rendering fault rather than a pointer.
+    func testOnlyTheMarkThatNamesNoControlDropsItsTail() {
+        let everyMark: [ActivationCoachMark] = [
+            .act01, .act02, .act02B, .act03, .act04, .act06, .act08, .act09
+        ]
+        for coachMark in everyMark {
+            XCTAssertEqual(
+                ActivationSpotlightTargetPolicy
+                    .mode(for: coachMark)
+                    .pointsAtAControl,
+                coachMark != .act03,
+                "\(coachMark)"
+            )
+        }
+    }
+
     // MARK: - Accessibility
 
     /// The surface leaves the accessibility tree only when the mark really

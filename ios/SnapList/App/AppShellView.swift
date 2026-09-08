@@ -1152,7 +1152,10 @@ struct AppShellView: View {
             dismiss: dismissActivationGuidance,
             isCompleting: isCompletingActivation,
             usesStaticScoutRendering: configuration.usesStaticScoutRendering,
-            placementOverride: placement
+            placementOverride: placement,
+            showsTail: ActivationSpotlightTargetPolicy
+                .mode(for: coachMark)
+                .pointsAtAControl
         )
         .padding(.horizontal, Self.activationBubbleHorizontalPadding)
         .background {

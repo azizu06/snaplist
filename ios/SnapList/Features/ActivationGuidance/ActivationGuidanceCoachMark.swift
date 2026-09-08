@@ -10,17 +10,21 @@ struct ActivationGuidanceCoachMark: View {
     /// the bottom of the screen, so the shell hands the geometry down instead
     /// of the domain policy deciding it. `nil` keeps the approved anchor.
     var placementOverride: ActivationSpotlightBubblePlacement? = nil
+    /// #1056 review. False for a mark that names no control: the tail would
+    /// point at empty surface. The approved composition keeps its tail
+    /// everywhere else.
+    var showsTail: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
-            if anchor.tailEdge == .top {
+            if showsTail, anchor.tailEdge == .top {
                 tail
             }
 
             bubble
 
-            if anchor.tailEdge == .bottom {
+            if showsTail, anchor.tailEdge == .bottom {
                 tail
             }
         }

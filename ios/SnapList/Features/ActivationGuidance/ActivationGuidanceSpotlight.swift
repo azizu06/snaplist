@@ -57,6 +57,15 @@ enum ActivationSpotlightMode: Equatable {
     /// Dim the surface with no hole. For a mark that states something rather
     /// than asking for an action, so Got it is the only way on.
     case dim
+
+    /// Whether the bubble has a control to point at. The approved composition
+    /// gives every bubble a tail, but a `.dim` mark names no control, so its
+    /// tail aims at empty surface and reads as a rendering fault (#1056
+    /// review). Only that mode drops it; every spotlight keeps its tail.
+    var pointsAtAControl: Bool {
+        if case .dim = self { return false }
+        return true
+    }
 }
 
 enum ActivationSpotlightTargetPolicy {
