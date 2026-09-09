@@ -4777,7 +4777,12 @@ struct PhotoReviewView: View {
             // meant a state that set only `visibleMessage` rendered nothing, and
             // the seller watched a refused upload finish in silence (#803).
             if let message = submissionPresentation.visibleMessage {
-                HStack(alignment: .top, spacing: 10) {
+                // #1074: `.top` left the icon's fixed 22pt frame out of step
+                // with the text's own line-height box, most visibly on the
+                // spinner. `.center` shares one vertical center regardless of
+                // Dynamic Type; the message still grows downward via
+                // `fixedSize(vertical: true)` below.
+                HStack(alignment: .center, spacing: 10) {
                     if let statusKind = submissionPresentation.statusKind {
                         submissionStatusIcon(statusKind)
                             .frame(width: 22, height: 22)

@@ -193,40 +193,55 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
         case .offline:
             "You're offline. Your item is saved on this phone."
         case .ambiguity:
-            "We couldn't confirm this went through. Your item is still saved on this phone."
+            // #1074: shortened from "We couldn't confirm this went through.
+            // Your item is still saved on this phone." to fit one line at
+            // 393pt width, keeping the same two facts (unconfirmed send,
+            // still-saved promise).
+            "Not confirmed. Item still saved on this phone."
         case .conflict:
-            "Something changed since your last try. Review your item, then start again."
+            // #1074: shortened from "Something changed since your last try.
+            // Review your item, then start again." to fit one line.
+            "Something changed. Review your item first."
         case .tryAgain:
-            "This didn't go through. Your item is still saved on this phone."
+            // #1074: shortened from "This didn't go through. Your item is
+            // still saved on this phone." to fit one line at 393pt width.
+            "Didn't send. Item still saved on this phone."
         case .review:
             "This item can't be sent as it is."
         case .photosTooLarge:
             // Names the one thing the seller can change. "Remove or retake"
             // covers both remedies without explaining bytes or limits.
-            "These photos are too large to send. Remove or retake one, then try again."
+            // #1074: shortened from "These photos are too large to send.
+            // Remove or retake one, then try again." to fit one line.
+            "Too large to send. Remove or retake a photo."
         case .sessionRenewal:
             // "Sign-in" is the seller's word for the thing that lapsed. Session,
             // token, and credential are ours. The second sentence is the same
             // promise every other retention makes, and it is the one the seller
             // most needs after watching their photos upload into nothing.
-            "Your sign-in needs renewing. Your item is still saved on this phone."
+            // #1074: shortened from "Your sign-in needs renewing. Your item
+            // is still saved on this phone." to fit one line.
+            "Sign in again. Item is still saved on this phone."
         case .deviceIdentity:
             // "This phone" is the seller's word for the installation the intake
             // is filed under; scope, principal, and attestation are ours. The
             // wait is real, because enrollment retries on its own, and signing
             // in ends it immediately, so the copy offers both without ordering
             // them. Two sentences and no dash, like every other message here.
-            "This phone isn't ready to send yet. Your item is saved, so try again in a moment or sign in."
+            // #1074: shortened from "This phone isn't ready to send yet.
+            // Your item is saved, so try again in a moment or sign in." to
+            // fit one line.
+            "Not ready. Item still saved, try again or sign in."
         case .departedDeviceIdentity:
             // "This phone's ID" is the seller's word for the device identity
             // that was renewed; App Attest key, scope, and principal are ours.
             // The photos are all still here, so nothing may suggest they were
             // lost, and the second sentence names the only edit that clears the
             // refusal rather than offering a retry that cannot.
-            """
-            This phone's ID changed, so these photos can't be sent as they \
-            are. Add, replace, or remove a photo, then try again.
-            """
+            // #1074: shortened from "This phone's ID changed, so these
+            // photos can't be sent as they are. Add, replace, or remove a
+            // photo, then try again." to fit one line.
+            "Phone ID changed. Change a photo to resend."
         }
     }
 

@@ -1336,7 +1336,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(submissionHost.isSubmitting)
         XCTAssertFalse(scenario.photoReviewHost.isCommitting)
         let exactMessage =
-            "We couldn't confirm this went through. Your item is still saved on this phone."
+            "Not confirmed. Item still saved on this phone."
         var presentationProbe = RetainedSubmissionPresentationProbe()
         let firstEvent = try presentationProbe.assertNewEvent(
             host: submissionHost,
@@ -1894,7 +1894,7 @@ final class CaptureFlowTests: XCTestCase {
         )
 
         let visibleMessage =
-            "Something changed since your last try. Review your item, then start again."
+            "Something changed. Review your item first."
         let announcement = "Something changed since your last try."
         var presentationProbe = RetainedSubmissionPresentationProbe()
         let conflict = try presentationProbe.assertNewEvent(
@@ -2061,8 +2061,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             presentationProbe.announcements,
             [
-                "This didn't go through. Your item is still saved on this phone.",
-                "This didn't go through. Your item is still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
             ]
         )
         XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
@@ -2214,8 +2214,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             presentationProbe.announcements,
             [
-                "This didn't go through. Your item is still saved on this phone.",
-                "This didn't go through. Your item is still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
             ]
         )
         XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
@@ -2369,8 +2369,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             presentationProbe.announcements,
             [
-                "This didn't go through. Your item is still saved on this phone.",
-                "This didn't go through. Your item is still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
             ]
         )
         XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
@@ -2487,7 +2487,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNotEqual(rejectionPresentation.primaryActionLabel, "Try again")
         XCTAssertNotEqual(
             rejectionPresentation.visibleMessage,
-            "This didn't go through. Your item is still saved on this phone."
+            "Didn't send. Item still saved on this phone."
         )
         XCTAssertEqual(
             presentationProbe.announcements,
@@ -2644,7 +2644,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             rejection.presentation.visibleMessage,
-            "These photos are too large to send. Remove or retake one, then try again."
+            "Too large to send. Remove or retake a photo."
         )
         XCTAssertEqual(rejection.presentation.primaryActionLabel, "Review")
 
@@ -2788,7 +2788,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertNotEqual(
             rejectionPresentation.visibleMessage,
-            "This didn't go through. Your item is still saved on this phone."
+            "Didn't send. Item still saved on this phone."
         )
         XCTAssertEqual(
             presentationProbe.announcements,

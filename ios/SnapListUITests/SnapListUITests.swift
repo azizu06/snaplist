@@ -1540,7 +1540,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(UINavigationReturnBoundary().restored(message))
         XCTAssertEqual(
             message.label,
-            "These photos are too large to send. Remove or retake one, then try again."
+            "Too large to send. Remove or retake a photo."
         )
 
         // The remedy the banner names is reviewing the photos, so the route has
@@ -1649,7 +1649,7 @@ final class SnapListUITests: XCTestCase {
                     && thumbnail.exists
                     && retainedMessage.exists
                     && retainedMessage.label
-                        == "This didn't go through. Your item is still saved on this phone."
+                        == "Didn't send. Item still saved on this phone."
             },
             object: nil
         )
@@ -1726,7 +1726,7 @@ final class SnapListUITests: XCTestCase {
                     && thumbnail.exists
                     && renewalMessage.exists
                     && renewalMessage.label
-                        == "Your sign-in needs renewing. Your item is still saved on this phone."
+                        == "Sign in again. Item is still saved on this phone."
             },
             object: nil
         )
