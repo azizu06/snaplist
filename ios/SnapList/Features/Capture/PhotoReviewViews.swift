@@ -132,40 +132,14 @@ enum PhotoReviewVoiceNoteTransitionPolicy {
     static let sheetTransition: AnyTransition = .move(edge: .bottom)
 }
 
-/// #1046: which edge the hero's next photo enters from, and which edge the
-/// current one leaves toward. Kept out of the view so the direction-to-edge
-/// mapping and the Reduced Motion branch can be asserted directly.
-enum PhotoReviewHeroSlideDirection: Hashable {
-    case previous
-    case next
-}
-
-enum PhotoReviewHeroSlidePolicy {
-    static func insertionEdge(for direction: PhotoReviewHeroSlideDirection) -> Edge {
-        switch direction {
-        case .next: .trailing
-        case .previous: .leading
-        }
-    }
-
-    static func removalEdge(for direction: PhotoReviewHeroSlideDirection) -> Edge {
-        switch direction {
-        case .next: .leading
-        case .previous: .trailing
-        }
-    }
-
-    static func transition(
-        for direction: PhotoReviewHeroSlideDirection,
-        reduceMotion: Bool
-    ) -> AnyTransition {
-        guard !reduceMotion else {
-            return .opacity
-        }
-        return .asymmetric(
-            insertion: .move(edge: insertionEdge(for: direction)),
-            removal: .move(edge: removalEdge(for: direction))
-        )
+/// #1073: the hero is a real paging `ScrollView`, so the finger (or the
+/// system's own paging spring) drives the slide — no transition policy is
+/// needed for the swipe itself. What stays pure and testable is whether a
+/// *programmatic* jump (thumbnail tap, #883 accessibility navigation) may
+/// animate at all.
+enum PhotoReviewHeroNavigationAnimationPolicy {
+    static func animation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .default
     }
 }
 
@@ -3390,7 +3364,6 @@ struct PhotoReviewView: View {
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
     @State private var isVoiceNotePresented = false
-    @State private var heroSlideDirection: PhotoReviewHeroSlideDirection = .next
     @State private var submissionEffectConsumer =
         PhotoReviewSubmissionEffectConsumer()
     @State private var saveFailureAnnouncementConsumer =
@@ -4001,43 +3974,97 @@ struct PhotoReviewView: View {
             .photoReviewLayoutLandmark(.title)
     }
 
+    // #1073: a real paging `ScrollView` replaced the id-swap + `.transition()`
+    // pair. The old pair rendered the incoming and outgoing hero in the same
+    // transaction as an `.easeOut` animation that the simulator (and,
+    // per the owner's device report, the display compositor) could resolve
+    // in under one frame — no visible slide, and the two `RoundedRectangle`
+    // strokes briefly sharing the `.clipped()` ZStack read as corner
+    // artifacts. Paging hands the slide to the system: the finger drives it
+    // while dragging, the paging spring drives it on release, and only one
+    // page's rounded corners are ever on screen at rest.
     @ViewBuilder
     private func hero(width: CGFloat, height: CGFloat) -> some View {
-        if let selectedPhoto,
-           let selectedIndex = store.photos.firstIndex(where: { $0.id == selectedPhoto.id }) {
+        if !store.photos.isEmpty {
             ZStack(alignment: .bottom) {
-                heroImage(
-                    selectedPhoto: selectedPhoto,
-                    selectedIndex: selectedIndex,
-                    width: width,
-                    height: height
-                )
-                .id(selectedPhoto.id)
-                .transition(
-                    PhotoReviewHeroSlidePolicy.transition(
-                        for: heroSlideDirection,
-                        reduceMotion: reduceMotion
-                    )
-                )
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(
+                            Array(store.photos.enumerated()),
+                            id: \.element.id
+                        ) { index, photo in
+                            heroPage(
+                                photo: photo,
+                                index: index,
+                                width: width,
+                                height: height
+                            )
+                            .id(photo.id)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: heroScrollPosition)
+                .scrollIndicators(.hidden)
+                .scrollDisabled(store.photos.count <= 1)
+                .frame(width: width, height: height)
 
-                heroPageIndicator(selectedIndex: selectedIndex)
+                if let selectedIndex = store.photos.firstIndex(
+                    where: { $0.id == store.selectedPhotoID }
+                ) {
+                    heroPageIndicator(selectedIndex: selectedIndex)
+                }
             }
             .frame(width: width, height: height)
             .clipped()
+            // The hero landmark is the fixed viewport, not whichever page's
+            // button happens to be selected — a selected page's own frame
+            // moves with the scroll offset once it isn't the first page, but
+            // the delete badge and page indicator anchor to a stable rect.
+            .photoReviewLayoutLandmark(.hero)
         }
     }
 
-    private func heroImage(
-        selectedPhoto: StagedCapturePhoto,
-        selectedIndex: Int,
+    // The scroll view is the source of a swipe-driven selection: SwiftUI
+    // calls this binding's setter once paging settles on a neighboring page.
+    // A programmatic jump (thumbnail tap, #883 accessibility actions) instead
+    // changes `store.selectedPhotoID` directly, which this binding's getter
+    // then reflects — the scroll view animates to match on its own.
+    private var heroScrollPosition: Binding<StagedCapturePhoto.ID?> {
+        Binding(
+            get: { store.selectedPhotoID ?? store.photos.first?.id },
+            set: { newValue in
+                guard let newValue,
+                      let index = store.photos.firstIndex(where: { $0.id == newValue }),
+                      store.selectPhotoForNavigation(id: newValue)
+                else {
+                    return
+                }
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: photoAccessibilityLabel(
+                        index: index,
+                        isSelected: true,
+                        includesThumbnailActions: false
+                    )
+                )
+            }
+        )
+    }
+
+    private func heroPage(
+        photo: StagedCapturePhoto,
+        index: Int,
         width: CGFloat,
         height: CGFloat
     ) -> some View {
-        Button {
-            store.selectPhotoForActions(id: selectedPhoto.id)
+        let isSelected = photo.id == store.selectedPhotoID
+        let button = Button {
+            store.selectPhotoForActions(id: photo.id)
         } label: {
             LocalCaptureImage(
-                url: selectedPhoto.photoURL,
+                url: photo.photoURL,
                 maximumPixelSize: 1_200
             )
             .scaledToFill()
@@ -4067,20 +4094,26 @@ struct PhotoReviewView: View {
         }
         .buttonStyle(.plain)
         .frame(width: width, height: height)
+        .accessibilityHidden(!isSelected)
         .accessibilityLabel(
             photoAccessibilityLabel(
-                index: selectedIndex,
-                isSelected: true,
+                index: index,
+                isSelected: isSelected,
                 includesThumbnailActions: false
             )
         )
-        .accessibilityIdentifier("photo-review.hero")
+        // A paging `ScrollView` exposes its flanking pages to the
+        // accessibility tree for the system's own swipe affordance even
+        // when they are `accessibilityHidden` — so uniqueness has to come
+        // from the identifier itself, not from hiding, or `photo-review.hero`
+        // matches two elements mid-scroll.
+        .accessibilityIdentifier(isSelected ? "photo-review.hero" : "photo-review.hero.unselected")
         // #883: the chevrons were the path VoiceOver and Switch Control
         // could take without a swipe gesture. They are gone from the photo,
         // but the two named moves they carried stay on the hero itself, so
         // nobody is left with the swipe as their only way forward.
         .accessibilityActions {
-            if PhotoReviewHeroNavigationPolicy.hasSomewhereToGo(
+            if isSelected && PhotoReviewHeroNavigationPolicy.hasSomewhereToGo(
                 photoCount: store.photos.count
             ) {
                 ForEach(
@@ -4093,14 +4126,7 @@ struct PhotoReviewView: View {
                 }
             }
         }
-        // #883: the swipe outranks the hero's own tap. Under
-        // `simultaneousGesture` both fired on lift, and the tap's
-        // `selectPhotoForActions` carried the photo captured when the view
-        // last rendered, so every swipe advanced selection and then handed
-        // it straight back while opening Replace and Delete. The drag needs
-        // 24pt to recognize, so a tap still opens the actions row.
-        .highPriorityGesture(heroSwipeGesture)
-        .photoReviewLayoutLandmark(.hero)
+        return button
     }
 
     // #883 built this indicator here; #896 moved it to `SnapListPageDots` so
@@ -4135,15 +4161,19 @@ struct PhotoReviewView: View {
         }
     }
 
-    private var heroSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height)
-                else {
-                    return
-                }
-                navigateHero(value.translation.width < 0 ? .next : .previous)
-            }
+    // #883's accessibility previous/next actions and a thumbnail tap are both
+    // programmatic jumps rather than a finger dragging the scroll view, so
+    // they animate the hero's scroll position themselves — full motion
+    // unless Reduced Motion asks for an instant cut (#1073).
+    @discardableResult
+    private func navigateHeroProgrammatically(to photoID: StagedCapturePhoto.ID) -> Bool {
+        var didNavigate = false
+        withAnimation(
+            PhotoReviewHeroNavigationAnimationPolicy.animation(reduceMotion: reduceMotion)
+        ) {
+            didNavigate = store.selectPhotoForNavigation(id: photoID)
+        }
+        return didNavigate
     }
 
     private func navigateHero(_ direction: PhotoReviewHeroNavigationDirection) {
@@ -4159,14 +4189,7 @@ struct PhotoReviewView: View {
             return
         }
         let targetPhoto = store.photos[targetIndex]
-        let slideDirection: PhotoReviewHeroSlideDirection =
-            direction == .next ? .next : .previous
-        var didNavigate = false
-        withAnimation(.easeOut(duration: 0.24)) {
-            heroSlideDirection = slideDirection
-            didNavigate = store.selectPhotoForNavigation(id: targetPhoto.id)
-        }
-        guard didNavigate else {
+        guard navigateHeroProgrammatically(to: targetPhoto.id) else {
             return
         }
         UIAccessibility.post(
@@ -4299,7 +4322,7 @@ struct PhotoReviewView: View {
             spacing: PhotoReviewV5VisualContract.coverColumnGap
         ) {
             Button {
-                store.selectPhotoForNavigation(id: photo.id)
+                navigateHeroProgrammatically(to: photo.id)
                 hardwareFocusedThumbnailID = photo.id
             } label: {
                 LocalCaptureImage(

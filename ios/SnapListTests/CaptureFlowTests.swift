@@ -9837,57 +9837,18 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
-    func testHeroSlideDirectionMapsNextToTrailingInsertionAndLeadingRemoval() {
-        XCTAssertEqual(
-            PhotoReviewHeroSlidePolicy.insertionEdge(for: .next),
-            .trailing
-        )
-        XCTAssertEqual(
-            PhotoReviewHeroSlidePolicy.removalEdge(for: .next),
-            .leading
+    // #1073: the paging `ScrollView` itself drives the hero's swipe motion,
+    // so the only remaining animation decision is whether a *programmatic*
+    // jump (thumbnail tap, #883 accessibility navigation) may animate at all.
+    func testHeroNavigationAnimationPolicyAnimatesWhenMotionIsNotReduced() {
+        XCTAssertNotNil(
+            PhotoReviewHeroNavigationAnimationPolicy.animation(reduceMotion: false)
         )
     }
 
-    func testHeroSlideDirectionMapsPreviousToLeadingInsertionAndTrailingRemoval() {
-        XCTAssertEqual(
-            PhotoReviewHeroSlidePolicy.insertionEdge(for: .previous),
-            .leading
-        )
-        XCTAssertEqual(
-            PhotoReviewHeroSlidePolicy.removalEdge(for: .previous),
-            .trailing
-        )
-    }
-
-    func testHeroSlideTransitionCrossfadesUnderReducedMotionRegardlessOfDirection() {
-        let next = String(
-            reflecting: PhotoReviewHeroSlidePolicy.transition(
-                for: .next,
-                reduceMotion: true
-            )
-        )
-        let previous = String(
-            reflecting: PhotoReviewHeroSlidePolicy.transition(
-                for: .previous,
-                reduceMotion: true
-            )
-        )
-
-        XCTAssertTrue(next.contains("OpacityTransition"), next)
-        XCTAssertTrue(previous.contains("OpacityTransition"), previous)
-    }
-
-    func testHeroSlideTransitionMovesWhenMotionIsNotReduced() {
-        let rendered = String(
-            reflecting: PhotoReviewHeroSlidePolicy.transition(
-                for: .next,
-                reduceMotion: false
-            )
-        )
-
-        XCTAssertFalse(
-            rendered.contains("OpacityTransition"),
-            "Full motion must push, not crossfade: \(rendered)"
+    func testHeroNavigationAnimationPolicyIsInstantUnderReducedMotion() {
+        XCTAssertNil(
+            PhotoReviewHeroNavigationAnimationPolicy.animation(reduceMotion: true)
         )
     }
 
