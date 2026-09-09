@@ -1837,7 +1837,10 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(hero.exists)
         XCTAssertFalse(thumbnail.exists)
         XCTAssertFalse(addPhoto.exists)
-        XCTAssertFalse(app.buttons["scan.review"].exists)
+        assertReviewIsPresentButInert(
+            in: app,
+            because: "Returning to a cleared Scan leaves Review in the row, inert."
+        )
         XCTAssertFalse(app.descendants(matching: .any)["scan.photo-1"].exists)
 
         // Which ready Scan surface mounts decides whether a dock exists at all.
@@ -1966,9 +1969,9 @@ final class SnapListUITests: XCTestCase {
             "Emptying the intake must not restart onboarding behind the camera."
         )
         XCTAssertFalse(screen.waitForExistence(timeout: 2))
-        XCTAssertFalse(
-            app.buttons["scan.review"].exists,
-            "Zero-photo Scan has nothing to review."
+        assertReviewIsPresentButInert(
+            in: app,
+            because: "Zero-photo Scan has nothing to review, so Review is inert, not absent."
         )
         XCTAssertFalse(
             app.descendants(matching: .any)["scan.photo-1"].exists,
@@ -2085,7 +2088,10 @@ final class SnapListUITests: XCTestCase {
         // real shell has always hidden it here; this route now matches.
         XCTAssertFalse(zero.buttons["dock.scan"].exists)
         XCTAssertFalse(zero.buttons["dock.trophy-wall"].exists)
-        XCTAssertFalse(zero.buttons["scan.review"].exists)
+        assertReviewIsPresentButInert(
+            in: zero,
+            because: "CAM-01 keeps the row symmetric with an inert Review."
+        )
         XCTAssertFalse(zero.descendants(matching: .any)["scan.photo-1"].exists)
         XCTAssertTrue(zero.buttons["scan.shutter"].isEnabled)
         XCTAssertEqual(zero.buttons["scan.shutter"].label, "Take photo")
@@ -2096,6 +2102,10 @@ final class SnapListUITests: XCTestCase {
             capped.descendants(matching: .any)["scan.photo-5"].waitForExistence(timeout: 2)
         )
         XCTAssertTrue(capped.buttons["scan.review"].exists)
+        XCTAssertTrue(
+            capped.buttons["scan.review"].isEnabled,
+            "#1072: Review lights up as soon as there is at least one photo."
+        )
         // #954 deleted the "5 of 5" capsule, which was the only text saying the
         // seller had reached the cap. The shutter carries that now: it is
         // actually disabled, and its accessibility label says why rather than
@@ -2285,9 +2295,26 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(stagedLibraryOffset, emptyOffset, accuracy: 1, stagedReceipt)
         XCTAssertEqual(reviewOffset, emptyOffset, accuracy: 1, stagedReceipt)
         // The old two-region design let a control's midX drift more than
-        // 150pt from the shutter's; the fixed-slot design keeps it tight.
-        XCTAssertLessThan(emptyOffset, 110, emptyReceipt)
-        XCTAssertLessThan(reviewOffset, 110, stagedReceipt)
+        // 150pt from the shutter's; the fixed-slot design keeps it bounded.
+        // #1072 widened the slot gap 24 -> 56 on owner direction, which moves
+        // each side control out toward its framing corner, so the bound moves
+        // with it and the real contract below is the distance from the screen
+        // edge rather than from the shutter.
+        XCTAssertLessThan(emptyOffset, 140, emptyReceipt)
+        XCTAssertLessThan(reviewOffset, 140, stagedReceipt)
+
+        // #1072 owner acceptance: each side control's center sits roughly
+        // 60-70pt from the screen edge on a 393pt device — a little inside the
+        // framing bracket, not tucked against the shutter. The fixture window
+        // is 402pt wide, so the same layout lands a few points wider; the band
+        // is stated with that slack rather than pinned to one device.
+        let window = staged.windows.firstMatch.frame
+        let libraryInset = library.frame.midX - window.minX
+        let reviewInset = window.maxX - review.frame.midX
+        let insetReceipt = "\(stagedReceipt) window=\(window)"
+        XCTAssertEqual(libraryInset, reviewInset, accuracy: 1, insetReceipt)
+        XCTAssertGreaterThanOrEqual(libraryInset, 55, insetReceipt)
+        XCTAssertLessThanOrEqual(libraryInset, 85, insetReceipt)
         XCTAssertFalse(library.frame.intersects(shutter.frame), stagedReceipt)
         XCTAssertFalse(review.frame.intersects(shutter.frame), stagedReceipt)
         staged.terminate()
@@ -2731,7 +2758,12 @@ final class SnapListUITests: XCTestCase {
         // The row that used to hold review alone is gone, so the shutter row
         // follows the strip directly. Pinning the gap keeps the reclaimed
         // height from quietly reappearing as padding.
-        XCTAssertEqual(library.frame.minY - firstPhoto.frame.maxY, 28, accuracy: 2)
+        //
+        // #1072 raised the strip-to-shutter-row padding from 12 to 18 on the
+        // owner's second device pass, so this measured gap moved 28 -> 33.
+        // It is the padding plus the shutter row's own vertical centering of
+        // a 48pt control inside its 80pt frame, not padding alone.
+        XCTAssertEqual(library.frame.minY - firstPhoto.frame.maxY, 33, accuracy: 2)
         // #885: no dock on the camera preview, so the shutter row is the last
         // thing above the home indicator rather than the second to last.
         XCTAssertFalse(app.buttons["dock.scan"].exists)
@@ -2879,8 +2911,18 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(review.label, "Review 2 photos")
         XCTAssertTrue(removeSecond.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertEqual(removeSecond.label, "Remove photo 2")
-        XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(removeSecond.frame.height, 44)
+        // The badge is `.frame(width: 44, height: 44)` in
+        // `ScanPhotoThumbnail`, but XCUITest reports its width as
+        // 43.99999999999997 — three parts in 10^15 short, which is float
+        // noise in the frame conversion rather than a target a finger would
+        // miss. Verified against 4367b7341 (this branch's merge base) with
+        // #1072's layout reverted: the same assertion fails there with the
+        // identical value, so the strictness predates this branch. Half a
+        // point of slack survives the last bit and still fails on any real
+        // shrink.
+        let badgeReceipt = "removeSecond=\(removeSecond.frame)"
+        XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 43.5, badgeReceipt)
+        XCTAssertGreaterThanOrEqual(removeSecond.frame.height, 43.5, badgeReceipt)
 
         removeSecond.tap()
 
@@ -2910,7 +2952,10 @@ final class SnapListUITests: XCTestCase {
             .completed,
             "Removing the last photo must clear the strip."
         )
-        XCTAssertFalse(app.buttons["scan.review"].exists)
+        assertReviewIsPresentButInert(
+            in: app,
+            because: "Emptying the strip disables Review rather than removing it."
+        )
         XCTAssertTrue(
             shutter.waitForExistence(timeout: 3),
             "The capture surface must remain, ready for another photo."
@@ -4730,6 +4775,25 @@ final class SnapListUITests: XCTestCase {
             }
             processTermination.assertRetired(app, "SnapList after \(state)")
         }
+    }
+
+    /// #1072's replacement for the #1009/#1045 contract that `scan.review`
+    /// must not exist below one photo.
+    ///
+    /// An empty trailing slot read as an asymmetric shutter row on device, so
+    /// Review now renders at every count and carries the "nothing to review
+    /// yet" meaning through `isEnabled` instead of through absence. Absence
+    /// and disabled are different promises to VoiceOver, and this is the one
+    /// the approved layout makes.
+    private func assertReviewIsPresentButInert(
+        in app: XCUIApplication,
+        because reason: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3), reason, file: file, line: line)
+        XCTAssertFalse(review.isEnabled, reason, file: file, line: line)
     }
 
     private func launch(
