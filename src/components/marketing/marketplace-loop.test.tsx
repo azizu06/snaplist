@@ -4,6 +4,12 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// React only recognizes act() calls made outside a library like React Testing
+// Library when this flag is set; without it every act() here logs a spurious
+// "not configured to support act(...)" warning instead of asserting on a
+// flushed DOM. See https://react.dev/reference/react/act.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const logoLoopCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 
 vi.mock("@/components/bits/LogoLoop", () => ({
