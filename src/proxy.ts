@@ -38,6 +38,10 @@ const isPublic = createRouteMatcher([
   "/api/app-attest",
   "/api/app-attest/",
   "/api/ebay/account-deletion",
+  // RevenueCat webhook deliveries carry no Clerk cookie. The route verifies the
+  // exact Authorization value and the HMAC signature itself; a login redirect
+  // here drops every billing event (found by the first production test event).
+  "/api/webhooks/revenuecat",
   "/api/internal/pipeline-worker",
   "/api/internal/pipeline-maintenance",
   "/api/internal/included-offer-worker",

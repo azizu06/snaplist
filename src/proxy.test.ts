@@ -250,6 +250,25 @@ describe("auth proxy", () => {
     expect(pricingResponse.headers.get("location")).toBeNull();
   });
 
+  it("lets a RevenueCat webhook delivery reach its own header-authenticated handler", async () => {
+    // RevenueCat carries no Clerk cookie; the route verifies the exact
+    // Authorization value and the HMAC signature itself. A login redirect here
+    // silently drops every billing event.
+    const response = await proxy(
+      new NextRequest("https://snaplist.test/api/webhooks/revenuecat", {
+        method: "POST",
+      }),
+      {} as NextFetchEvent,
+    );
+    if (!response) {
+      throw new Error("Expected the proxy to return a response");
+    }
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("lets Apple fetch the app-site association without a Clerk redirect", async () => {
     const response = await proxy(
       new NextRequest(
