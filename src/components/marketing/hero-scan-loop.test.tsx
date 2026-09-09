@@ -4,6 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { HeroScanLoop } from "@/components/marketing/hero-scan-loop";
 
+// React only recognizes act() calls made outside a library like React Testing
+// Library when this flag is set; without it every act() here logs a spurious
+// "not configured to support act(...)" warning instead of asserting on a
+// flushed DOM. See https://react.dev/reference/react/act.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 /**
  * The loop advances on the flash animation's iteration boundary rather than on
  * a timer of its own, so the item swap cannot drift away from the beat the
