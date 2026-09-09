@@ -1,4 +1,4 @@
-# CI (issues #18, #1026, #1036): typecheck → lint → migration audit → unit/contract tests → offline eval → build,
+# CI (issues #18, #1026, #1036, #1041): typecheck → lint → migration audit → unit-economics freshness → unit/contract tests → offline eval → build,
 # plus the pgTAP database contracts (issue #496) and the Docker image build.
 # Runs with NO secrets: no API keys, no hosted database. `verify` is offline by
 # construction; `database` builds a throwaway local Postgres from the branch's
@@ -36,6 +36,10 @@ jobs:
       # Fail fast with a focused diagnostic when migration filenames are
       # malformed or reuse an existing 14-digit version.
       - run: pnpm audit:migrations
+
+      # Keep the checked-in Pro unit-economics results synchronized with the
+      # validated model and calculator.
+      - run: pnpm unit-economics:check
 
       # This job intentionally has no Supabase stack. DB/RLS coverage is
       # enforced by the database job after it provisions its local API.
