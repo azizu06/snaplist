@@ -207,6 +207,7 @@ src/lib/billing/entitlement.ts
 src/lib/billing/index.ts
 src/lib/billing/item-run-policy.ts
 src/lib/billing/lifecycle.ts
+src/lib/billing/operator-pro.ts
 src/lib/billing/revenuecat-store.ts
 src/lib/billing/revenuecat.ts
 src/lib/billing/webhook.ts
@@ -546,6 +547,7 @@ supabase/migrations/20260816200000_seller_push_delivery.sql
 supabase/migrations/20260820120000_condition_only_review_rerun_is_free.sql
 supabase/migrations/20260821220000_post_completion_provider_usage_overflow_guard.sql
 supabase/migrations/20260821221000_post_completion_provider_usage_replay_fence.sql
+supabase/migrations/20260909120000_operator_pro_allowance.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

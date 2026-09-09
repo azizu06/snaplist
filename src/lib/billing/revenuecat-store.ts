@@ -1,4 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  ensureOperatorProAllowance,
+  type OperatorProGrantClient,
+} from "./operator-pro";
 import type {
   RevenueCatCustomerIdentity,
   RevenueCatEntitlementStore,
@@ -118,13 +122,45 @@ export function createSupabaseRevenueCatEntitlementStore(
   };
 }
 
+export interface NativeSubscriptionBridgeOptions {
+  /** Overridable only so tests need not mutate the process environment. */
+  env?: Record<string, string | undefined>;
+}
+
 export function createSupabaseNativeSubscriptionBridge(
   admin: SupabaseClient,
   config: RevenueCatServerConfig | null,
+  options: NativeSubscriptionBridgeOptions = {},
 ): NativeSubscriptionBridge {
+  /**
+   * Issue #1077. The App Review demo account and the owner hold SnapList Pro
+   * without a purchase, so their allowance period is materialized here — the
+   * one composed seam every native subscription read already passes through —
+   * rather than at each call site.
+   *
+   * It is emphatically NOT a RevenueCat or StoreKit write: the period carries
+   * `source = 'operator'`, and the customer binding below is unchanged, so a
+   * grant can never be read back as a purchase. Membership comes from the
+   * server environment compared against the AUTHENTICATED Clerk subject the
+   * caller was resolved to; nothing a client sends reaches it.
+   *
+   * A refused grant propagates. Reporting an entitlement the database declined
+   * to write would tell the reviewer they have Pro and then deny their run.
+   */
+  async function grantOperatorPro(userId: string): Promise<void> {
+    await ensureOperatorProAllowance({
+      userId,
+      client: admin as unknown as OperatorProGrantClient,
+      ...(options.env ? { env: options.env } : {}),
+    });
+  }
+
   return {
     async configurationFor(userId) {
       if (!config?.iosPublicSdkKey) return { configured: false, appUserId: userId };
+      // Granted at configuration time as well as at entitlement time, so a
+      // reviewer who never opens Settings still reaches run #2.
+      await grantOperatorPro(userId);
       const { data, error } = await admin.rpc("bind_revenuecat_customer", {
         p_revenuecat_app_user_id: userId,
         p_user_id: userId,
@@ -165,6 +201,7 @@ export function createSupabaseNativeSubscriptionBridge(
           legacyStripeStatus: null,
         };
       }
+      await grantOperatorPro(userId);
       const { data, error } = await admin.rpc(
         "get_verified_ai_item_entitlement",
         { p_user_id: userId },
