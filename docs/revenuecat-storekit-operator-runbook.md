@@ -107,6 +107,42 @@ refuses to reconcile while the verified Stripe mirror is still current. If Strip
 current again, the subscription lifecycle write immediately restores `required`, marks the StoreKit
 period ambiguous, and blocks reservation authority until another explicit reconciliation.
 
+## Operator SnapList Pro without a purchase
+
+`SNAPLIST_PRO_OPERATOR_USER_IDS` grants SnapList Pro to a small, explicit list of Clerk user ids
+without any App Store purchase, so the App Review demo account can exercise the paid path and the
+owner can test the product on a real device.
+
+**Only the App Review demo account and the owner are ever listed.** This is not a comp, beta,
+influencer, support, or refund mechanism; those go through the store. Adding anyone else means the
+seller has SnapList Pro without a receipt, and reconciliation has nothing to point at.
+
+- Format: a comma-separated list of exact Clerk user ids, each `user_` followed by letters and
+  digits (trimmed and deduplicated; at most ten). No email addresses, no wildcards, no guest
+  installation ids. A malformed value fails startup validation rather than being ignored.
+- Unset is the production-safe default: no grant, and no behavior change of any kind.
+- The id is compared only against the Clerk subject the server itself verified — the same value RLS
+  enforces as `user_id`. Nothing a client sends participates.
+- The grant materializes an `ai_item_allowance_periods` row with `source = 'operator'`. It is not a
+  RevenueCat customer and not a StoreKit period: the webhook path, the customer-binding resolver, and
+  the legacy-environment quarantine all filter on `source = 'storekit'`, so an operator row can never
+  be reconciled as a purchase.
+- Every operator run still writes an `ai_item_credit_reservations` row, so the eval harness and the
+  settle/restore lifecycle see reviewer runs exactly as they see paid ones.
+- Settings shows the existing Pro active state through the unchanged envelope. The client's frozen
+  `billingSource` enum has no operator value, so the grant reports the non-purchase source with an
+  active status; the durable operator marker lives in the ledger's `source` column.
+
+An operator period takes precedence over a real StoreKit period in both the reservation trigger and
+the entitlement projection, so a listed account cannot validate a genuine purchase: it will reserve
+against the grant and report the grant's state. **Before testing a real subscription, remove yourself
+from `SNAPLIST_PRO_OPERATOR_USER_IDS` and delete your `source = 'operator'` allowance row.**
+
+To withdraw a grant, remove the id from `SNAPLIST_PRO_OPERATOR_USER_IDS`, deploy, and delete that
+account's `source = 'operator'` allowance row. Removing the environment value alone stops future
+grants but leaves the existing period in place. Deleting the row does not touch the account's
+settled reservations or drafts.
+
 ## Disable / rollback
 
 Disable webhook delivery at RevenueCat, remove the RevenueCat server environment values, and deploy

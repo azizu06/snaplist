@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { generateTestPkcs8PrivateKeyPem } from "./guest-capability/signer.testing";
-import { parseEnv } from "./env";
+import { getProOperatorUserIds, parseEnv } from "./env";
 
 const DEPLOYED_SERVER_RPC_SECRET =
   "dd0Gf7bUC6iOCfyI1cXgM7pPDSpyDGd9zM6rhFgDFk6r2sW7d2VKB/EkB2WRUM/p";
@@ -570,5 +570,57 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({ ...valid, EBAY_SOLD_PROXY_TEMPLATE: template }),
     ).toThrowError(/EBAY_SOLD_PROXY_TEMPLATE/);
+  });
+});
+
+describe("getProOperatorUserIds", () => {
+  it("reports no operator grant when the variable is unset or blank", () => {
+    expect(getProOperatorUserIds({})).toEqual([]);
+    expect(getProOperatorUserIds({ SNAPLIST_PRO_OPERATOR_USER_IDS: "   " })).toEqual(
+      [],
+    );
+    expect(getProOperatorUserIds({ SNAPLIST_PRO_OPERATOR_USER_IDS: " , ," })).toEqual(
+      [],
+    );
+  });
+
+  it("trims, deduplicates, and preserves the configured order", () => {
+    expect(
+      getProOperatorUserIds({
+        SNAPLIST_PRO_OPERATOR_USER_IDS:
+          " user_2reviewDemoAccount , user_2ownerAccount ,user_2reviewDemoAccount",
+      }),
+    ).toEqual(["user_2reviewDemoAccount", "user_2ownerAccount"]);
+  });
+
+  it.each([
+    ["an email address", "reviewer@example.com"],
+    ["a wildcard", "user_*"],
+    ["a bare Clerk id with no prefix", "2reviewDemoAccount"],
+    ["a prefix with no subject", "user_"],
+    ["a punctuated subject", "user_2review.demo"],
+  ])("rejects %s", (_label, value) => {
+    expect(() =>
+      getProOperatorUserIds({ SNAPLIST_PRO_OPERATOR_USER_IDS: value }),
+    ).toThrowError(/SNAPLIST_PRO_OPERATOR_USER_IDS/);
+  });
+
+  it("rejects an allowlist larger than the two operator accounts plus headroom", () => {
+    const ids = Array.from({ length: 11 }, (_, index) => `user_2operator${index}`);
+    expect(() =>
+      getProOperatorUserIds({ SNAPLIST_PRO_OPERATOR_USER_IDS: ids.join(",") }),
+    ).toThrowError(/SNAPLIST_PRO_OPERATOR_USER_IDS/);
+  });
+
+  it("fails config validation for a malformed allowlist and accepts a valid one", () => {
+    expect(() =>
+      parseEnv({ ...valid, SNAPLIST_PRO_OPERATOR_USER_IDS: "reviewer@example.com" }),
+    ).toThrowError(/SNAPLIST_PRO_OPERATOR_USER_IDS/);
+    expect(
+      parseEnv({
+        ...valid,
+        SNAPLIST_PRO_OPERATOR_USER_IDS: "user_2reviewDemoAccount",
+      }).SNAPLIST_PRO_OPERATOR_USER_IDS,
+    ).toBe("user_2reviewDemoAccount");
   });
 });

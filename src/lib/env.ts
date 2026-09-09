@@ -192,6 +192,12 @@ const envSchema = z.object({
   REVENUECAT_IOS_PUBLIC_SDK_KEY: z.string().min(1).optional(),
   REVENUECAT_OFFERING_ID: z.string().min(1).optional(),
   SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: z.string().min(1).optional(),
+  // Operator SnapList Pro allowlist (#1077). Comma-separated Clerk subjects —
+  // only the App Review demo account and the owner are ever listed. Unset means
+  // no grant, which is the production-safe default. The value is a plain string
+  // here because `getProOperatorUserIds` owns the vocabulary, exactly as
+  // `CLERK_AUTHORIZED_PARTIES` defers to `getClerkAuthorizedParties`.
+  SNAPLIST_PRO_OPERATOR_USER_IDS: z.string().min(1).optional(),
 
   // Experimental listing-example retrieval (ADR-0010). Default-off and bounded;
   // these are server-only controls and must never become native client state.
@@ -313,6 +319,16 @@ const envSchema = z.object({
  * the fence: an absent NODE_ENV has to mean the same thing here as it does to
  * `resolveProvider(process.env)` at call time.
  */
+function stringEnv(
+  raw: Record<string, unknown>,
+): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") env[key] = value;
+  }
+  return env;
+}
+
 function llmProviderIssues(raw: Record<string, unknown>): string[] {
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(raw)) {
@@ -550,6 +566,61 @@ export function getClerkAuthorizedParties(
   return parties;
 }
 
+/**
+ * Clerk subjects are `user_` plus an opaque alphanumeric id. The pattern is
+ * deliberately narrow: an email, a wildcard, or a bare id is a configuration
+ * mistake that must fail loudly rather than silently grant nobody — or, worse,
+ * be matched loosely against a subject it does not name.
+ */
+const PRO_OPERATOR_USER_ID_PATTERN = /^user_[A-Za-z0-9]{1,120}$/;
+/**
+ * The grant exists for exactly two accounts (App Review demo + owner). The cap
+ * leaves headroom for a second reviewer account without letting the list grow
+ * into an unaudited entitlement channel.
+ */
+const MAX_PRO_OPERATOR_USER_IDS = 10;
+
+function proOperatorUserIdIssue(
+  env: Record<string, string | undefined>,
+): string | null {
+  const entries = (env.SNAPLIST_PRO_OPERATOR_USER_IDS ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const invalid = entries.find(
+    (entry) => !PRO_OPERATOR_USER_ID_PATTERN.test(entry),
+  );
+  if (invalid !== undefined) {
+    return "every entry must be an exact Clerk user id (`user_` followed by letters and digits); emails and wildcards are never accepted.";
+  }
+  if (new Set(entries).size > MAX_PRO_OPERATOR_USER_IDS) {
+    return `at most ${MAX_PRO_OPERATOR_USER_IDS} operator accounts may be granted SnapList Pro without a purchase.`;
+  }
+  return null;
+}
+
+/**
+ * The server-side operator SnapList Pro allowlist (#1077).
+ *
+ * Unset or blank means no grant — the production-safe default. Entries are
+ * compared later against the AUTHENTICATED Clerk subject only; nothing a client
+ * supplies ever reaches this list.
+ */
+export function getProOperatorUserIds(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const issue = proOperatorUserIdIssue(env);
+  if (issue) throw new Error(`SNAPLIST_PRO_OPERATOR_USER_IDS: ${issue}`);
+  return [
+    ...new Set(
+      (env.SNAPLIST_PRO_OPERATOR_USER_IDS ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
 export type Env = z.infer<typeof envSchema>;
 
 /**
@@ -563,6 +634,13 @@ export function parseEnv(raw: Record<string, unknown>): Env {
     : parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`);
   issues.push(...llmProviderIssues(raw));
   issues.push(...deploymentConfigIssues(raw));
+  // Checked in every environment, not only deployed ones: a malformed operator
+  // allowlist is a mistake about who gets Pro without paying, and a local box
+  // that silently ignores it would hide the typo until production.
+  const operatorIssue = proOperatorUserIdIssue(stringEnv(raw));
+  if (operatorIssue) {
+    issues.push(`  - SNAPLIST_PRO_OPERATOR_USER_IDS: ${operatorIssue}`);
+  }
 
   if (!parsed.success) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);
   if (issues.length > 0) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);
