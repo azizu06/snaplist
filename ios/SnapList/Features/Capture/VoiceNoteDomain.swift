@@ -412,17 +412,22 @@ final class VoiceNoteStore {
     }
 
     func refreshRecording() {
-        guard case .recording = phase else {
+        guard case .recording(_, let previousLevel) = phase else {
             return
         }
 
         let snapshot = audio.drainRecordingSnapshot()
-        for meterLevel in snapshot.meterLevels {
-            liveMeterSamples = VoiceNoteWaveformGeometry
-                .appendingLiveMeterSample(meterLevel, to: liveMeterSamples)
-        }
-
         let elapsed = min(max(snapshot.elapsed, 0), Self.maximumDuration)
+        if !snapshot.meterLevels.isEmpty {
+            liveMeterSamples = VoiceNoteWaveformGeometry
+                .updatingLiveMeterSamples(
+                    with: snapshot.meterLevels,
+                    elapsed: elapsed,
+                    in: liveMeterSamples
+                )
+        }
+        let level = snapshot.meterLevels.last ?? previousLevel
+
         if elapsed >= Self.maximumDuration {
             audio.stopRecording()
             provisionalDuration = Self.maximumDuration
@@ -430,10 +435,7 @@ final class VoiceNoteStore {
             return
         }
 
-        phase = .recording(
-            elapsed: elapsed,
-            level: liveMeterSamples.last ?? 0
-        )
+        phase = .recording(elapsed: elapsed, level: level)
     }
 
     /// Advances the playback head. The caller polls this while a saved note is
@@ -715,6 +717,11 @@ final class VoiceNoteStore {
     func applyLaunchFixturePhase(_ phase: VoiceNotePhase) {
         launchFixturePhaseApplied = true
         self.phase = phase
+        // A playing fixture needs a non-zero head so its screenshot shows the
+        // tinted-behind / dim-ahead split; a real player never attaches to it.
+        if case .saved(isPlaying: true) = phase {
+            playbackProgress = 0.4
+        }
     }
 
     @discardableResult
@@ -764,7 +771,7 @@ final class VoiceNoteStore {
         }
         savedNoteWaveform = audio.savedWaveform(
             for: savedNote.url,
-            barCount: VoiceNoteWaveformGeometry.savedBarCount
+            barCount: VoiceNoteWaveformGeometry.trackBarCount
         )
     }
 
