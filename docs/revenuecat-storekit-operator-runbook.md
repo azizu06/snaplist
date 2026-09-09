@@ -133,6 +133,11 @@ seller has SnapList Pro without a receipt, and reconciliation has nothing to poi
   `billingSource` enum has no operator value, so the grant reports the non-purchase source with an
   active status; the durable operator marker lives in the ledger's `source` column.
 
+An operator period takes precedence over a real StoreKit period in both the reservation trigger and
+the entitlement projection, so a listed account cannot validate a genuine purchase: it will reserve
+against the grant and report the grant's state. **Before testing a real subscription, remove yourself
+from `SNAPLIST_PRO_OPERATOR_USER_IDS` and delete your `source = 'operator'` allowance row.**
+
 To withdraw a grant, remove the id from `SNAPLIST_PRO_OPERATOR_USER_IDS`, deploy, and delete that
 account's `source = 'operator'` allowance row. Removing the environment value alone stops future
 grants but leaves the existing period in place. Deleting the row does not touch the account's

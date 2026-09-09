@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import {
+  OPERATOR_PRO_ALLOWANCE,
+  OPERATOR_PRO_PERIOD_KEY,
+} from "./operator-pro";
 
 const migration = readFileSync(
   new URL(
@@ -29,6 +33,18 @@ describe("operator Pro allowance migration", () => {
     // always active: nothing about it can be read back as a purchase.
     expect(migration).toMatch(
       /source = 'operator'[\s\S]{0,400}?period_key = 'operator-pro-grant'[\s\S]{0,200}?original_transaction_id is null[\s\S]{0,200}?state = 'active'/i,
+    );
+  });
+
+  it("names the same period identity and ceiling the server module does", () => {
+    // The constants exist so the TypeScript seam and the schema cannot drift
+    // apart silently: a repeat grant is only idempotent while both sides agree
+    // on the period key, and the RPC only accepts an allowance the ledger's own
+    // ceiling permits.
+    expect(migration).toContain(`period_key = '${OPERATOR_PRO_PERIOD_KEY}'`);
+    expect(migration).toContain(`'${OPERATOR_PRO_PERIOD_KEY}',`);
+    expect(migration).toMatch(
+      new RegExp(`not between 1 and ${OPERATOR_PRO_ALLOWANCE}`, "i"),
     );
   });
 
