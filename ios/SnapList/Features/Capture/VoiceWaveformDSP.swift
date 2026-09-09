@@ -1,4 +1,5 @@
 import Accelerate
+import CoreGraphics
 import Foundation
 
 /// One analysis window's measurements. Everything the meter draws is derived
@@ -300,6 +301,39 @@ enum VoiceWaveformBucketing {
             )
             return Double(pow(normalized, contourExponent))
         }
+    }
+}
+
+/// The bar layout and amplitude mapping shared by the recording countdown
+/// track and the saved-note playback row, so both draw the same track.
+enum VoiceWaveformBarPolicy {
+    /// Time one bar step represents. Fixed, so the track's bar count is
+    /// derived from the cap instead of chosen per screen.
+    static let secondsPerBar: TimeInterval = 0.2
+    /// The shortest a bar ever draws, so near-silence still reads as a mark
+    /// on the track rather than disappearing.
+    static let minimumBarHeight: CGFloat = 2
+
+    /// Bars needed to represent `duration` at `secondsPerBar` spacing.
+    static func barCount(
+        duration: TimeInterval,
+        secondsPerBar: TimeInterval = Self.secondsPerBar
+    ) -> Int {
+        guard duration > 0, secondsPerBar > 0 else {
+            return 0
+        }
+        return max(Int((duration / secondsPerBar).rounded()), 1)
+    }
+
+    /// Maps a normalized amplitude to a bar height between
+    /// ``minimumBarHeight`` and `maximumHeight`, monotonic in `amplitude`.
+    static func barHeight(
+        amplitude: Double,
+        maximumHeight: CGFloat
+    ) -> CGFloat {
+        let normalized = min(max(amplitude, 0), 1)
+        let usableHeight = max(maximumHeight - minimumBarHeight, 0)
+        return minimumBarHeight + CGFloat(normalized) * usableHeight
     }
 }
 

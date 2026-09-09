@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class VoiceNoteTests: XCTestCase {
-    func testRecordingMeterAdvancesTheRollingWaveformOncePerTapFrame() async {
+    func testRecordingMeterFillsTheTrackAtTheElapsedBarSlotLeavingTheRestAtZero() async {
         let audio = VoiceNoteAudioClientStub(permission: .allowed)
         let store = VoiceNoteStore(
             audio: audio,
@@ -15,11 +15,13 @@ final class VoiceNoteTests: XCTestCase {
 
         XCTAssertEqual(
             store.liveMeterSamples,
-            VoiceNoteWaveformGeometry.emptyLiveMeterSamples
+            VoiceNoteWaveformGeometry.emptyLiveMeterSamples,
+            "A new take must start from an all-zero, fully unrecorded track."
         )
 
         // One poll carries every envelope frame produced since the previous
-        // one, so the bars travel at tap rate instead of at poll rate.
+        // one; the loudest of them lands in the bar slot the elapsed time has
+        // reached, not appended to a rolling trail.
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
             elapsed: 0.1,
             meterLevels: [0.05, 0.4, 0.95, 0.2, 0.62]
@@ -28,11 +30,16 @@ final class VoiceNoteTests: XCTestCase {
 
         XCTAssertEqual(
             store.liveMeterSamples.count,
-            VoiceNoteWaveformGeometry.liveBarCount
+            VoiceNoteWaveformGeometry.trackBarCount
         )
+        XCTAssertEqual(store.liveMeterSamples[0], 0.95, accuracy: 0.0001)
         XCTAssertEqual(
-            Array(store.liveMeterSamples.suffix(5)),
-            [0.05, 0.4, 0.95, 0.2, 0.62]
+            Array(store.liveMeterSamples.dropFirst()),
+            Array(
+                repeating: 0,
+                count: VoiceNoteWaveformGeometry.trackBarCount - 1
+            ),
+            "Slots ahead of the elapsed time must stay at zero: the unrecorded remainder."
         )
         guard case .recording(let elapsed, let level) = store.phase else {
             return XCTFail("A live meter frame must publish a recording phase.")
@@ -45,31 +52,31 @@ final class VoiceNoteTests: XCTestCase {
             "The published level is the newest frame, not a poll-rate average."
         )
 
-        let heights = VoiceNoteWaveformGeometry.liveMeterBarHeights(
-            samples: store.liveMeterSamples
-        )
-        XCTAssertEqual(heights.count, VoiceNoteWaveformGeometry.liveBarCount)
-        XCTAssertGreaterThan(
-            (heights.max() ?? 0) - (heights.min() ?? 0),
-            20,
-            "One utterance must span visibly different bar heights."
-        )
-
-        // A poll that finds no new frames must hold the trail still rather than
-        // shifting silence into it.
+        // A poll that finds no new frames must hold the track still rather
+        // than writing silence into the current slot.
         let held = store.liveMeterSamples
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
-            elapsed: 0.2,
+            elapsed: 0.15,
             meterLevels: []
         )
         store.refreshRecording()
         XCTAssertEqual(store.liveMeterSamples, held)
 
+        // Moving into a later bar slot fills that slot without disturbing the
+        // one already locked in: the fill only ever advances.
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 0.5,
+            meterLevels: [0.3, 0.9]
+        )
+        store.refreshRecording()
+        XCTAssertEqual(store.liveMeterSamples[0], 0.95, accuracy: 0.0001)
+        XCTAssertEqual(store.liveMeterSamples[2], 0.9, accuracy: 0.0001)
+
         await store.startRecording()
         XCTAssertEqual(
             store.liveMeterSamples,
             VoiceNoteWaveformGeometry.emptyLiveMeterSamples,
-            "A new take must start from an empty trail."
+            "A new take must start from an empty track."
         )
     }
 
@@ -91,7 +98,7 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(audio.savedWaveformRequests.map(\.url), [prior.url])
         XCTAssertEqual(
             audio.savedWaveformRequests.map(\.barCount),
-            [VoiceNoteWaveformGeometry.savedBarCount]
+            [VoiceNoteWaveformGeometry.trackBarCount]
         )
 
         audio.stubbedSavedWaveform = [1, 0.5]
@@ -146,9 +153,9 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(
             VoiceWaveformPlayhead.playedBarCount(
                 progress: store.playbackProgress,
-                barCount: VoiceNoteWaveformGeometry.savedBarCount
+                barCount: VoiceNoteWaveformGeometry.trackBarCount
             ),
-            6
+            19
         )
 
         // Pause retains the player, so the head stays where the seller left it.

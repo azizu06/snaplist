@@ -104,9 +104,9 @@ final class VoiceWaveformDSPTests: XCTestCase {
             from: settledOnRoomTone
         )
 
-        let heights = VoiceNoteWaveformGeometry.liveMeterBarHeights(
-            samples: [roomTone, quietSpeech, loudSpeech, sibilant]
-        )
+        let heights = [roomTone, quietSpeech, loudSpeech, sibilant].map {
+            VoiceWaveformBarPolicy.barHeight(amplitude: $0, maximumHeight: 60)
+        }
         XCTAssertGreaterThanOrEqual(
             distinctLevelCount(heights, separation: 3),
             3,
@@ -392,6 +392,64 @@ final class VoiceWaveformDSPTests: XCTestCase {
         XCTAssertEqual(
             VoiceWaveformPlayhead.playedBarCount(progress: 0.5, barCount: 0),
             0
+        )
+    }
+
+    // MARK: - Bar policy
+
+    func testBarCountIsDerivedFromTheCapAndThePitchNotHardcoded() {
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barCount(duration: 15, secondsPerBar: 0.2),
+            75
+        )
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barCount(duration: 10, secondsPerBar: 0.2),
+            50,
+            "Bar count must scale with duration, not stay pinned to one screen's constant."
+        )
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barCount(duration: 15, secondsPerBar: 0.5),
+            30,
+            "Bar count must also scale with pitch."
+        )
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barCount(duration: 0, secondsPerBar: 0.2),
+            0
+        )
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barCount(duration: 15, secondsPerBar: 0),
+            0,
+            "A zero pitch must not divide by zero."
+        )
+    }
+
+    func testBarHeightMapsSilenceToTheMinimumAndFullScaleToFullHeightMonotonically() {
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barHeight(amplitude: 0, maximumHeight: 40),
+            VoiceWaveformBarPolicy.minimumBarHeight
+        )
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barHeight(amplitude: 1, maximumHeight: 40),
+            40
+        )
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barHeight(amplitude: -1, maximumHeight: 40),
+            VoiceWaveformBarPolicy.minimumBarHeight,
+            "Out-of-range amplitude must clamp rather than draw below the floor."
+        )
+        XCTAssertEqual(
+            VoiceWaveformBarPolicy.barHeight(amplitude: 2, maximumHeight: 40),
+            40,
+            "Out-of-range amplitude must clamp rather than overshoot the ceiling."
+        )
+
+        let ascending = stride(from: 0.0, through: 1.0, by: 0.1).map {
+            VoiceWaveformBarPolicy.barHeight(amplitude: $0, maximumHeight: 40)
+        }
+        XCTAssertEqual(
+            ascending,
+            ascending.sorted(),
+            "Louder amplitude must never draw a shorter bar."
         )
     }
 
