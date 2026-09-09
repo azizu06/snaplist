@@ -81,7 +81,56 @@ function signedRequest(environment: "PRODUCTION" | "SANDBOX") {
   });
 }
 
+function signedTestEventRequest() {
+  const eventTimestamp = Date.now();
+  const rawBody = JSON.stringify({
+    api_version: "1.0",
+    event: {
+      id: "route-event-test",
+      type: "TEST",
+      event_timestamp_ms: eventTimestamp,
+      app_id: "app_fixture",
+      environment: "PRODUCTION",
+      entitlement_ids: null,
+      transaction_id: null,
+      original_transaction_id: null,
+    },
+  });
+  const timestamp = Math.floor(eventTimestamp / 1000);
+  const signature = createHmac("sha256", "offline-secret")
+    .update(`${timestamp}.${rawBody}`)
+    .digest("hex");
+  return new NextRequest("http://localhost/api/webhooks/revenuecat", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer offline",
+      "x-revenuecat-webhook-signature": `t=${timestamp},v1=${signature}`,
+    },
+    body: rawBody,
+  });
+}
+
 describe("RevenueCat webhook route boundary", () => {
+  it("returns 200 for a dashboard TEST event with null entitlement/transaction ids", async () => {
+    configure();
+    createAdminClient.mockReturnValue({
+      rpc: vi.fn(() => {
+        throw new Error("store rpc must not be reached for an ignored TEST event");
+      }),
+    } as never);
+
+    const response = await POST(signedTestEventRequest());
+
+    expect(response.status).toBe(200);
+    expect(logEvent).toHaveBeenCalledWith("billing.revenuecat.handled", {
+      type: "TEST",
+      environment: "PRODUCTION",
+      processed: false,
+      reason: "ignored",
+    });
+  });
+
+
   it("returns a truthful 503 without any hosted configuration", async () => {
     const response = await POST(
       new NextRequest("http://localhost/api/webhooks/revenuecat", {
