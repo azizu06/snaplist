@@ -226,6 +226,82 @@ enum CapturePhotoOutputConfiguration {
     }
 }
 
+/// Decides the capture device's focus, exposure, and lens-switching
+/// configuration from the device's own capability report, kept pure so the
+/// decision is unit-testable without a camera the way
+/// `CapturePhotoOutputConfiguration` already is.
+///
+/// Both defects it answers were owner-reported on an iPhone 16 Pro (#1072)
+/// and both come from leaving the device on AVFoundation's defaults:
+///
+/// - A virtual `.builtInDualWideCamera` switches its own physical constituent
+///   by subject distance, so simply moving closer changed the lens
+///   mid-framing. `.restricted` with `[.videoZoomChanged]` leaves the switch
+///   to the one thing the seller controls, since tapping .5x/1x is the app's
+///   only writer of `videoZoomFactor`.
+/// - Continuous autofocus defaults to smooth, video-style lens ramping, which
+///   reads as a one to two second hunt after the phone stops moving. Still
+///   capture wants the abrupt ramp instead, which is what
+///   `isSmoothAutoFocusEnabled = false` asks for.
+///
+/// `nil` means "leave the device's own value alone". That is not a nicety
+/// here: `setPrimaryConstituentDeviceSwitchingBehavior` raises an
+/// `NSInvalidArgumentException` — uncatchable from Swift — on a device that
+/// does not support constituent switching, so a wide-only iPhone must reach
+/// the `nil` branch rather than the setter.
+enum CaptureDeviceFocusConfiguration {
+    struct Support {
+        let isContinuousAutoFocusSupported: Bool
+        let isContinuousAutoExposureSupported: Bool
+        let isSmoothAutoFocusSupported: Bool
+        let isAutoFocusRangeRestrictionSupported: Bool
+        /// `primaryConstituentDeviceSwitchingBehavior != .unsupported`, which is
+        /// the only capability signal AVFoundation offers here: a device that
+        /// cannot switch constituents reports `.unsupported`, and one that can
+        /// reports `.auto` by default. There is no
+        /// `supportedPrimaryConstituentDeviceSwitchingBehaviors` array.
+        let isPrimaryConstituentDeviceSwitchingSupported: Bool
+    }
+
+    struct PrimaryConstituentDeviceSwitching: Equatable {
+        let behavior: AVCaptureDevice.PrimaryConstituentDeviceSwitchingBehavior
+        let restrictedSwitchingBehaviorConditions:
+            AVCaptureDevice.PrimaryConstituentDeviceRestrictedSwitchingBehaviorConditions
+    }
+
+    struct Settings: Equatable {
+        var focusMode: AVCaptureDevice.FocusMode?
+        var exposureMode: AVCaptureDevice.ExposureMode?
+        var isSmoothAutoFocusEnabled: Bool?
+        var autoFocusRangeRestriction: AVCaptureDevice.AutoFocusRangeRestriction?
+        var primaryConstituentDeviceSwitching: PrimaryConstituentDeviceSwitching?
+        /// Unconditional: it is settable on every device, and it is what lets
+        /// continuous autofocus re-converge deliberately when the seller
+        /// reframes rather than drifting on its own schedule.
+        var isSubjectAreaChangeMonitoringEnabled = true
+    }
+
+    static func apply(supported: Support) -> Settings {
+        Settings(
+            focusMode: supported.isContinuousAutoFocusSupported ? .continuousAutoFocus : nil,
+            exposureMode: supported.isContinuousAutoExposureSupported
+                ? .continuousAutoExposure
+                : nil,
+            isSmoothAutoFocusEnabled: supported.isSmoothAutoFocusSupported ? false : nil,
+            autoFocusRangeRestriction: supported.isAutoFocusRangeRestrictionSupported
+                ? AVCaptureDevice.AutoFocusRangeRestriction.none
+                : nil,
+            primaryConstituentDeviceSwitching:
+                supported.isPrimaryConstituentDeviceSwitchingSupported
+                    ? PrimaryConstituentDeviceSwitching(
+                        behavior: .restricted,
+                        restrictedSwitchingBehaviorConditions: [.videoZoomChanged]
+                    )
+                    : nil
+        )
+    }
+}
+
 final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Sendable {
     let session = AVCaptureSession()
     private(set) var captureDevice: AVCaptureDevice?
@@ -403,6 +479,53 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
         }
     }
 
+    /// Runs on `sessionQueue` only, like `applyZoomLens`: `configureIfNeeded`
+    /// is reached from `start()` on that queue, and `lockForConfiguration`
+    /// serializes this against AVFoundation's own use of the device.
+    private func applyFocusConfiguration(to device: AVCaptureDevice) {
+        let settings = CaptureDeviceFocusConfiguration.apply(
+            supported: CaptureDeviceFocusConfiguration.Support(
+                isContinuousAutoFocusSupported: device.isFocusModeSupported(.continuousAutoFocus),
+                isContinuousAutoExposureSupported: device.isExposureModeSupported(
+                    .continuousAutoExposure
+                ),
+                isSmoothAutoFocusSupported: device.isSmoothAutoFocusSupported,
+                isAutoFocusRangeRestrictionSupported: device.isAutoFocusRangeRestrictionSupported,
+                isPrimaryConstituentDeviceSwitchingSupported: device
+                    .primaryConstituentDeviceSwitchingBehavior != .unsupported
+            )
+        )
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            if let focusMode = settings.focusMode {
+                device.focusMode = focusMode
+            }
+            if let exposureMode = settings.exposureMode {
+                device.exposureMode = exposureMode
+            }
+            if let isSmoothAutoFocusEnabled = settings.isSmoothAutoFocusEnabled {
+                device.isSmoothAutoFocusEnabled = isSmoothAutoFocusEnabled
+            }
+            if let autoFocusRangeRestriction = settings.autoFocusRangeRestriction {
+                device.autoFocusRangeRestriction = autoFocusRangeRestriction
+            }
+            device.isSubjectAreaChangeMonitoringEnabled =
+                settings.isSubjectAreaChangeMonitoringEnabled
+            if let switching = settings.primaryConstituentDeviceSwitching {
+                device.setPrimaryConstituentDeviceSwitchingBehavior(
+                    switching.behavior,
+                    restrictedSwitchingBehaviorConditions: switching
+                        .restrictedSwitchingBehaviorConditions
+                )
+            }
+        } catch {
+            // Another client holds the device. The preview keeps the behavior it
+            // already has, which is honest; retrying here would fight whoever
+            // took the lock.
+        }
+    }
+
     func authorizationStatus() -> CaptureCameraAuthorization {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .notDetermined: .notDetermined
@@ -528,6 +651,8 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
         ]
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         session.addOutput(videoOutput)
+
+        applyFocusConfiguration(to: captureDevice)
 
         rotationCoordinator = AVCaptureDevice.RotationCoordinator(
             device: captureDevice,

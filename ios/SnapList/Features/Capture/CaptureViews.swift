@@ -696,7 +696,17 @@ private enum ScanCameraControlLayout {
     /// closer to center" #1045 asks for, chosen small enough to read as
     /// one row and large enough that the widest side content (the capsule)
     /// never approaches the shutter.
-    static let controlSlotGap: CGFloat = 14
+    ///
+    /// #1072 raised it 14 -> 24 -> 56 across two owner device passes: the
+    /// gallery and Review controls read as crowding the shutter, and the ask
+    /// was to push them out toward the framing corners without moving the
+    /// shutter off center. Because the row is a centered
+    /// `slot + gap + shutter + gap + slot`, a side control's center sits
+    /// `(width - 224) / 2 + 38 - gap` from the screen edge, so 56 puts it at
+    /// ~66pt on a 393pt device and ~71pt on the 402pt iPhone 16 Pro — inside
+    /// the framing bracket rather than under it, which is the approved look.
+    /// The shutter stays centered by construction at every text size.
+    static let controlSlotGap: CGFloat = 56
     /// The staged strip's thumbnail height (#1045), reserved unconditionally
     /// so the row's footprint does not change when the first photo lands.
     static let stagedStripHeight: CGFloat = 56
@@ -806,14 +816,6 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                 // `fixedSize` because ".5x" is two glyph groups: a squeezed
                 // capsule wraps into a stack rather than truncating, and grows
                 // taller than the row it sits in.
-                ScanZoomControlView(
-                    control: zoomControl,
-                    selectedLens: selectedZoomLens,
-                    selectLens: selectZoomLens
-                )
-                .fixedSize(horizontal: true, vertical: false)
-                .reportsBottomStackTop()
-
                 // #1045: rendered unconditionally so the row's height is
                 // reserved from the first frame, not inserted once photos
                 // land. An empty `ScanPhotoProgressRow` draws nothing, but
@@ -822,16 +824,53 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                 // staged, which is what keeps the framing corners, zoom
                 // row, and shutter from moving the moment the first photo
                 // is captured (owner correction 3).
-                stagedControls
-                    .frame(minHeight: ScanCameraControlLayout.stagedStripHeight)
-                    .padding(.horizontal, 15)
-                    .reportsBottomStackTop()
-                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
+                // #1072 (owner-approved layout C): the 56pt band directly
+                // above the shutter row is always reserved. At zero photos
+                // it holds the zoom capsule, so the seller never sees an
+                // empty gap between the capsule and the strip that is not
+                // there yet; once photos land the strip takes the band and
+                // the capsule moves up to its own row above it.
+                if !thumbnailURLs.isEmpty {
+                    zoomCapsule
+                        .reportsBottomStackTop()
+                }
+
+                // The `Color.clear` sibling, not `.frame(minHeight:)`, is
+                // what actually reserves the band. `ScanZoomControlView`'s
+                // body is `if control.isOffered { ... }`, so on a phone whose
+                // back camera pairs no ultra wide — and on the simulator,
+                // which has no camera at all — the empty branch resolves to
+                // `EmptyView`, and layout modifiers on an `EmptyView` are
+                // no-ops. Sizing the band from its own content therefore
+                // collapsed it to nothing at zero photos and moved the
+                // framing corners 74pt the moment the first photo landed,
+                // which is the exact defect #1045 correction 3 exists to
+                // prevent. A `ZStack` sizes to the tallest child, so the
+                // floor holds and a staged strip is still free to grow past
+                // it at large Dynamic Type sizes.
+                ZStack {
+                    Color.clear
+                        .frame(
+                            width: 1,
+                            height: ScanCameraControlLayout.stagedStripHeight
+                        )
+
+                    if thumbnailURLs.isEmpty {
+                        zoomCapsule
+                    } else {
+                        stagedControls
+                    }
+                }
+                .padding(.horizontal, 15)
+                .reportsBottomStackTop()
+                // #1072: zoom-to-strip daylight, raised from 12.
+                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 18 : 16)
 
                 cameraControls
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
                     .reportsBottomStackTop()
-                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
+                    // #1072: strip-to-shutter-row daylight, raised from 12.
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 20 : 18)
             }
             // #1058: kept as-is. These are fixed safe-area clearances on the
             // control stack itself, not a device-size guess — the framing
@@ -925,9 +964,18 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         photoProgress
     }
 
+    private var zoomCapsule: some View {
+        ScanZoomControlView(
+            control: zoomControl,
+            selectedLens: selectedZoomLens,
+            selectLens: selectZoomLens
+        )
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     /// How far above the screen's bottom edge the framing corners should end.
     ///
-    /// One rule at every text size and every staged count: 18pt of daylight
+    /// One rule at every text size and every staged count: 24pt of daylight
     /// above whatever row the bottom control stack starts with. That is the
     /// staged strip once photos are staged and the shutter row before then, and
     /// the zoom row's own height varies with Dynamic Type, so the position is
@@ -939,7 +987,9 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         guard surfaceBottomY > 0, bottomStackTopY < .greatestFiniteMagnitude else {
             return nil
         }
-        return surfaceBottomY - bottomStackTopY + 18
+        // #1072 raised this from 18 with the rest of the bottom cluster's
+        // vertical breathing room.
+        return surfaceBottomY - bottomStackTopY + 24
     }
 
     /// #1045: two `.frame(maxWidth: .infinity)` side regions were meant to
@@ -956,19 +1006,23 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     /// running app (confirmed on device, not just in theory) — the row
     /// measured as if the trailing slot and its gap did not exist at all,
     /// shifting the shutter right by precisely half of `controlSlotWidth +
-    /// controlSlotGap`. Making `reviewButton` itself unconditional and
-    /// merely hiding it (`opacity`/`accessibilityHidden`) at zero photos
-    /// fixed the centering but broke the frozen contract that `scan.review`
-    /// must not exist to VoiceOver or XCUITest below one photo — an
-    /// `accessibilityHidden` Button apparently still answers `exists`.
+    /// controlSlotGap`.
     ///
-    /// The fix that satisfies both: the reserved slot is an unconditional
+    /// The fix for the centering: the reserved slot is an unconditional
     /// `Color.clear` sized to the slot's own frame — a plain sibling of
     /// `shutterButton` in the `HStack`, not a wrapper around a conditional,
     /// so its width can never depend on what is inside it — and the actual
-    /// `reviewButton` is layered on top via `.overlay`, still conditional
-    /// on `thumbnailURLs.isEmpty` and so still genuinely absent at zero
-    /// photos, but no longer the thing establishing the slot's width.
+    /// `reviewButton` is layered on top via `.overlay`, which is therefore
+    /// free to change without moving the shutter.
+    ///
+    /// #1072 replaced the old "absent below one photo" contract with a
+    /// present-but-inert one: an empty trailing slot read as an asymmetric
+    /// row on device, so `reviewButton` now renders at every count and is
+    /// `.disabled` and dimmed to 0.35 at zero photos. The frozen XCUITest
+    /// contract is now "`scan.review` exists and `isEnabled == false` at
+    /// zero photos, enabled at one", which `.disabled` gives VoiceOver and
+    /// XCUITest alike — unlike `accessibilityHidden`, which still answered
+    /// `exists` and was why the old contract needed a conditional at all.
     ///
     /// The row's own (now compact, not full-bleed) width is centered by the
     /// enclosing `VStack`, which the top bar's `Spacer` already forces to
@@ -992,9 +1046,9 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             Color.clear
                 .frame(width: ScanCameraControlLayout.controlSlotWidth, height: 48)
                 .overlay {
-                    if !thumbnailURLs.isEmpty {
-                        reviewButton
-                    }
+                    reviewButton
+                        .disabled(thumbnailURLs.isEmpty)
+                        .opacity(thumbnailURLs.isEmpty ? 0.35 : 1)
                 }
         }
     }
