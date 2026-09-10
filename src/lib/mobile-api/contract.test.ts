@@ -131,6 +131,63 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(JSON.stringify(contract)).toContain("Idempotency-Key");
   });
 
+  it("publishes #581's live export-handoffs read and mutation to the mobile contract", () => {
+    // The route (src/app/v1/items/[itemId]/export-handoffs/route.ts) and the
+    // native client (AssistedExportClient.swift, built via chained
+    // .appending(path:) segments rather than one literal "/v1/..." string) both
+    // predate this entry. Neither `mobile-api-routes.test.ts`'s contract-driven
+    // route check nor its Swift-literal scrape can see a path that is absent
+    // from the contract, so this was a live, tested endpoint with zero contract
+    // coverage until now.
+    expect(contract.paths["/v1/items/{itemId}/export-handoffs"].get).toMatchObject({
+      operationId: "getExportHandoffs",
+      "x-owner-issue": 581,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ExportHandoffsEnvelope" },
+            },
+          },
+        },
+      },
+    });
+    expect(contract.paths["/v1/items/{itemId}/export-handoffs"].post).toMatchObject({
+      operationId: "recordExportHandoffAction",
+      "x-owner-issue": 581,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ExportHandoffAction" },
+          },
+        },
+      },
+    });
+    expect(contract.components.schemas.ExportHandoffsPack).toMatchObject({
+      required: ["handoffs", "pack"],
+      properties: {
+        handoffs: {
+          type: "array",
+          minItems: 3,
+          maxItems: 3,
+          items: { $ref: "#/components/schemas/ExportHandoffView" },
+        },
+      },
+    });
+    expect(contract.components.schemas.ExportHandoffAction).toMatchObject({
+      required: ["platform", "action", "reviewContentRevision", "reviewRevision"],
+      properties: {
+        platform: { enum: ["facebook", "mercari", "depop"] },
+        action: { enum: ["handoff", "shared", "undo"] },
+      },
+    });
+  });
+
   it("publishes the implemented run-bound Listing Review save contract to both mirrors", () => {
     expect(nativeContractSource).toBe(serverContractSource);
     const saveOperation = contract.paths["/v1/runs/{runId}/review"].put;
