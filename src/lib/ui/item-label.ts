@@ -10,7 +10,8 @@ export function itemLabel(attributes: unknown, id: string): string {
   const parsed = extractedAttributesSchema.safeParse(attributes ?? {});
   if (parsed.success) {
     const a = parsed.data;
-    const label = [a.brand, a.model].filter(Boolean).join(" ") || a.title;
+    const label =
+      [a.brand?.trim(), a.model?.trim()].filter(Boolean).join(" ") || a.title?.trim();
     if (label) return label;
   }
   return `Item ${id.slice(0, 8)}`;
