@@ -14,6 +14,13 @@ describe("sentenceCase", () => {
     expect(sentenceCase("iPhone")).toBe("iPhone");
   });
 
+  it("still capitalizes a lowercase-leading value that carries an uppercase letter later on", () => {
+    expect(sentenceCase("good iPhone case")).toBe("Good iPhone case");
+    expect(sentenceCase("like new, USB-C cable included")).toBe(
+      "Like new, USB-C cable included",
+    );
+  });
+
   it("trims surrounding whitespace before capitalizing", () => {
     expect(sentenceCase("  good  ")).toBe("Good");
   });
