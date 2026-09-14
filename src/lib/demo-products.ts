@@ -5,8 +5,7 @@
  * Every entry's title was written by looking at the actual photo: the label
  * always matches what is visibly in the image (brand text verified where
  * present). The newly sourced primary reseller set has per-file license and
- * transformation records in docs/demo-asset-provenance.md. The small dashboard
- * folder set retains its original repository provenance.
+ * transformation records in docs/demo-asset-provenance.md.
  *
  * Rules for consumers:
  * - Pick products via DEMO_SURFACE_ASSIGNMENTS. Prefer the audience's clearest
@@ -39,42 +38,6 @@ export type DemoProduct = {
 };
 
 export const DEMO_PRODUCTS: DemoProduct[] = [
-  {
-    slug: "kettlebell",
-    image: "/demo/kettlebell.jpg",
-    title: "Cast iron kettlebell, 35 lb / 16 kg",
-    shortName: "Kettlebell",
-    price: 30,
-    condition: "Good",
-    category: "Sporting Goods",
-    pricingStory: "comps",
-    details: ["35 lb / 16 kg cast iron", "Single-cast handle, no chips or cracks", "Light surface wear from home use"],
-    alt: "A single black cast iron 35 lb kettlebell resting on a mat on the floor in natural window light",
-  },
-  {
-    slug: "binoculars",
-    image: "/demo/binoculars.jpg",
-    title: "Antique French opera glasses, brass and leather",
-    shortName: "Binoculars",
-    price: 48,
-    condition: "Good",
-    category: "Cameras & Photo",
-    pricingStory: "comps",
-    details: ["Vintage brass and leather barrels", "Engraved 'PARIS' on the eyepiece ring", "Compact opera/field glass style, glass intact"],
-    alt: "Vintage brass and leather opera-glass binoculars resting on a polished wooden table in natural light",
-  },
-  {
-    slug: "sewingmachine",
-    image: "/demo/sewingmachine.jpg",
-    title: "Brother 1034D serger overlock sewing machine with manual",
-    shortName: "Sewing machine",
-    price: 135,
-    condition: "Good",
-    category: "Crafts",
-    pricingStory: "comps",
-    details: ["Brother Lock 1034D 3/4-thread serger", "Includes original instruction manual", "Color-coded threading guides intact"],
-    alt: "A used Brother 1034D serger sewing machine on a wooden table by a window with its manual open in front of it",
-  },
   {
     slug: "reseller-ps5",
     image: "/demo/reseller/ps5.webp",
@@ -234,7 +197,4 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
     "reseller-keychron",
     "reseller-airpods-max",
   ],
-  // Three items exclusive to the logged-in dashboard folder (ordered
-  // shortest→longest name for the folder's narrow→wide papers).
-  "dashboard-folder": ["kettlebell", "binoculars", "sewingmachine"],
 };
