@@ -20,7 +20,9 @@ struct LegalLinkRow: View {
             HStack {
                 Text(destination.label)
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             // `settingsCardRow` proposes its full `minHeight: 52` down to
             // this label, but a plain-button label otherwise reports back
