@@ -1,18 +1,17 @@
-import { Skeleton, SkeletonCard } from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/** Dashboard loading state (audit H-3). */
+/**
+ * Root Suspense fallback — the only `loading.tsx` in `src/app`, so it covers
+ * every route under this layout without its own: `(auth)/login`,
+ * `(auth)/signup`, and every `(marketing)` page. Kept narrow and generic
+ * (no list/card shape) since the `(app)` dashboard route group it used to
+ * back was retired (#598) and none of the surviving routes show a list.
+ */
 export default function Loading() {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
-      <div className="flex items-end justify-between">
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-7 w-44" />
-          <Skeleton className="h-4 w-56" />
-        </div>
-        <Skeleton className="h-9 w-28" />
-      </div>
-      <SkeletonCard />
-      <SkeletonCard />
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-3 px-6 pt-2 pb-[20vh]">
+      <Skeleton className="h-7 w-48" />
+      <Skeleton className="h-4 w-64" />
     </main>
   );
 }
