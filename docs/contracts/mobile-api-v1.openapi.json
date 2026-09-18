@@ -119,6 +119,40 @@
         }
       }
     },
+    "/v1/items/{itemId}/export-handoffs": {
+      "parameters": [{ "name": "itemId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "get": {
+        "operationId": "getExportHandoffs",
+        "x-owner-issue": 581,
+        "x-related-owner-issues": [378, 580],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "parameters": [{ "name": "reviewContentRevision", "in": "query", "required": true, "schema": { "type": "string", "format": "uuid" }, "description": "The pack revision this projection must reflect; a stale or missing value fails 400 rather than silently returning a different pack." }],
+        "responses": {
+          "200": { "description": "The three assisted destinations' current Prepared/Shared state at the effective price", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExportHandoffsEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "operationId": "recordExportHandoffAction",
+        "x-owner-issue": 581,
+        "x-related-owner-issues": [378, 580],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExportHandoffAction" } } } },
+        "responses": {
+          "200": { "description": "The seller's handoff, shared confirmation, or undo committed and the current pack view is returned; never claims Published, Listed, or Sold", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExportHandoffsEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "description": "The listing changed after this pack was prepared; nothing was recorded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "422": { "$ref": "#/components/responses/UnprocessableEntity" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
     "/v1/guest/attestations": {
       "post": {
         "operationId": "issueGuestClaimHandoff",
@@ -404,6 +438,10 @@
       "HomeListing": { "type": "object", "additionalProperties": false, "required": ["id", "title", "lifecycle", "statusLabel", "detail", "price", "destination"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1 }, "lifecycle": { "type": "string", "enum": ["active", "draft", "sold", "needsAttention", "resolvedConversation"] }, "statusLabel": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "price": { "type": ["string", "null"] }, "destination": { "oneOf": [{ "$ref": "#/components/schemas/HomeDestination" }, { "type": "null" }] } } },
       "ItemDeletionEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/ItemDeletionReceipt" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "ItemDeletionReceipt": { "type": "object", "additionalProperties": false, "required": ["itemId", "retainedRecords"], "properties": { "itemId": { "type": "string", "format": "uuid" }, "retainedRecords": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Records SnapList does not own and therefore did not delete. A live eBay listing stays live; ending it is the seller's action on eBay." } } },
+      "ExportHandoffsEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/ExportHandoffsPack" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "ExportHandoffsPack": { "type": "object", "additionalProperties": false, "required": ["handoffs", "pack"], "properties": { "handoffs": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "$ref": "#/components/schemas/ExportHandoffView" } }, "pack": { "type": "object", "additionalProperties": false, "required": ["effectivePrice", "reviewRevision"], "properties": { "effectivePrice": { "type": "number", "exclusiveMinimum": 0 }, "reviewRevision": { "type": "string", "format": "uuid" } } } } },
+      "ExportHandoffView": { "type": "object", "additionalProperties": false, "required": ["platform", "state", "handedOffAt", "sharedAt"], "properties": { "platform": { "type": "string", "enum": ["facebook", "mercari", "depop"] }, "state": { "type": "string", "enum": ["prepared", "shared"] }, "handedOffAt": { "type": ["string", "null"], "format": "date-time" }, "sharedAt": { "type": ["string", "null"], "format": "date-time" } } },
+      "ExportHandoffAction": { "type": "object", "additionalProperties": false, "required": ["platform", "action", "reviewContentRevision", "reviewRevision"], "properties": { "platform": { "type": "string", "enum": ["facebook", "mercari", "depop"] }, "action": { "type": "string", "enum": ["handoff", "shared", "undo"] }, "reviewContentRevision": { "type": "string", "format": "uuid" }, "reviewRevision": { "type": "string", "format": "uuid" } } },
       "PricingEvidenceEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/PricingEvidenceProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "PricingEvidenceProjection": { "type": "object", "additionalProperties": false, "required": ["item", "priceResult", "evidenceLevel", "evidenceAsOf", "evidenceAgeDays", "isStale", "defaultWindow", "comparables", "estimatedFees", "estimatedPayout", "chartBounds"], "properties": { "item": { "$ref": "#/components/schemas/PricingItem" }, "priceResult": { "$ref": "#/components/schemas/PriceResult" }, "evidenceLevel": { "type": "string", "enum": ["strong", "limited"] }, "evidenceAsOf": { "type": "string", "format": "date-time" }, "evidenceAgeDays": { "type": "number", "minimum": 0 }, "isStale": { "type": "boolean" }, "defaultWindow": { "type": "string", "enum": ["60D", "90D"] }, "comparables": { "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/PricingComparable" } }, "estimatedFees": { "type": "number", "minimum": 0 }, "estimatedPayout": { "type": "number", "minimum": 0 }, "chartBounds": { "oneOf": [{ "$ref": "#/components/schemas/PricingChartBounds" }, { "type": "null" }] } } },
       "PricingItem": { "type": "object", "additionalProperties": false, "required": ["id", "title"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1, "maxLength": 500 }, "condition": { "type": "string", "minLength": 1, "maxLength": 120 } } },

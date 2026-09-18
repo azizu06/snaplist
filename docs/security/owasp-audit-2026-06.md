@@ -6,6 +6,14 @@ positives). Scope: every client-facing error boundary — `src/app/api/**` route
 actions, **user-facing Server Components**, the OAuth flow, the LLM/pricing/inbox/export libraries, and
 the outbound-fetch surfaces.
 
+**Scope note (post-#598).** F-1 and F-3 below name `src/app/api/inbox/*`, `export/[itemId]/page.tsx`,
+and the `uploadAndProcess` / `saveReview` / `publishToEbay` / `disconnectEbay` server actions. The
+`(app)` web-dashboard route group that hosted all of those was retired under #598 (see
+`src/app/retired-web-dashboard-copy.test.ts`) — none of them exist in current code, so their fixes are
+historical record, not live protection. This audit predates the mobile API and never covered
+`src/app/v1/**`; a reader relying on this document for today's actual attack surface should treat it
+as superseded background, not current coverage.
+
 ## Posture summary
 
 The multi-tenant security model held up under audit. Findings: one **RLS-bypass** (MEDIUM) and one
