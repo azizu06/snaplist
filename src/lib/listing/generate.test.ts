@@ -553,12 +553,32 @@ describe("listing/generate — eBay title-length constraint (≤ 80) is guarante
     const short = "Sony WH-1000XM4 Headphones";
     expect(enforceTitleLength(short)).toBe(short);
 
+    // The only space lands exactly at max/2 (index 40 of an 80-char budget), so the
+    // strict `>` in the boundary check takes the hard-cut branch, not the
+    // word-boundary branch: this exercises `lastSpace > max / 2` being FALSE.
     const long = "a".repeat(40) + " " + "b".repeat(60);
     const cut = enforceTitleLength(long);
     expect(cut.length).toBeLessThanOrEqual(EBAY_TITLE_MAX_LENGTH);
     expect(cut.endsWith(" ")).toBe(false);
     // No ellipsis is ever appended, even on a mid-content cut.
     expect(cut).not.toContain("…");
+  });
+
+  it("enforceTitleLength prefers a word boundary in the back half of the budget over a mid-word cut", () => {
+    // The last space (index 70) is past max/2 (40), so `lastSpace > max / 2` is
+    // TRUE here: the branch above never reaches this path.
+    const long = "x".repeat(70) + " " + "y".repeat(20);
+    const cut = enforceTitleLength(long, 80);
+    expect(cut).toBe("x".repeat(70));
+    expect(cut.length).toBeLessThanOrEqual(80);
+    expect(cut).not.toContain("y");
+  });
+
+  it("enforceTitleLength hard-cuts a single word with no space at all", () => {
+    const long = "z".repeat(85);
+    const cut = enforceTitleLength(long, 80);
+    expect(cut).toBe("z".repeat(80));
+    expect(cut.length).toBe(80);
   });
 });
 
