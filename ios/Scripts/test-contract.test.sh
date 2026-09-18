@@ -47,8 +47,49 @@ serialized_descendant_log=${temporary_directory}/xcodebuild-descendants
 substitute_shard_wall_clock_budget_file=${temporary_directory}/substitute-shard-wall-clock-budget-minutes
 waiter_diagnostics_file=${temporary_directory}/waiter-diagnostics
 holder_selector="SnapListTests/LockHolderProbeTests/testHoldsTheBuildLock"
+# The shard-timeout/lock/plumbing cases below prove xcodebuild lifecycle and
+# selector-routing mechanics, not that today's real ios/SnapListUITests suite
+# is fully assigned. Pointing them at the real, ever-growing shard inventory
+# made them collateral damage of ordinary UI-test additions (see #1019); this
+# fixture keeps them independent of that content entirely.
+shard_mechanics_repository=${temporary_directory}/shard-mechanics-repository
+shard_mechanics_inventory_file=${temporary_directory}/shard-mechanics-test-shards.json
 
-mkdir -p "$fake_bin" "$target_repository" "$serialized_bin"
+mkdir -p "$fake_bin" "$target_repository" "$serialized_bin" \
+  "${shard_mechanics_repository}/ios/SnapListUITests"
+
+cat > "${shard_mechanics_repository}/ios/SnapListUITests/ShardMechanicsFixtureTests.swift" <<'EOF'
+import XCTest
+
+final class ShardMechanicsFixtureTests: XCTestCase {
+    func testShardMechanicsFixture() {}
+}
+EOF
+
+cat > "$shard_mechanics_inventory_file" <<'EOF'
+{
+  "schema_version": 2,
+  "ui_shard_count": 1,
+  "execution_model": {
+    "build_products": "isolated-per-shard",
+    "reason": "Fixture inventory for shard-runner mechanics self-tests, deliberately independent of the real ios/SnapListUITests suite."
+  },
+  "shards": {
+    "unit": ["SnapListTests"],
+    "ui-1": ["SnapListUITests/ShardMechanicsFixtureTests/testShardMechanicsFixture"]
+  },
+  "baseline": {
+    "measured_layout_ui_shard_count": 1,
+    "source_ui_shard_suite_seconds": { "ui-1": 1 },
+    "ui_test_count": 1,
+    "selector_seconds_total": 1,
+    "balanced_ui_shard_observed_seconds": { "ui-1": 1 },
+    "selector_observed_seconds": {
+      "SnapListUITests/ShardMechanicsFixtureTests/testShardMechanicsFixture": 1
+    }
+  }
+}
+EOF
 
 cat > "${serialized_bin}/xcodebuild" <<'EOF'
 #!/bin/zsh
@@ -129,6 +170,7 @@ run_test_script() {
   local selector=${2-}
   local repository_root=${3-}
   local shard=${4-}
+  local shard_inventory_override=${5-}
 
   (
     export PATH="${fake_bin}:${PATH}"
@@ -146,6 +188,12 @@ run_test_script() {
       export SNAPLIST_IOS_REPOSITORY_ROOT=$repository_root
     else
       unset SNAPLIST_IOS_REPOSITORY_ROOT
+    fi
+
+    if [[ -n $shard_inventory_override ]]; then
+      export SNAPLIST_IOS_SHARD_INVENTORY_FILE=$shard_inventory_override
+    else
+      unset SNAPLIST_IOS_SHARD_INVENTORY_FILE
     fi
 
     if [[ -n $shard ]]; then
@@ -524,14 +572,16 @@ assert_declared_shard_selectors_reach_xcodebuild_once() {
       inventory = JSON.parse(File.read(ARGV.fetch(0)))
       puts ["unit"] +
         (1..inventory.fetch("ui_shard_count")).map { |index| "ui-#{index}" }
-    ' "$shard_inventory_file")}"
+    ' "$shard_mechanics_inventory_file")}"
   )
 
   for shard in "${declared_shards[@]}"; do
     : > "$arguments_file"
     : > "$expected_arguments_file"
 
-    if ! run_test_script unset "" "" "$shard"; then
+    if ! run_test_script unset "" "$shard_mechanics_repository" "$shard" \
+      "$shard_mechanics_inventory_file"
+    then
       return 1
     fi
 
@@ -540,7 +590,7 @@ assert_declared_shard_selectors_reach_xcodebuild_once() {
       inventory.fetch("shards").fetch(ARGV.fetch(1)).each do |selector|
         puts "-only-testing:#{selector}"
       end
-    ' "$shard_inventory_file" "$shard" > "$expected_arguments_file"
+    ' "$shard_mechanics_inventory_file" "$shard" > "$expected_arguments_file"
 
     if ! diff -u "$expected_arguments_file" \
       <(grep -- "^-only-testing:" "$arguments_file"); then
@@ -555,10 +605,11 @@ assert_invalid_or_conflicting_shard_selection_fails_before_xcodebuild() {
   invalid_shard=$(ruby -rjson -e '
     inventory = JSON.parse(File.read(ARGV.fetch(0)))
     puts "ui-#{inventory.fetch("ui_shard_count") + 1}"
-  ' "$shard_inventory_file")
+  ' "$shard_mechanics_inventory_file")
 
   : > "$arguments_file"
-  run_test_script unset "" "" "$invalid_shard"
+  run_test_script unset "" "$shard_mechanics_repository" "$invalid_shard" \
+    "$shard_mechanics_inventory_file"
   exit_status=$?
 
   if [[ $exit_status -ne 64 || -s $arguments_file ]]; then
@@ -840,7 +891,11 @@ run_shard_timeout_test_script() {
     fi
 
     unset SNAPLIST_IOS_ONLY_TESTING
-    unset SNAPLIST_IOS_REPOSITORY_ROOT
+    # These cases exercise xcodebuild lifecycle mechanics, not whether the
+    # real UI test suite is fully assigned, so they run against the isolated
+    # fixture inventory rather than the real, ever-growing one.
+    export SNAPLIST_IOS_REPOSITORY_ROOT=$shard_mechanics_repository
+    export SNAPLIST_IOS_SHARD_INVENTORY_FILE=$shard_mechanics_inventory_file
 
     if [[ -n $shard ]]; then
       export SNAPLIST_IOS_SHARD=$shard
