@@ -5,6 +5,7 @@ import {
   loadExportHandoffPack,
   markExportShared,
   recordExportHandoff,
+  undoExportShared,
 } from "./handoff";
 
 /**
@@ -209,6 +210,56 @@ describe("assisted export handoffs", () => {
         reviewRevision: REVIEW_REVISION,
       }),
     ).rejects.toThrow(/no timestamp/i);
+  });
+
+  it("sends both revisions when taking back a confirmation so a stale pack fails closed", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    await undoExportShared(fakeSupabase([], calls, null, null), {
+      itemId: ITEM_ID,
+      platform: "facebook",
+      reviewContentRevision: CONTENT_REVISION,
+      reviewRevision: REVIEW_REVISION,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.name).toBe("undo_export_shared");
+    expect(calls[0]!.args).toEqual({
+      p_item_id: ITEM_ID,
+      p_platform: "facebook",
+      p_source_review_revision: CONTENT_REVISION,
+      p_expected_review_revision: REVIEW_REVISION,
+    });
+  });
+
+  it("surfaces a refused undo instead of leaving the claim standing", async () => {
+    await expect(
+      undoExportShared(
+        fakeSupabase([], [], {
+          message: "This listing changed. Reopen the export pack and try again.",
+          code: "P0002",
+        }),
+        {
+          itemId: ITEM_ID,
+          platform: "mercari",
+          reviewContentRevision: CONTENT_REVISION,
+          reviewRevision: REVIEW_REVISION,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "P0002" });
+  });
+
+  it("refuses to undo a share for a directly published marketplace", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    await expect(
+      undoExportShared(fakeSupabase([], calls), {
+        itemId: ITEM_ID,
+        // eBay is a transactional adapter, never an assisted destination.
+        platform: "ebay" as never,
+        reviewContentRevision: CONTENT_REVISION,
+        reviewRevision: REVIEW_REVISION,
+      }),
+    ).rejects.toThrow(/assisted/i);
+    expect(calls).toHaveLength(0);
   });
 
   it("refuses to record an assisted handoff for a directly published marketplace", async () => {

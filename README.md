@@ -214,7 +214,11 @@ The full set, including provider-neutral hosting and voice context, is in
 
 ## Getting started
 
+SnapList uses Node.js 22.19.0 and pnpm 10. With [nvm](https://github.com/nvm-sh/nvm), activate the
+repository runtime before installing dependencies:
+
 ```bash
+nvm use
 pnpm install --frozen-lockfile
 cp .env.example .env.local     # fill in what you need; env validation is lazy
 pnpm dev
