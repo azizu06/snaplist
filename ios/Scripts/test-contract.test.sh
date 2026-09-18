@@ -321,6 +321,18 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       focused_job.fetch("if") == "github.event_name == '\''workflow_dispatch'\''"
     abort "focused dispatch budget must remain 60 minutes" unless
       focused_job.fetch("timeout-minutes") == 60
+    focused_release_contract_step = focused_job.fetch("steps").find do |step|
+      step["name"] == "Validate exact-head Release archive configuration"
+    end
+    abort "focused dispatch must validate the exact target Release configuration" unless
+      focused_release_contract_step&.fetch("run") ==
+        "zsh test-target/ios/Scripts/release-config-contract.test.sh"
+    focused_pairing_contract_step = focused_job.fetch("steps").find do |step|
+      step["name"] == "Validate exact-head Clerk instance and API origin pairing"
+    end
+    abort "focused dispatch must validate the exact target Clerk/API pairing" unless
+      focused_pairing_contract_step&.fetch("run") ==
+        "zsh test-target/ios/Scripts/clerk-origin-pairing.test.sh"
   ' "$workflow_file" "$shard_inventory_file"
 }
 

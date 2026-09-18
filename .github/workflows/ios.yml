@@ -246,6 +246,12 @@ jobs:
       - name: Validate exact-head Reduce Transparency material fallbacks
         run: zsh test-target/ios/Scripts/reduce-transparency-contract.test.sh
 
+      - name: Validate exact-head Release archive configuration
+        run: zsh test-target/ios/Scripts/release-config-contract.test.sh
+
+      - name: Validate exact-head Clerk instance and API origin pairing
+        run: zsh test-target/ios/Scripts/clerk-origin-pairing.test.sh
+
       - name: Build app and run one focused test
         env:
           SNAPLIST_IOS_ONLY_TESTING: ${{ inputs.test_selector }}
