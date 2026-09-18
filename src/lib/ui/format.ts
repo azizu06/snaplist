@@ -9,16 +9,21 @@
 /**
  * Sentence-case a value: trim, then uppercase the first letter and leave the
  * rest as-is (so "good" → "Good", "like new" → "Like new"). Returns null for
- * empty/missing input. The rest of the string is preserved verbatim, which
- * keeps real casing like "USB-C" or "iPhone" intact when it leads.
+ * empty/missing input. A leading word that already carries meaningful casing
+ * (e.g. "USB-C", "iPhone") is preserved verbatim instead of being forced —
+ * even when that word appears later in an otherwise-lowercase value, as in
+ * "good iPhone case" → "Good iPhone case".
  */
 export function sentenceCase(value: string | null | undefined): string | null {
   if (value == null) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  // A value that already carries an uppercase letter (e.g. "USB-C", "iPhone")
-  // has meaningful casing to preserve; only force-capitalize plain lowercase
-  // input like the "good" -> "Good" case this function exists for.
-  if (/[A-Z]/.test(trimmed)) return trimmed;
+  // Only the LEADING word decides whether casing is "meaningful" (e.g.
+  // "USB-C", "iPhone") versus plain lowercase to force-capitalize. Checking
+  // the whole string here would wrongly skip the leading word whenever an
+  // unrelated later word happens to carry a capital, e.g. "good iPhone case"
+  // must still become "Good iPhone case", not stay "good iPhone case".
+  const leadingWord = trimmed.split(/\s/, 1)[0];
+  if (/[A-Z]/.test(leadingWord)) return trimmed;
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }

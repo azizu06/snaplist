@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -507,18 +507,16 @@ describe("mobile API contract to App Router routing", () => {
     ]);
 
     // This client-only route is deliberately absent from the OpenAPI route
-    // table. Hide its real route file briefly so this exercises the guard's
-    // production population and real filesystem check, not a fake resolver.
+    // table. Keep the production route in place for parallel source-scanning
+    // suites while the injected resolver models only this route as missing.
     const clientOnlyPath = "/v1/included-offer/redemptions";
     const routeFile = routeFileFor(clientOnlyPath);
-    const hiddenRouteFile = `${routeFile}.mobile-api-routes-test-hidden`;
-
-    renameSync(routeFile, hiddenRouteFile);
-    try {
-      expect(missingRoutePaths(routeGuardPaths())).toEqual([clientOnlyPath]);
-    } finally {
-      renameSync(hiddenRouteFile, routeFile);
-    }
+    expect(existsSync(routeFile)).toBe(true);
+    expect(
+      missingRoutePaths(routeGuardPaths(), (path) =>
+        path === clientOnlyPath ? `${routeFile}.test-missing` : routeFileFor(path),
+      ),
+    ).toEqual([clientOnlyPath]);
   });
 
   it("exports each contract method on the route that serves it", () => {
