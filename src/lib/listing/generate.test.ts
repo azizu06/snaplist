@@ -557,6 +557,8 @@ describe("listing/generate — eBay title-length constraint (≤ 80) is guarante
     const cut = enforceTitleLength(long);
     expect(cut.length).toBeLessThanOrEqual(EBAY_TITLE_MAX_LENGTH);
     expect(cut.endsWith(" ")).toBe(false);
+    // No ellipsis is ever appended, even on a mid-content cut.
+    expect(cut).not.toContain("…");
   });
 });
 

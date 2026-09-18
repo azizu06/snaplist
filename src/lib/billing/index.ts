@@ -59,6 +59,14 @@ export {
   type VerifiedStoreKitPeriod,
 } from "./revenuecat";
 export {
+  OPERATOR_PRO_ALLOWANCE,
+  OPERATOR_PRO_PERIOD_KEY,
+  ensureOperatorProAllowance,
+  isOperatorProUser,
+  type EnsureOperatorProAllowanceInput,
+  type OperatorProGrantClient,
+} from "./operator-pro";
+export {
   createSupabaseNativeSubscriptionBridge,
   createSupabaseRevenueCatEntitlementStore,
   type NativeRevenueCatConfiguration,

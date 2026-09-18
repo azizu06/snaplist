@@ -1,8 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { effectivePrice } from "../pipeline";
 import { itemLabel } from "../ui/item-label";
 import { sentenceCase } from "../ui/format";
-import { signPhotoUrlMap } from "../vision/photos";
 
 /**
  * Dashboard intake rows — the "one row per Item" invariant, extracted from
@@ -11,8 +9,7 @@ import { signPhotoUrlMap } from "../vision/photos";
  * still appear (status `new` → "Processing") so nothing the seller uploaded
  * disappears; the latest logged price is shown with the seller override winning.
  *
- * `assembleDashboardRows` is the PURE core (the unit-test target); `loadDashboardRows`
- * is the thin RLS-scoped I/O wrapper the page calls.
+ * `assembleDashboardRows` is the PURE core (the unit-test target).
  */
 
 /** The `listings` columns the dashboard reads (query is newest-first). */
@@ -184,52 +181,4 @@ export function assembleDashboardRows(
         condition: sentenceCase(attrString(item.attributes, "condition")),
       })),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-/**
- * Load the seller's dashboard rows: three RLS-scoped reads (newest-first, same
- * limits as before the extraction) + batch-signed first-photo thumbnails, fed
- * into the pure `assembleDashboardRows`.
- */
-export async function loadDashboardRows(
-  supabase: SupabaseClient,
-): Promise<DashboardRowData[]> {
-  const [{ data: listings }, { data: items }, { data: logs }] = await Promise.all([
-    supabase
-      .from("listings")
-      .select("id, item_id, title, status, created_at, listed_price")
-      .eq("platform", "ebay")
-      .order("created_at", { ascending: false })
-      .limit(100),
-    supabase
-      .from("items")
-      .select("id, attributes, photos, price_override, cost_basis, created_at")
-      .order("created_at", { ascending: false })
-      .limit(100),
-    supabase
-      .from("prediction_logs")
-      .select("item_id, price, created_at")
-      .order("created_at", { ascending: false })
-      .limit(200),
-  ]);
-
-  // Batch-sign first photos (private bucket) for the table thumbnails.
-  const firstPhotoByItem = new Map<string, string>();
-  for (const item of items ?? []) {
-    const first = (item.photos as string[] | null)?.[0];
-    if (first) firstPhotoByItem.set(item.id as string, first);
-  }
-  const signedByPath = await signPhotoUrlMap(supabase, [
-    ...firstPhotoByItem.values(),
-  ]);
-
-  return assembleDashboardRows({
-    listings,
-    items,
-    latestPrice: latestPricePerItem(logs),
-    thumbUrlFor: (itemId) => {
-      const path = firstPhotoByItem.get(itemId);
-      return path ? (signedByPath.get(path) ?? null) : null;
-    },
-  });
 }

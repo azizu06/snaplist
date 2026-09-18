@@ -58,6 +58,7 @@ struct AppShellView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
+    @State private var dockScrollScale = DockScrollScaleModel()
     @State private var isDeleteAccountFlowPresented = false
     @State private var hasConsumedMountedFirstValueDirectScanCommand = false
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
@@ -84,6 +85,13 @@ struct AppShellView: View {
     @State private var activationProgress = ActivationGuidanceProgress()
     @State private var activationListingReviewPresented = false
     @State private var activationGuestClaimPresented = false
+    /// #1056. The spotlight's own state: the bubble's frame, so the touch gate
+    /// can let its Got it button through, and the registry a spotlit control
+    /// publishes its action to for the accessibility stand-in.
+    @State private var activationBubbleFrame: CGRect?
+    @State private var activationSpotlightActions = ActivationSpotlightActionRegistry()
+    @State private var activationSpotlightAnchoredTargets:
+        Set<ActivationSpotlightTarget> = []
     private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
     private let activationGuestCompletionStore =
         UserDefaultsActivationGuidanceGuestCompletionStore()
@@ -262,8 +270,26 @@ struct AppShellView: View {
             }
         }
         .fixtureAccessibilityOverrides(configuration)
-        .overlay(alignment: .bottom) {
-            activationGuidanceOverlay
+        .environment(\.activationSpotlightActions, activationSpotlightActions)
+        .onPreferenceChange(ActivationSpotlightAnchoredTargetsKey.self) { targets in
+            activationSpotlightAnchoredTargets = targets
+        }
+        // While a blocking mark is up the surface behind it is out of the
+        // accessibility tree; the mark's own elements — its line, the spotlit
+        // control's stand-in, and Got it — are the way forward. A mark whose
+        // control never reported a frame blocks nothing, and Listing Review's
+        // form has no honest stand-in, so both leave the surface reachable.
+        .accessibilityHidden(
+            ActivationSpotlightAccessibilityPolicy.hidesSurface(
+                for: activationCoachMark,
+                anchoredTargets: activationSpotlightAnchoredTargets
+            )
+        )
+        .overlayPreferenceValue(ActivationSpotlightTargetPreferenceKey.self) { anchors in
+            GeometryReader { geometry in
+                activationGuidanceOverlay(anchors: anchors, geometry: geometry)
+            }
+            .ignoresSafeArea()
         }
         // Issue #891. Attached here rather than inside the shell so a push that
         // lands during onboarding still has somewhere to draw; the bottom is
@@ -641,9 +667,18 @@ struct AppShellView: View {
         // unconfigured default and reported a refusal while every screen looked
         // right. `AccountDeletionUITests` is what catches this.
         .environment(\.accountDeletionDependencies, accountDeletionDependencies)
+        .environment(\.dockScrollScale, dockScrollScale)
         .floatingDock(
             selectedTab: router.selectedTab,
             isVisible: shellChromeProjection.showsDock,
+            // #1049: the model is a single shared instance so Trophy Wall's
+            // scroll observation never has to thread through every
+            // intermediate initializer, but that means a shrink from Trophy
+            // Wall scroll would otherwise persist onto Scan after a tab
+            // switch. Scan has no scroll surface to report a reset offset,
+            // so the dock composition call is where full scale is enforced
+            // for every screen but Trophy Wall.
+            scale: router.selectedTab == .trophyWall ? dockScrollScale.scale : DockScrollScalePolicy.fullScale,
             select: router.select
         )
         .animation(
@@ -656,6 +691,9 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
         }
+        // #1057: root only, so the concentric dock corners derive from the
+        // device's own display corner rather than a nested frame.
+        .snapListConcentricContainerShape()
     }
 
     /// Keeps the typed navigation stack mounted before the seller chooses the
@@ -773,6 +811,10 @@ struct AppShellView: View {
             refreshState: $trophyWallCollectionRefreshState,
             runStore: runStore,
             listingReviewStore: listingReviewStore,
+            // Same `SettingsProfile.current(configuration:)` path Settings
+            // itself calls, so the header can never show initials that
+            // disagree with the account screen (#1051).
+            accountInitials: SettingsProfile.current(configuration: configuration).initials,
             correctionAvailability: configuration.listingReviewCorrectionAvailability,
             forceReducedMotion: configuration.forceReducedMotion,
             activationListingReviewOpened: {
@@ -1023,44 +1065,129 @@ struct AppShellView: View {
     }
 
     private var activationFallbackSurface: ActivationGuidanceSurface? {
-        if photoReviewHost.session != nil {
-            return .photoReview
-        }
-        if router.selectedTab == .trophyWall,
-           router.presentedFullScreen == nil {
-            return .trophyWall
-        }
-        if router.selectedTab == .scan,
-           router.presentedFullScreen == nil
-                || router.presentedFullScreen == .guidedCamera {
-            return .scan
-        }
-        return nil
+        // #1056: the pushed stack is an input. Reading only the tab is what let
+        // the Trophy Wall mark draw on top of pushed Settings.
+        ActivationSurfaceResolutionPolicy.surface(
+            hasPhotoReviewSession: photoReviewHost.session != nil,
+            selectedTab: router.selectedTab,
+            pushedPath: router.selectedPath,
+            presentedFullScreen: router.presentedFullScreen
+        )
     }
 
     private var activationCoachMark: ActivationCoachMark? {
-        guard shouldPresentActivation,
-              !activationProgress.hasAcknowledgedCurrentState,
-              let surface = activationSurface else { return nil }
-        return ActivationCoachMark(
-            state: activationProgress.state,
-            surface: surface
+        guard shouldPresentActivation else { return nil }
+        return ActivationCoachMarkResolutionPolicy.coachMark(
+            progress: activationProgress,
+            surface: activationSurface
         )
     }
 
     @ViewBuilder
-    private var activationGuidanceOverlay: some View {
+    private func activationGuidanceOverlay(
+        anchors: [ActivationSpotlightTarget: Anchor<CGRect>],
+        geometry: GeometryProxy
+    ) -> some View {
         if let coachMark = activationCoachMark {
-            ActivationGuidanceCoachMark(
-                coachMark: coachMark,
-                dismiss: dismissActivationGuidance,
-                isCompleting: isCompletingActivation,
-                usesStaticScoutRendering: configuration.usesStaticScoutRendering
+            let bounds = CGRect(origin: .zero, size: geometry.size)
+            let presentation = ActivationSpotlightPolicy.presentation(
+                for: coachMark,
+                targetFrame: ActivationSpotlightTargetPolicy
+                    .target(for: coachMark)
+                    .flatMap { anchors[$0] }
+                    .map { geometry[$0] },
+                bounds: bounds
             )
-            .padding(.horizontal, 18)
-            .padding(.bottom, activationBottomInset)
+
+            ZStack(alignment: .topLeading) {
+                if presentation.isBlocking {
+                    ActivationSpotlightScrim(
+                        coachMark: coachMark,
+                        cutout: presentation.cutout,
+                        dismissFrame: activationBubbleFrame,
+                        reduceMotion: reduceMotion,
+                        targetTouched: {
+                            activationSpotlightTargetTouched(coachMark)
+                        }
+                    )
+                }
+
+                activationCoachMarkBubble(
+                    coachMark,
+                    presentation: presentation,
+                    bounds: bounds,
+                    safeAreaBottom: geometry.safeAreaInsets.bottom
+                )
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .coordinateSpace(name: Self.activationSpotlightSpace)
+            .onPreferenceChange(ActivationBubbleFramePreferenceKey.self) { frame in
+                activationBubbleFrame = frame
+            }
         }
     }
+
+    private static let activationSpotlightSpace = "activation-spotlight"
+
+    /// The bubble keeps its approved bottom-docked anchor for every mark the
+    /// design package placed there. A mark whose control is not docked to the
+    /// bottom — the Trophy Wall clock, the Settings row — is placed against its
+    /// own cutout instead.
+    @ViewBuilder
+    private func activationCoachMarkBubble(
+        _ coachMark: ActivationCoachMark,
+        presentation: ActivationSpotlightPresentation,
+        bounds: CGRect,
+        safeAreaBottom: CGFloat
+    ) -> some View {
+        let placement = coachMark.isContextual
+            ? presentation.cutout.map {
+                ActivationSpotlightBubblePlacementPolicy.placement(
+                    cutout: $0,
+                    bounds: bounds,
+                    horizontalPadding: Self.activationBubbleHorizontalPadding
+                )
+            }
+            : nil
+
+        ActivationGuidanceCoachMark(
+            coachMark: coachMark,
+            dismiss: dismissActivationGuidance,
+            isCompleting: isCompletingActivation,
+            usesStaticScoutRendering: configuration.usesStaticScoutRendering,
+            placementOverride: placement,
+            showsTail: ActivationSpotlightTargetPolicy
+                .mode(for: coachMark)
+                .pointsAtAControl
+        )
+        .padding(.horizontal, Self.activationBubbleHorizontalPadding)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ActivationBubbleFramePreferenceKey.self,
+                    value: proxy.frame(
+                        in: .named(Self.activationSpotlightSpace)
+                    )
+                )
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: placement?.topInset == nil ? .bottom : .top
+        )
+        .padding(
+            .top,
+            placement?.topInset ?? 0
+        )
+        .padding(
+            .bottom,
+            placement.map { $0.bottomInset ?? 0 }
+                ?? (activationBottomInset + safeAreaBottom)
+        )
+    }
+
+    private static let activationBubbleHorizontalPadding: CGFloat = 18
 
     private var activationBottomInset: CGFloat {
         guard let coachMark = activationCoachMark else { return 24 }
@@ -1105,7 +1232,34 @@ struct AppShellView: View {
     }
 
     private func dismissActivationGuidance() {
+        guard let coachMark = activationCoachMark else { return }
+        guard !coachMark.isContextual else {
+            acknowledgeActivationContextualMark(coachMark)
+            return
+        }
         advanceActivationGuidance(for: .gotIt)
+    }
+
+    /// A touch inside the cutout reaches the real control, which runs its own
+    /// action and — for a spine mark — advances through the hook that action
+    /// already calls. A contextual mark has no such hook, so tapping its
+    /// control is what retires it.
+    private func activationSpotlightTargetTouched(
+        _ coachMark: ActivationCoachMark
+    ) {
+        guard coachMark.isContextual else { return }
+        acknowledgeActivationContextualMark(coachMark)
+    }
+
+    private func acknowledgeActivationContextualMark(
+        _ coachMark: ActivationCoachMark
+    ) {
+        guard shouldPresentActivation,
+              activationProgress.acknowledgeContextualMark(coachMark) else {
+            return
+        }
+        saveActivationProgress()
+        retireActivationBubbleFrame()
     }
 
     private func advanceActivationGuidance(for action: ActivationGuidanceAction) {
@@ -1113,12 +1267,21 @@ struct AppShellView: View {
         switch activationProgress.advance(for: action) {
         case .completionRequested:
             saveActivationProgress()
+            retireActivationBubbleFrame()
             completeActivationGuidance()
         case .advanced, .completionRecorded:
             saveActivationProgress()
+            retireActivationBubbleFrame()
         case .unchanged:
             break
         }
+    }
+
+    /// The retired mark's bubble frame is a hole in the next mark's scrim until
+    /// the new bubble reports its own. Clearing it at the moment a mark retires
+    /// closes that window; the preference itself resets a frame later.
+    private func retireActivationBubbleFrame() {
+        activationBubbleFrame = nil
     }
 
     private func completeActivationGuidance() {
@@ -2183,6 +2346,17 @@ enum TrophyWallPendingCardRecovery: Equatable {
     }
 }
 
+/// #1062: pure so the exact zoom-vs-push decision for the listing-review
+/// destination is unit-testable without standing up `TrophyWallFeatureView`'s
+/// private `@State`/`@Namespace`. The `#available(iOS 18, *)` gate itself
+/// stays at the call site — OS availability has no unit-testable value.
+enum TrophyWallZoomTransitionPolicy {
+    static func shouldZoom(reduceMotion: Bool, sourceRunID: UUID?) -> Bool {
+        TrophyWallMotionEnhancementPolicy.isEnabled(reduceMotion: reduceMotion)
+            && sourceRunID != nil
+    }
+}
+
 @MainActor
 struct TrophyWallFeatureView: View {
     @Environment(\.appDependencies) private var dependencies
@@ -2193,6 +2367,7 @@ struct TrophyWallFeatureView: View {
     @Binding var refreshState: TrophyWallCollectionRefreshState
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
+    let accountInitials: String
     let correctionAvailability: ListingReviewCorrectionAvailability
     let forceReducedMotion: Bool
     let activationListingReviewOpened: () -> Void
@@ -2207,11 +2382,25 @@ struct TrophyWallFeatureView: View {
         ProcessingGuestClaimPresentationHost()
     @State private var listingReviewPresentation =
         ListingReviewPresentationHost()
+    /// #1062: shared between the settled tile (`.matchedTransitionSource`)
+    /// and listing review (`.navigationTransition(.zoom)`) so the two halves
+    /// of the same transition agree on which geometry to animate.
+    @Namespace private var zoomTransitionNamespace
+    /// The run the seller's own tap most recently opened, so the zoom knows
+    /// which tile it is zooming from. A guest-claim reopen never sets this —
+    /// there is no tile in that flow — so it falls back to the plain push.
+    @State private var zoomTransitionRunID: UUID?
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    private var reduceMotion: Bool {
+        systemReduceMotion || forceReducedMotion
+    }
 
     var body: some View {
         @Bindable var listingReviewPresentation = listingReviewPresentation
         TrophyWallView(
             store: store,
+            accountInitials: accountInitials,
             openProcessing: {
                 router.navigate(to: .home(.processing))
             },
@@ -2223,7 +2412,8 @@ struct TrophyWallFeatureView: View {
                 router.reset(tab: .scan)
                 router.selectedTab = .scan
             },
-            onTryAgain: { refreshState.tryAgain() }
+            onTryAgain: { refreshState.tryAgain() },
+            namespace: zoomTransitionNamespace
         )
         .task(id: refreshState.taskID(tab: router.selectedTab)) {
             guard router.selectedTab == .trophyWall else { return }
@@ -2262,26 +2452,47 @@ struct TrophyWallFeatureView: View {
             }
         }
         .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
-            ListingReviewView(
-                store: listingReviewStore,
-                correctionAvailability: correctionAvailability,
-                forceReducedMotion: forceReducedMotion,
-                dismissReview: { listingReviewPresentation.dismiss() },
-                goToTrophyWall: {
-                    router.reset(tab: .trophyWall)
-                    router.selectedTab = .trophyWall
-                },
-                startNewItem: {
-                    router.reset(tab: .scan)
-                    router.selectedTab = .scan
-                },
-                activationInteraction: activationListingReviewInteraction
-            )
+            listingReviewDestination
         }
         .onChange(of: listingReviewPresentation.isPresented) { _, isPresented in
             if !isPresented {
                 activationListingReviewDismissed()
+                zoomTransitionRunID = nil
             }
+        }
+    }
+
+    /// #1062: iOS 17 has no `.navigationTransition`, and Reduced Motion (system
+    /// or forced) keeps the plain push even on iOS 18 — only a tile-initiated
+    /// open (a known `zoomTransitionRunID`) ever zooms.
+    @ViewBuilder
+    private var listingReviewDestination: some View {
+        let destination = ListingReviewView(
+            store: listingReviewStore,
+            correctionAvailability: correctionAvailability,
+            forceReducedMotion: forceReducedMotion,
+            dismissReview: { listingReviewPresentation.dismiss() },
+            goToTrophyWall: {
+                router.reset(tab: .trophyWall)
+                router.selectedTab = .trophyWall
+            },
+            startNewItem: {
+                router.reset(tab: .scan)
+                router.selectedTab = .scan
+            },
+            activationInteraction: activationListingReviewInteraction
+        )
+        if #available(iOS 18, *),
+           TrophyWallZoomTransitionPolicy.shouldZoom(
+               reduceMotion: reduceMotion,
+               sourceRunID: zoomTransitionRunID
+           ),
+           let zoomTransitionRunID {
+            destination.navigationTransition(
+                .zoom(sourceID: zoomTransitionRunID, in: zoomTransitionNamespace)
+            )
+        } else {
+            destination
         }
     }
 
@@ -2302,6 +2513,7 @@ struct TrophyWallFeatureView: View {
         case .presentedGuestClaim:
             activationGuestClaimPresentationChanged(true)
         case .presentedReview:
+            zoomTransitionRunID = runID
             activationListingReviewOpened()
         default:
             break
@@ -2428,7 +2640,8 @@ private struct ProcessingListingReviewSurface: View {
             },
             onScan: onScan,
             onTryAgain: onTryAgain,
-            onRefresh: onRefresh
+            onRefresh: onRefresh,
+            forceReducedMotion: forceReducedMotion
         )
         .navigationDestination(
             isPresented: Binding(

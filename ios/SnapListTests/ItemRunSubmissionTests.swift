@@ -21,21 +21,21 @@ final class ItemRunSubmissionTests: XCTestCase {
                 .rateLimited(reason: "opaque"),
                 .tryAgain,
                 "Try again",
-                "This didn't go through. Your item is still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
                 .startListing
             ),
             (
                 .attemptNotPersisted,
                 .tryAgain,
                 "Try again",
-                "This didn't go through. Your item is still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
                 .startListing
             ),
             (
                 .submissionUnavailable,
                 .tryAgain,
                 "Try again",
-                "This didn't go through. Your item is still saved on this phone.",
+                "Didn't send. Item still saved on this phone.",
                 .startListing
             ),
             (
@@ -59,17 +59,17 @@ final class ItemRunSubmissionTests: XCTestCase {
                 .photosTooLarge,
                 .photosTooLarge,
                 "Review",
-                "These photos are too large to send. Remove or retake one, then try again.",
+                "Too large to send. Remove or retake a photo.",
                 .reviewSubmission(eventID: eventID)
             ),
             // A rejected session takes the same retry as `.tryAgain` and must
-            // not take its words: "this didn't go through" tells a seller whose
-            // sign-in lapsed nothing about what would make the next tap work.
+            // not take its words: "didn't send" tells a seller whose sign-in
+            // lapsed nothing about what would make the next tap work.
             (
                 .sessionRenewalRequired,
                 .sessionRenewal,
                 "Try again",
-                "Your sign-in needs renewing. Your item is still saved on this phone.",
+                "Sign in again. Item is still saved on this phone.",
                 .startListing
             ),
             // #843 item 3. Same retry, and it must not borrow `.tryAgain`'s
@@ -80,7 +80,7 @@ final class ItemRunSubmissionTests: XCTestCase {
                 .deviceIdentityUnavailable,
                 .deviceIdentity,
                 "Try again",
-                "This phone isn't ready to send yet. Your item is saved, so try again in a moment or sign in.",
+                "Not ready. Item still saved, try again or sign in.",
                 .startListing
             ),
         ]
@@ -95,6 +95,40 @@ final class ItemRunSubmissionTests: XCTestCase {
             XCTAssertEqual(
                 family?.primaryActionEvent(eventID: eventID),
                 testCase.action
+            )
+        }
+    }
+
+    /// #1074: the footer draws this message beside a 22pt status icon with
+    /// 10pt spacing inside `submissionFooter`'s content width (screen width
+    /// minus two 18pt content gutters), at `submissionMessageSize` (14pt
+    /// semibold). A message that wraps there costs vertical space the owner
+    /// does not want spent, so this measures every family's copy against that
+    /// exact geometry on a 393pt-wide device rather than eyeballing a
+    /// simulator screenshot.
+    func testEveryRejectionMessageFitsOneLineAt393PointWidthAtDefaultTextSize() {
+        let contentWidth: CGFloat = 393 - 2 * 18
+        let availableWidth = contentWidth - 22 - 10
+        let font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        let singleLineHeight = font.lineHeight
+
+        for family in PhotoReviewSubmissionRejectionFamily.allCases {
+            let bounds = (family.message as NSString).boundingRect(
+                with: CGSize(
+                    width: availableWidth,
+                    height: .greatestFiniteMagnitude
+                ),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: font],
+                context: nil
+            )
+            XCTAssertLessThanOrEqual(
+                bounds.height,
+                singleLineHeight + 1,
+                """
+                \(family) message wraps to more than one line at 393pt \
+                width: "\(family.message)"
+                """
             )
         }
     }
@@ -668,7 +702,7 @@ final class ItemRunSubmissionTests: XCTestCase {
 
         let presentation = PhotoReviewSubmissionPresentation(host: host)
         let message =
-            "Your sign-in needs renewing. Your item is still saved on this phone."
+            "Sign in again. Item is still saved on this phone."
         XCTAssertEqual(presentation.visibleMessage, message)
         XCTAssertEqual(presentation.accessibilityAnnouncement, message)
         // The footer draws its message beside a status icon and shows neither
@@ -789,7 +823,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         }
         let presentation = PhotoReviewSubmissionPresentation(host: host)
         let message =
-            "We couldn't confirm this went through. Your item is still saved on this phone."
+            "Not confirmed. Item still saved on this phone."
         XCTAssertNotEqual(presentation, .idle)
         XCTAssertNotEqual(
             presentation,
@@ -5387,10 +5421,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
         XCTAssertEqual(
             family.message,
-            """
-            This phone's ID changed, so these photos can't be sent as they \
-            are. Add, replace, or remove a photo, then try again.
-            """,
+            "Phone ID changed. Change a photo to resend.",
             """
             `.tryAgain`'s words describe a send that failed once. This one \
             fails identically every time until the photo set changes, so the \

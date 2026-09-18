@@ -72,7 +72,14 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(TrophyWallGridMetrics.tileAspectRatio, 4.0 / 5.0)
         XCTAssertEqual(TrophyWallGridMetrics.gutterPoints, 12)
         XCTAssertEqual(TrophyWallGridMetrics.tileCornerRadiusPoints, 12)
-        XCTAssertEqual(TrophyWallGridMetrics.bottomPaddingPoints, 132)
+        // #1057: derived from the dock's own metrics rather than a
+        // hand-guessed literal, so the clearance cannot drift from what the
+        // floating dock actually occupies. `containerHeight(for:)` already
+        // folds in `bottomInset(for:)`; asserting both here would double it.
+        XCTAssertEqual(
+            TrophyWallGridMetrics.bottomPaddingPoints,
+            FloatingDockMetrics.containerHeight(for: .trophyWall)
+        )
 
         let columns = TrophyWallView.gridColumns
         XCTAssertEqual(columns.count, TrophyWallGridMetrics.columnCount)
@@ -350,6 +357,69 @@ final class TrophyWallDomainTests: XCTestCase {
                 testCase.name
             )
         }
+    }
+
+    /// #1062: `isAnalyzing` feeds the row indicator's symbol effect. It must
+    /// track active AI analysis specifically — not merely "no action" — so an
+    /// accepted-but-not-yet-working row and a locked needs-retry row, both
+    /// actionless or action-bearing in their own ways, never light up as if
+    /// the pipeline were still running.
+    func testWorkingAndRetryingRowsAreAnalyzingWhileAcceptedAndNeedsRetryAreNot() throws {
+        let fixture = TrophyWallTestFixture()
+
+        for testCase in fixture.workingStageCases {
+            let store = fixture.makeStore()
+            let runDetail = try fixture.decodedRunDetail(
+                runID: fixture.runID,
+                itemID: fixture.itemID,
+                status: .running,
+                stage: testCase.stage
+            )
+            store.ingest(
+                acceptedHandoff: fixture.acceptedHandoff,
+                runDetail: runDetail,
+                principalScope: fixture.principal
+            )
+
+            let row = try XCTUnwrap(
+                store.processingRows.first { $0.id == .run(fixture.runID) },
+                testCase.name
+            )
+            XCTAssertTrue(row.isAnalyzing, testCase.name)
+        }
+
+        let acceptedStore = fixture.makeStore()
+        acceptedStore.ingest(
+            historyPage: try fixture.historyPage(
+                status: .retrying,
+                stage: .queued,
+                terminalOutcome: nil
+            ),
+            principalScope: fixture.principal
+        )
+        XCTAssertEqual(acceptedStore.processingRows.last?.isAnalyzing, true)
+
+        let needsRetryStore = fixture.makeStore()
+        needsRetryStore.ingest(
+            historyPage: try fixture.historyPage(
+                status: .failed,
+                stage: .pricing,
+                terminalOutcome: .failed,
+                retryTruth: (canRetry: true, workPreserved: true)
+            ),
+            principalScope: fixture.principal
+        )
+        XCTAssertEqual(needsRetryStore.processingRows.last?.isAnalyzing, false)
+
+        let acceptedOnlyStore = fixture.makeStore(cards: [
+            .accepted(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                itemName: fixture.matchedItemName,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            ),
+        ])
+        XCTAssertEqual(acceptedOnlyStore.processingRows.last?.isAnalyzing, false)
     }
 
     func testStoreProjectsRetryingCanonicalWorkingStagesFromRunHistoryPage() throws {
@@ -1959,7 +2029,7 @@ final class TrophyWallDomainTests: XCTestCase {
             TrophyWallProcessingView.CollectionMessage(
                 heading: "Nothing is processing.",
                 action: .scan(label: "Scan an item"),
-                scoutImageName: "ScoutUncertain",
+                scoutImageName: "ScoutReassurance",
                 scoutAccessibilityLabel: "Scout, the SnapList camera helper"
             )
         )
@@ -2511,11 +2581,13 @@ final class TrophyWallDomainTests: XCTestCase {
             let host = HostedTrophyWallTestWindow(
                 rootView: TrophyWallView(
                     store: store,
+                    accountInitials: "S",
                     openProcessing: {},
                     openAccount: {},
                     openListing: { _ in .presentedReview },
                     onScan: {},
-                    onTryAgain: {}
+                    onTryAgain: {},
+                    namespace: Namespace().wrappedValue
                 ),
                 size: CGSize(width: 390, height: 844)
             )
@@ -2556,11 +2628,13 @@ final class TrophyWallDomainTests: XCTestCase {
 
         let exhaustedWall = TrophyWallView(
             store: settledStore,
+            accountInitials: "S",
             openProcessing: {},
             openAccount: {},
             openListing: { _ in .presentedReview },
             onScan: {},
-            onTryAgain: {}
+            onTryAgain: {},
+            namespace: Namespace().wrappedValue
         )
         let exhaustedHost = HostedTrophyWallTestWindow(
             rootView: exhaustedWall,
@@ -2605,7 +2679,7 @@ final class TrophyWallDomainTests: XCTestCase {
                 .init(
                     heading: "Nothing is processing.",
                     action: .scan(label: "Scan an item"),
-                    scoutImageName: "ScoutUncertain",
+                    scoutImageName: "ScoutReassurance",
                     scoutAccessibilityLabel: "Scout"
                 ),
                 "trophy.processing.collection.scan"
@@ -2894,6 +2968,7 @@ private struct TrophyWallFeatureTestRoot: View {
             refreshState: $driver.refreshState,
             runStore: runStore,
             listingReviewStore: listingReviewStore,
+            accountInitials: "S",
             correctionAvailability: .notOffered,
             forceReducedMotion: false,
             activationListingReviewOpened: {},
@@ -3121,6 +3196,49 @@ private extension UIImage {
             }
             return count
         }
+    }
+}
+
+/// #1062: the single Reduced-Motion gate behind the zoom navigation
+/// transition and both processing-row symbol effects. Tested once here at
+/// the pure seam rather than through three separate view-level assertions.
+final class TrophyWallMotionEnhancementPolicyTests: XCTestCase {
+    func testDisablesEnhancementsWhenReduceMotionIsOn() {
+        XCTAssertFalse(TrophyWallMotionEnhancementPolicy.isEnabled(reduceMotion: true))
+    }
+
+    func testEnablesEnhancementsWhenReduceMotionIsOff() {
+        XCTAssertTrue(TrophyWallMotionEnhancementPolicy.isEnabled(reduceMotion: false))
+    }
+}
+
+/// #1062: the exact zoom-vs-plain-push decision `AppShellView`'s listing
+/// review destination applies, extracted so a regression here (a stale run
+/// ID surviving into the next tile's zoom, or Reduced Motion failing to
+/// suppress it) fails a fast unit test instead of only showing up on device.
+final class TrophyWallZoomTransitionPolicyTests: XCTestCase {
+    func testZoomsForATileInitiatedRunWithoutReducedMotion() {
+        XCTAssertTrue(
+            TrophyWallZoomTransitionPolicy.shouldZoom(reduceMotion: false, sourceRunID: UUID())
+        )
+    }
+
+    func testNeverZoomsUnderReducedMotionEvenWithAKnownRunID() {
+        XCTAssertFalse(
+            TrophyWallZoomTransitionPolicy.shouldZoom(reduceMotion: true, sourceRunID: UUID())
+        )
+    }
+
+    func testNeverZoomsWithoutATileInitiatedRunID() {
+        XCTAssertFalse(
+            TrophyWallZoomTransitionPolicy.shouldZoom(reduceMotion: false, sourceRunID: nil)
+        )
+    }
+
+    func testNeverZoomsWithoutARunIDEvenUnderReducedMotion() {
+        XCTAssertFalse(
+            TrophyWallZoomTransitionPolicy.shouldZoom(reduceMotion: true, sourceRunID: nil)
+        )
     }
 }
 

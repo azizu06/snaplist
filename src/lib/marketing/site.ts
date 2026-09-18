@@ -125,30 +125,6 @@ export const FEATURE_STEPS = [
 
 export type FeatureStep = (typeof FEATURE_STEPS)[number];
 
-export const VALUE_CARDS = [
-  {
-    id: "review",
-    title: "Editable listing review",
-    body:
-      "Review and edit the title, condition, item details, description, photos, and "
-      + "price before anything leaves SnapList.",
-  },
-  {
-    id: "evidence",
-    title: "Sold-price evidence",
-    body:
-      "See sold-price matches when they exist. When evidence is missing, SnapList "
-      + "says so and you choose the price.",
-  },
-  {
-    id: "publish",
-    title: "eBay after confirmation",
-    body:
-      "Publish to eBay only after you confirm. Other supported marketplaces use a "
-      + "prepared handoff you finish yourself.",
-  },
-] as const;
-
 /** Uniform Why-choose grid: one equal card per product truth. */
 export const MARKETING_BENTO_CARDS = [
   {

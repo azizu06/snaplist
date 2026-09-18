@@ -6,6 +6,7 @@ const {
   resolveGuest,
   signGuestOperation,
   submit,
+  supabaseCreateClient,
   verifyToken,
 } = vi.hoisted(() => ({
   createConfiguredMobileItemSubmissionOperations: vi.fn(),
@@ -13,10 +14,12 @@ const {
   resolveGuest: vi.fn(),
   signGuestOperation: vi.fn(),
   submit: vi.fn(),
+  supabaseCreateClient: vi.fn(),
   verifyToken: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ verifyToken }));
+vi.mock("@supabase/supabase-js", () => ({ createClient: supabaseCreateClient }));
 vi.mock("@/lib/mobile-item-submission/configured", () => ({
   createConfiguredMobileItemSubmissionOperations,
 }));
@@ -37,7 +40,43 @@ const environmentKeys = [
   "SUPABASE_GUEST_JWT_KEY_ID",
   "SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM",
   "MOBILE_VOICE_SUBMISSION_ENABLED",
+  "SNAPLIST_PRO_OPERATOR_USER_IDS",
 ] as const;
+
+/** Records every service-role RPC the route issues on the submission path. */
+function recordingAdmin(
+  result: { data: unknown; error: { message: string } | null } = {
+    data: true,
+    error: null,
+  },
+) {
+  const calls: Array<{ functionName: string; args: unknown }> = [];
+  supabaseCreateClient.mockReturnValue({
+    rpc(functionName: string, args: unknown) {
+      calls.push({ functionName, args });
+      return Promise.resolve(result);
+    },
+  });
+  return calls;
+}
+
+function photoSubmission(key: string): Request {
+  const body = new FormData();
+  body.append(
+    "photo",
+    new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], "item.jpg", {
+      type: "image/jpeg",
+    }),
+  );
+  return new Request("https://snaplist.example/v1/items/runs", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer signed-release-jwt",
+      "idempotency-key": key,
+    },
+    body,
+  });
+}
 
 function fixedWavBytes(): Uint8Array {
   const samples = 160;
@@ -296,5 +335,106 @@ describe("production mobile item submission route", () => {
     expect(response.status).toBe(401);
     expect(verifyToken).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("operator SnapList Pro on the submission path (#1077)", () => {
+  const OPERATOR = "user_2reviewDemoAccount";
+
+  it("materializes the grant for an allowlisted subject before the run is staged", async () => {
+    process.env.SNAPLIST_PRO_OPERATOR_USER_IDS = `${OPERATOR}, user_2ownerAccount`;
+    verifyToken.mockResolvedValue({ sub: OPERATOR });
+    const calls = recordingAdmin();
+
+    const response = await POST(
+      photoSubmission("54140000-0000-4000-8000-000000000001"),
+    );
+
+    expect(response.status).toBe(202);
+    // The grant is compared against the subject Clerk verified, never against
+    // anything the request carried.
+    expect(calls).toEqual([
+      {
+        functionName: "grant_operator_ai_item_allowance",
+        args: { p_user_id: OPERATOR, p_allowance: 10_000 },
+      },
+    ]);
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        principal: expect.objectContaining({ userId: OPERATOR }),
+      }),
+    );
+  });
+
+  it("issues no grant, and no database call, for a seller the environment does not name", async () => {
+    process.env.SNAPLIST_PRO_OPERATOR_USER_IDS = OPERATOR;
+    verifyToken.mockResolvedValue({ sub: "user_2ordinarySeller" });
+    const calls = recordingAdmin();
+
+    expect(
+      (await POST(photoSubmission("54140000-0000-4000-8000-000000000002")))
+        .status,
+    ).toBe(202);
+    expect(calls).toEqual([]);
+  });
+
+  it("issues no grant when the allowlist is unset, which is the production default", async () => {
+    verifyToken.mockResolvedValue({ sub: OPERATOR });
+    const calls = recordingAdmin();
+
+    expect(
+      (await POST(photoSubmission("54140000-0000-4000-8000-000000000003")))
+        .status,
+    ).toBe(202);
+    expect(calls).toEqual([]);
+  });
+
+  it("never grants for a verified-guest bearer, which proves an installation and not a subject", async () => {
+    process.env.SNAPLIST_PRO_OPERATOR_USER_IDS = OPERATOR;
+    const calls = recordingAdmin();
+    const body = new FormData();
+    body.append(
+      "photo",
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], "item.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    const response = await POST(
+      new Request("https://snaplist.example/v1/items/runs", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer GuestBearer signed-capability",
+          "idempotency-key": "54140000-0000-4000-8000-000000000004",
+        },
+        body,
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(calls).toEqual([]);
+  });
+
+  it("degrades to the ordinary paid gate when the grant is refused, rather than failing the submission", async () => {
+    process.env.SNAPLIST_PRO_OPERATOR_USER_IDS = OPERATOR;
+    verifyToken.mockResolvedValue({ sub: OPERATOR });
+    const calls = recordingAdmin({
+      data: null,
+      error: { message: "permission denied for function" },
+    });
+    const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(
+      photoSubmission("54140000-0000-4000-8000-000000000005"),
+    );
+
+    // The seller keeps the behavior they had before this issue: the run is
+    // staged and the ledger decides. A refused grant is loud, never silent.
+    expect(response.status).toBe(202);
+    expect(calls).toHaveLength(1);
+    expect(reported).toHaveBeenCalledWith(
+      expect.stringContaining("operator-pro-grant"),
+      expect.objectContaining({ message: "permission denied for function" }),
+    );
+    reported.mockRestore();
   });
 });

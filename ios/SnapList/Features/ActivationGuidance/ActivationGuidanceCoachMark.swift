@@ -6,17 +6,25 @@ struct ActivationGuidanceCoachMark: View {
     let dismiss: () -> Void
     let isCompleting: Bool
     let usesStaticScoutRendering: Bool
+    /// #1056. A contextual mark is anchored to its own cutout rather than to
+    /// the bottom of the screen, so the shell hands the geometry down instead
+    /// of the domain policy deciding it. `nil` keeps the approved anchor.
+    var placementOverride: ActivationSpotlightBubblePlacement? = nil
+    /// #1056 review. False for a mark that names no control: the tail would
+    /// point at empty surface. The approved composition keeps its tail
+    /// everywhere else.
+    var showsTail: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
-            if anchor.tailEdge == .top {
+            if showsTail, anchor.tailEdge == .top {
                 tail
             }
 
             bubble
 
-            if anchor.tailEdge == .bottom {
+            if showsTail, anchor.tailEdge == .bottom {
                 tail
             }
         }
@@ -68,9 +76,20 @@ struct ActivationGuidanceCoachMark: View {
     /// The one anchor contract, shared by the normal and Reduced Motion
     /// compositions: Activation v1.1 keeps the tail as the anchor in both.
     var anchor: ActivationCoachMarkAnchor {
-        ActivationCoachMarkAnchorPolicy.anchor(
+        let approved = ActivationCoachMarkAnchorPolicy.anchor(
             for: coachMark,
             reduceMotion: reduceMotion
+        )
+        guard let placementOverride else { return approved }
+        return ActivationCoachMarkAnchor(
+            tailEdge: placementOverride.tailEdge,
+            // Carried, not used: this view reads only `tailEdge` and
+            // `tailHorizontalOffset`. In the override path the shell positions
+            // the bubble against its cutout, so the approved bottom inset is
+            // kept only to complete the value — do not wire anything to it
+            // here expecting it to describe where the bubble actually sits.
+            bottomInset: approved.bottomInset,
+            tailHorizontalOffset: placementOverride.tailHorizontalOffset
         )
     }
 

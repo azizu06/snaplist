@@ -11,14 +11,25 @@ const revenueCatEventSchema = z
     original_app_user_id: z.string().min(1).optional(),
     aliases: z.array(z.string().min(1)).default([]),
     product_id: z.string().min(1).optional(),
-    entitlement_ids: z.array(z.string().min(1)).default([]),
+    entitlement_ids: z
+      .array(z.string().min(1))
+      .nullish()
+      .transform((value) => value ?? []),
     period_type: z.string().min(1).optional(),
     purchased_at_ms: z.number().int().nonnegative().optional(),
     expiration_at_ms: z.number().int().nonnegative().nullable().optional(),
     grace_period_expiration_at_ms: z.number().int().nonnegative().nullable().optional(),
     environment: z.enum(["PRODUCTION", "SANDBOX"]),
-    transaction_id: z.string().min(1).optional(),
-    original_transaction_id: z.string().min(1).optional(),
+    transaction_id: z
+      .string()
+      .min(1)
+      .nullish()
+      .transform((value) => value ?? undefined),
+    original_transaction_id: z
+      .string()
+      .min(1)
+      .nullish()
+      .transform((value) => value ?? undefined),
     store: z.string().min(1).optional(),
     cancel_reason: z.string().min(1).nullable().optional(),
     expiration_reason: z.string().min(1).nullable().optional(),

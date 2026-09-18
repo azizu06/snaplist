@@ -43,6 +43,7 @@ ios/SnapList/Core/API/IncludedOfferRedemptionCoordinator.swift
 ios/SnapList/Core/API/MobileAPIClient.swift
 ios/SnapList/Core/API/MobileAPIModels.swift
 ios/SnapList/Core/API/PushDeviceTokenClient.swift
+ios/SnapList/Core/AccountInitials.swift
 ios/SnapList/Core/Analytics/AnalyticsClient.swift
 ios/SnapList/Core/Analytics/AnalyticsContracts.swift
 ios/SnapList/Core/Analytics/AnalyticsPersistence.swift
@@ -63,6 +64,7 @@ ios/SnapList/DesignSystem/SnapListPageDots.swift
 ios/SnapList/DesignSystem/SnapListTokens.swift
 ios/SnapList/Features/ActivationGuidance/ActivationGuidanceCoachMark.swift
 ios/SnapList/Features/ActivationGuidance/ActivationGuidanceDomain.swift
+ios/SnapList/Features/ActivationGuidance/ActivationGuidanceSpotlight.swift
 ios/SnapList/Features/AssistedExport/AssistedExportClient.swift
 ios/SnapList/Features/AssistedExport/AssistedExportDeviceActions.swift
 ios/SnapList/Features/AssistedExport/AssistedExportDomain.swift
@@ -77,6 +79,7 @@ ios/SnapList/Features/Capture/NativeIntake.swift
 ios/SnapList/Features/Capture/PhotoReviewViews.swift
 ios/SnapList/Features/Capture/VoiceNoteDomain.swift
 ios/SnapList/Features/Capture/VoiceNoteView.swift
+ios/SnapList/Features/Capture/VoiceWaveformDSP.swift
 ios/SnapList/Features/EbayPublish/EbayConnectionSettings.swift
 ios/SnapList/Features/EbayPublish/EbayPublishClient.swift
 ios/SnapList/Features/EbayPublish/EbayPublishDelivery.swift
@@ -204,6 +207,7 @@ src/lib/billing/entitlement.ts
 src/lib/billing/index.ts
 src/lib/billing/item-run-policy.ts
 src/lib/billing/lifecycle.ts
+src/lib/billing/operator-pro.ts
 src/lib/billing/revenuecat-store.ts
 src/lib/billing/revenuecat.ts
 src/lib/billing/webhook.ts
@@ -543,6 +547,7 @@ supabase/migrations/20260816200000_seller_push_delivery.sql
 supabase/migrations/20260820120000_condition_only_review_rerun_is_free.sql
 supabase/migrations/20260821220000_post_completion_provider_usage_overflow_guard.sql
 supabase/migrations/20260821221000_post_completion_provider_usage_replay_fence.sql
+supabase/migrations/20260909120000_operator_pro_allowance.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

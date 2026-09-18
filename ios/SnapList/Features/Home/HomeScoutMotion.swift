@@ -4,9 +4,22 @@ import AVFoundation
 enum TrophyWallScout: Equatable {
     case uncertainty
     case recovery
+    /// Backed by 042-seedance-reassurance, already bundled for ONB-06
+    /// (`OnboardingDomain.swift`). Reused from `FirstValueOnboarding` rather
+    /// than duplicated into `HomeScoutMotion` so the wall carries no second
+    /// copy of the source clip (#1051).
+    case reassurance
 
-    static let resourceSubdirectory = "HomeScoutMotion"
     static let staticRenderingArgument = "--static-scout-rendering"
+
+    var resourceSubdirectory: String {
+        switch self {
+        case .uncertainty, .recovery:
+            "HomeScoutMotion"
+        case .reassurance:
+            "FirstValueOnboarding"
+        }
+    }
 
     var clipResource: String {
         switch self {
@@ -14,6 +27,8 @@ enum TrophyWallScout: Equatable {
             "041-seedance-uncertainty-shrug"
         case .recovery:
             "040-seedance-recovery-safe-cue"
+        case .reassurance:
+            "042-seedance-reassurance"
         }
     }
 
@@ -23,6 +38,8 @@ enum TrophyWallScout: Equatable {
             "07-uncertain"
         case .recovery:
             "09-retry-review"
+        case .reassurance:
+            "042-reassurance"
         }
     }
 
@@ -32,16 +49,18 @@ enum TrophyWallScout: Equatable {
             "ScoutUncertain"
         case .recovery:
             "ScoutRetryReview"
+        case .reassurance:
+            "FirstValueScoutONB06"
         }
     }
 
     /// Clip 041 is the accepted 1112:834 frame and must never be squashed into
-    /// a square. Clip 040 is the accepted 960:960 frame.
+    /// a square. Clips 040 and 042 are both the accepted 960:960 frame.
     var canvasAspectRatio: CGFloat {
         switch self {
         case .uncertainty:
             1112.0 / 834.0
-        case .recovery:
+        case .recovery, .reassurance:
             1
         }
     }
@@ -54,7 +73,7 @@ enum TrophyWallScout: Equatable {
         guard let fallbackURL = bundle.url(
             forResource: fallbackResource,
             withExtension: "png",
-            subdirectory: Self.resourceSubdirectory
+            subdirectory: resourceSubdirectory
         ) else {
             return .legacyStaticAsset(name: legacyFallbackAsset)
         }
@@ -64,12 +83,12 @@ enum TrophyWallScout: Equatable {
               let sourceURL = bundle.url(
                   forResource: clipResource,
                   withExtension: "webm",
-                  subdirectory: Self.resourceSubdirectory
+                  subdirectory: resourceSubdirectory
               ),
               let runtimeURL = bundle.url(
                   forResource: clipResource,
                   withExtension: "mov",
-                  subdirectory: Self.resourceSubdirectory
+                  subdirectory: resourceSubdirectory
               ) else {
             return .staticPNG(url: fallbackURL)
         }

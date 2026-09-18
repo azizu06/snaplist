@@ -22,6 +22,22 @@ describe("itemLabel", () => {
     );
   });
 
+  it("falls back to title when brand/model are whitespace-only", () => {
+    expect(itemLabel({ brand: "  ", model: " ", title: "Vintage lamp" }, "abcdef123456")).toBe(
+      "Vintage lamp",
+    );
+  });
+
+  it("falls back to a truncated id when title is also whitespace-only", () => {
+    expect(itemLabel({ brand: " ", title: "   " }, "abcdef123456")).toBe("Item abcdef12");
+  });
+
+  it("trims a valid brand/model pair with incidental surrounding whitespace", () => {
+    expect(itemLabel({ brand: " Sony ", model: " WH-1000XM4 " }, "abcdef123456")).toBe(
+      "Sony WH-1000XM4",
+    );
+  });
+
   it("uses only the model when brand is absent", () => {
     expect(itemLabel({ model: "WH-1000XM4" }, "abcdef123456")).toBe("WH-1000XM4");
   });

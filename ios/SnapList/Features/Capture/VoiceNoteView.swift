@@ -1,44 +1,68 @@
 import SwiftUI
 import UIKit
 
+/// The one track both the recording countdown and the saved note's playback
+/// row draw: a fixed bar count spanning the 15 s cap, so the two never
+/// disagree about how many bars represent a full take.
 enum VoiceNoteWaveformGeometry {
-    static let liveBarCount = 27
-    static let quietBarHeight: CGFloat = 4
+    static let trackBarCount = VoiceWaveformBarPolicy.barCount(
+        duration: VoiceNotePresentation.maximumDuration
+    )
 
     static var emptyLiveMeterSamples: [Double] {
-        Array(repeating: 0, count: liveBarCount)
+        Array(repeating: 0, count: trackBarCount)
     }
 
-    static func appendingLiveMeterSample(
-        _ level: Double,
-        to samples: [Double]
+    /// Writes the loudest level in `levels` into the bar slot `elapsed` has
+    /// reached, leaving every other slot untouched. Slots ahead of `elapsed`
+    /// stay at their initial `0`, which the view draws as the unrecorded
+    /// remainder — the fill doubles as a countdown.
+    static func updatingLiveMeterSamples(
+        with levels: [Double],
+        elapsed: TimeInterval,
+        secondsPerBar: TimeInterval = VoiceWaveformBarPolicy.secondsPerBar,
+        in samples: [Double]
     ) -> [Double] {
-        let retained = samples.suffix(liveBarCount - 1)
-        let missingQuietSamples = max(
-            liveBarCount - retained.count - 1,
-            0
-        )
-        return Array(repeating: 0, count: missingQuietSamples)
-            + retained
-            + [min(max(level, 0), 1)]
-    }
-
-    static func liveMeterBarHeights(
-        samples: [Double]
-    ) -> [CGFloat] {
-        normalizedLiveMeterSamples(samples).map { sample in
-            quietBarHeight + (28 * CGFloat(sample))
+        guard !levels.isEmpty, !samples.isEmpty, secondsPerBar > 0 else {
+            return samples
         }
+        let index = min(
+            max(Int(elapsed / secondsPerBar), 0),
+            samples.count - 1
+        )
+        let peak = levels.reduce(Double(0)) { max($0, min(max($1, 0), 1)) }
+        var updated = samples
+        updated[index] = max(updated[index], peak)
+        return updated
     }
 
-    private static func normalizedLiveMeterSamples(
-        _ samples: [Double]
-    ) -> [Double] {
-        let retained = samples.suffix(liveBarCount)
-        return Array(
-            repeating: 0,
-            count: max(liveBarCount - retained.count, 0)
-        ) + retained.map { min(max($0, 0), 1) }
+    /// How many of the track's bars recording has reached, `0...barCount`.
+    static func filledBarCount(elapsed: TimeInterval, barCount: Int) -> Int {
+        VoiceWaveformPlayhead.playedBarCount(
+            progress: VoiceWaveformPlayhead.progress(
+                currentTime: elapsed,
+                duration: VoiceNotePresentation.maximumDuration
+            ),
+            barCount: barCount
+        )
+    }
+}
+
+enum VoiceNoteSensoryFeedbackPolicy {
+    static func recordingFeedback(
+        previousPhase: VoiceNotePhase,
+        currentPhase: VoiceNotePhase
+    ) -> SensoryFeedback? {
+        let wasRecording = isRecording(previousPhase)
+        let isRecordingNow = isRecording(currentPhase)
+        if !wasRecording && isRecordingNow { return .start }
+        if wasRecording && !isRecordingNow { return .stop }
+        return nil
+    }
+
+    private static func isRecording(_ phase: VoiceNotePhase) -> Bool {
+        if case .recording = phase { return true }
+        return false
     }
 }
 
@@ -119,6 +143,12 @@ struct VoiceNoteSheet: View {
             }
             resolvePendingSaveDismissal()
         }
+        .sensoryFeedback(trigger: store.phase) { previous, current in
+            VoiceNoteSensoryFeedbackPolicy.recordingFeedback(
+                previousPhase: previous,
+                currentPhase: current
+            )
+        }
         .task(id: isRecording) {
             guard isRecording, !usesStaticRecordingFixture else {
                 return
@@ -132,25 +162,26 @@ struct VoiceNoteSheet: View {
                 )
             }
         }
+        // The playhead is progress, not decoration, so Reduced Motion keeps
+        // the same cadence instead of slowing it down.
+        .task(id: isPlayingSavedNote) {
+            guard isPlayingSavedNote, !usesStaticVoiceNoteFixture else {
+                return
+            }
+            while !Task.isCancelled, isPlayingSavedNote {
+                store.refreshPlayback()
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+        }
     }
 
     @ViewBuilder
     private var content: some View {
         switch store.phase {
-        case .recording(let elapsed, let level):
-            recordingControls(
-                elapsed: elapsed,
-                level: level,
-                canSave: elapsed > 0,
-                isHeldTake: false
-            )
+        case .recording(let elapsed, _):
+            recordingControls(elapsed: elapsed, canSave: elapsed > 0)
         case .takeReady(let duration):
-            recordingControls(
-                elapsed: duration,
-                level: 0.64,
-                canSave: true,
-                isHeldTake: true
-            )
+            recordingControls(elapsed: duration, canSave: true)
         case .ready:
             VStack(spacing: 0) {
                 standardHeader
@@ -245,9 +276,7 @@ struct VoiceNoteSheet: View {
 
     private func recordingControls(
         elapsed: TimeInterval,
-        level: Double,
-        canSave: Bool,
-        isHeldTake: Bool
+        canSave: Bool
     ) -> some View {
         VStack(spacing: 15) {
             HStack(spacing: 14) {
@@ -276,12 +305,12 @@ struct VoiceNoteSheet: View {
                 )
 
                 VoiceNoteWaveform(
-                    level: level,
                     isLive: true,
                     reduceMotion: reduceMotion,
-                    isHeldTake: isHeldTake,
-                    usesLiveMeterSamples:
-                        !usesStaticRecordingFixture && !isHeldTake
+                    samples: usesStaticLiveFixtureSamples
+                        ? Self.staticLiveFixtureSamples
+                        : store.liveMeterSamples,
+                    elapsed: elapsed
                 )
                 .frame(maxWidth: .infinity, minHeight: 52)
 
@@ -360,11 +389,12 @@ struct VoiceNoteSheet: View {
                 )
 
                 VoiceNoteWaveform(
-                    level: 0.72,
                     isLive: false,
                     reduceMotion: true,
-                    isHeldTake: false,
-                    usesLiveMeterSamples: false
+                    samples: usesStaticVoiceNoteFixture
+                        ? Self.staticSavedFixtureSamples
+                        : store.savedNoteWaveform,
+                    playbackProgress: store.playbackProgress
                 )
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .accessibilityHidden(
@@ -476,6 +506,59 @@ struct VoiceNoteSheet: View {
         return false
     }
 
+    /// The launch-argument fixtures replace the microphone and the player, so
+    /// they also replace the shapes those would have produced. Debug only.
+    private var usesStaticVoiceNoteFixture: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains {
+            $0.hasPrefix("--voice-note-")
+        }
+#else
+        false
+#endif
+    }
+
+    private static let liveFixturePattern: [Double] = [
+        0.72, 0.86, 0.92, 0.80, 0.74, 0.66,
+        0.14, 0.12, 0.42, 0.72, 0.88, 0.96,
+        1.00, 0.82, 0.68, 0.78, 0.92, 0.70,
+        0.56, 0.42, 0.34, 0.12, 0.46, 0.82,
+        0.98, 0.14, 0.10
+    ]
+
+    private static let savedFixturePattern: [Double] = [
+        0.72, 0.64, 0.16, 0.48, 0.82, 0.78,
+        0.36, 0.14, 0.76, 0.18, 0.14, 0.12,
+        0.10, 0.12, 0.66, 0.18, 0.36, 0.90,
+        1.00, 0.72, 0.54, 0.16, 0.70, 0.68
+    ]
+
+    /// The fixed track has more bars than the hand-authored fixture shapes
+    /// above, so each pattern repeats to fill it. Trailing indices beyond
+    /// whatever is "filled" for a given fixture phase are never drawn — the
+    /// view shows a placeholder dot there instead — so the repetition only
+    /// needs to look plausible, not be unique per bar.
+    private static let staticLiveFixtureSamples: [Double] =
+        tiled(liveFixturePattern)
+    private static let staticSavedFixtureSamples: [Double] =
+        tiled(savedFixturePattern)
+
+    private static func tiled(_ pattern: [Double]) -> [Double] {
+        guard !pattern.isEmpty else {
+            return []
+        }
+        var extended: [Double] = []
+        extended.reserveCapacity(VoiceNoteWaveformGeometry.trackBarCount)
+        while extended.count < VoiceNoteWaveformGeometry.trackBarCount {
+            extended.append(contentsOf: pattern)
+        }
+        return Array(extended.prefix(VoiceNoteWaveformGeometry.trackBarCount))
+    }
+
+    private var isPlayingSavedNote: Bool {
+        store.phase == .saved(isPlaying: true)
+    }
+
     private var usesStaticRecordingFixture: Bool {
 #if DEBUG
         ProcessInfo.processInfo.arguments.contains(
@@ -484,6 +567,23 @@ struct VoiceNoteSheet: View {
 #else
         false
 #endif
+    }
+
+    private var usesStaticTakeReadyFixture: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains(
+            "--voice-note-take-ready-fixture"
+        )
+#else
+        false
+#endif
+    }
+
+    /// Both the live-recording fixture and the take-ready fixture replace the
+    /// microphone, so neither drives `store.liveMeterSamples` — they draw the
+    /// same static shape instead.
+    private var usesStaticLiveFixtureSamples: Bool {
+        usesStaticRecordingFixture || usesStaticTakeReadyFixture
     }
 
     private func saveAndDismissWhenCommitted() {
@@ -525,152 +625,91 @@ struct VoiceNoteSheet: View {
     }
 }
 
+/// One fixed-width track, drawn once, for both the recording countdown and
+/// the saved note's playback row. While recording, bars fill left to right at
+/// a fixed pitch and the unrecorded remainder draws as dim placeholder dots —
+/// the fill doubles as a countdown against the 15 s cap. During playback the
+/// same bars split into an accent-tinted run behind the head and a dim run
+/// ahead of it.
 private struct VoiceNoteWaveform: View {
-    let level: Double
     let isLive: Bool
     let reduceMotion: Bool
-    let isHeldTake: Bool
-    let usesLiveMeterSamples: Bool
+    /// The shape to draw: the whole-track live-meter trail while recording
+    /// (zeros ahead of what has been recorded), or the file-derived shape for
+    /// a saved note.
+    var samples: [Double] = []
+    /// How far recording has reached. Only meaningful while `isLive`; drives
+    /// the fill-to-cap boundary.
+    var elapsed: TimeInterval = 0
+    /// How far playback has reached, `0...1`. Only meaningful while not
+    /// `isLive`; drives the tinted/dim boundary.
+    var playbackProgress: Double = 0
 
-    @State private var liveMeterSamples =
-        VoiceNoteWaveformGeometry.emptyLiveMeterSamples
-
-    private let livePattern: [Double] = [
-        0.72, 0.86, 0.92, 0.80, 0.74, 0.66,
-        0.14, 0.12, 0.42, 0.72, 0.88, 0.96,
-        1.00, 0.82, 0.68, 0.78, 0.92, 0.70,
-        0.56, 0.42, 0.34, 0.12, 0.46, 0.82,
-        0.98, 0.14, 0.10
-    ]
-
-    private let savedPattern: [Double] = [
-        0.72, 0.64, 0.16, 0.48, 0.82, 0.78,
-        0.36, 0.14, 0.76, 0.18, 0.14, 0.12,
-        0.10, 0.12, 0.66, 0.18, 0.36, 0.90,
-        1.00, 0.72, 0.54, 0.16, 0.70, 0.68
-    ]
+    private static let barWidth: CGFloat = 2.5
+    private static let placeholderDotDiameter: CGFloat = 1.5
 
     var body: some View {
-        Group {
-            if isHeldTake {
-                VoiceNoteHeldTakeWaveform()
-            } else {
-                Canvas { context, size in
-                    let barHeights: [CGFloat]
-                    if usesLiveMeterSamples {
-                        barHeights = VoiceNoteWaveformGeometry
-                            .liveMeterBarHeights(samples: liveMeterSamples)
-                    } else {
-                        let pattern = isLive ? livePattern : savedPattern
-                        barHeights = pattern.map {
-                            barHeight(value: $0, isLive: isLive)
-                        }
-                    }
-                    let color = isLive
-                        ? SnapListColorToken.inkPrimary.color
-                        : SnapListColorToken.waveformInactive.color
-                    let barWidth: CGFloat = 4
-                    let centerY = size.height / 2
-                    let step = barHeights.count > 1
-                        ? (size.width - barWidth)
-                            / CGFloat(barHeights.count - 1)
-                        : 0
+        Canvas { context, size in
+            let barCount = samples.count
+            guard barCount > 0 else {
+                return
+            }
+            let step = size.width / CGFloat(barCount)
+            let centerY = size.height / 2
+            let filledBarCount = isLive
+                ? VoiceNoteWaveformGeometry.filledBarCount(
+                    elapsed: elapsed,
+                    barCount: barCount
+                )
+                : barCount
+            let tintedBarCount = isLive
+                ? filledBarCount
+                : VoiceWaveformPlayhead.playedBarCount(
+                    progress: playbackProgress,
+                    barCount: barCount
+                )
 
-                    for (index, height) in barHeights.enumerated() {
-                        let rect = CGRect(
-                            x: CGFloat(index) * step,
-                            y: centerY - (height / 2),
-                            width: barWidth,
-                            height: height
-                        )
-                        context.fill(
-                            Path(
-                                roundedRect: rect,
-                                cornerRadius: barWidth / 2
-                            ),
-                            with: .color(color)
-                        )
-                    }
+            for index in 0..<barCount {
+                let x = CGFloat(index) * step + (step - Self.barWidth) / 2
+                guard !isLive || index < filledBarCount else {
+                    let diameter = Self.placeholderDotDiameter
+                    let dotRect = CGRect(
+                        x: x + (Self.barWidth - diameter) / 2,
+                        y: centerY - diameter / 2,
+                        width: diameter,
+                        height: diameter
+                    )
+                    context.fill(
+                        Path(ellipseIn: dotRect),
+                        with: .color(SnapListColorToken.waveformInactive.color)
+                    )
+                    continue
                 }
+
+                let height = VoiceWaveformBarPolicy.barHeight(
+                    amplitude: samples[index],
+                    maximumHeight: size.height
+                )
+                let rect = CGRect(
+                    x: x,
+                    y: centerY - height / 2,
+                    width: Self.barWidth,
+                    height: height
+                )
+                context.fill(
+                    Path(roundedRect: rect, cornerRadius: Self.barWidth / 2),
+                    with: .color(
+                        index < tintedBarCount
+                            ? SnapListColorToken.action.color
+                            : SnapListColorToken.waveformInactive.color
+                    )
+                )
             }
         }
         .animation(
             reduceMotion ? nil : .linear(duration: 0.1),
-            value: liveMeterSamples
+            value: samples
         )
-        .onChange(of: level, initial: true) { _, newLevel in
-            guard usesLiveMeterSamples else {
-                return
-            }
-            liveMeterSamples = VoiceNoteWaveformGeometry
-                .appendingLiveMeterSample(
-                    newLevel,
-                    to: liveMeterSamples
-                )
-        }
-        .accessibilityHidden(true)
-        .allowsHitTesting(false)
-    }
-
-    private func barHeight(
-        value: Double,
-        isLive: Bool
-    ) -> CGFloat {
-        if isLive {
-            let visibleLevel = max(level, 0.12)
-            return max(
-                4,
-                32 * value * (0.70 + (visibleLevel * 0.40))
-            )
-        }
-        return max(5, 30 * value)
-    }
-}
-
-private struct VoiceNoteHeldTakeWaveform: View {
-    private let heights: [CGFloat] = [
-        24, 32, 37, 31, 24, 20, 25, 22,
-        16, 12, 10, 9, 9, 9, 14, 34
-    ]
-
-    var body: some View {
-        Canvas { context, size in
-            let ink = SnapListColorToken.inkPrimary.color
-            let centerY = size.height / 2
-            let barWidth: CGFloat = 4
-            let barStep: CGFloat = 8.5
-
-            for (index, height) in heights.enumerated() {
-                let x = CGFloat(index) * barStep
-                let rect = CGRect(
-                    x: x,
-                    y: centerY - (height / 2),
-                    width: barWidth,
-                    height: height
-                )
-                context.fill(
-                    Path(roundedRect: rect, cornerRadius: barWidth / 2),
-                    with: .color(ink)
-                )
-            }
-
-            let dotSize: CGFloat = 3.5
-            var dotX = (CGFloat(heights.count) * barStep) + 2
-            while dotX + dotSize <= size.width - 10 {
-                context.fill(
-                    Path(
-                        ellipseIn: CGRect(
-                            x: dotX,
-                            y: centerY - (dotSize / 2),
-                            width: dotSize,
-                            height: dotSize
-                        )
-                    ),
-                    with: .color(ink)
-                )
-                dotX += 8.5
-            }
-        }
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }

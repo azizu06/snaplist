@@ -269,6 +269,10 @@ struct ListingReviewView: View {
             }
             .padding(.top, 9)
         }
+        // #1056. ACT-04's line names every field rather than one control, so
+        // the editable body is the spotlight's hole: the back button and the
+        // dock stay behind the scrim, the fields stay usable.
+        .activationSpotlightTarget(.listingReviewForm)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
                 .background(SnapListColorToken.canvas.color)
@@ -398,11 +402,15 @@ struct ListingReviewView: View {
             label: "Price",
             pending: pending
         ) {
-            TextField("Price", text: $priceText)
+            // #1060: the issue names ListingReviewComponents.swift for this
+            // control, but the editable price field itself lives here — a
+            // small correction recorded in the PR body rather than a
+            // relocation. `ListingReviewPriceValueText` isolates the
+            // digit-rolling styling so it stays reflectable the same way
+            // `PhotoReviewCountPill` and `ListingReviewSoldCard` are.
+            ListingReviewPriceValueText(priceText: $priceText)
                 .focused($focusedField, equals: .price)
                 .keyboardType(.decimalPad)
-                .font(.title3.weight(.bold).monospacedDigit())
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .multilineTextAlignment(.leading)
                 .textFieldStyle(.plain)
                 // #989: the box now spans the row like Title/Description, so
@@ -1055,4 +1063,18 @@ struct ListingReviewView: View {
             + (remainder > 0 ? " · +\(remainder) more" : "")
     }
 
+}
+
+/// Isolated so the digit-rolling transition on the editable price can be
+/// proven with a body-reflection test the same way `PhotoReviewCountPill`
+/// and `ListingReviewSoldCard` are (#1060).
+struct ListingReviewPriceValueText: View {
+    @Binding var priceText: String
+
+    var body: some View {
+        TextField("Price", text: $priceText)
+            .font(.title3.weight(.bold).monospacedDigit())
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .contentTransition(.numericText())
+    }
 }

@@ -414,6 +414,19 @@ describe("RevenueCat verified lifecycle bridge", () => {
     expect(fake.resolveCustomer).not.toHaveBeenCalled();
   });
 
+  it("accepts a RevenueCat TEST event whose entitlement_ids and transaction ids are null", async () => {
+    const { result, fake } = await handle({
+      type: "TEST",
+      id: "event-test",
+      entitlement_ids: null,
+      transaction_id: null,
+      original_transaction_id: null,
+    });
+    expect(result).toEqual({ processed: false, reason: "ignored" });
+    expect(fake.resolveCustomer).not.toHaveBeenCalled();
+    expect(fake.recordPeriod).not.toHaveBeenCalled();
+  });
+
   it("accepts and safely ignores RevenueCat transfer payloads that contain no subscription identity", async () => {
     const { result, fake } = await handle({
       type: "TRANSFER",

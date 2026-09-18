@@ -26,6 +26,11 @@ struct TrophyWallView: View {
     )
 
     @Bindable var store: TrophyWallStore
+    /// Derived once via `AccountInitials.from` through the same
+    /// `SettingsProfile.current(configuration:)` path Settings itself uses,
+    /// so the header can never show a different answer than Settings does
+    /// for the same signed-in seller (#1051).
+    let accountInitials: String
     let openProcessing: () -> Void
     let openAccount: () -> Void
     /// #963: a settled tile opens its listing surface directly rather than an
@@ -34,8 +39,14 @@ struct TrophyWallView: View {
     let openListing: (UUID) async -> ProcessingActionOutcome
     let onScan: () -> Void
     let onTryAgain: () -> Void
+    /// #1062: shared with the listing review destination so a settled tile's
+    /// zoom transition source matches the namespace the pushed screen zooms
+    /// into. Owned by the shell, threaded through unchanged.
+    let namespace: Namespace.ID
 
     @ScaledMetric(relativeTo: .title) private var titleSize = 28
+    @Environment(\.dockScrollScale) private var dockScrollScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,9 +72,13 @@ struct TrophyWallView: View {
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .accessibilityLabel("Processing")
                 .accessibilityIdentifier("trophy.wall.processing")
+                .activationSpotlightTarget(
+                    .trophyWallProcessing,
+                    action: openProcessing
+                )
 
                 Button(action: openAccount) {
-                    Text("A")
+                    Text(accountInitials)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .frame(width: 36, height: 36)
@@ -192,20 +207,101 @@ struct TrophyWallView: View {
 
         if presentation.showsGrid {
             ScrollView {
-                LazyVGrid(
-                    columns: Self.gridColumns,
-                    spacing: TrophyWallGridMetrics.gutterPoints
-                ) {
-                    ForEach(store.settledTiles) { tile in
-                        TrophyWallSettledTileView(tile: tile, openListing: openListing)
+                ZStack(alignment: .top) {
+                    if #unavailable(iOS 18) {
+                        // iOS 17 fallback for `onScrollGeometryChange`: a
+                        // zero-height marker anchored to the content's top
+                        // reports its own drift, in the ScrollView's own
+                        // (non-scrolling) coordinate space, as the seller
+                        // scrolls the content past it.
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: TrophyWallDockScrollOffsetKey.self,
+                                value: geometry.frame(
+                                    in: .named(TrophyWallDockScrollCoordinateSpace.name)
+                                ).minY
+                            )
+                        }
+                        .frame(height: 0)
                     }
+
+                    LazyVGrid(
+                        columns: Self.gridColumns,
+                        spacing: TrophyWallGridMetrics.gutterPoints
+                    ) {
+                        ForEach(store.settledTiles) { tile in
+                            TrophyWallSettledTileView(
+                                tile: tile,
+                                openListing: openListing,
+                                namespace: namespace
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, TrophyWallGridMetrics.bottomPaddingPoints)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, TrophyWallGridMetrics.bottomPaddingPoints)
             }
             .scrollIndicators(.hidden)
+            .snapListScrollEdgeEffect(ScrollEdgeEffectPolicy.trophyWallBottomStyle, for: .bottom)
             .accessibilityIdentifier("trophy.wall.grid")
+            .reportingDockScrollOffset(to: dockScrollScale, reduceMotion: reduceMotion)
+        }
+    }
+}
+
+/// #1049: names the fixed (non-scrolling) reference frame the iOS 17 dock-scroll
+/// fallback measures against — the ScrollView's own bounds, not its content.
+private enum TrophyWallDockScrollCoordinateSpace {
+    static let name = "trophyWall.dockScroll"
+}
+
+private struct TrophyWallDockScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private extension View {
+    /// Reports the surface's downward scroll offset (0 at rest, increasing as
+    /// the seller scrolls down) to the shared dock-scale model. iOS 18 reads
+    /// the scroll geometry directly; iOS 17 falls back to the `PreferenceKey`
+    /// fed by the marker the caller places at the scrolled content's top.
+    @ViewBuilder
+    func reportingDockScrollOffset(
+        to model: DockScrollScaleModel,
+        reduceMotion: Bool
+    ) -> some View {
+        if #available(iOS 18, *) {
+            onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, newOffset in
+                model.reportDownwardScrollOffset(newOffset, reduceMotion: reduceMotion)
+            }
+        } else {
+            coordinateSpace(name: TrophyWallDockScrollCoordinateSpace.name)
+                .onPreferenceChange(TrophyWallDockScrollOffsetKey.self) { minY in
+                    model.reportDownwardScrollOffset(-minY, reduceMotion: reduceMotion)
+                }
+        }
+    }
+}
+
+private extension View {
+    /// #1062: iOS 17 has no `matchedTransitionSource`, so the tile is just
+    /// itself there — the plain push is the only navigation transition iOS 17
+    /// offers regardless.
+    @ViewBuilder
+    func matchedTransitionSourceIfAvailable(
+        id: UUID,
+        in namespace: Namespace.ID
+    ) -> some View {
+        if #available(iOS 18, *) {
+            matchedTransitionSource(id: id, in: namespace)
+        } else {
+            self
         }
     }
 }
@@ -213,6 +309,7 @@ struct TrophyWallView: View {
 private struct TrophyWallSettledTileView: View {
     let tile: TrophyWallSettledTile
     let openListing: (UUID) async -> ProcessingActionOutcome
+    let namespace: Namespace.ID
 
     @ScaledMetric(relativeTo: .callout) private var dateChipHorizontalPadding: CGFloat = 8
     @ScaledMetric(relativeTo: .callout) private var dateChipVerticalPadding: CGFloat = 4
@@ -250,6 +347,12 @@ private struct TrophyWallSettledTileView: View {
                     : tile.accessibilityLabel
             )
             .accessibilityIdentifier(identifier)
+            // #1062: iOS 17 keeps the plain push — `matchedTransitionSource`
+            // is iOS 18+. Attaching it costs nothing when the destination
+            // never applies a matching `.zoom` (Reduced Motion): with no
+            // navigation transition to read it, the source id just sits
+            // unused.
+            .matchedTransitionSourceIfAvailable(id: runID, in: namespace)
         } else {
             surface
                 .accessibilityElement(children: .ignore)
@@ -456,7 +559,14 @@ struct TrophyWallProcessingView: View {
         let scoutAccessibilityLabel: String
 
         var scout: TrophyWallScout {
-            scoutImageName == "ScoutRetryReview" ? .recovery : .uncertainty
+            switch scoutImageName {
+            case "ScoutRetryReview":
+                .recovery
+            case "ScoutReassurance":
+                .reassurance
+            default:
+                .uncertainty
+            }
         }
     }
 
@@ -482,7 +592,7 @@ struct TrophyWallProcessingView: View {
     private static let emptyCollectionMessage = CollectionMessage(
         heading: "Nothing is processing.",
         action: .scan(label: "Scan an item"),
-        scoutImageName: "ScoutUncertain",
+        scoutImageName: "ScoutReassurance",
         scoutAccessibilityLabel: scoutAccessibilityLabel
     )
     static let unavailableCollectionMessage = CollectionMessage(
@@ -507,6 +617,10 @@ struct TrophyWallProcessingView: View {
     let onScan: () -> Void
     let onTryAgain: () -> Void
     let onRefresh: () async -> Void
+    /// #1062: the fixture-forced flag `HomeScoutMotion` never had to combine,
+    /// because a screenshot proving the row symbol effects are off needs the
+    /// `--reduced-motion` launch argument, not just the system setting.
+    let forceReducedMotion: Bool
 
     @State private var refreshHost = TrophyWallProcessingRefreshHost()
 
@@ -519,7 +633,8 @@ struct TrophyWallProcessingView: View {
         onAction: @escaping (TrophyWallProcessingAction) async -> ProcessingActionOutcome,
         onScan: @escaping () -> Void,
         onTryAgain: @escaping () -> Void,
-        onRefresh: @escaping () async -> Void = {}
+        onRefresh: @escaping () async -> Void = {},
+        forceReducedMotion: Bool = false
     ) {
         self.rows = rows
         self.collectionOutcome = collectionOutcome
@@ -530,6 +645,7 @@ struct TrophyWallProcessingView: View {
         self.onScan = onScan
         self.onTryAgain = onTryAgain
         self.onRefresh = onRefresh
+        self.forceReducedMotion = forceReducedMotion
     }
 
     /// The seller's one way to ask Processing for fresh status. It reports
@@ -634,7 +750,8 @@ struct TrophyWallProcessingView: View {
                                 TrophyWallProcessingRowView(
                                     row: row,
                                     openRoute: openRoute,
-                                    onAction: onAction
+                                    onAction: onAction,
+                                    forceReducedMotion: forceReducedMotion
                                 )
 
                                 if row.id != presentation.visibleRows.last?.id {
@@ -897,8 +1014,6 @@ private struct TrophyWallNoticeStripView: View {
 }
 
 struct TrophyWallCollectionMessageView: View {
-    private static let scoutHeight: CGFloat = 150
-
     let message: TrophyWallProcessingView.CollectionMessage
     let onScan: () -> Void
     let onTryAgain: () -> Void
@@ -906,12 +1021,16 @@ struct TrophyWallCollectionMessageView: View {
     @ScaledMetric(relativeTo: .title3) private var headingSize = 18
 
     var body: some View {
-        VStack(spacing: 20) {
+        // Shares `TrophyWallEmptyMetrics` with `TrophyWallEmptyView` so the two
+        // Trophy Wall empty states read as distinct clips of one system rather
+        // than two screens that happen to look alike (#1051).
+        VStack(spacing: TrophyWallEmptyMetrics.contentSpacing) {
             TrophyWallScoutView(
                 scout: message.scout,
-                height: Self.scoutHeight,
+                height: TrophyWallEmptyMetrics.scoutHeight,
                 accessibilityLabel: message.scoutAccessibilityLabel
             )
+                .padding(.bottom, TrophyWallEmptyMetrics.scoutOpticalBottomInset)
 
             Text(message.heading)
                 .font(.system(size: headingSize, weight: .bold))
@@ -922,9 +1041,8 @@ struct TrophyWallCollectionMessageView: View {
 
             action
         }
-        .padding(.horizontal, 34)
-        .padding(.top, 24)
-        .padding(.bottom, 104)
+        .padding(.horizontal, TrophyWallEmptyMetrics.horizontalPadding)
+        .padding(.bottom, TrophyWallEmptyMetrics.bottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.processing.collection")
@@ -1060,8 +1178,10 @@ private struct TrophyWallProcessingRowView: View {
     let row: TrophyWallProcessingRow
     let openRoute: (HomeRoute) -> Void
     let onAction: (TrophyWallProcessingAction) async -> ProcessingActionOutcome
+    let forceReducedMotion: Bool
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     /// #963: the server-authorized action this row last attempted and had
     /// rejected, so the row can say so where the seller is instead of pushing
     /// them to a status screen. A later successful attempt clears it.
@@ -1069,6 +1189,14 @@ private struct TrophyWallProcessingRowView: View {
 
     private var layout: TrophyWallProcessingRowMetrics.Layout {
         TrophyWallProcessingRowMetrics.layout(for: dynamicTypeSize)
+    }
+
+    /// #1062: the analyzing indicator's `.variableColor.iterative` and the
+    /// needs-retry chip's `.wiggle` both read this one gate.
+    private var showsMotionEnhancements: Bool {
+        TrophyWallMotionEnhancementPolicy.isEnabled(
+            reduceMotion: systemReduceMotion || forceReducedMotion
+        )
     }
 
     private var unavailableLabel: String? {
@@ -1176,27 +1304,64 @@ private struct TrophyWallProcessingRowView: View {
         Button {
             perform(action)
         } label: {
-            Text(action.label)
-                .snapListTypography(.status)
-                .foregroundStyle(action.foregroundColor)
-                .frame(minWidth: SnapListMetrics.minimumTouchTarget)
-                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                .padding(.horizontal, 10)
-                .background(action.backgroundColor)
-                .clipShape(.rect(cornerRadius: 12))
-                .overlay {
-                    if action.showsBorder {
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(
-                                SnapListColorToken.hairline.color,
-                                lineWidth: 1
-                            )
-                    }
+            HStack(spacing: 4) {
+                if case .retry = action {
+                    retryIcon
                 }
+                Text(action.label)
+                    .snapListTypography(.status)
+            }
+            .foregroundStyle(action.foregroundColor)
+            .frame(minWidth: SnapListMetrics.minimumTouchTarget)
+            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+            .padding(.horizontal, 10)
+            .background(action.backgroundColor)
+            .clipShape(.rect(cornerRadius: 12))
+            .overlay {
+                if action.showsBorder {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            SnapListColorToken.hairline.color,
+                            lineWidth: 1
+                        )
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
         .accessibilityIdentifier(action.accessibilityIdentifier)
+    }
+
+    /// #1062: the wall stays alive on the analyzing rows without borrowing
+    /// progress vocabulary — `sparkles` reads as "still working on this,"
+    /// never as a percentage or a spinner.
+    private var analyzingIndicator: some View {
+        let icon = Image(systemName: "sparkles")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .accessibilityHidden(true)
+        return Group {
+            if showsMotionEnhancements {
+                icon.symbolEffect(.variableColor.iterative, options: .repeating)
+            } else {
+                icon
+            }
+        }
+    }
+
+    /// `.wiggle` is iOS 18+; iOS 17 keeps the plain glyph regardless of
+    /// Reduced Motion.
+    private var retryIcon: some View {
+        let icon = Image(systemName: "arrow.clockwise")
+            .font(.system(size: 12, weight: .semibold))
+            .accessibilityHidden(true)
+        return Group {
+            if #available(iOS 18, *), showsMotionEnhancements {
+                icon.symbolEffect(.wiggle, options: .repeating)
+            } else {
+                icon
+            }
+        }
     }
 
     private var content: some View {
@@ -1211,11 +1376,16 @@ private struct TrophyWallProcessingRowView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if row.action == nil {
-                    Text(row.stateLabel)
-                        .snapListTypography(.status)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        if row.isAnalyzing {
+                            analyzingIndicator
+                        }
+                        Text(row.stateLabel)
+                            .snapListTypography(.status)
+                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 // #963: the "Ready / Review unavailable" defect used to be a

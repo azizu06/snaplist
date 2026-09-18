@@ -25,6 +25,15 @@ struct ScanCameraView: View {
     @AccessibilityFocusState private var focusedLibraryControl:
         ScanLibraryFocusConsumer.MountedLibraryControl?
     @State private var libraryItems: [PhotosPickerItem] = []
+    /// Bumped once per successful shutter reservation (#1060) — the
+    /// `sensoryFeedback(trigger:)` seam for the `.impact(weight: .medium)`
+    /// haptic. A guard failure (shutter disabled) never bumps it, so a
+    /// disabled tap fires nothing.
+    @State private var shutterFireCount = 0
+    /// Bumped once per newly queued photo-limit announcement (#1060), the
+    /// same one-shot signal `consumePhotoLimitAnnouncement()` already
+    /// guards, so the `.warning` haptic fires exactly once per limit reached.
+    @State private var photoLimitAnnouncementCount = 0
 
     var body: some View {
         Group {
@@ -66,6 +75,19 @@ struct ScanCameraView: View {
         .onChange(of: flow.stagedPhotos.count) { _, _ in
             guard let announcement = flow.consumePhotoLimitAnnouncement() else { return }
             UIAccessibility.post(notification: .announcement, argument: announcement)
+            photoLimitAnnouncementCount += 1
+        }
+        .sensoryFeedback(trigger: shutterFireCount) { previous, current in
+            ScanCaptureSensoryFeedbackPolicy.shutterFeedback(
+                previousShutterFireCount: previous,
+                currentShutterFireCount: current
+            )
+        }
+        .sensoryFeedback(trigger: photoLimitAnnouncementCount) { previous, current in
+            ScanCaptureSensoryFeedbackPolicy.photoLimitFeedback(
+                previousLimitAnnouncementCount: previous,
+                currentLimitAnnouncementCount: current
+            )
         }
     }
 
@@ -93,6 +115,7 @@ struct ScanCameraView: View {
             toggleFlash: flow.toggleFlash,
             takePhoto: {
                 guard let captureID = flow.reservePhotoCapture() else { return }
+                shutterFireCount += 1
                 Task { await flow.takePhoto(reservation: captureID) }
             },
             close: closeLiveCameraPreview,
@@ -460,17 +483,17 @@ enum ScanReviewMorphAnimation {
 /// input that is allowed to differ, even though `.live` and `.recovery` both resolve to 40 today.
 ///
 /// #1009 reshapes this from a name-driven capsule to a fixed-size circle that mirrors the
-/// library opener (48pt) with a photo-count badge, so it can sit beside the shutter and
-/// library in one row without a growing label ever contesting that row's width. Owner
-/// refinement 2 reopened exactly that width question at the five-photo cap only: Review
-/// morphed into a labeled capsule there. It still sits in the row's trailing
-/// `.frame(maxWidth: .infinity, alignment: .trailing)` region, so it grows leftward from a
-/// pinned trailing edge rather than displacing the shutter — verified at accessibility5 by
+/// library opener (48pt), so it can sit beside the shutter and library in one row without a
+/// growing label ever contesting that row's width. Owner refinement 2 reopened exactly that
+/// width question at the five-photo cap only: Review morphed into a labeled capsule there.
+/// It still sits in the row's trailing, fixed-width side slot (#1045), so it grows within
+/// that reserved width rather than displacing the shutter — verified at accessibility5 by
 /// `testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive`. Refinement 3 amends
 /// that: the label is gone. The capsule is a fixed, modestly wider shape carrying only the
 /// chevron, so nothing in it can ever contest Dynamic Type again — the shape change alone
-/// is the affordance. The accessibility label still says "Review N photos" at every count;
-/// only the visible glyph dropped.
+/// is the affordance. #1045 drops the numeric count badge the circle carried, since the
+/// staged strip's own thumbnails already show the count; the accessibility label still says
+/// "Review N photos" at every count.
 ///
 /// Not `private`: a unit test renders it alone to inspect its resolved button style (#856).
 struct ScanReviewButton: View {
@@ -552,20 +575,7 @@ struct ScanReviewButton: View {
                 .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
                 .clipShape(.circle)
                 .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
-                .overlay(alignment: .topTrailing) { countBadge }
         }
-    }
-
-    private var countBadge: some View {
-        Text("\(photoCount)")
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-            .frame(minWidth: 20, minHeight: 20)
-            .background(SnapListColorToken.inkPrimary.color)
-            .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.9), lineWidth: 1) }
-            .clipShape(.circle)
-            .offset(x: 6, y: -6)
-            .accessibilityHidden(true)
     }
 
     private func consumeReviewFocusIfPossible() {
@@ -589,6 +599,34 @@ enum ScanReturnFocusOutcome: Equatable {
     case none
     /// Move the accessibility cursor to the Review opener and consume the request.
     case focusReviewOpener
+}
+
+/// Pure feedback-event mapper for `ScanCameraView`'s `sensoryFeedback(trigger:)`
+/// closures (#1060), so the mapping from a state change to a feedback kind (or
+/// none) is unit-testable without rendering the camera surface.
+enum ScanCaptureSensoryFeedbackPolicy {
+    /// Fires once each time the shutter successfully reserves a capture.
+    /// A guard failure (shutter disabled) never bumps the trigger, so this
+    /// never fires for a disabled or double tap.
+    static func shutterFeedback(
+        previousShutterFireCount: Int,
+        currentShutterFireCount: Int
+    ) -> SensoryFeedback? {
+        currentShutterFireCount == previousShutterFireCount
+            ? nil
+            : .impact(weight: .medium)
+    }
+
+    /// Fires once when the five-photo limit is newly reached, not again on a
+    /// passive re-render while still at the cap.
+    static func photoLimitFeedback(
+        previousLimitAnnouncementCount: Int,
+        currentLimitAnnouncementCount: Int
+    ) -> SensoryFeedback? {
+        currentLimitAnnouncementCount == previousLimitAnnouncementCount
+            ? nil
+            : .warning
+    }
 }
 
 enum ScanReturnFocusPolicy {
@@ -645,6 +683,35 @@ extension View {
     }
 }
 
+/// Layout constants for `LiveScanCameraSurface`'s bottom control stack (#1045).
+///
+/// Pulled out of the generic view itself because Swift does not allow static
+/// stored properties on a generic type.
+private enum ScanCameraControlLayout {
+    /// Wide enough to hold the five-photo Review capsule (#1009 refinement
+    /// 3) without clipping; the library icon and the below-cap Review
+    /// circle just sit centered within the same reserved width.
+    static let controlSlotWidth: CGFloat = 76
+    /// Fixed daylight between a side slot and the shutter — the "pulled
+    /// closer to center" #1045 asks for, chosen small enough to read as
+    /// one row and large enough that the widest side content (the capsule)
+    /// never approaches the shutter.
+    ///
+    /// #1072 raised it 14 -> 24 -> 56 across two owner device passes: the
+    /// gallery and Review controls read as crowding the shutter, and the ask
+    /// was to push them out toward the framing corners without moving the
+    /// shutter off center. Because the row is a centered
+    /// `slot + gap + shutter + gap + slot`, a side control's center sits
+    /// `(width - 224) / 2 + 38 - gap` from the screen edge, so 56 puts it at
+    /// ~66pt on a 393pt device and ~71pt on the 402pt iPhone 16 Pro — inside
+    /// the framing bracket rather than under it, which is the approved look.
+    /// The shutter stays centered by construction at every text size.
+    static let controlSlotGap: CGFloat = 56
+    /// The staged strip's thumbnail height (#1045), reserved unconditionally
+    /// so the row's footprint does not change when the first photo lands.
+    static let stagedStripHeight: CGFloat = 56
+}
+
 private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
     let photoIDs: [StagedCapturePhoto.ID]
@@ -658,6 +725,13 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     let reduceMotion: Bool
     let motionStateIdentifier: String?
     let fixturePreviewDescription: String?
+    /// Exposes the framing corners' rendered frame to XCUITest via a real
+    /// accessibility element instead of the `accessibilityHidden(true)` the
+    /// production surface uses (#1045). `nil` on the real `ScanCameraView`,
+    /// so nothing changes for VoiceOver there; the DEBUG fixture route sets
+    /// it so `--visual-state=CAM-02`/`CAM-03` launches can assert the corner
+    /// frame stays fixed across empty and staged states.
+    var framingCornersTestIdentifier: String? = nil
     @ViewBuilder let preview: () -> Preview
     @ViewBuilder let libraryControl: () -> LibraryControl
     let toggleFlash: () -> Void
@@ -695,12 +769,25 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .accessibilitySortPriority(10)
             }
 
-            ResponsiveFramingCorners(
-                additionalBottomInset: -FloatingDockMetrics.containerHeight(for: .scan),
-                bottomEdgeAboveContainerBottom: framingCornersBottomEdge
-            )
-            .ignoresSafeArea()
-            .accessibilityHidden(true)
+            Group {
+                if let framingCornersTestIdentifier {
+                    ResponsiveFramingCorners(
+                        additionalBottomInset: -FloatingDockMetrics.containerHeight(for: .scan),
+                        bottomEdgeAboveContainerBottom: framingCornersBottomEdge
+                    )
+                    .ignoresSafeArea()
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Framing corners")
+                    .accessibilityIdentifier(framingCornersTestIdentifier)
+                } else {
+                    ResponsiveFramingCorners(
+                        additionalBottomInset: -FloatingDockMetrics.containerHeight(for: .scan),
+                        bottomEdgeAboveContainerBottom: framingCornersBottomEdge
+                    )
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+                }
+            }
 
             VStack(spacing: 0) {
                 // #1009 moves flash up beside the close button, so the bottom
@@ -729,31 +816,68 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                 // `fixedSize` because ".5x" is two glyph groups: a squeezed
                 // capsule wraps into a stack rather than truncating, and grows
                 // taller than the row it sits in.
-                ScanZoomControlView(
-                    control: zoomControl,
-                    selectedLens: selectedZoomLens,
-                    selectLens: selectZoomLens
-                )
-                .fixedSize(horizontal: true, vertical: false)
-                .reportsBottomStackTop()
-
+                // #1045: rendered unconditionally so the row's height is
+                // reserved from the first frame, not inserted once photos
+                // land. An empty `ScanPhotoProgressRow` draws nothing, but
+                // the fixed `minHeight` keeps `reportsBottomStackTop()`
+                // reporting the same top edge whether 0 or 1-5 photos are
+                // staged, which is what keeps the framing corners, zoom
+                // row, and shutter from moving the moment the first photo
+                // is captured (owner correction 3).
+                // #1072 (owner-approved layout C): the 56pt band directly
+                // above the shutter row is always reserved. At zero photos
+                // it holds the zoom capsule, so the seller never sees an
+                // empty gap between the capsule and the strip that is not
+                // there yet; once photos land the strip takes the band and
+                // the capsule moves up to its own row above it.
                 if !thumbnailURLs.isEmpty {
-                    stagedControls
-                        .padding(.horizontal, 15)
+                    zoomCapsule
                         .reportsBottomStackTop()
-                        .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
-                        .transition(
-                            reduceMotion
-                                ? .identity
-                                : .opacity.combined(with: .offset(y: 10))
-                        )
                 }
+
+                // The `Color.clear` sibling, not `.frame(minHeight:)`, is
+                // what actually reserves the band. `ScanZoomControlView`'s
+                // body is `if control.isOffered { ... }`, so on a phone whose
+                // back camera pairs no ultra wide — and on the simulator,
+                // which has no camera at all — the empty branch resolves to
+                // `EmptyView`, and layout modifiers on an `EmptyView` are
+                // no-ops. Sizing the band from its own content therefore
+                // collapsed it to nothing at zero photos and moved the
+                // framing corners 74pt the moment the first photo landed,
+                // which is the exact defect #1045 correction 3 exists to
+                // prevent. A `ZStack` sizes to the tallest child, so the
+                // floor holds and a staged strip is still free to grow past
+                // it at large Dynamic Type sizes.
+                ZStack {
+                    Color.clear
+                        .frame(
+                            width: 1,
+                            height: ScanCameraControlLayout.stagedStripHeight
+                        )
+
+                    if thumbnailURLs.isEmpty {
+                        zoomCapsule
+                    } else {
+                        stagedControls
+                    }
+                }
+                .padding(.horizontal, 15)
+                .reportsBottomStackTop()
+                // #1072: zoom-to-strip daylight, raised from 12.
+                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 18 : 16)
 
                 cameraControls
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
                     .reportsBottomStackTop()
-                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 12)
+                    // #1072: strip-to-shutter-row daylight, raised from 12.
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 20 : 18)
             }
+            // #1058: kept as-is. These are fixed safe-area clearances on the
+            // control stack itself, not a device-size guess — the framing
+            // corners above measure this stack's resulting top edge
+            // (ScanBottomStackTopPreferenceKey) rather than assuming its
+            // height, so a hardcoded value here doesn't reintroduce the
+            // bucketed-geometry defect the issue targets.
             .safeAreaPadding(.top, 2)
             .safeAreaPadding(.bottom, 30)
         }
@@ -840,9 +964,18 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         photoProgress
     }
 
+    private var zoomCapsule: some View {
+        ScanZoomControlView(
+            control: zoomControl,
+            selectedLens: selectedZoomLens,
+            selectLens: selectZoomLens
+        )
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     /// How far above the screen's bottom edge the framing corners should end.
     ///
-    /// One rule at every text size and every staged count: 18pt of daylight
+    /// One rule at every text size and every staged count: 24pt of daylight
     /// above whatever row the bottom control stack starts with. That is the
     /// staged strip once photos are staged and the shutter row before then, and
     /// the zoom row's own height varies with Dynamic Type, so the position is
@@ -854,41 +987,70 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         guard surfaceBottomY > 0, bottomStackTopY < .greatestFiniteMagnitude else {
             return nil
         }
-        return surfaceBottomY - bottomStackTopY + 18
+        // #1072 raised this from 18 with the rest of the bottom cluster's
+        // vertical breathing room.
+        return surfaceBottomY - bottomStackTopY + 24
     }
 
-    // A `ZStack` that absolutely centers the shutter over an independent `HStack` once let
-    // an AX5-widened side control extend under the shutter, since nothing in a `ZStack`
-    // keeps sibling views from overlapping (#864). A single `HStack` with two equally
-    // flexible side regions keeps every control in its own non-overlapping region by
-    // construction: SwiftUI splits leftover width evenly between `maxWidth: .infinity`
-    // siblings, only yielding more to one side once the other no longer needs its share,
-    // so the shutter stays centered at default sizes and the regions simply grow
-    // asymmetrically at accessibility sizes instead of colliding.
-    //
-    // #885 swapped the occupants (flash left, library right, review moved above the row)
-    // and kept the technique. #1009 swaps them again — gallery left, Review right, flash
-    // moved up beside the close button — and Review is now a fixed-size circle rather than
-    // a name-driven capsule, so both side regions stay fixed-size at every Dynamic Type
-    // size and the guarantee still costs nothing. Review's region stays flexible even at
-    // zero staged photos, when it renders nothing, so the shutter does not drift off center
-    // the moment the first photo lands.
+    /// #1045: two `.frame(maxWidth: .infinity)` side regions were meant to
+    /// split leftover width evenly around the fixed shutter, but an empty
+    /// trailing `Group` (zero staged photos, Review renders nothing) does
+    /// not claim its equal share the way a populated one does — measured
+    /// on device, the shutter landed off-center at zero photos even though
+    /// the two-region technique worked once Review had content (#864,
+    /// #885, #1009). A `HStack` with two EQUAL, FIXED-width side slots was
+    /// the first attempt at removing that ambiguity, but a
+    /// `Group { if cond { reviewButton } }.frame(width:, height:)` turned
+    /// out to carry the exact same failure: an exact `.frame` around a
+    /// conditional's absent branch still did not claim its slot in the
+    /// running app (confirmed on device, not just in theory) — the row
+    /// measured as if the trailing slot and its gap did not exist at all,
+    /// shifting the shutter right by precisely half of `controlSlotWidth +
+    /// controlSlotGap`.
+    ///
+    /// The fix for the centering: the reserved slot is an unconditional
+    /// `Color.clear` sized to the slot's own frame — a plain sibling of
+    /// `shutterButton` in the `HStack`, not a wrapper around a conditional,
+    /// so its width can never depend on what is inside it — and the actual
+    /// `reviewButton` is layered on top via `.overlay`, which is therefore
+    /// free to change without moving the shutter.
+    ///
+    /// #1072 replaced the old "absent below one photo" contract with a
+    /// present-but-inert one: an empty trailing slot read as an asymmetric
+    /// row on device, so `reviewButton` now renders at every count and is
+    /// `.disabled` and dimmed to 0.35 at zero photos. The frozen XCUITest
+    /// contract is now "`scan.review` exists and `isEnabled == false` at
+    /// zero photos, enabled at one", which `.disabled` gives VoiceOver and
+    /// XCUITest alike — unlike `accessibilityHidden`, which still answered
+    /// `exists` and was why the old contract needed a conditional at all.
+    ///
+    /// The row's own (now compact, not full-bleed) width is centered by the
+    /// enclosing `VStack`, which the top bar's `Spacer` already forces to
+    /// the full surface width — so the shutter lands on the surface's own
+    /// center, not just the row's.
+    ///
+    /// The slot width is the five-photo Review capsule's width (#1009
+    /// refinement 3), the widest either slot ever needs to hold, so growth
+    /// at the cap happens inside the reserved slot rather than displacing
+    /// the shutter. Fixed, non-Dynamic-Type-driven content on both sides
+    /// (icons and a fixed-shape capsule) means this holds at every text
+    /// size, verified at accessibility5.
     private var cameraControls: some View {
-        HStack {
+        HStack(spacing: ScanCameraControlLayout.controlSlotGap) {
             libraryControl()
                 .disabled(!isLibraryEnabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: ScanCameraControlLayout.controlSlotWidth, height: 48)
 
             shutterButton
 
-            Group {
-                if !thumbnailURLs.isEmpty {
+            Color.clear
+                .frame(width: ScanCameraControlLayout.controlSlotWidth, height: 48)
+                .overlay {
                     reviewButton
+                        .disabled(thumbnailURLs.isEmpty)
+                        .opacity(thumbnailURLs.isEmpty ? 0.35 : 1)
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(.horizontal, 18)
     }
 
     private var shutterButton: some View {
@@ -913,6 +1075,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         )
         .accessibilityIdentifier("scan.shutter")
         .accessibilitySortPriority(50)
+        .activationSpotlightTarget(.scanShutter, action: takePhoto)
     }
 
     private var reviewButton: some View {
@@ -1210,6 +1373,7 @@ struct ScanCameraVisualStateView: View {
                 reduceMotion: reduceMotion,
                 motionStateIdentifier: reduceMotion ? "scan.motion-reduced" : nil,
                 fixturePreviewDescription: "Simulator camera fixture. No live camera feed.",
+                framingCornersTestIdentifier: "scan.framing-corners",
                 preview: { ScanCameraFixturePreview() },
                 libraryControl: {
                     Button(action: {}) { ScanLibraryLabel(style: .icon) }
@@ -1324,6 +1488,18 @@ private struct FramingCorners: View {
     }
 
     var body: some View {
+        // The iOS 17 Canvas path draws its own fixed-radius elbow; iOS 26
+        // instead asks `ConcentricRectangle` to resolve the elbow's radius so
+        // it nests with whatever container corner (the display itself, absent
+        // any other ancestor) the system considers concentric, per #1058.
+        if #available(iOS 26.0, *) {
+            concentricBrackets
+        } else {
+            legacyBrackets
+        }
+    }
+
+    private var legacyBrackets: some View {
         Canvas { context, size in
             let color = SnapListColorToken.onDarkSurface.color.opacity(0.95)
             // A centered stroke would spill half its width past the canvas, so
@@ -1379,6 +1555,99 @@ private struct FramingCorners: View {
             )
         }
     }
+
+    /// Strokes the full frame with a concentric-cornered rectangle, then
+    /// reveals only an `length`-sized box at each corner so the result reads
+    /// as the same open bracket the Canvas path draws, but with a radius the
+    /// system — not a fixed literal — resolves for iOS 26.
+    @available(iOS 26.0, *)
+    private var concentricBrackets: some View {
+        GeometryReader { proxy in
+            let armBox = min(length + cornerRadius, min(proxy.size.width, proxy.size.height) / 2)
+            ConcentricRectangle(corners: .concentric(minimum: .fixed(cornerRadius)))
+                .stroke(
+                    SnapListColorToken.onDarkSurface.color.opacity(0.95),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+                )
+                .mask {
+                    ZStack {
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .topLeading)
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .topTrailing)
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .bottomLeading)
+                        cornerRevealBox(armBox, in: proxy.size, alignment: .bottomTrailing)
+                    }
+                }
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func cornerRevealBox(_ box: CGFloat, in size: CGSize, alignment: Alignment) -> some View {
+        Rectangle()
+            .frame(width: box, height: box)
+            .frame(width: size.width, height: size.height, alignment: alignment)
+    }
+}
+
+/// Pure geometry for `ResponsiveFramingCorners`, pulled out so crafted sizes
+/// can be unit-tested without a live SwiftUI layout pass (#1058).
+///
+/// Every input here is either measured — the surface's own size, the space
+/// the caller's bottom control stack has already claimed — or a SwiftUI
+/// size class. There is no screen-size table: `verticalSizeClass` and
+/// `horizontalSizeClass` only differ from `.regular` in landscape or on
+/// larger idioms, so on every supported portrait phone the shape comes
+/// entirely from the measured `availableSize` and `bottomInset` (the latter
+/// already varies by device because the caller measured it against
+/// `ScanBottomStackTopPreferenceKey`), scaled continuously rather than
+/// jumping between two device-size buckets.
+enum ResponsiveFramingGeometry {
+    struct Layout: Equatable {
+        let size: CGSize
+        let center: CGPoint
+        let cornerRadius: CGFloat
+        let armLength: CGFloat
+        let lineWidth: CGFloat
+    }
+
+    /// Before the caller's `bottomEdgeAboveContainerBottom` preference has
+    /// landed, the corners still need somewhere to sit for that first pass.
+    /// Scaling the guess off the surface's own measured height keeps it
+    /// close to the eventual real value on every device, instead of two
+    /// device-size buckets landing on the identical guess.
+    static func fallbackBottomInset(
+        availableHeight: CGFloat,
+        verticalSizeClass: UserInterfaceSizeClass?
+    ) -> CGFloat {
+        availableHeight * (verticalSizeClass == .compact ? 0.30 : 0.34)
+    }
+
+    static func layout(
+        availableSize: CGSize,
+        bottomInset: CGFloat,
+        verticalSizeClass: UserInterfaceSizeClass?,
+        horizontalSizeClass: UserInterfaceSizeClass?
+    ) -> Layout {
+        let isCompactHeight = verticalSizeClass == .compact
+        let isCompactWidth = horizontalSizeClass != .regular
+
+        let horizontalInset = max(24, availableSize.width * (isCompactWidth ? 0.088 : 0.14))
+        let topInset = max(64, availableSize.height * (isCompactHeight ? 0.13 : 0.15))
+
+        let frameWidth = max(180, availableSize.width - horizontalInset * 2)
+        let frameHeight = max(140, availableSize.height - topInset - bottomInset)
+
+        let armLength = min(44, max(28, frameHeight * (isCompactHeight ? 0.075 : 0.09)))
+        let cornerRadius = min(16, max(10, armLength * 0.36))
+        let lineWidth = min(3.25, max(2.25, frameHeight * 0.0065))
+
+        return Layout(
+            size: CGSize(width: frameWidth, height: frameHeight),
+            center: CGPoint(x: availableSize.width / 2, y: topInset + frameHeight / 2),
+            cornerRadius: cornerRadius,
+            armLength: armLength,
+            lineWidth: lineWidth
+        )
+    }
 }
 
 private struct ResponsiveFramingCorners: View {
@@ -1398,26 +1667,30 @@ private struct ResponsiveFramingCorners: View {
     /// `additionalBottomInset`.
     var bottomEdgeAboveContainerBottom: CGFloat?
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     var body: some View {
         GeometryReader { proxy in
-            let isCompactHeight = proxy.size.height <= 700
-            let horizontalInset: CGFloat = proxy.size.width <= 375 ? 28 : 34
-            let topInset: CGFloat = isCompactHeight ? 112 : 140
-            let bottomInset: CGFloat = bottomEdgeAboveContainerBottom
-                ?? ((isCompactHeight ? 264 : 300) + additionalBottomInset)
-            FramingCorners(
-                length: isCompactHeight ? 34 : 42,
-                cornerRadius: isCompactHeight ? 12 : 15,
-                lineWidth: isCompactHeight ? 2.5 : 3
+            let bottomInset = bottomEdgeAboveContainerBottom ?? (
+                ResponsiveFramingGeometry.fallbackBottomInset(
+                    availableHeight: proxy.size.height,
+                    verticalSizeClass: verticalSizeClass
+                ) + additionalBottomInset
             )
-                .frame(
-                    width: max(180, proxy.size.width - (horizontalInset * 2)),
-                    height: max(140, proxy.size.height - topInset - bottomInset)
-                )
-                .position(
-                    x: proxy.size.width / 2,
-                    y: topInset + ((proxy.size.height - topInset - bottomInset) / 2)
-                )
+            let layout = ResponsiveFramingGeometry.layout(
+                availableSize: proxy.size,
+                bottomInset: bottomInset,
+                verticalSizeClass: verticalSizeClass,
+                horizontalSizeClass: horizontalSizeClass
+            )
+            FramingCorners(
+                length: layout.armLength,
+                cornerRadius: layout.cornerRadius,
+                lineWidth: layout.lineWidth
+            )
+                .frame(width: layout.size.width, height: layout.size.height)
+                .position(layout.center)
         }
     }
 }

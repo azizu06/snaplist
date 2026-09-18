@@ -75,6 +75,35 @@ describe("pipeline checkpoint write boundary", () => {
     });
   });
 
+  it("keeps the later entry when two open-record keys repair to the same string", () => {
+    // jsonb-safe.ts documents this as deterministic: "a<NUL>b" and "ab" both
+    // repair to "ab", and the later entry wins. That is strictly better than
+    // dead-lettering the run over the unrepaired key, but it is a real,
+    // subtle data-loss trade-off with no coverage — if the merge order were
+    // ever flipped, or the collision made it throw instead, this is the seam
+    // that would catch it.
+    const parsed = pipelineWorkerCheckpointWriteSchema.parse({
+      identified: {
+        attributes: { brand: "Sony" },
+        model: "test-vision",
+      },
+      generated: {
+        copy: {
+          platform: "ebay",
+          title: "Sony Headphones",
+          description: "Used headphones in good condition.",
+          fields: {
+            [`Item${NUL}Specifics`]: "first",
+            ItemSpecifics: "second",
+          },
+        },
+        model: "test-listing",
+      },
+    });
+
+    expect(parsed.generated?.copy.fields).toEqual({ ItemSpecifics: "second" });
+  });
+
   it("repairs strings inside pricing evidence arrays", () => {
     const parsed = pipelineWorkerCheckpointWriteSchema.parse({
       identified: {

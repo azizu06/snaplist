@@ -19,7 +19,29 @@ enum VoiceNoteMicrophonePermission: Equatable {
 
 struct VoiceNoteRecordingSnapshot: Equatable {
     let elapsed: TimeInterval
-    let averagePower: Float
+    /// Envelope levels produced since the previous read, oldest first. The
+    /// meter runs far faster than the sheet polls, so a poll collects a batch
+    /// rather than a single instantaneous value, and a poll that finds nothing
+    /// new leaves the drawn trail exactly where it was.
+    let meterLevels: [Double]
+
+    init(elapsed: TimeInterval, meterLevels: [Double] = []) {
+        self.elapsed = elapsed
+        self.meterLevels = meterLevels
+    }
+}
+
+/// Where playback has reached. `duration` is the player's own view of the file
+/// and is zero until it knows, which is why the store keeps the asset duration
+/// as a fallback.
+struct VoiceNotePlaybackSnapshot: Equatable {
+    let currentTime: TimeInterval
+    let duration: TimeInterval
+
+    init(currentTime: TimeInterval = 0, duration: TimeInterval = 0) {
+        self.currentTime = currentTime
+        self.duration = duration
+    }
 }
 
 enum VoiceNoteRecordingCompletion: Equatable {
@@ -85,7 +107,8 @@ enum VoiceNotePresentation {
     static func recordingAccessibilityLabel(
         elapsed: TimeInterval
     ) -> String {
-        "Recording, \(Int(max(elapsed, 0))) seconds of 15"
+        let cap = Int(VoiceNotePresentation.maximumDuration)
+        return "Recording, \(Int(max(elapsed, 0))) seconds of \(cap)"
     }
 
     static func playbackAccessibilityLabel(isPlaying: Bool) -> String {
@@ -96,7 +119,11 @@ enum VoiceNotePresentation {
 @MainActor
 protocol VoiceNoteAudioClient: AnyObject {
     var permission: VoiceNoteMicrophonePermission { get }
-    var recordingSnapshot: VoiceNoteRecordingSnapshot { get }
+    /// Returns every envelope frame produced since the previous call and
+    /// clears them. Draining is the point, so it is a method: reading twice in
+    /// one tick would silently discard frames.
+    func drainRecordingSnapshot() -> VoiceNoteRecordingSnapshot
+    var playbackSnapshot: VoiceNotePlaybackSnapshot { get }
     var interruptionHandler: (() -> Void)? { get set }
     var routeChangeHandler: (() -> Void)? { get set }
     var playbackFinishedHandler: (() -> Void)? { get set }
@@ -110,6 +137,10 @@ protocol VoiceNoteAudioClient: AnyObject {
     func startPlaying(_ url: URL) throws
     func pausePlaying()
     func stopPlaying()
+    /// The recorded file's own shape, downsampled to `barCount` bars. Empty
+    /// when the file cannot be read; the sheet then draws a quiet baseline
+    /// rather than a pattern it made up.
+    func savedWaveform(for url: URL, barCount: Int) -> [Double]
 }
 
 protocol VoiceNoteFileStoring: AnyObject {
@@ -280,6 +311,17 @@ final class VoiceNoteStore {
 
     private(set) var phase: VoiceNotePhase
     private(set) var savedNote: VoiceNoteAsset?
+    /// The rolling live-meter trail the recording waveform draws. It advances
+    /// once per envelope frame, not once per poll, so the bars move at the
+    /// meter's rate rather than the sheet's.
+    private(set) var liveMeterSamples =
+        VoiceNoteWaveformGeometry.emptyLiveMeterSamples
+    /// The saved note's own shape, read from its file. Empty when the file
+    /// cannot be read.
+    private(set) var savedNoteWaveform: [Double] = []
+    /// How far playback has reached, `0...1`. Progress, not decoration: it
+    /// keeps moving under Reduced Motion.
+    private(set) var playbackProgress: Double = 0
 
     private let audio: VoiceNoteAudioClient
     private let files: VoiceNoteFileStoring
@@ -303,6 +345,7 @@ final class VoiceNoteStore {
         self.files = files
         self.authority = authority
         phase = savedNote == nil ? .ready : .saved(isPlaying: false)
+        refreshSavedNoteWaveform()
         audio.interruptionHandler = { [weak self] in
             self?.handleInterruption()
         }
@@ -322,6 +365,8 @@ final class VoiceNoteStore {
         launchFixturePhaseApplied = false
 #endif
         authorityMutationID = nil
+        liveMeterSamples = VoiceNoteWaveformGeometry.emptyLiveMeterSamples
+        playbackProgress = 0
         guard discardPendingProvisionalBeforeRecording() else {
             return
         }
@@ -367,12 +412,22 @@ final class VoiceNoteStore {
     }
 
     func refreshRecording() {
-        guard case .recording = phase else {
+        guard case .recording(_, let previousLevel) = phase else {
             return
         }
 
-        let snapshot = audio.recordingSnapshot
+        let snapshot = audio.drainRecordingSnapshot()
         let elapsed = min(max(snapshot.elapsed, 0), Self.maximumDuration)
+        if !snapshot.meterLevels.isEmpty {
+            liveMeterSamples = VoiceNoteWaveformGeometry
+                .updatingLiveMeterSamples(
+                    with: snapshot.meterLevels,
+                    elapsed: elapsed,
+                    in: liveMeterSamples
+                )
+        }
+        let level = snapshot.meterLevels.last ?? previousLevel
+
         if elapsed >= Self.maximumDuration {
             audio.stopRecording()
             provisionalDuration = Self.maximumDuration
@@ -380,9 +435,22 @@ final class VoiceNoteStore {
             return
         }
 
-        phase = .recording(
-            elapsed: elapsed,
-            level: Self.normalizedLevel(from: snapshot.averagePower)
+        phase = .recording(elapsed: elapsed, level: level)
+    }
+
+    /// Advances the playback head. The caller polls this while a saved note is
+    /// playing; every other phase leaves the head where it is.
+    func refreshPlayback() {
+        guard phase == .saved(isPlaying: true) else {
+            return
+        }
+        let snapshot = audio.playbackSnapshot
+        let duration = snapshot.duration > 0
+            ? snapshot.duration
+            : (savedNote?.duration ?? 0)
+        playbackProgress = VoiceWaveformPlayhead.progress(
+            currentTime: snapshot.currentTime,
+            duration: duration
         )
     }
 
@@ -402,7 +470,9 @@ final class VoiceNoteStore {
 
     func save() {
         if case .recording = phase {
-            let snapshot = audio.recordingSnapshot
+            // The take is ending, so any frames still pending are discarded
+            // with it; only the elapsed time matters here.
+            let snapshot = audio.drainRecordingSnapshot()
             audio.stopRecording()
             provisionalDuration = min(
                 max(snapshot.elapsed, 0),
@@ -446,7 +516,7 @@ final class VoiceNoteStore {
                 }
                 authorityMutationID = nil
                 if let committed {
-                    self.savedNote = committed
+                    setSavedNote(committed)
                     self.provisionalURL = nil
                     self.provisionalDuration = nil
                     try? files.discardProvisional(at: provisionalURL)
@@ -465,7 +535,7 @@ final class VoiceNoteStore {
                 duration: provisionalDuration,
                 replacing: savedNote
             )
-            self.savedNote = savedNote
+            setSavedNote(savedNote)
             self.provisionalURL = nil
             self.provisionalDuration = nil
             phase = .saved(isPlaying: false)
@@ -477,6 +547,7 @@ final class VoiceNoteStore {
 
     func rerecord() async {
         audio.stopPlaying()
+        playbackProgress = 0
         await startRecording()
     }
 
@@ -503,6 +574,7 @@ final class VoiceNoteStore {
     func handleInterruption() {
         if phase == .saved(isPlaying: true) {
             audio.stopPlaying()
+            playbackProgress = 0
             phase = .saved(isPlaying: false)
             return
         }
@@ -548,6 +620,7 @@ final class VoiceNoteStore {
             try audio.startPlaying(savedNote.url)
             phase = .saved(isPlaying: true)
         } catch {
+            playbackProgress = 0
             phase = .saved(isPlaying: false)
         }
     }
@@ -556,6 +629,7 @@ final class VoiceNoteStore {
         guard savedNote != nil else {
             return
         }
+        playbackProgress = 0
         phase = .saved(isPlaying: false)
     }
 
@@ -565,6 +639,7 @@ final class VoiceNoteStore {
             return true
         }
         audio.stopPlaying()
+        playbackProgress = 0
         if let authority {
             let mutationID = UUID()
             authorityMutationID = mutationID
@@ -581,7 +656,7 @@ final class VoiceNoteStore {
                 return false
             }
             if self.savedNote == savedNote || self.savedNote == nil {
-                self.savedNote = nil
+                setSavedNote(nil)
                 phase = .ready
             } else {
                 phase = .saved(isPlaying: false)
@@ -590,7 +665,7 @@ final class VoiceNoteStore {
         }
         do {
             try files.delete(savedNote)
-            self.savedNote = nil
+            setSavedNote(nil)
             phase = .ready
             return true
         } catch {
@@ -602,6 +677,7 @@ final class VoiceNoteStore {
     @discardableResult
     func dismiss() -> Bool {
         audio.stopPlaying()
+        playbackProgress = 0
         authorityMutationID = nil
         if provisionalURL != nil {
             prepareProvisionalForCleanup()
@@ -622,9 +698,12 @@ final class VoiceNoteStore {
 
     func publishCommittedVoice(_ voice: NativeIntake.Voice?) {
         audio.stopPlaying()
-        savedNote = voice.map {
-            VoiceNoteAsset(url: $0.mediaURL, duration: $0.duration)
-        }
+        playbackProgress = 0
+        setSavedNote(
+            voice.map {
+                VoiceNoteAsset(url: $0.mediaURL, duration: $0.duration)
+            }
+        )
         if case .recording = phase {
             return
         }
@@ -638,6 +717,11 @@ final class VoiceNoteStore {
     func applyLaunchFixturePhase(_ phase: VoiceNotePhase) {
         launchFixturePhaseApplied = true
         self.phase = phase
+        // A playing fixture needs a non-zero head so its screenshot shows the
+        // tinted-behind / dim-ahead split; a real player never attaches to it.
+        if case .saved(isPlaying: true) = phase {
+            playbackProgress = 0.4
+        }
     }
 
     @discardableResult
@@ -658,12 +742,14 @@ final class VoiceNoteStore {
             return false
         }
         launchFixturePhaseApplied = false
-        savedNote = VoiceNoteAsset(
-            url: URL(
-                fileURLWithPath:
-                    "/tmp/snaplist-voice-note-ui-fixture.wav"
-            ),
-            duration: duration
+        setSavedNote(
+            VoiceNoteAsset(
+                url: URL(
+                    fileURLWithPath:
+                        "/tmp/snaplist-voice-note-ui-fixture.wav"
+                ),
+                duration: duration
+            )
         )
         phase = .saved(isPlaying: false)
         pendingFocusRequest = .savedNoteSummary
@@ -671,8 +757,22 @@ final class VoiceNoteStore {
     }
 #endif
 
-    private static func normalizedLevel(from averagePower: Float) -> Double {
-        min(max(Double(averagePower + 60) / 60, 0), 1)
+    /// The one place `savedNote` changes, so its drawn shape can never be left
+    /// describing a file that is no longer the saved note.
+    private func setSavedNote(_ note: VoiceNoteAsset?) {
+        savedNote = note
+        refreshSavedNoteWaveform()
+    }
+
+    private func refreshSavedNoteWaveform() {
+        guard let savedNote else {
+            savedNoteWaveform = []
+            return
+        }
+        savedNoteWaveform = audio.savedWaveform(
+            for: savedNote.url,
+            barCount: VoiceNoteWaveformGeometry.trackBarCount
+        )
     }
 
     private func discardPendingProvisionalBeforeRecording() -> Bool {

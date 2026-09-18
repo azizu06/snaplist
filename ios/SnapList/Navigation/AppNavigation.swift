@@ -144,6 +144,12 @@ final class AppRouter {
         }
     }
 
+    /// The routes pushed onto the tab the seller is currently looking at.
+    /// Read-only, and observed: #1056's activation surface resolution has to
+    /// see a pushed route, because a coach mark anchored to a tab's chrome must
+    /// not draw over a screen pushed on top of it.
+    var selectedPath: [AppRoute] { path(for: selectedTab) }
+
     func pathBinding(for tab: PrimaryTab) -> Binding<[AppRoute]> {
         Binding(
             get: { [weak self] in self?.path(for: tab) ?? [] },
