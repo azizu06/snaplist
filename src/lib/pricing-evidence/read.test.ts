@@ -103,6 +103,20 @@ describe("pricing-evidence read projection", () => {
     expect(projection.chartBounds).toEqual({ min: 120, max: 140 });
   });
 
+  it("treats exactly PRICING_EVIDENCE_STALE_AFTER_DAYS as not yet stale", () => {
+    // The staleness check is a strict `>`, so evidence exactly at the
+    // threshold reads as fresh; only tests at 1.5 and ~5 days existed before,
+    // leaving the boundary itself (`>` vs `>=`) unverified.
+    const projection = buildPricingEvidenceProjection(row(), {
+      userId: "user_a",
+      itemId: "22222222-2222-4222-8222-222222222222",
+      now: Date.parse("2026-07-21T12:00:00.000Z"),
+    });
+
+    expect(projection.evidenceAgeDays).toBe(3);
+    expect(projection.isStale).toBe(false);
+  });
+
   it("keeps a USD 0.01 recommendation schema-valid when its estimated fee is larger", () => {
     const subFee = row();
     subFee.price_result.suggested = 0.01;
