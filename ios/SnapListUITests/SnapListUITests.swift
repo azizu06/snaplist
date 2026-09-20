@@ -1481,8 +1481,11 @@ final class SnapListUITests: XCTestCase {
 
         let savingAction = saving.buttons["photo-review.start-listing"]
         XCTAssertTrue(savingAction.waitForExistence(timeout: 3))
-        XCTAssertEqual(savingAction.label, "Cancel")
-        savingAction.tap()
+        XCTAssertEqual(savingAction.label, "Saving your item")
+        let cancelLink = saving.buttons["photo-review.cancel-submission"]
+        XCTAssertTrue(cancelLink.isHittable)
+        XCTAssertEqual(cancelLink.label, "Cancel")
+        cancelLink.tap()
 
         let cancelledMessage = saving.staticTexts[
             "photo-review.submission-message"
@@ -1497,7 +1500,7 @@ final class SnapListUITests: XCTestCase {
         savingAction.tap()
         let retrySaving = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                savingAction.label == "Cancel"
+                savingAction.label == "Saving your item"
             },
             object: savingAction
         )
@@ -1517,7 +1520,14 @@ final class SnapListUITests: XCTestCase {
 
         let done = accepted.buttons["photo-review.start-listing"]
         XCTAssertTrue(done.waitForExistence(timeout: 3))
-        XCTAssertEqual(done.label, "Done")
+        // The "Item saved" beat lasts one second and launch overhead can outrun
+        // it, so the beat is pinned at the presentation seam; here the button
+        // must settle on Done.
+        let beatEnded = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in done.label == "Done" },
+            object: done
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [beatEnded], timeout: 3), .completed)
         done.tap()
         XCTAssertEqual(done.label, "Start listing")
     }

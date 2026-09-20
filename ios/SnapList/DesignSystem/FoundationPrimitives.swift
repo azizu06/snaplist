@@ -137,6 +137,7 @@ struct SnapListChip: View {
         HStack(spacing: 4) {
             if let systemImage {
                 Image(systemName: systemImage)
+                    .accessibilityHidden(true)
             }
             Text(title)
         }

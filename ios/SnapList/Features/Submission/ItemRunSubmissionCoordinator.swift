@@ -941,6 +941,41 @@ struct PhotoReviewSubmissionPresentation: Equatable {
         case submissionRejected(eventID: UUID)
     }
 
+    /// #1126 (owner pick B): the bar's status lives inside the primary button.
+    /// `standard` keeps the status row above the button for every other state.
+    enum BarPhase: Equatable {
+        case standard
+        case saving
+        case savedBeat
+        case done
+    }
+
+    /// How long "Item saved" holds before the button becomes Done.
+    static let savedBeatSeconds: Double = 1.0
+
+    func barPhase(savedBeatFinished: Bool) -> BarPhase {
+        switch (statusKind, primaryActionEvent) {
+        case (.saving?, .cancelSubmission):
+            return .saving
+        case (.success?, .completeSavedSubmission):
+            return savedBeatFinished ? .done : .savedBeat
+        default:
+            return .standard
+        }
+    }
+
+    /// Text the button shows while it carries status instead of an action.
+    var statusButtonLabel: String? { visibleMessage }
+
+    /// Cancel is a small link under the button only while saving.
+    var cancelLinkLabel: String? {
+        barPhase(savedBeatFinished: false) == .saving ? primaryActionLabel : nil
+    }
+
+    var cancelLinkEvent: PhotoReviewBoundaryEvent? {
+        cancelLinkLabel == nil ? nil : primaryActionEvent
+    }
+
     let primaryActionLabel: String
     let primaryActionEvent: PhotoReviewBoundaryEvent
     let mutationControlsLocked: Bool

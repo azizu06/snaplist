@@ -63,6 +63,47 @@ final class HomeAPIOriginTests: XCTestCase {
 
 @MainActor
 final class TrophyWallDomainTests: XCTestCase {
+    /// #1126 / #1122: a row cached with the `Item <id>` stub fetched while the
+    /// run was analyzing converges to the server's real title when
+    /// the run succeeds. The cached name must not outrank a fresh projection.
+    func testFinishedRunReplacesStubTitleFromServerProjection() {
+        let principal = TrophyWallPrincipalScope(opaqueValue: "principal-1126")
+        let store = TrophyWallStore(
+            principalScope: principal,
+            repository: StaticTrophyWallRepository(cards: [])
+        )
+        let runID = UUID()
+        let base = Date(timeIntervalSince1970: 100)
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principal,
+                runID: runID,
+                linkedLogicalIdentity: nil,
+                state: .workingPersisting,
+                lastMeaningfulUpdateAt: base,
+                itemName: "Item AE304646"
+            )
+        )
+        XCTAssertEqual(store.processingRows.first?.itemName, "Item AE304646")
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principal,
+                runID: runID,
+                linkedLogicalIdentity: nil,
+                state: .readyToReview,
+                lastMeaningfulUpdateAt: base.addingTimeInterval(30),
+                itemName: "Nikon FE 35mm film camera"
+            )
+        )
+
+        XCTAssertEqual(store.processingRows.count, 1)
+        XCTAssertEqual(
+            store.processingRows.first?.itemName,
+            "Nikon FE 35mm film camera"
+        )
+    }
+
     /// The approved wall is a two-column 4:5 photo grid at a 12-point gutter and
     /// a 12-point corner radius. Asserting the numbers where they are declared,
     /// and asserting the rendered columns are derived from them, keeps the spec
