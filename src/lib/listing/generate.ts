@@ -267,64 +267,6 @@ function descriptionRepeatsTranscript(
   return false;
 }
 
-const NUMBER_TOKEN = /\d+(?:[.,]\d+)*/gu;
-const NAME_TOKEN = /[\p{L}\p{N}][\p{L}\p{N}-]*/gu;
-
-/** Lowercased whole tokens plus their hyphen parts ("WH-1000XM4" -> "wh", "1000xm4"). */
-function tokenSet(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const token of text.match(NAME_TOKEN) ?? []) {
-    const lower = token.toLowerCase();
-    out.add(lower);
-    for (const part of lower.split("-")) if (part) out.add(part);
-  }
-  return out;
-}
-
-/**
- * Does the model's prose assert identity or a numeric spec the validated core never
- * established? The description is shipped as written (#1117), so it cannot be
- * fact-checked after generation; this rejects the two shapes that make it unsafe:
- *  - a number (capacity, size, year, generation) absent from the core;
- *  - a proper-noun-like token (capitalised mid-sentence, or letters mixed with digits)
- *    absent from the core: a brand/model the seller only SAID, or the model invented.
- * Conservative on purpose: a false positive falls back to the core template.
- */
-function descriptionIsUngrounded(
-  description: string,
-  attributes: ExtractedAttributes,
-): boolean {
-  const corpus = [
-    attributes.brand,
-    attributes.model,
-    attributes.title,
-    attributes.category,
-    attributes.condition,
-    ...(attributes.specs ?? []),
-  ]
-    .filter((part): part is string => typeof part === "string")
-    .join(" ");
-  const knownNumbers = new Set(corpus.match(NUMBER_TOKEN) ?? []);
-  if ((description.match(NUMBER_TOKEN) ?? []).some((n) => !knownNumbers.has(n))) {
-    return true;
-  }
-  const known = tokenSet(corpus);
-  for (const match of description.matchAll(NAME_TOKEN)) {
-    const token = match[0];
-    const before = description.slice(0, match.index).trimEnd();
-    const startsSentence = before === "" || /[.!?\n]$/u.test(before);
-    const looksLikeName =
-      (!startsSentence && /^\p{Lu}/u.test(token)) ||
-      (/\d/u.test(token) && /\p{L}/u.test(token));
-    if (!looksLikeName) continue;
-    const lower = token.toLowerCase();
-    const grounded =
-      known.has(lower) || lower.split("-").every((part) => !part || known.has(part));
-    if (!grounded) return true;
-  }
-  return false;
-}
-
 /** "very-good" -> "very good": humanise an enum-style grade before it reaches prose. */
 function humanizeGrade(value: string): string {
   return /^\p{L}+(?:-\p{L}+)+$/u.test(value.trim()) ? value.trim().replace(/-/gu, " ") : value;
@@ -431,8 +373,27 @@ function asSentence(fragment: string): string {
 }
 
 /**
+ * Lowercase a fragment's first letter so it can sit mid-sentence, leaving acronyms
+ * ("LED", "USB-C") and internally capitalised tokens ("iPhone", "AirPods") alone.
+ */
+function lowercaseFirst(fragment: string): string {
+  const firstWord = fragment.split(/\s/u)[0] ?? "";
+  const letters = firstWord.replace(/[^\p{L}]/gu, "");
+  const isAcronym = letters.length > 1 && letters === letters.toUpperCase();
+  const hasInnerCapital = /\p{Ll}\p{Lu}|\p{Lu}.*\p{Lu}/u.test(firstWord);
+  if (isAcronym || hasInnerCapital) return fragment;
+  return fragment.charAt(0).toLowerCase() + fragment.slice(1);
+}
+
+/** "a", "a and b", "a, b and c". */
+function joinNaturally(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
  * A factual description assembled only from the validated attribute core, written as
- * SENTENCES (issue #894).
+ * SENTENCES (issue #894), the specs joined into one natural sentence (#1117).
  *
  * This is the floor for every listing a seller sees: `generateEbayListing` builds the
  * seller-visible description from here on BOTH the model pass-through path and the
@@ -463,10 +424,12 @@ export function buildCoreListingDescription(
       : `${name} in ${conditionPhrase} condition`
     : name;
   const sentences = [asSentence(identity)];
-  for (const spec of attributes.specs ?? []) {
-    const safe = safeSellerCoreValue(spec);
-    if (safe) sentences.push(asSentence(safe));
-  }
+  const specs = (attributes.specs ?? [])
+    .map((spec) => safeSellerCoreValue(spec))
+    .filter((spec): spec is string => Boolean(spec))
+    .map((spec) => lowercaseFirst(stripTerminator(neutralizeLabelColons(spec))))
+    .filter((spec) => spec.length > 0);
+  if (specs.length > 0) sentences.push(`It has ${joinNaturally(specs)}.`);
   return sentences.filter((sentence) => sentence.length > 0).join(" ");
 }
 
@@ -574,7 +537,6 @@ export async function generateEbayListing(
     const modelCopyViolates =
       sellerTitleViolations(raw.title, titleCore).length > 0 ||
       sellerCopyViolations(raw.description).length > 0 ||
-      descriptionIsUngrounded(raw.description, attributes) ||
       modelSellerVoiceViolates;
     const modelTagsViolate = raw.tags.some(
       (tag) => sellerTitleViolations(tag, titleCore).length > 0,
@@ -587,9 +549,9 @@ export async function generateEbayListing(
       : {
           title: enforceTitleLength(raw.title),
           itemSpecifics: reconcileSpecifics(attributes),
-          // The model's prose, having passed the seller-voice, transcript-paste and
-          // grounding guards above. The core template is only the fallback (#1117).
-          description: raw.description.trim(),
+          // Descriptions cannot be completely fact-checked after generation. Build
+          // this seller-visible field from the validated core instead.
+          description: buildCoreListingDescription(attributes),
           tags: raw.tags,
         };
 
@@ -774,8 +736,7 @@ const LISTING_SYSTEM_PROMPT =
   "sentences a person selling their own item would write, in plain seller voice. Never " +
   "label fields: no \"Item:\", no \"Condition:\", no \"Details:\", no colon-prefixed " +
   "fragments, no bullet lists, and never the words \"seller note\" or \"unverified\". " +
-  "Do not name any brand, model, or number (capacity, size, year, generation) that is not " +
-  "in the supplied facts. Description and item " +
+  "Description and item " +
   "specifics must use plain seller voice: no em dashes or en dashes; no promotional " +
   "adjectives (stunning, elevate, boasts, must-have, exquisite, seamless, vibrant, " +
   "top-notch, sleek, gorgeous, breathtaking); no urgency or hype (don't miss, act fast, " +

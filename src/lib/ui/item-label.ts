@@ -3,9 +3,8 @@ function trimmedString(value: unknown): string {
 }
 
 /**
- * Read only the three name fields, one by one. A whole-object schema parse would throw
- * away a usable title when an unrelated attribute (specs, measurements) is malformed,
- * and the seller would see "Item <id>" for a finished item (#1117).
+ * Read only the three name fields, one by one, so a malformed unrelated attribute
+ * (specs, measurements) cannot hide a usable name (#1117).
  */
 function readNameFields(attributes: unknown): {
   brand: string;
