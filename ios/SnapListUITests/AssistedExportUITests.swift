@@ -29,66 +29,89 @@ final class AssistedExportUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    func testAPackUpdateTakesDownAConfirmSheetTheSellerIsLookingAt() {
+    // MARK: - Guide sheet (#1128)
+
+    func testRowTapOpensTheSheetAndThePrimaryActionAdvancesOneStep() {
+        let app = launch(fixture: "prepared")
+        let row = app.buttons["assisted-export.row.facebook"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        openRow(row, in: app)
+
+        XCTAssertEqual(position(in: app), "Step 1 of 4")
+
+        primary(app, "copy-listing-text").tap()
+        XCTAssertTrue(
+            waitForLabel("Step 2 of 4", on: positionElement(in: app), timeout: loadedTreeTimeout),
+            "One tap completes one step and no more."
+        )
+
+        primary(app, "save-8-photos").tap()
+        XCTAssertTrue(
+            waitForLabel("Step 3 of 4", on: positionElement(in: app), timeout: loadedTreeTimeout)
+        )
+    }
+
+    func testClosingAndReopeningTheSheetResumesOnTheRightStep() {
+        let app = launch(fixture: "prepared")
+        let row = app.buttons["assisted-export.row.facebook"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        openRow(row, in: app)
+        primary(app, "copy-listing-text").tap()
+        XCTAssertTrue(
+            waitForLabel("Step 2 of 4", on: positionElement(in: app), timeout: loadedTreeTimeout)
+        )
+
+        app.buttons["assisted-export.guide.close"].tap()
+        XCTAssertTrue(
+            waitForDisappearance(
+                of: marker("assisted-export.guide.position", in: app),
+                timeout: loadedTreeTimeout
+            )
+        )
+        XCTAssertTrue(
+            row.label.localizedCaseInsensitiveContains("prepared"),
+            "Was: \"\(row.label)\""
+        )
+
+        openRow(row, in: app)
+        XCTAssertEqual(position(in: app), "Step 2 of 4")
+    }
+
+    func testAPackUpdateTakesDownAConfirmQuestionTheSellerIsLookingAt() {
         let app = launch(fixture: "pack-update-while-confirming")
 
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        openRow(row)
+        openRow(row, in: app)
 
-        // Opening the row is navigation, so assert it separately from the
-        // action inside it. A failure here means the row did not toggle; a
-        // failure below means the workspace opened but its action is not
-        // reachable. Collapsing the two would leave that ambiguous.
-        let workspace = marker("assisted-export.workspace.facebook", in: app)
-        XCTAssertTrue(
-            workspace.waitForExistence(timeout: loadedTreeTimeout),
-            "Tapping the row opens its workspace.\n\(app.debugDescription)"
-        )
+        // Opening the row is navigation, so it is asserted apart from the
+        // actions inside the sheet.
+        primary(app, "copy-listing-text").tap()
+        primary(app, "save-8-photos").tap()
+        primary(app, "open-facebook-marketplace").tap()
 
-        // `SnapListPrimaryButton` derives its identifier from its own title, so
-        // these are addressed the way the rest of the suite addresses that
-        // component rather than by an outer identifier that never reaches it.
-        let open = app.buttons["button.primary.open-facebook-marketplace"]
-        XCTAssertTrue(
-            open.waitForExistence(timeout: loadedTreeTimeout),
-            "The workspace offers the open action.\n\(app.debugDescription)"
-        )
-        open.tap()
-
-        let markAsShared = app.buttons["assisted-export.mark-as-shared.facebook"]
-        XCTAssertTrue(
-            markAsShared.waitForExistence(timeout: loadedTreeTimeout),
-            "Mark as shared follows a recorded handoff.\n\(app.debugDescription)"
-        )
-        markAsShared.tap()
-
-        // The sheet is dismissed in the same breath it appears, so polling for
-        // it would be a race. The fixture records the presentation durably
+        // The question is dismissed in the same breath it appears, so polling
+        // for it would be a race. The fixture records the presentation durably
         // instead, which is what makes the dismissal assertion below mean
-        // something: without this, a screen that never presented a sheet at all
-        // would pass every remaining assertion.
+        // something.
         XCTAssertTrue(
             marker("assisted-export.fixture.sheet-was-presented", in: app)
                 .waitForExistence(timeout: loadedTreeTimeout),
-            "The confirm sheet must actually reach the screen first."
+            "The confirm question must actually reach the screen first."
         )
 
-        let sheet = marker("assisted-export.confirm-sheet", in: app)
+        let question = marker("assisted-export.confirm-sheet", in: app)
         XCTAssertTrue(
-            waitForDisappearance(of: sheet, timeout: loadedTreeTimeout),
-            "A pack update must take the confirm sheet down, not leave it "
-                + "standing over a pack the seller was never shown."
+            waitForDisappearance(of: question, timeout: loadedTreeTimeout),
+            "A pack update must take the confirm question down, not leave it "
+                + "asking about a pack the seller was never shown."
         )
-        // No separate assertion that the confirm button is gone: a negative
-        // existence check on an identifier this test never observed present
-        // would also pass if the identifier were simply wrong. The sheet is the
-        // button's only host, so the assertion above already covers it.
 
         // The replacement pack carries a new content revision, which retires
-        // the earlier handoff along with the claim (the same rule proven in
-        // `testANewPackTextRetiresTheSharedClaimThatBelongedToTheOldOne`), so
-        // the row goes back to saying nothing rather than "not shared".
+        // the earlier handoff along with the claim, so the guide starts over.
+        XCTAssertTrue(
+            waitForLabel("Step 1 of 4", on: positionElement(in: app), timeout: loadedTreeTimeout)
+        )
         let label = row.label
         XCTAssertFalse(
             label.localizedCaseInsensitiveContains("shared"),
@@ -96,59 +119,58 @@ final class AssistedExportUITests: XCTestCase {
                 + "handoff too, so the row must not claim any share state. "
                 + "Was: \"\(label)\""
         )
-        // The replacement pack restores the workspace only after the stale
-        // confirmation sheet has been dismissed.
-        XCTAssertTrue(
-            marker("assisted-export.workspace.facebook", in: app)
-                .waitForExistence(timeout: loadedTreeTimeout),
-            "The replacement pack restores the workspace after dismissing its stale sheet."
-        )
     }
 
     func testFailedDestinationOpenShowsAdviceWithoutRecordingAHandoff() {
         let app = launch(fixture: "destination-open-failure")
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        openRow(row)
+        openRow(row, in: app)
+        primary(app, "copy-listing-text").tap()
+        primary(app, "save-8-photos").tap()
 
-        let open = app.buttons["button.primary.open-facebook-marketplace"]
-        XCTAssertTrue(open.waitForExistence(timeout: loadedTreeTimeout))
-        open.tap()
+        primary(app, "open-facebook-marketplace").tap()
 
         XCTAssertTrue(
             marker("assisted-export.advisory", in: app)
                 .waitForExistence(timeout: loadedTreeTimeout)
         )
+        XCTAssertEqual(
+            position(in: app),
+            "Step 3 of 4",
+            "A failed open attempt is not a handoff, so the guide stays on it."
+        )
         XCTAssertFalse(
-            app.buttons["assisted-export.mark-as-shared.facebook"].exists,
-            "A failed open attempt is not a handoff receipt."
+            app.buttons["button.primary.yes,-mark-as-shared"].exists,
+            "A failed open attempt must not offer the confirm question."
         )
     }
 
-    func testRepeatedSaveTapsWritePhotosAndReceiptOnce() {
+    func testRepeatedSaveTapsWritePhotosOnce() {
         let app = launch(fixture: "save-deduplication")
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        openRow(row)
+        openRow(row, in: app)
+        primary(app, "copy-listing-text").tap()
 
-        let save = app.buttons["assisted-export.save.facebook"]
-        XCTAssertTrue(save.waitForExistence(timeout: loadedTreeTimeout))
-        let saveCoordinate = save.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
-        )
-        saveCoordinate.tap()
-        saveCoordinate.tap()
+        // One synthesized double tap, so both land before the fixture's slow
+        // save finishes and the step moves on.
+        primary(app, "save-8-photos").doubleTap()
 
         XCTAssertTrue(
             waitForLabel(
-                "1",
-                on: marker(
-                    "assisted-export.fixture.handoff-write-count",
-                    in: app
-                ),
+                "Step 3 of 4",
+                on: positionElement(in: app),
                 timeout: loadedTreeTimeout
             ),
-            "Saving is complete only after exactly one durable handoff receipt."
+            "Saving completes the step once."
+        )
+        // The counters live behind the sheet, which hides them from
+        // accessibility while it is up.
+        app.buttons["assisted-export.guide.close"].tap()
+        XCTAssertTrue(
+            marker("assisted-export.fixture.photo-write-count", in: app)
+                .waitForExistence(timeout: loadedTreeTimeout)
         )
         XCTAssertEqual(
             marker("assisted-export.fixture.photo-write-count", in: app).label,
@@ -156,47 +178,30 @@ final class AssistedExportUITests: XCTestCase {
         )
         XCTAssertEqual(
             marker("assisted-export.fixture.handoff-write-count", in: app).label,
-            "1"
+            "1",
+            "Copy wrote the one durable receipt; saving must not write another."
         )
     }
 
     func testConfirmationControlsRemainReachableAtAccessibilityFive() {
         let app = launch(
-            fixture: "prepared",
+            fixture: "guide-step-4",
             extraArguments: ["--dynamic-type=accessibility5"]
         )
-        let row = app.buttons["assisted-export.row.facebook"]
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        openRow(row)
-        app.buttons["button.primary.open-facebook-marketplace"].tap()
-        let mark = app.buttons["assisted-export.mark-as-shared.facebook"]
-        XCTAssertTrue(mark.waitForExistence(timeout: loadedTreeTimeout))
-        mark.tap()
-
         let confirm = app.buttons["button.primary.yes,-mark-as-shared"]
         let cancel = app.buttons["button.secondary.not-yet"]
         XCTAssertTrue(confirm.waitForExistence(timeout: loadedTreeTimeout))
+        scrollUntilHittable(confirm, in: app)
         XCTAssertTrue(confirm.isHittable)
         XCTAssertTrue(cancel.waitForExistence(timeout: loadedTreeTimeout))
+        scrollUntilHittable(cancel, in: app)
         XCTAssertTrue(cancel.isHittable)
     }
 
-    /// #961: `confirmSheetBinding`'s own setter comment says a swipe-down is
-    /// meant to be the same full cancel as "Not yet" — this is the UI proof
-    /// of that claim. `interactiveDismissDisabled(store.isWriting)` only
-    /// blocks the swipe while the durable "Shared" write is actually in
-    /// flight (see the guard comment on `dismissConfirmSheet()`), and no
-    /// write has started yet at this point, so the swipe must go through.
-    func testConfirmSheetSlidesDownToDismissAsAFullCancel() {
-        let app = launch(fixture: "prepared")
-        let row = app.buttons["assisted-export.row.facebook"]
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        openRow(row)
-        app.buttons["button.primary.open-facebook-marketplace"].tap()
-        let mark = app.buttons["assisted-export.mark-as-shared.facebook"]
-        XCTAssertTrue(mark.waitForExistence(timeout: loadedTreeTimeout))
-        mark.tap()
-
+    /// A swipe down is the same full cancel as `Not yet`: nothing is written and
+    /// the row is still there to open again.
+    func testSlidingTheSheetDownIsAFullCancel() {
+        let app = launch(fixture: "guide-step-4")
         let question = app.staticTexts["assisted-export.confirm-sheet"]
         XCTAssertTrue(question.waitForExistence(timeout: loadedTreeTimeout))
 
@@ -206,15 +211,31 @@ final class AssistedExportUITests: XCTestCase {
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
         start.press(forDuration: 0.05, thenDragTo: end)
 
+        XCTAssertTrue(
+            waitForDisappearance(of: question, timeout: loadedTreeTimeout),
+            "A swipe-down must dismiss the sheet before any write starts."
+        )
+        let row = app.buttons["assisted-export.row.facebook"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
         XCTAssertFalse(
-            question.waitForExistence(timeout: 3),
-            "A swipe-down must dismiss the confirm sheet before any write "
-                + "starts."
+            row.label.localizedCaseInsensitiveContains("shared"),
+            "Cancelling writes nothing. Was: \"\(row.label)\""
+        )
+    }
+
+    func testGuideSheetCompletesToTheSellersOwnSharedClaim() {
+        let app = launch(fixture: "guide-step-4")
+        let yes = app.buttons["button.primary.yes,-mark-as-shared"]
+        XCTAssertTrue(yes.waitForExistence(timeout: loadedTreeTimeout))
+        yes.tap()
+
+        XCTAssertTrue(
+            marker("assisted-export.guide.shared", in: app)
+                .waitForExistence(timeout: loadedTreeTimeout)
         )
         XCTAssertTrue(
-            mark.waitForExistence(timeout: 3),
-            "A cancelled confirm sheet must leave Mark as shared tappable "
-                + "again, the same as 'Not yet' would."
+            marker("assisted-export.guide.shared", in: app)
+                .label.hasPrefix("Shared ")
         )
     }
 
@@ -229,29 +250,22 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(depop.exists)
 
         XCTAssertTrue(facebook.label.localizedCaseInsensitiveContains("shared"))
-        XCTAssertFalse(
-            facebook.label.localizedCaseInsensitiveContains("not shared")
-        )
-        XCTAssertTrue(mercari.label.localizedCaseInsensitiveContains("not shared"))
-        // Depop has no receipt at all in this fixture: nobody has handed it
-        // off, so the row says nothing about sharing yet, not "not shared".
-        XCTAssertFalse(depop.label.localizedCaseInsensitiveContains("not shared"))
+        XCTAssertTrue(mercari.label.localizedCaseInsensitiveContains("prepared"))
+        XCTAssertTrue(depop.label.localizedCaseInsensitiveContains("not started"))
 
-        openRow(mercari)
-        XCTAssertTrue(
-            app.buttons["assisted-export.mark-as-shared.mercari"]
-                .waitForExistence(timeout: loadedTreeTimeout),
-            "A durable handoff reveals the explicit seller confirmation."
+        openRow(mercari, in: app)
+        XCTAssertEqual(
+            position(in: app),
+            "Step 4 of 4",
+            "A durable handoff resumes on the explicit seller confirmation."
         )
         XCTAssertTrue(
-            marker("assisted-export.workspace.mercari", in: app)
-                .label.localizedCaseInsensitiveContains(
-                    "you finish this in mercari"
-                )
+            app.buttons["button.primary.yes,-mark-as-shared"]
+                .waitForExistence(timeout: loadedTreeTimeout)
         )
 
         let reachable = [facebook.label, mercari.label, depop.label,
-                         marker("assisted-export.workspace.mercari", in: app).label]
+                         marker("assisted-export.confirm-sheet", in: app).label]
             .joined(separator: " ")
             .lowercased()
         for forbidden in ["published", "listed", "sold", "synced", "received", "verified"] {
@@ -263,12 +277,9 @@ final class AssistedExportUITests: XCTestCase {
     }
 
     /// #977: an untouched destination row rendered only its brand mark, which
-    /// is a fixed-size image and never grows with Dynamic Type — the row
-    /// carried no text at any size. `destinationRow` now pairs the mark with
-    /// `destination.displayName` at the `.rowTitle` token, so a row that has
-    /// nothing else to say still has a real, scaling text identity. Depop is
-    /// untouched in the `prepared` fixture (no receipt), so its row's only
-    /// content is the mark plus that name — the exact case the issue named.
+    /// is a fixed-size image and never grows with Dynamic Type. The row now
+    /// carries its one-line state at a text token, so it grows. Depop is
+    /// untouched in the `prepared` fixture (no receipt).
     func testUntouchedDestinationRowGrowsWithDynamicType() {
         let mediumApp = XCUIApplication()
         mediumApp.launchArguments = [
@@ -296,9 +307,7 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertGreaterThan(
             a11yRow.frame.height,
             mediumHeight,
-            "An untouched row's only content used to be a fixed-size mark, so "
-                + "the row never grew with Dynamic Type. It must grow now that "
-                + "the row carries the destination's own scaling text name."
+            "The row's state line scales with Dynamic Type, so the row grows."
         )
     }
 
@@ -345,32 +354,25 @@ final class AssistedExportUITests: XCTestCase {
         )
     }
 
-    /// Opens a destination row and does not return until the row itself says
-    /// it is open.
+    /// Opens a destination row and does not return until its guide sheet is
+    /// on screen.
     ///
-    /// A tap the system accepts is not a tap the app acted on. In job
-    /// 95336686008 of run 32012821535 (`ui-1`, head `7408e4c26`) the activity
-    /// log for this screen reads `Tap` at t=8.61s, `Synthesize event` at
-    /// 8.68s, and `Wait for dev.snaplist.ios to idle` satisfied by 8.98s —
-    /// then thirty one-second existence checks, each answered in about 0.1s,
-    /// against a row whose own dump still read
-    /// `label: 'Facebook Marketplace, closed'`. The app was answering queries
-    /// the whole time, so the event was acknowledged and dropped rather than
-    /// delayed. Waiting longer on that tap buys nothing. Only another tap can
-    /// recover it, which is why the budget above stays where it is.
-    ///
-    /// The state is re-read before every attempt and a tap is sent only while
-    /// the row is still shut, so a row that opens slowly is never toggled back
-    /// closed. Each retry is recorded as its own activity, so a green run that
-    /// needed one still says so in the log instead of looking clean.
+    /// A tap the system accepts is not a tap the app acted on: a tap can be
+    /// acknowledged and dropped, and waiting longer buys nothing. The state is
+    /// re-read before every attempt and a tap is sent only while the sheet is
+    /// absent, so a sheet that opens slowly is never toggled back closed. Each
+    /// retry is recorded as its own activity, so a green run that needed one
+    /// still says so in the log.
     private func openRow(
         _ row: XCUIElement,
+        in app: XCUIApplication,
         attempts: Int = 2,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        let sheet = positionElement(in: app)
         for attempt in 1...attempts {
-            if isDisclosed("open", row) { return }
+            if sheet.exists { return }
 
             if attempt > 1 {
                 XCTContext.runActivity(
@@ -380,38 +382,39 @@ final class AssistedExportUITests: XCTestCase {
 
             row.tap()
 
-            if waitForDisclosedState("open", on: row, timeout: loadedTreeTimeout) {
-                return
-            }
+            if sheet.waitForExistence(timeout: loadedTreeTimeout) { return }
         }
 
         XCTFail(
-            "The row stayed shut through \(attempts) taps, each given "
-                + "\(Int(loadedTreeTimeout))s to take. A row that ignores every "
-                + "tap is refusing them, not dropping one. Was: \"\(row.label)\"",
+            "The guide sheet stayed shut through \(attempts) taps, each given "
+                + "\(Int(loadedTreeTimeout))s to take. Was: \"\(row.label)\"",
             file: file,
             line: line
         )
     }
 
-    /// The disclosure word is the last comma-separated component of the row's
-    /// label; `AssistedExportDomain.accessibilityLabel(for:)` appends it after
-    /// the optional status. Matching the suffix therefore cannot be satisfied
-    /// by a status that happens to contain the word.
-    private func isDisclosed(_ state: String, _ row: XCUIElement) -> Bool {
-        row.label.hasSuffix(", \(state)")
+    private func positionElement(in app: XCUIApplication) -> XCUIElement {
+        marker("assisted-export.guide.position", in: app)
     }
 
-    private func waitForDisclosedState(
-        _ state: String,
-        on row: XCUIElement,
-        timeout: TimeInterval
-    ) -> Bool {
-        let disclosed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label ENDSWITH %@", ", \(state)"),
-            object: row
+    private func position(in app: XCUIApplication) -> String {
+        positionElement(in: app).label
+    }
+
+    /// `SnapListPrimaryButton` derives its identifier from its own title.
+    private func primary(_ app: XCUIApplication, _ slug: String) -> XCUIElement {
+        let button = app.buttons["button.primary.\(slug)"]
+        XCTAssertTrue(
+            button.waitForExistence(timeout: loadedTreeTimeout),
+            "The current step offers \(slug).\n\(app.debugDescription)"
         )
-        return XCTWaiter().wait(for: [disclosed], timeout: timeout) == .completed
+        return button
+    }
+
+    private func scrollUntilHittable(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<6 where !element.isHittable {
+            app.swipeUp()
+        }
     }
 
     private func launch(

@@ -104,6 +104,7 @@ struct AssistedExportFixtureView: View {
                 onConfirmSheetPresented: confirmSheetPresented
             )
         }
+        .task { await openGuideForFixture() }
         .overlay(alignment: .topLeading) {
             if sheetWasPresented {
                 Color.clear
@@ -122,6 +123,46 @@ struct AssistedExportFixtureView: View {
                 recorder.handoffWriteCount,
                 identifier: "assisted-export.fixture.handoff-write-count"
             )
+        }
+    }
+
+    /// The guide fixtures replay real store calls up to the chosen step, so the
+    /// sheet shows what a seller who did those things would see. The screen
+    /// loads the pack on its own, so wait for that rather than racing it.
+    private func openGuideForFixture() async {
+        let destination = AssistedExportDestination.facebookMarketplace
+        let pack = store.domain.pack
+        let performedBeforeSheet: [AssistedExportHandoffAction]
+        switch fixture {
+        case .guideStep1:
+            performedBeforeSheet = []
+        case .guideStep2:
+            performedBeforeSheet = [.copiedListingText]
+        case .guideStep3:
+            performedBeforeSheet = [.copiedListingText, .savedPhotos]
+        case .guideStep4, .guideShared:
+            performedBeforeSheet = [.copiedListingText, .savedPhotos, .openedDestination]
+        default:
+            return
+        }
+        for _ in 0..<50 where store.phase != .ready {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        for action in performedBeforeSheet {
+            switch action {
+            case .copiedListingText:
+                await store.deliver(action, for: destination, pack: pack) { _ in }
+            case .savedPhotos:
+                await store.savePhotos(for: destination, pack: pack) {}
+            default:
+                await store.recordHandoff(action, for: destination, pack: pack)
+            }
+        }
+        store.toggle(destination)
+        if fixture == .guideShared {
+            // The question mounts with the sheet; give it a beat to appear.
+            try? await Task.sleep(for: .milliseconds(500))
+            await store.confirmShared()
         }
     }
 

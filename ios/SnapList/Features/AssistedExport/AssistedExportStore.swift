@@ -117,6 +117,7 @@ final class AssistedExportStore {
             guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
                 return
             }
+            domain.recordHandoff(action, for: destination)
             switch action {
             case .copiedListingText:
                 showCompletion(action, for: destination)
@@ -204,6 +205,7 @@ final class AssistedExportStore {
             )
             guard synchronize(response, for: currentPack),
                   !domain.isPackOutOfDate else { return }
+            domain.recordHandoff(receipt.action, for: receipt.destination)
             switch receipt.action {
             case .copiedListingText, .savedPhotos:
                 showCompletion(receipt.action, for: receipt.destination)
@@ -249,6 +251,7 @@ final class AssistedExportStore {
                     return
                 }
             }
+            domain.recordHandoff(.savedPhotos, for: destination)
             showCompletion(.savedPhotos, for: destination)
         } catch {
             actionMessage = AssistedExportCopy.actionFailed

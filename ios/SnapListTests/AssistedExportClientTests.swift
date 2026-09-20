@@ -347,6 +347,29 @@ final class AssistedExportClientTests: XCTestCase {
     // never repriced; that path is covered by
     // `testNothingIsDeliveredOnceTheListingItselfHasMovedOn`.
 
+    func testEachSuccessfulDeviceActionAdvancesTheGuideByOneStep() async {
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService()
+        )
+        await store.load()
+        store.toggle(.mercari)
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .copyText)
+
+        await store.deliver(
+            .copiedListingText,
+            for: .mercari,
+            pack: store.domain.pack
+        ) { _ in }
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .savePhotos)
+
+        await store.savePhotos(for: .mercari) {}
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .openDestination)
+
+        await store.recordHandoff(.openedDestination, for: .mercari)
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .confirmPosted)
+    }
+
     func testDeliveryHandsOverTheServerPriceWhenTheClientProjectionIsStale() async {
         let service = AssistedExportDeliveryService(price: 145)
         let store = AssistedExportStore(

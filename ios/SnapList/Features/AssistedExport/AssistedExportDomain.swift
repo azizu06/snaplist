@@ -135,11 +135,72 @@ enum AssistedExportConfirmOutcome: Equatable, Sendable {
     case refused
 }
 
+/// The one-step-at-a-time guide inside a destination's sheet (issue #1128).
+///
+/// The steps are the existing export-pack actions in the order a seller uses
+/// them. Nothing here is new domain behavior: the guide only reads which of
+/// those actions the seller has already performed on this device.
+enum AssistedExportGuideStep: Int, CaseIterable, Sendable {
+    case copyText
+    case savePhotos
+    case openDestination
+    case confirmPosted
+}
+
+struct AssistedExportGuideProgress: Equatable, Sendable {
+    /// The step to show, or nil once the seller has made the Shared claim.
+    let current: AssistedExportGuideStep?
+    let completed: [AssistedExportGuideStep]
+
+    var total: Int { AssistedExportGuideStep.allCases.count }
+
+    /// One-based position of the current step.
+    var position: Int { (current?.rawValue ?? total - 1) + 1 }
+
+    var positionText: String { AssistedExportCopy.stepPosition(position, of: total) }
+}
+
+enum AssistedExportGuide {
+    static func progress(
+        performed: Set<AssistedExportHandoffAction>,
+        handedOff: Bool,
+        isShared: Bool
+    ) -> AssistedExportGuideProgress {
+        let all = AssistedExportGuideStep.allCases
+        if isShared {
+            return AssistedExportGuideProgress(current: nil, completed: all)
+        }
+        // A restored receipt records that a handoff happened but not which
+        // action, and the share sheet carries the text and the photos out in
+        // one go. Both mean the three device steps are behind the seller.
+        let deviceStepsDone = performed.contains(.sharedAnotherWay)
+            || (performed.isEmpty && handedOff)
+        let done: [AssistedExportGuideStep] = all.filter { step in
+            switch step {
+            case .copyText:
+                return deviceStepsDone || performed.contains(.copiedListingText)
+            case .savePhotos:
+                return deviceStepsDone || performed.contains(.savedPhotos)
+            case .openDestination:
+                return deviceStepsDone || performed.contains(.openedDestination)
+            case .confirmPosted:
+                return false
+            }
+        }
+        let current = all.first { !done.contains($0) } ?? .confirmPosted
+        return AssistedExportGuideProgress(current: current, completed: done)
+    }
+}
+
 struct AssistedExportDomain: Equatable, Sendable {
     private(set) var pack: AssistedExportPack
     private(set) var confirmSheet: AssistedExportDestination?
     private(set) var openDestination: AssistedExportDestination?
     private var handedOff: Set<AssistedExportDestination> = []
+    /// Which handoff actions the seller performed on this device, per
+    /// destination. The server receipt only says a handoff happened, so this is
+    /// what lets the guided sheet resume on the step after the last one done.
+    private var performed: [AssistedExportDestination: Set<AssistedExportHandoffAction>] = [:]
     private var sharedAt: [AssistedExportDestination: Date] = [:]
     /// The newest listing revision this client knows about. It starts equal to
     /// the revision the pack was built against and moves ahead of it the moment
@@ -226,13 +287,26 @@ struct AssistedExportDomain: Equatable, Sendable {
         openDestination = openDestination == destination ? nil : destination
     }
 
-    /// Note what the seller did on this device. The only consequence is that
-    /// `Mark as shared` becomes reachable for that destination.
+    /// Note what the seller did on this device. The only consequences are that
+    /// `Mark as shared` becomes reachable for that destination and the guided
+    /// sheet moves past the step that action completes.
     mutating func recordHandoff(
-        _: AssistedExportHandoffAction,
+        _ action: AssistedExportHandoffAction,
         for destination: AssistedExportDestination
     ) {
         handedOff.insert(destination)
+        performed[destination, default: []].insert(action)
+    }
+
+    /// Where the destination's guided sheet stands. Derived on every read from
+    /// the handoff state above, so closing and reopening the sheet cannot lose
+    /// or invent progress.
+    func guide(for destination: AssistedExportDestination) -> AssistedExportGuideProgress {
+        AssistedExportGuide.progress(
+            performed: performed[destination] ?? [],
+            handedOff: handedOff.contains(destination),
+            isShared: sharedAt[destination] != nil
+        )
     }
 
     /// The seller tapped Open and nothing happened. Attempt first, then report,
@@ -278,14 +352,23 @@ struct AssistedExportDomain: Equatable, Sendable {
     }
 
     func accessibilityLabel(for destination: AssistedExportDestination) -> String {
-        let disclosure = isWorkspaceOpen(destination) ? "open" : "closed"
-        // Routed through `statusText` rather than re-deriving the same
-        // status: a sighted seller and a VoiceOver seller must agree on
-        // whether an untouched row says anything at all.
-        guard let status = statusText(for: destination)?.lowercased() else {
-            return "\(destination.displayName), \(disclosure)"
+        // Routed through `rowStateText` rather than re-deriving the same
+        // state: a sighted seller and a VoiceOver seller read one line.
+        "\(destination.displayName), \(rowStateText(for: destination).lowercased())"
+    }
+
+    /// The row's one-line state: Not started, Prepared, or the seller's own
+    /// Shared claim. Prepared means the seller handed the pack over on this
+    /// device, never that anything reached the destination.
+    func rowStateText(for destination: AssistedExportDestination) -> String {
+        switch handoff(for: destination) {
+        case let .shared(at: date):
+            return AssistedExportCopy.sharedStatus(on: date)
+        case .prepared:
+            return hasHandedOff(to: destination)
+                ? AssistedExportCopy.prepared
+                : AssistedExportCopy.notStarted
         }
-        return "\(destination.displayName), \(status), \(disclosure)"
     }
 
     /// Ask the seller. The sheet only mounts for a row that could legitimately
@@ -376,6 +459,7 @@ struct AssistedExportDomain: Equatable, Sendable {
         undoWindow = nil
         if pack.contentRevision != self.pack.contentRevision {
             handedOff = []
+            performed = [:]
             sharedAt = [:]
         }
         self.pack = pack
@@ -402,6 +486,59 @@ struct AssistedExportDomain: Equatable, Sendable {
 /// published, synced, verified, or sold anything.
 enum AssistedExportCopy {
     static let notShared = "Not shared"
+    static let notStarted = "Not started"
+    static let rowHint = "Opens a step-by-step guide"
+    static let closeGuide = "Close"
+    static let stepDone = "done"
+    static let stepUpcoming = "upcoming"
+    static let prepared = "Prepared"
+
+    static func guideInstruction(
+        _ step: AssistedExportGuideStep,
+        for destination: AssistedExportDestination
+    ) -> String {
+        switch step {
+        case .copyText:
+            return destination == .depop
+                ? "Copy the listing text. Depop takes no separate title."
+                : "Copy the listing text."
+        case .savePhotos:
+            return "Save your photos to your library."
+        case .openDestination:
+            return "Open \(destination.displayName) and paste in the text and photos."
+        case .confirmPosted:
+            return confirmQuestion(destination)
+        }
+    }
+
+    static func completedStepSummary(_ step: AssistedExportGuideStep) -> String {
+        switch step {
+        case .copyText:
+            return "Listing text copied"
+        case .savePhotos:
+            return "Photos saved"
+        case .openDestination:
+            return "Opened"
+        case .confirmPosted:
+            return "Marked as shared"
+        }
+    }
+
+    static func upcomingStepTitle(
+        _ step: AssistedExportGuideStep,
+        for destination: AssistedExportDestination
+    ) -> String {
+        switch step {
+        case .copyText:
+            return "Copy the listing text"
+        case .savePhotos:
+            return "Save your photos"
+        case .openDestination:
+            return openDestination(destination)
+        case .confirmPosted:
+            return "Confirm you posted it"
+        }
+    }
 
     static func openDestination(_ destination: AssistedExportDestination) -> String {
         "Open \(destination.displayName)"
@@ -413,6 +550,10 @@ enum AssistedExportCopy {
     }
 
     static let screenTitle = "Share to other marketplaces"
+
+    static func stepPosition(_ position: Int, of total: Int) -> String {
+        "Step \(position) of \(total)"
+    }
     static let copyListingText = "Copy listing text"
     static let copyListingTextDone = "Copied"
     static let savedPhotosDone = "Saved to Photos"
@@ -476,6 +617,13 @@ enum AssistedExportCopy {
     /// hold no seller-facing literals of their own.
     static let allSellerFacingStrings: [String] = [
         notShared,
+        notStarted,
+        rowHint,
+        closeGuide,
+        stepDone,
+        stepUpcoming,
+        prepared,
+        stepPosition(2, of: 4),
         screenTitle,
         copyListingText,
         copyListingTextDone,
@@ -499,7 +647,14 @@ enum AssistedExportCopy {
         savePhotos(count: 8),
         savePhotos(count: 1),
         packMeta(photoCount: 8, preparedAt: "2:41 PM"),
-    ]
+    ] + AssistedExportGuideStep.allCases.flatMap { step in
+        AssistedExportDestination.allCases.flatMap { destination in
+            [
+                guideInstruction(step, for: destination),
+                upcomingStepTitle(step, for: destination),
+            ]
+        } + [completedStepSummary(step)]
+    }
 
     static func sharedStatus(on date: Date) -> String {
         "Shared \(sharedDateFormatter.string(from: date))"
