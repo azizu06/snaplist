@@ -18,6 +18,7 @@ import {
 import type { PipelineQueue } from "./queue";
 import type { PipelineWorkerStore } from "./worker-store";
 import {
+  checkpointTranscriptionAttemptUsage,
   consumePipelineQueue,
   type PipelineConsumerSummary,
 } from "./worker";
@@ -71,6 +72,29 @@ export function createPipelineWorker(input: {
         }),
       recordTerminalOutcome: (outcome) =>
         input.capabilities.runs.recordVoiceOutcome(outcome),
+      // A fresh voice run transcribes BEFORE it identifies, so it has no checkpoint
+      // to carry the reservation — `checkpoint_pipeline_run` refuses a checkpoint
+      // without `identified` (#1120 P0). Reserve the paid call directly instead;
+      // `record_pipeline_run_provider_usage` merges a transcription-only entry
+      // idempotently and in either order, so a replay cannot double-count it. A
+      // false return blocks the adapter.
+      reserveTranscription: async ({ runId, leaseToken, attempt }) => {
+        const usage = checkpointTranscriptionAttemptUsage(attempt);
+        if (!usage) return false;
+        try {
+          await input.capabilities.runs.recordProviderUsage({
+            runId,
+            leaseToken,
+            usage,
+          });
+          return true;
+        } catch {
+          // The rejection concerns a run whose transcript is in flight, so its
+          // message is not ours to repeat (see `log-safe-error`). Refusing is the
+          // whole signal the caller needs: it blocks the paid call and retries.
+          return false;
+        }
+      },
     },
   );
 

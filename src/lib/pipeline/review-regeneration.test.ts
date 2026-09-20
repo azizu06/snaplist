@@ -8,6 +8,7 @@ import {
   parseIdentityCorrections,
   regenerateReviewListing,
   type ReviewRegenerationStore,
+  applyIdentityCorrections,
 } from "./review-regeneration";
 
 const soldPrice: PriceResult = {
@@ -794,5 +795,29 @@ describe("regenerateReviewListing", () => {
     await store.recordProviderUsage?.(report);
 
     expect(gateway.recordProviderUsage).toHaveBeenCalledWith(report);
+  });
+});
+
+describe("applyIdentityCorrections — a typed correction is not seller-hinted (#1120)", () => {
+  it("clears a voice-hinted provenance when the seller corrects the identity", () => {
+    const corrected = applyIdentityCorrections(
+      {
+        brand: "Apple",
+        model: "AirPods Pro",
+        category: "electronics",
+        identitySource: "seller-hinted",
+      },
+      {
+        brand: "Apple",
+        model: "AirPods Pro 2",
+        category: "electronics",
+        condition: "very-good",
+        isbn: null,
+        upc: null,
+        specs: [],
+      },
+    );
+    expect(corrected.identitySource).toBeUndefined();
+    expect(corrected.model).toBe("AirPods Pro 2");
   });
 });

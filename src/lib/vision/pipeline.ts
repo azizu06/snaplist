@@ -106,7 +106,15 @@ export interface VisionPipelineStages {
     photos: string[];
     sellerContext?: SellerContext;
   }): Promise<IdentifiedVisionPipelineStage>;
-  price(input: { attributes: ExtractedAttributes }): Promise<PriceResult>;
+  /**
+   * Price the item. `sellerContext` rides along as an UNVERIFIED hint for the
+   * model-backed tiers only (#1120) — it cannot route a tier, key a query, or raise
+   * confidence. Omitted when no transcript exists.
+   */
+  price(input: {
+    attributes: ExtractedAttributes;
+    sellerContext?: SellerContext;
+  }): Promise<PriceResult>;
   generate(input: {
     attributes: ExtractedAttributes;
     sellerContext?: SellerContext;
@@ -259,8 +267,17 @@ export function createVisionPipelineStages(
     };
   };
 
-  const price = async ({ attributes }: { attributes: ExtractedAttributes }) =>
-    priceItem(attributesToSignal(attributes));
+  const price: VisionPipelineStages["price"] = async ({
+    attributes,
+    sellerContext,
+  }) =>
+    priceItem({
+      ...attributesToSignal(attributes),
+      // A non-identity hint for the model-backed tiers, nothing more (#1120).
+      ...(sellerContext
+        ? { unverifiedSellerContext: sellerContext.text }
+        : {}),
+    });
 
   const generate: VisionPipelineStages["generate"] = async ({
     attributes,
@@ -315,7 +332,10 @@ export function createVisionPipelineStages(
       // durable stage seam awaits measurements only so its identify checkpoint is
       // complete and reusable after a crash.
       const [priceResult, generated, identified] = await Promise.all([
-        price({ attributes: pending.baseAttributes }),
+        price({
+          attributes: pending.baseAttributes,
+          ...(input.sellerContext ? { sellerContext: input.sellerContext } : {}),
+        }),
         generate({
           attributes: pending.baseAttributes,
           ...(input.sellerContext ? { sellerContext: input.sellerContext } : {}),

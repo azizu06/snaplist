@@ -169,11 +169,14 @@ describe("pipeline checkpoint write boundary", () => {
 });
 
 /**
- * Issue #1120: the worker now transcribes the seller's voice BEFORE identification,
- * so the transcript can be offered to the vision call as an identity hint. The
- * checkpoint schema used to forbid exactly that ordering.
+ * Issue #1120 P0: the worker transcribes BEFORE it identifies so the transcript can
+ * hint the vision call — but the transcript is buffered and written in the SAME
+ * checkpoint as `identified`, never on its own. This schema is one of TWO copies of
+ * that rule; `checkpoint_pipeline_run` is the other and raises 22023. Relaxing only
+ * this copy is what broke every voice run while the unit suites stayed green, so
+ * these tests pin the agreement.
  */
-describe("checkpoint ordering — voice may precede identification (#1120)", () => {
+describe("checkpoint ordering — voice is never persisted without identification (#1120)", () => {
   const VOICE = {
     version: 1,
     contentSha256: "b".repeat(64),
@@ -181,19 +184,33 @@ describe("checkpoint ordering — voice may precede identification (#1120)", () 
     providerContacted: false,
     sellerContext: null,
   };
+  const IDENTIFIED = {
+    attributes: { brand: "Apple", model: "AirPods Pro" },
+    model: "vision-model",
+  };
 
-  it("accepts a voice attempt recorded before any identification", () => {
+  it("rejects a voice attempt recorded without identification", () => {
     expect(
       pipelineWorkerCheckpointSchema.safeParse({
         voiceAttempt: { version: 1, contentSha256: "b".repeat(64) },
       }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("accepts a terminal voice outcome recorded before any identification", () => {
+  it("rejects a terminal voice outcome recorded without identification", () => {
     expect(pipelineWorkerCheckpointSchema.safeParse({ voice: VOICE }).success).toBe(
-      true,
+      false,
     );
+  });
+
+  it("accepts the combined write the worker actually performs", () => {
+    expect(
+      pipelineWorkerCheckpointSchema.safeParse({
+        identified: IDENTIFIED,
+        voiceAttempt: { version: 1, contentSha256: "b".repeat(64) },
+        voice: VOICE,
+      }).success,
+    ).toBe(true);
   });
 
   it("still requires identification before pricing and generation", () => {
