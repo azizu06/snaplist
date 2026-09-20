@@ -4885,7 +4885,7 @@ struct PhotoReviewView: View {
             Text(submissionPresentation.cancelLinkLabel ?? "Cancel")
                 .font(.system(size: submissionMessageSize, weight: .semibold))
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -4905,7 +4905,7 @@ struct PhotoReviewView: View {
         case .saving, .savedBeat:
             statusButton(phase: phase)
         case .standard, .done:
-            actionButton(openBoundary, phase: phase)
+            actionButton(openBoundary)
         }
     }
 
@@ -4956,14 +4956,16 @@ struct PhotoReviewView: View {
         // to ignore touches.
         .allowsHitTesting(false)
         .accessibilityLabel(submissionPresentation.statusButtonLabel ?? "")
-        .accessibilityAddTraits(.isButton)
+        // Saving and saved cannot be activated, so they must not announce as
+        // an activatable button; they are a live status instead.
+        .accessibilityRemoveTraits(.isButton)
+        .accessibilityAddTraits(.updatesFrequently)
         .accessibilityIdentifier("photo-review.start-listing")
     }
 
     @ViewBuilder
     private func actionButton(
-        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
-        phase: PhotoReviewSubmissionPresentation.BarPhase
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
         let button = Button {
             openBoundary(submissionPresentation.primaryActionEvent)

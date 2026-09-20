@@ -1323,28 +1323,29 @@ private struct TrophyWallProcessingRowView: View {
         Button {
             perform(action)
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 if case .retry = action {
                     retryIcon
                 }
                 Text(action.label)
                     .snapListTypography(.status)
+                    .fontWeight(.bold)
+                    // Labels never truncate or wrap, at any Dynamic Type size.
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: true)
             }
             .foregroundStyle(action.foregroundColor)
             .frame(minWidth: SnapListMetrics.minimumTouchTarget)
             .frame(minHeight: SnapListMetrics.minimumTouchTarget)
             .padding(.horizontal, 10)
-            .background(action.backgroundColor)
-            .clipShape(.rect(cornerRadius: 12))
+            .background(action.backgroundColor, in: Capsule())
             .overlay {
                 if action.showsBorder {
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(
-                            SnapListColorToken.hairline.color,
-                            lineWidth: 1
-                        )
+                    Capsule()
+                        .stroke(action.borderColor, lineWidth: 1.4)
                 }
             }
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
@@ -1469,29 +1470,45 @@ private extension TrophyWallProcessingAction {
         }
     }
 
+    /// #1130 (owner pick F): Review is the one filled capsule so the next step
+    /// is unmistakable; Retry and Scan stay outlined so they never compete with
+    /// it. Color never carries meaning alone: every button keeps its label.
     var backgroundColor: Color {
         switch self {
-        case .review, .retry:
-            SnapListColorToken.actionTint.color
-        case .scan:
-            SnapListColorToken.canvas.color
+        case .review:
+            SnapListColorToken.action.color
+        case .retry, .scan:
+            .clear
         }
     }
 
     var foregroundColor: Color {
         switch self {
-        case .review, .retry:
+        case .review:
+            SnapListColorToken.canvas.color
+        case .retry:
             SnapListColorToken.actionDeep.color
         case .scan:
             SnapListColorToken.inkPrimary.color
         }
     }
 
+    var borderColor: Color {
+        switch self {
+        case .review:
+            .clear
+        case .retry:
+            SnapListColorToken.action.color
+        case .scan:
+            SnapListColorToken.hairline.color
+        }
+    }
+
     var showsBorder: Bool {
-        if case .scan = self {
-            true
-        } else {
+        if case .review = self {
             false
+        } else {
+            true
         }
     }
 }

@@ -63,6 +63,44 @@ final class HomeAPIOriginTests: XCTestCase {
 
 @MainActor
 final class TrophyWallDomainTests: XCTestCase {
+    /// #1130: ready to review first, then needs retry, then everything still
+    /// working; newest first inside each group, so a finished item is never
+    /// buried under three that are still in progress.
+    func testProcessingRowsSortReadyThenRetryThenWorkingKeepingChronologyInsideEachGroup() {
+        let principal = TrophyWallPrincipalScope(opaqueValue: "principal-1130")
+        func run(_ n: Int) -> UUID {
+            UUID(uuidString: "11300000-0000-4000-8000-00000000000\(n)")!
+        }
+        // Newest first: working(5), retry(4), ready(3), working(2), ready(1).
+        func card(
+            _ n: Int,
+            _ state: TrophyWallCardState
+        ) -> TrophyWallCard {
+            .accepted(
+                principalScope: principal,
+                runID: run(n),
+                state: state,
+                itemName: "Item \(n)",
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: Double(n))
+            )
+        }
+        let store = TrophyWallStore(
+            principalScope: principal,
+            repository: StaticTrophyWallRepository(cards: [
+                card(1, .readyToReview),
+                card(2, .workingPricing),
+                card(3, .readyToReview),
+                card(4, .needsRetryLocked(detail: "Try again")),
+                card(5, .accepted),
+            ])
+        )
+
+        XCTAssertEqual(
+            store.processingRows.map(\.itemName),
+            ["Item 3", "Item 1", "Item 4", "Item 5", "Item 2"]
+        )
+    }
+
     /// #1126 / #1122: a row cached with the `Item <id>` stub fetched while the
     /// run was analyzing converges to the server's real title when
     /// the run succeeds. The cached name must not outrank a fresh projection.
@@ -539,7 +577,7 @@ final class TrophyWallDomainTests: XCTestCase {
             )
         )
 
-        let row = store.processingRows.last
+        let row = store.processingRows.first { $0.id == .run(fixture.runID) }
         XCTAssertEqual(row?.activation, .action(.review(runID: fixture.runID)))
         XCTAssertNil(row?.destination)
         XCTAssertEqual(row?.action, .review(runID: fixture.runID))
@@ -562,7 +600,7 @@ final class TrophyWallDomainTests: XCTestCase {
             principalScope: fixture.principal
         )
 
-        let row = store.processingRows.last
+        let row = store.processingRows.first { $0.id == .run(fixture.runID) }
         XCTAssertEqual(row?.activation, .action(.retry(runID: fixture.runID)))
         XCTAssertNil(row?.destination)
         XCTAssertEqual(row?.action, .retry(runID: fixture.runID))
@@ -585,7 +623,7 @@ final class TrophyWallDomainTests: XCTestCase {
             principalScope: fixture.principal
         )
 
-        let row = store.processingRows.last
+        let row = store.processingRows.first { $0.id == .run(fixture.runID) }
         XCTAssertEqual(row?.stateLabel, "Retrying")
         XCTAssertEqual(row?.accessibilityLabel, "\(fixture.matchedItemName), retrying.")
         // #1116: a retrying row opens the plain "Still working" state.
@@ -608,7 +646,7 @@ final class TrophyWallDomainTests: XCTestCase {
             principalScope: fixture.principal
         )
 
-        let scanRow = scanStore.processingRows.last
+        let scanRow = scanStore.processingRows.first { $0.id == .run(fixture.runID) }
         XCTAssertEqual(scanRow?.activation, .action(.scan(runID: fixture.runID)))
         XCTAssertNil(scanRow?.destination)
         XCTAssertEqual(scanRow?.action, .scan(runID: fixture.runID))
@@ -628,7 +666,7 @@ final class TrophyWallDomainTests: XCTestCase {
             principalScope: fixture.principal
         )
 
-        let staticRow = staticStore.processingRows.last
+        let staticRow = staticStore.processingRows.first { $0.id == .run(fixture.runID) }
         XCTAssertEqual(
             staticRow?.activation,
             TrophyWallProcessingRowActivation.none
@@ -667,7 +705,7 @@ final class TrophyWallDomainTests: XCTestCase {
         store.ingest(historyPage: retryablePage, principalScope: fixture.principal)
         XCTAssertEqual(
             store.processingRows.map(\.stateLabel),
-            ["Pending upload", "Needs retry · Upload didn't finish."]
+            ["Needs retry · Upload didn't finish.", "Pending upload"]
         )
 
         store.ingest(historyPage: retentionCleanedPage, principalScope: fixture.principal)
@@ -1417,8 +1455,8 @@ final class TrophyWallDomainTests: XCTestCase {
 
         XCTAssertTrue(store.settledTiles.isEmpty)
         XCTAssertEqual(store.processingRows.map(\.stateLabel), [
-            "Pending upload",
             "Ready to review",
+            "Pending upload",
         ])
         XCTAssertEqual(
             store.cards.last?.orderKey.lastMeaningfulUpdateAt,
@@ -2901,18 +2939,18 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.stateLabel),
-            ["Pending upload", expectedStateLabel]
+            [expectedStateLabel, "Pending upload"]
         )
         XCTAssertEqual(
             store.processingRows.map(\.accessibilityLabel),
             [
-                "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
                 expectedAccessibilityLabel,
+                "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
             ]
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.localRecovery(fixture.unrelatedLogicalID), nil]
+            [nil, .localRecovery(fixture.unrelatedLogicalID)]
         )
         XCTAssertEqual(store.cards, firstCards)
         XCTAssertEqual(store.processingRows, firstRows)
