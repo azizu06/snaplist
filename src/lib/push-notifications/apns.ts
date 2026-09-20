@@ -1,3 +1,4 @@
+import { createPrivateKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connect, type ClientHttp2Session } from "node:http2";
 import { SignJWT, importPKCS8 } from "jose";
@@ -135,7 +136,32 @@ export function resolveApnsConfig(
     }
   }
 
+  assertUsableSigningKey(privateKeyPem, inlineKey ? "APNS_AUTH_KEY" : "APNS_AUTH_KEY_PATH");
+
   return { bundleId: bundleId!, keyId: keyId!, privateKeyPem, teamId: teamId! };
+}
+
+/**
+ * A key that carries the PEM marker can still be truncated or the wrong kind,
+ * and would only fail at signing time, after the once-only delivery claim was
+ * spent. Parse it here so a bad key reads as "not configured" before anything
+ * is claimed. Names the variable, never the material.
+ */
+function assertUsableSigningKey(pem: string, variable: string): void {
+  let usable = false;
+  try {
+    const key = createPrivateKey({ key: pem, format: "pem" });
+    usable =
+      key.asymmetricKeyType === "ec" &&
+      key.asymmetricKeyDetails?.namedCurve === "prime256v1";
+  } catch {
+    usable = false;
+  }
+  if (!usable) {
+    throw new ApnsMisconfiguredError(
+      `${variable} is not a usable APNs auth key (expected an EC P-256 PKCS8 key).`,
+    );
+  }
 }
 
 function normalizeInlineKey(value: string): string {

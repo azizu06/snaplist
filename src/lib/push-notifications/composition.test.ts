@@ -285,3 +285,31 @@ describe("recovering from a transient resolveApnsConfig failure", () => {
     }
   });
 });
+
+describe("an unusable inline key never reaches the delivery claim (#1123)", () => {
+  it("reports not configured and makes no database call for a truncated key", async () => {
+    clearApnsTestEnv();
+    process.env.APNS_KEY_ID = "TEST_KEY_ID";
+    process.env.APNS_TEAM_ID = "TEST_TEAM_ID";
+    process.env.APNS_BUNDLE_ID = "com.snaplist.app.test";
+    process.env.APNS_AUTH_KEY = "-----BEGIN PRIVATE KEY-----\nTRUNCATED";
+    try {
+      const log = vi.fn();
+      const client = recordingClient();
+      await createSellerPushDispatcherFor(client, log).listingReady({
+        userId: "user-1",
+        runId: "run-1",
+        itemName: "Lamp",
+      });
+      expect(log).toHaveBeenCalledWith(
+        "push_not_configured",
+        expect.objectContaining({
+          reason: expect.stringContaining("not a usable APNs auth key"),
+        }),
+      );
+      expect(client.rpc).not.toHaveBeenCalled();
+    } finally {
+      clearApnsTestEnv();
+    }
+  });
+});
