@@ -40,7 +40,7 @@ const GONE_REASONS = new Set(["Unregistered", "BadDeviceToken"]);
 export interface ApnsConfig {
   bundleId: string;
   keyId: string;
-  /** PKCS8 PEM, read from disk at startup. Never logged, never serialised. */
+  /** PKCS8 PEM, from `APNS_AUTH_KEY` or read from disk. Never logged, never serialised. */
   privateKeyPem: string;
   teamId: string;
 }
@@ -88,13 +88,14 @@ export function resolveApnsConfig(
   const keyId = env.APNS_KEY_ID?.trim();
   const teamId = env.APNS_TEAM_ID?.trim();
   const bundleId = env.APNS_BUNDLE_ID?.trim();
+  const inlineKey = env.APNS_AUTH_KEY?.trim();
   const keyPath = env.APNS_AUTH_KEY_PATH?.trim();
 
   const missing = [
     ["APNS_KEY_ID", keyId],
     ["APNS_TEAM_ID", teamId],
     ["APNS_BUNDLE_ID", bundleId],
-    ["APNS_AUTH_KEY_PATH", keyPath],
+    ["APNS_AUTH_KEY or APNS_AUTH_KEY_PATH", inlineKey || keyPath],
   ]
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -105,23 +106,43 @@ export function resolveApnsConfig(
   }
 
   let privateKeyPem: string;
-  try {
-    privateKeyPem = readKey(keyPath!);
-  } catch (error) {
-    // The path, never the contents. A key that failed to load is still a key.
-    throw new Error(
-      `Seller push could not read APNS_AUTH_KEY_PATH (${keyPath}): ${
-        error instanceof Error ? error.name : typeof error
-      }.`,
-    );
-  }
-  if (!privateKeyPem.includes("BEGIN PRIVATE KEY")) {
-    throw new Error(
-      "APNS_AUTH_KEY_PATH does not point at an APNs auth key. Apple issues it as a PKCS8 .p8 file.",
-    );
+  if (inlineKey) {
+    // A serverless deployment has no durable file to point at, so the key
+    // arrives as a value. Dashboards flatten a PEM's newlines to literal `\n`
+    // or to base64; both are undone here. The error names the variable and
+    // never the value: a key that failed to parse is still a key.
+    privateKeyPem = normalizeInlineKey(inlineKey);
+    if (!privateKeyPem.includes("BEGIN PRIVATE KEY")) {
+      throw new ApnsMisconfiguredError(
+        "APNS_AUTH_KEY does not point at an APNs auth key. Apple issues it as a PKCS8 .p8 file.",
+      );
+    }
+  } else {
+    try {
+      privateKeyPem = readKey(keyPath!);
+    } catch (error) {
+      // The path, never the contents. A key that failed to load is still a key.
+      throw new Error(
+        `Seller push could not read APNS_AUTH_KEY_PATH (${keyPath}): ${
+          error instanceof Error ? error.name : typeof error
+        }.`,
+      );
+    }
+    if (!privateKeyPem.includes("BEGIN PRIVATE KEY")) {
+      throw new Error(
+        "APNS_AUTH_KEY_PATH does not point at an APNs auth key. Apple issues it as a PKCS8 .p8 file.",
+      );
+    }
   }
 
   return { bundleId: bundleId!, keyId: keyId!, privateKeyPem, teamId: teamId! };
+}
+
+function normalizeInlineKey(value: string): string {
+  const unescaped = value.replace(/\\n/g, "\n");
+  if (unescaped.includes("BEGIN PRIVATE KEY")) return unescaped;
+  const decoded = Buffer.from(value, "base64").toString("utf8");
+  return decoded.includes("BEGIN PRIVATE KEY") ? decoded : unescaped;
 }
 
 export function createHttpApnsSender(input: {

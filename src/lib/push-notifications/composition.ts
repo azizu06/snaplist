@@ -47,6 +47,7 @@ function senderForCurrentEnvironment():
     env.APNS_KEY_ID,
     env.APNS_TEAM_ID,
     env.APNS_BUNDLE_ID,
+    env.APNS_AUTH_KEY,
     env.APNS_AUTH_KEY_PATH,
   ]);
   if (cachedSender?.key !== key) {

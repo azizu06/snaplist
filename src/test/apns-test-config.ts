@@ -19,6 +19,7 @@ const NAMES = [
   "APNS_KEY_ID",
   "APNS_TEAM_ID",
   "APNS_BUNDLE_ID",
+  "APNS_AUTH_KEY",
   "APNS_AUTH_KEY_PATH",
 ] as const;
 
