@@ -1,13 +1,15 @@
 # Billing — freemium subscriptions via direct Stripe (implementation plan, #64)
 
-> **Status:** frontend landed (this PR); backend is the remaining work and needs a human for the
-> Stripe account + keys. Test mode only. This doc is the handoff spec for the backend slice.
+> **Status:** historical. This doc's original "frontend landed, backend remaining" plan predates
+> `src/lib/billing/` and the Stripe/RevenueCat backend that has since shipped, and predates the web
+> `(app)` dashboard's retirement under #598. See "Current state" below for what actually exists
+> today; do not use the original frontend/backend split as a work plan.
 
 ## Why this doc
-Issue [#64](https://github.com/azizu06/snaplist/issues/64) is `ready-for-human` because it needs a
-Stripe account and keys in env. The **frontend** is independent of that and is done here, so the
-backend can land as a clean follow-up. This plan records the decisions, the data model, the
-endpoints, and — most importantly — **the one seam the backend flips** so nothing else has to change.
+Issue [#64](https://github.com/azizu06/snaplist/issues/64) originally proposed a direct-Stripe
+billing surface. This plan recorded the decisions, the data model, the endpoints, and — most
+importantly — **the one seam the backend flips** so nothing else has to change. Kept for the data
+model and endpoint design record; see "Current state" for what actually shipped.
 
 ## Non-negotiables (from PRD / AGENTS, don't relitigate)
 - **Direct Stripe SDK, not Clerk Billing.** Clerk stays **auth-only**. We want the real
@@ -22,32 +24,29 @@ endpoints, and — most importantly — **the one seam the backend flips** so no
   offline-testable against a fake.
 
 ## Current state (what already exists — build on these, don't duplicate)
-- **The tier seam:** `src/lib/abuse/config.ts` — `type Tier = "free" | "paid"`,
-  `tierLimits(tier)` (env-configurable: free = 15 items/day · 20 req/min; paid = 200 · 60), and
-  `resolveTier(userId)` which **currently returns `"free"` for everyone**. Its own comment says it is
-  "the single seam that issue [#64] will set; nothing else changes." That is literally the plan.
-- **Marketing `/pricing`** (`src/app/(marketing)/pricing/page.tsx`) — Beta `$0` live card + a
-  "Seller Pro · $TBD · Coming soon" card with a disabled "Notify me" button, plus a billing FAQ.
-- **In-app Plan & billing** (this PR) — a settings card that reads `resolveTier`/`tierLimits` and
-  shows the live plan + real daily allowance. Free shows **See plans → `/pricing`**; the paid branch
-  shows **Manage billing → `/api/billing/portal`** (the route this backend adds). The paid branch is
-  dead today (everyone is free) and is the shape the backend lights up.
+- **The tier seam:** `src/lib/abuse/config.ts` — `type Tier = "free" | "paid"` and
+  `tierLimits(tier)` (env-configurable: free = 15 items/day · 20 req/min; paid = 200 · 60).
+  `resolveTier(userId)` still returns `"free"` for everyone; it is not this plan's authority for
+  SnapList Pro entitlement (see below).
+- **This plan's Stripe backend has shipped**, in `src/lib/billing/{adapter,entitlement,lifecycle,
+  webhook}.ts` plus `src/app/api/billing/{checkout,portal}/route.ts` and
+  `src/app/api/webhooks/stripe/route.ts`, matching the endpoints and idempotency design below. No
+  client surface calls these routes today — see the next point.
+- **No `/pricing` page and no web settings surface exist.** The `(app)` web dashboard route group,
+  including any "Plan & billing" settings card, was retired under #598 (see
+  `src/app/retired-web-dashboard-copy.test.ts`); `/pricing` is a permanent redirect to `/`
+  (`next.config.ts`). The web app is marketing + auth only.
+- **SnapList Pro entitlement in the shipped native app runs through RevenueCat/StoreKit** (issue
+  #173), not this doc's Stripe checkout/portal flow — see
+  `docs/revenuecat-storekit-operator-runbook.md` and `src/lib/billing/revenuecat*.ts`. This plan's
+  Stripe backend remains unused by any current client.
 
 ## The seam the backend flips
-Today:
-```ts
-export function resolveTier(_userId: string): Tier { return "free"; }
-```
-Target: resolve from the entitlement mirror. `resolveTier` is **sync + pure** and is called on the
-abuse/rate-limit hot path, so don't make it do I/O. Instead:
-1. Add `async getEntitlement(userId): Promise<Tier>` that reads the `subscriptions` table (below) and
-   maps Stripe status → tier (`active`/`trialing` → `paid`, else `free`).
-2. Callers that already `await` (the settings page, the abuse check entry points) use
-   `getEntitlement`; keep `resolveTier` as the pure default/fallback for places that can't await.
-3. `tierLimits` stays pure and unchanged — the number shown in the UI is the number enforced.
-
-The settings page already does `const tier = resolveTier(userId)`; swapping that one line to
-`await getEntitlement(userId)` is the entire frontend change once the backend lands.
+`resolveTier(_userId) { return "free"; }` stays the pure sync default for callers that can't
+await. `getEntitlement(userId)` (async, reads the `subscriptions` mirror) has shipped and is the
+seam this Stripe plan's own item-run policy actually reads (`src/lib/billing/item-run-policy.ts`);
+`tierLimits` stays pure and unchanged. There is no settings-page caller to flip — SnapList Pro
+gating in the shipped app goes through the RevenueCat/StoreKit path described above instead.
 
 ## Data model
 `billing_customers` is an immutable, server-only Customer map (one row per Clerk user):
@@ -117,12 +116,11 @@ secret-free). Quota numbers stay on the existing `QUOTA_*` / `RATE_LIMIT_*` env 
 - **Bounded test-mode E2E** — `docs/billing-test-mode-e2e.md` covers abandoned Checkout → retry →
   signed webhook → entitlement → Portal → cancellation using one seller and no live charges.
 
-## Frontend already in place (so the backend is a clean drop-in)
-- Settings **Plan & billing** card: live tier + real allowance, free → `/pricing`, paid →
-  `/api/billing/portal`. Preview fixture covers it.
-- When the backend lands: (a) point the free CTA at `POST /api/billing/checkout`; (b) flip the
-  `/pricing` "Seller Pro · Coming soon / Notify me" card to a real checkout CTA and a concrete price;
-  (c) change the settings page's one `resolveTier` line to `await getEntitlement(userId)`.
+## No web frontend for this plan
+There is no `/pricing` page and no web settings surface (see "Current state" above); this Stripe
+backend has no client calling it. If this seam is revived, it needs a client, not just a backend
+drop-in — evaluate against the shipped RevenueCat/StoreKit entitlement path first rather than
+building a second one.
 
 ## Out of scope
 Buyer/marketplace payments (stay on eBay), Clerk Billing, annual plans, proration UI, multiple paid

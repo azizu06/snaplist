@@ -18,6 +18,7 @@ describe("required CI verification", () => {
       "pnpm typecheck",
       "pnpm lint",
       "pnpm audit:migrations",
+      "pnpm unit-economics:check",
       "pnpm test",
       "pnpm eval",
       "pnpm build",

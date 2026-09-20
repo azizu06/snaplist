@@ -45,4 +45,33 @@ describe("activation-guidance completion store", () => {
       store.complete({ bearerToken: "seller-token", userId: "seller_123" }),
     ).resolves.toBeUndefined();
   });
+
+  it("surfaces a real read failure instead of reporting not completed", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "connection reset" },
+    });
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const select = vi.fn(() => ({ eq }));
+    const store = createSupabaseActivationGuidanceStore(() => ({
+      from: vi.fn(() => ({ select })),
+    }) as unknown as ActivationGuidanceDatabaseClient);
+
+    await expect(
+      store.isCompleted({ bearerToken: "seller-token", userId: "seller_123" }),
+    ).rejects.toThrow("Activation guidance completion read failed: connection reset");
+  });
+
+  it("surfaces a non-replay write failure instead of swallowing it as success", async () => {
+    const insert = vi.fn().mockResolvedValue({
+      error: { code: "53300", message: "too many connections" },
+    });
+    const store = createSupabaseActivationGuidanceStore(() => ({
+      from: vi.fn(() => ({ insert })),
+    }) as unknown as ActivationGuidanceDatabaseClient);
+
+    await expect(
+      store.complete({ bearerToken: "seller-token", userId: "seller_123" }),
+    ).rejects.toThrow("Activation guidance completion failed: too many connections");
+  });
 });
