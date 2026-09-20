@@ -164,7 +164,7 @@ section is estimated.
 
 | Measure | Result | Source |
 | --- | --- | --- |
-| Offline test suite (`pnpm test`) | 2,938 passing, 243 skipped across 338 files. The skips are the database-backed suites, which need a running Supabase stack; CI's separate `database` job provisions one and fails rather than skips | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
+| Offline test suite (`pnpm test`) | Required CI runs the full source-only Vitest suite without hosted secrets. Its separate `database` job provisions Supabase and requires the database-backed suites to run rather than skip | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 | Database contract suites | 35 pgTAP files covering RLS tenancy, lifecycle triggers, and queue authority | [`supabase/tests/`](supabase/tests) |
 | Tenancy coverage in TypeScript | 36 `*.rls.test.ts` suites, 24 `*.migration.test.ts` suites | `src/lib/**` |
 | Eval harness | 36-item gold set; the offline CI run scores checked-in sample predictions with a deterministic judge, and validates that judge against 8 human-labeled listings at **100% within ±1** on every axis | [`src/lib/eval`](src/lib/eval), `pnpm eval` |
