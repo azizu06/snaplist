@@ -151,9 +151,10 @@ describe("listing/generate — valid output maps onto ListingCopy (ebay)", () =>
       Brand: "Sony",
       Model: "WH-1000XM4",
     });
-    expect(listing.description).toContain(
-      "Seller note (unverified): I think this is a Nintendo Switch; scratch on left hinge",
-    );
+    // The transcript is generator CONTEXT only (#1117): it never lands in the
+    // seller-visible description, and never overrides core identity.
+    expect(listing.description).not.toContain("Nintendo Switch");
+    expect(listing.description).not.toContain("scratch on left hinge");
   });
 
   it("returns a schema-valid eBay listing mapped onto the ListingCopy seam", async () => {
@@ -255,28 +256,14 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
   });
 });
 
-/**
- * A field label is a capitalized word (or short phrase) followed by a colon at the
- * start of the description or of a sentence — the `Item:` / `Condition:` / `Details:`
- * form shape a seller would never type.
- *
- * The lookahead pins the seller-note qualifier as the one deliberate exception: it is
- * the provenance disclosure the seller-context contract requires, not a form field. As
- * currently worded it would not match anyway (the `(unverified)` parenthetical breaks
- * the word run before the colon), so the lookahead is belt-and-braces — it keeps the
- * exemption true if that qualifier is ever reworded to a plain `Word:` shape.
- */
-const FIELD_LABEL_PATTERN =
-  /(?:^|[.!?]\s+)(?!Seller note \(unverified\):)[A-Z][A-Za-z]*(?: [A-Za-z]+){0,2}:/;
-
-/** Any label colon — a colon followed by whitespace — anywhere in the description. */
+/** Any label colon (a colon followed by whitespace) anywhere in the description. */
 const LABEL_COLON_PATTERN = /:\s/;
 
 describe("listing/generate — the description reads as sentences, not a form (#894)", () => {
   it("builds the core description with no field-label prefix", () => {
     const description = buildCoreListingDescription(CORE);
 
-    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(description).not.toMatch(LABEL_COLON_PATTERN);
     expect(description).not.toMatch(/\bItem:/);
     expect(description).not.toMatch(/\bCondition:/);
     expect(description).not.toMatch(/\bDetails:/);
@@ -292,18 +279,14 @@ describe("listing/generate — the description reads as sentences, not a form (#
     }
   });
 
-  it("keeps the seller note qualified as unverified without a field-label body", () => {
-    const description = buildCoreListingDescription(CORE, {
-      text: "scratch on left hinge",
-      language: "en-US",
-      provenance: "seller_voice",
-      verification: "unverified",
-    });
+  it("never pastes the seller voice transcript into the core description", () => {
+    const text = "scratch on left hinge and the case has a crack near the lid";
+    const description = buildCoreListingDescription(CORE);
 
-    expect(description).toContain(
-      "Seller note (unverified): scratch on left hinge",
-    );
-    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(description).not.toContain(text);
+    expect(description).not.toContain("scratch on left hinge");
+    expect(description).not.toContain("(");
+    expect(description).not.toMatch(LABEL_COLON_PATTERN);
   });
 
   it("does not double the word condition when the core already carries it", () => {
@@ -313,7 +296,7 @@ describe("listing/generate — the description reads as sentences, not a form (#
     });
 
     expect(description).not.toMatch(/condition condition/i);
-    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(description).not.toMatch(LABEL_COLON_PATTERN);
   });
 
   it("does not strand the noun after a condition that is already a terminated phrase", () => {
@@ -342,8 +325,7 @@ describe("listing/generate — the description reads as sentences, not a form (#
     });
 
     expect(description).not.toMatch(LABEL_COLON_PATTERN);
-    expect(description).toContain("USB-C 2 ports.");
-    expect(description).toContain("Battery life 30 hours.");
+    expect(description).toContain("It has USB-C 2 ports and battery life 30 hours.");
   });
 
   it("keeps a colon that is part of a value rather than a label", () => {
@@ -373,7 +355,7 @@ describe("listing/generate — the description reads as sentences, not a form (#
       maxRetries: 0,
     });
 
-    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(listing.description).not.toMatch(LABEL_COLON_PATTERN);
   });
 
   it("returns a sentence-shaped description on the factual fallback path", async () => {
@@ -393,7 +375,7 @@ describe("listing/generate — the description reads as sentences, not a form (#
     // still reads as sentences.
     expect(calls).toHaveLength(2);
     expect(listing).toEqual(fallbackEbayListing(CORE));
-    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(listing.description).not.toMatch(LABEL_COLON_PATTERN);
   });
 });
 
@@ -893,5 +875,171 @@ describe("listing/generate — grounded by injected few-shot retrieval", () => {
     }));
     await generateEbayListing({ attributes: CORE, fewShot: EXEMPLARS, generate });
     expect(generate).toHaveBeenCalledOnce();
+  });
+});
+
+describe("listing/generate — a voice transcript is context, never copy (#1117)", () => {
+  const TRANSCRIPT =
+    "the left earbud has a small scuff on the stem and the charging case works fine";
+  const sellerContext = {
+    text: TRANSCRIPT,
+    language: "en-US",
+    provenance: "seller_voice" as const,
+    verification: "unverified" as const,
+  };
+
+  it("does not surface the transcript, parentheses, or label colons in the description", async () => {
+    const { generate } = scriptedGenerate([GOOD_LISTING]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      sellerContext,
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(listing.description.toLowerCase()).not.toContain(TRANSCRIPT.toLowerCase());
+    expect(listing.description).not.toContain("(");
+    expect(listing.description).not.toMatch(LABEL_COLON_PATTERN);
+  });
+
+  it("retries when the model pastes the transcript into its description", async () => {
+    const pasted = {
+      ...GOOD_LISTING,
+      description: "Includes the original box. The left earbud has a small scuff on the stem. Tested and working.",
+    };
+    const { generate, calls } = scriptedGenerate([pasted, GOOD_LISTING]);
+
+    await generateEbayListing({
+      attributes: CORE,
+      sellerContext,
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(2);
+  });
+
+  it("accepts a core-backed parenthetical and a single Note: label with one model call", async () => {
+    const { generate, calls } = scriptedGenerate([
+      {
+        ...GOOD_LISTING,
+        description:
+          "Sony WH-1000XM4 (over-ear) in good used condition. Note: light wear on the case.",
+      },
+    ]);
+
+    await generateEbayListing({ attributes: CORE, fewShot: EXEMPLARS, generate });
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it("retries when the model description is a Label: value list", async () => {
+    const { generate, calls } = scriptedGenerate([
+      {
+        ...GOOD_LISTING,
+        description: "Brand: Apple\nModel: A2698\nCondition: Used",
+      },
+      GOOD_LISTING,
+    ]);
+
+    await generateEbayListing({ attributes: CORE, fewShot: EXEMPLARS, generate });
+
+    expect(calls).toHaveLength(2);
+  });
+
+});
+
+describe("listing/generate — the description is deterministic prose from the core (#1117)", () => {
+  const voice = (text: string) => ({
+    text,
+    language: "en-US",
+    provenance: "seller_voice" as const,
+    verification: "unverified" as const,
+  });
+  const withSpecs = (specs: string[] | undefined) =>
+    buildCoreListingDescription({ ...CORE, specs });
+
+  it("says nothing about specs when there are none", () => {
+    expect(withSpecs(undefined)).toBe("Sony WH-1000XM4 in good condition.");
+    expect(withSpecs([])).toBe("Sony WH-1000XM4 in good condition.");
+  });
+
+  it("joins one, two, and three-plus specs into one natural sentence", () => {
+    expect(withSpecs(["White charging case"])).toContain(" It has white charging case.");
+    expect(withSpecs(["White charging case", "Silicone ear tips"])).toContain(
+      " It has white charging case and silicone ear tips.",
+    );
+    expect(
+      withSpecs(["White charging case", "Silicone ear tips", "Charging-case status LED"]),
+    ).toContain(
+      " It has white charging case, silicone ear tips and charging-case status LED.",
+    );
+  });
+
+  it("keeps acronyms and internal capitals when lowercasing the first letter", () => {
+    expect(withSpecs(["LED status light", "USB-C port", "iPhone cable", "Wireless"])).toContain(
+      "It has LED status light, USB-C port, iPhone cable and wireless.",
+    );
+  });
+
+  it("humanises an enum condition grade in the description", () => {
+    const description = buildCoreListingDescription({ ...CORE, condition: "very-good" });
+
+    expect(description).toContain("very good condition");
+    expect(description).not.toContain("very-good");
+  });
+
+  it("keeps the RAW enum condition in the item specifics", async () => {
+    const { generate } = scriptedGenerate([GOOD_LISTING]);
+
+    const { listing } = await generateEbayListing({
+      attributes: { ...CORE, condition: "very-good" },
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(listing.itemSpecifics.Condition).toBe("very-good");
+  });
+
+  it("uses the template for the description and never lets the transcript introduce identity", async () => {
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      sellerContext: voice("this is the newest generation of AirPods Pros, works like new"),
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(listing.description).toBe(buildCoreListingDescription(CORE));
+    expect(listing.description).not.toMatch(/AirPods/);
+  });
+
+  it("rejects a model description that mentions a seller note or unverified", async () => {
+    const { generate, calls } = scriptedGenerate([
+      { ...GOOD_LISTING, description: "Sony WH-1000XM4 headphones. Seller note unverified, sounds great." },
+      GOOD_LISTING,
+    ]);
+
+    await generateEbayListing({ attributes: CORE, fewShot: EXEMPLARS, generate });
+
+    expect(calls).toHaveLength(2);
+  });
+
+  it("does not treat a one-word transcript as a forbidden shingle", async () => {
+    const { generate, calls } = scriptedGenerate([
+      { ...GOOD_LISTING, description: "Sony WH-1000XM4 headphones in black. Tested and working." },
+    ]);
+
+    await generateEbayListing({
+      attributes: CORE,
+      sellerContext: voice("black"),
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(1);
   });
 });

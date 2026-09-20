@@ -1,18 +1,41 @@
-import { extractedAttributesSchema } from "@/lib/pipeline/types";
+function trimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Read only the three name fields, one by one, so a malformed unrelated attribute
+ * (specs, measurements) cannot hide a usable name (#1117).
+ */
+function readNameFields(attributes: unknown): {
+  brand: string;
+  model: string;
+  title: string;
+} {
+  const source =
+    attributes && typeof attributes === "object" ? (attributes as Record<string, unknown>) : {};
+  return {
+    brand: trimmedString(source.brand),
+    model: trimmedString(source.model),
+    title: trimmedString(source.title),
+  };
+}
 
 /**
  * Human label for an item from its extracted attributes — "brand model"
- * first, the vision title second, a truncated id as the last resort. Shared
+ * first, the vision title second, the generated listing (draft) title third,
+ * a truncated id as the last resort. Shared
  * by the dashboard row assembly and the ⌘K search API so the same item never
  * shows two different names.
  */
-export function itemLabel(attributes: unknown, id: string): string {
-  const parsed = extractedAttributesSchema.safeParse(attributes ?? {});
-  if (parsed.success) {
-    const a = parsed.data;
-    const label =
-      [a.brand?.trim(), a.model?.trim()].filter(Boolean).join(" ") || a.title?.trim();
-    if (label) return label;
-  }
+export function itemLabel(
+  attributes: unknown,
+  id: string,
+  listingTitle?: string | null,
+): string {
+  const a = readNameFields(attributes);
+  const label = [a.brand, a.model].filter(Boolean).join(" ") || a.title;
+  if (label) return label;
+  const draftTitle = listingTitle?.trim();
+  if (draftTitle) return draftTitle;
   return `Item ${id.slice(0, 8)}`;
 }

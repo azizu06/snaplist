@@ -95,6 +95,16 @@ describe("assembleDashboardRows", () => {
     expect(ghost?.title).toBe("Fallback SEO Title");
   });
 
+  it("labels a row by its listing title when the item's attributes carry no name", () => {
+    const rows = assembleDashboardRows({
+      listings: [listing({ title: "Apple AirPods Pro 2nd Generation" })],
+      items: [item({ attributes: {} })],
+      latestPrice: new Map(),
+      thumbUrlFor: noThumbs,
+    });
+    expect(rows[0]?.title).toBe("Apple AirPods Pro 2nd Generation");
+  });
+
   it("prices a row: seller override beats the latest suggested; suggested otherwise; bare override without a log", () => {
     const rows = assembleDashboardRows({
       listings: [],

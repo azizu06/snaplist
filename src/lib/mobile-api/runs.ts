@@ -197,6 +197,10 @@ const itemRowSchema = z
     user_id: z.string().min(1),
     attributes: z.unknown(),
     photos: z.array(z.string()),
+    // Draft titles embedded by `readItem`; the history RPC does not carry them.
+    listings: z
+      .array(z.object({ id: z.string().uuid(), title: z.string().nullable() }).strict())
+      .optional(),
   })
   .strict();
 
@@ -225,6 +229,7 @@ const deliveryProjectionRowSchema = z
     user_id: z.string().min(1),
     item_id: z.string().uuid(),
     platform: z.string().min(1),
+    title: z.string().nullable().optional(),
     source_review_revision: z.string().uuid().nullable(),
     ebay_listing_id: z.string().min(1).nullable(),
     ebay_status: z.string().nullable(),
@@ -301,12 +306,25 @@ function requireData<T>(
   return result.data;
 }
 
+/**
+ * The generated listing title for an item's run: the run's own listing when it
+ * has one, else the first listing that carries a title. Only a label fallback.
+ */
+function draftListingTitle(
+  listings: ReadonlyArray<{ id: string; title?: string | null }>,
+  listingId: string | null,
+): string | null {
+  const titled = listings.filter((listing) => listing.title?.trim());
+  return (titled.find((listing) => listing.id === listingId) ?? titled[0])?.title ?? null;
+}
+
 function projectCanonicalRun(
   run: z.infer<typeof runRowSchema>,
   item: z.infer<typeof itemRowSchema>,
   retryProjection: z.infer<typeof retryProjectionRowSchema>,
   userId: string,
   delivery?: DeliveryProjection,
+  draftTitle?: string | null,
 ): MobileRun {
   if (run.user_id !== userId) {
     throw new MobileRunUnavailableError("Run detail crossed the verified tenant boundary");
@@ -346,7 +364,7 @@ function projectCanonicalRun(
       retentionCleanedAt: run.retention_cleaned_at,
     },
     item: {
-      title: itemLabel(item.attributes, item.id),
+      title: itemLabel(item.attributes, item.id, draftTitle),
       photoCount: item.photos.length,
     },
     requiredInput: null,
@@ -391,11 +409,14 @@ async function readCanonicalRun(
     throw new MobileRunUnavailableError("Run retry projection was unavailable");
   }
 
+  const item = itemRowSchema.parse(rawItem);
   return projectCanonicalRun(
     run,
-    itemRowSchema.parse(rawItem),
+    item,
     retryProjectionRowSchema.parse(rawProjection),
     userId,
+    undefined,
+    draftListingTitle(item.listings ?? [], run.listing_id),
   );
 }
 
@@ -491,6 +512,14 @@ export function createMobileRunOperations(
               ? coverPhotoUrls.get(row.item_projection.photos[0])
               : undefined,
           ),
+          draftListingTitle(
+            deliveryRows.filter(
+              (delivery) =>
+                delivery.item_id === row.item_projection.id
+                && delivery.user_id === input.userId,
+            ),
+            row.run_projection.listing_id,
+          ),
         )
       );
       const boundary = rows.length > input.limit ? pageRows.at(-1) : undefined;
@@ -584,7 +613,7 @@ export function createSupabaseMobileRunDataClient(
       return client
         .from("listings")
         .select(
-          "id,user_id,item_id,platform,source_review_revision,ebay_listing_id,ebay_status,item:items!listings_item_user_fkey(review_content_revision)",
+          "id,user_id,item_id,platform,title,source_review_revision,ebay_listing_id,ebay_status,item:items!listings_item_user_fkey(review_content_revision)",
         )
         .in("item_id", itemIds);
     },
@@ -601,7 +630,7 @@ export function createSupabaseMobileRunDataClient(
     readItem(itemId) {
       return client
         .from("items")
-        .select("id,user_id,attributes,photos")
+        .select("id,user_id,attributes,photos,listings!listings_item_user_fkey(id,title)")
         .eq("id", itemId)
         .maybeSingle();
     },

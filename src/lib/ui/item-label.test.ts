@@ -50,4 +50,61 @@ describe("itemLabel", () => {
     expect(itemLabel(null, "abcdef123456")).toBe("Item abcdef12");
     expect(itemLabel("not an object", "abcdef123456")).toBe("Item abcdef12");
   });
+
+  describe("generated listing title fallback (#1117)", () => {
+    it("uses the listing title when attributes carry neither brand/model nor title", () => {
+      expect(itemLabel({}, "abcdef123456", "Apple AirPods Pro 2nd Gen")).toBe(
+        "Apple AirPods Pro 2nd Gen",
+      );
+    });
+
+    it("keeps brand + model ahead of the listing title", () => {
+      expect(
+        itemLabel({ brand: "Apple", model: "AirPods Pro" }, "abcdef123456", "Long SEO title"),
+      ).toBe("Apple AirPods Pro");
+    });
+
+    it("keeps the vision title ahead of the listing title", () => {
+      expect(itemLabel({ title: "Wireless earbuds" }, "abcdef123456", "Long SEO title")).toBe(
+        "Wireless earbuds",
+      );
+    });
+
+    it("ignores a blank listing title and falls to the id stub", () => {
+      expect(itemLabel({}, "abcdef123456", "   ")).toBe("Item abcdef12");
+      expect(itemLabel({}, "abcdef123456", null)).toBe("Item abcdef12");
+    });
+
+    it("uses the listing title when attributes fail to parse", () => {
+      expect(itemLabel(null, "abcdef123456", "Canon AE-1 Camera")).toBe("Canon AE-1 Camera");
+    });
+  });
+
+  describe("resilience (#1117)", () => {
+    const PROD_ATTRIBUTES = {
+      specs: ["White charging case", "Silicone ear tips", "Charging-case status LED"],
+      title: "White AirPods Pro-style Wireless Earbuds with Case",
+      category: "true wireless earbuds with charging case",
+      condition: "very-good",
+    };
+
+    it("labels the production attributes payload by its vision title", () => {
+      expect(itemLabel(PROD_ATTRIBUTES, "ae304646-0000")).toBe(
+        "White AirPods Pro-style Wireless Earbuds with Case",
+      );
+    });
+
+    it("still reads title and brand+model when the schema parse fails", () => {
+      const broken = { ...PROD_ATTRIBUTES, specs: "not-an-array", measurements: 7 };
+      expect(itemLabel(broken, "ae304646-0000")).toBe(PROD_ATTRIBUTES.title);
+      expect(itemLabel({ brand: "Apple", model: "AirPods Pro", specs: 3 }, "ae304646-0000")).toBe(
+        "Apple AirPods Pro",
+      );
+    });
+
+    it("falls through a failed parse to the listing title, then the id", () => {
+      expect(itemLabel({ specs: 3 }, "ae304646-0000", "Listing title")).toBe("Listing title");
+      expect(itemLabel({ specs: 3 }, "ae304646-0000")).toBe("Item ae304646");
+    });
+  });
 });
