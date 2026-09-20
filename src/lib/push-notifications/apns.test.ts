@@ -477,6 +477,12 @@ describe("the auth key delivered inline (#1123)", () => {
     expect(config.privateKeyPem.trim()).toBe(privateKeyPem.trim());
   });
 
+  it("restores a PEM whose newlines arrived as literal \\r\\n escapes", () => {
+    const escaped = privateKeyPem.trim().replace(/\n/g, "\\r\\n");
+    const config = resolveApnsConfig({ ...base, APNS_AUTH_KEY: escaped }, neverRead);
+    expect(config.privateKeyPem.trim()).toBe(privateKeyPem.trim());
+  });
+
   it("decodes a base64-encoded PEM", () => {
     const encoded = Buffer.from(privateKeyPem, "utf8").toString("base64");
     const config = resolveApnsConfig({ ...base, APNS_AUTH_KEY: encoded }, neverRead);
