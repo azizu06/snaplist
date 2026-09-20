@@ -393,6 +393,77 @@ final class HomeUITests: XCTestCase {
         add(terminalAccessibility)
     }
 
+    /// #1116: an analyzing/retrying row used to be inert. Tapping it now opens
+    /// a plain "Still working on this item" state — no destination, no queue
+    /// vocabulary — and dismissing it leaves Processing where it was.
+    func testProcessingRetryingRowOpensPlainStillWorkingState() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let retryingRunID = "37500000-0000-4000-8000-000000000006"
+        let disclosure = app.buttons["trophy.processing.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        disclosure.tap()
+
+        let row = app.buttons["trophy.processing.row.run.\(retryingRunID)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        row.tap()
+
+        let alert = app.alerts["Still working on this item"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 3))
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "PROC-1116-still-working"
+        shot.lifetime = .keepAlways
+        add(shot)
+        if let dir = ProcessInfo.processInfo.environment["SNAPLIST_SHOT_DIR"] {
+            try? XCUIScreen.main.screenshot().pngRepresentation
+                .write(to: URL(fileURLWithPath: dir + "/processing-still-working.png"))
+        }
+        alert.buttons["OK"].tap()
+        XCTAssertFalse(alert.exists)
+        XCTAssertTrue(app.otherElements["trophy.processing"].exists)
+    }
+
+    /// #1116: Listing Review's photos read like Review photos — the shared
+    /// hero plus a read-only thumbnail strip beneath.
+    func testListingReviewShowsPhotoCarouselWithThumbnailStrip() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--visual-state=HOME-01",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--run-detail-fixture=reviewable",
+            "--listing-review-fixture=loaded",
+            "--reset-listing-review-draft",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let tile = app.buttons[
+            "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
+        ]
+        XCTAssertTrue(tile.waitForExistence(timeout: 10))
+        tile.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["listing-review.photos"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["listing-review.photo-thumbnails"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertFalse(app.buttons["Add"].exists)
+        if let dir = ProcessInfo.processInfo.environment["SNAPLIST_SHOT_DIR"] {
+            try? XCUIScreen.main.screenshot().pngRepresentation
+                .write(to: URL(fileURLWithPath: dir + "/listing-review.png"))
+        }
+    }
+
     func testProcessingScanActionSelectsScanWithoutChangingItsRunRoute() {
         let app = XCUIApplication()
         app.launchArguments = [

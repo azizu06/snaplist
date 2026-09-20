@@ -9,6 +9,18 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    /// #1116: an accepted item's Done is the filled primary; Cancel while
+    /// saving stays secondary so the seller is not nudged to abort.
+    func testSubmissionBarDoneIsFilledAndSavingCancelStaysOutlined() {
+        let accepted = PhotoReviewSubmissionPresentation.visualState(.accepted)
+        let saving = PhotoReviewSubmissionPresentation.visualState(.saving)
+
+        XCTAssertEqual(accepted.primaryActionLabel, "Done")
+        XCTAssertEqual(accepted.actionStyle, .filled)
+        XCTAssertEqual(saving.primaryActionLabel, "Cancel")
+        XCTAssertEqual(saving.actionStyle, .outlined)
+    }
+
     /// The photo-count pill reads `PhotoReviewCapacityPolicy.photoLimit`, not a
     /// literal — this pins that constant to the domain's `CapturePhotoLimits`
     /// so the two can never drift apart (hub audit finding on #1051).

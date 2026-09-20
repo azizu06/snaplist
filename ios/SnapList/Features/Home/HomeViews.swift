@@ -1186,6 +1186,7 @@ private struct TrophyWallProcessingRowView: View {
     /// rejected, so the row can say so where the seller is instead of pushing
     /// them to a status screen. A later successful attempt clears it.
     @State private var rejectedAction: TrophyWallProcessingAction?
+    @State private var showsStillWorking = false
 
     private var layout: TrophyWallProcessingRowMetrics.Layout {
         TrophyWallProcessingRowMetrics.layout(for: dynamicTypeSize)
@@ -1282,6 +1283,24 @@ private struct TrophyWallProcessingRowView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(row.accessibilityLabel)
             .accessibilityIdentifier(row.accessibilityIdentifier)
+        case .stillWorking:
+            Button {
+                showsStillWorking = true
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(row.accessibilityLabel)
+            .accessibilityHint("Shows what is happening with this item.")
+            .accessibilityIdentifier(row.accessibilityIdentifier)
+            .alert(
+                TrophyWallProcessingRowActivation.stillWorkingTitle,
+                isPresented: $showsStillWorking
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(TrophyWallProcessingRowActivation.stillWorkingMessage)
+            }
         case .none:
             // Not a control: this state has nowhere direct to go (#963).
             content

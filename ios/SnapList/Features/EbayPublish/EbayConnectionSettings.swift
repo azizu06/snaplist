@@ -153,6 +153,12 @@ struct EbayConnectionSettingsView: View {
     private var notConnected: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                // #1116: the eBay wordmark, as the marketplace rows use theirs.
+                Image("MarketplaceMarkEbay")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 32)
+                    .accessibilityHidden(true)
                 Text("Connect your eBay account")
                     .snapListTypography(.displayTitle)
                     .accessibilityAddTraits(.isHeader)

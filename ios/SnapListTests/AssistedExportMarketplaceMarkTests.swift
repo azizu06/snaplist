@@ -16,6 +16,8 @@ final class AssistedExportMarketplaceMarkTests: XCTestCase {
         "MarketplaceMarkFacebook",
         "MarketplaceMarkMercari",
         "MarketplaceMarkDepop",
+        // #1116: the Connect-your-eBay screen's wordmark.
+        "MarketplaceMarkEbay",
     ]
 
     func testEveryMarketplaceMarkIsBundled() {

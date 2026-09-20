@@ -630,12 +630,31 @@ enum ListingReviewCurrency {
     }
 }
 
+/// #1116: the review's photos read like Review photos — the same rounded hero
+/// container, height, page dots and 64pt thumbnail strip beneath, measured off
+/// `PhotoReviewV5VisualContract` rather than restated. Read-only: no remove or
+/// add controls, because a saved listing's photo set is immutable here.
 struct ListingReviewPhotoPager: View {
     let photos: [ListingReviewPhoto]
     @State private var selectedOrdinal = 0
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        VStack(spacing: PhotoReviewV5VisualContract.thumbnailStripTopPadding) {
+            hero
+            if photos.count > 1 {
+                thumbnailStrip
+            }
+        }
+        .padding(.horizontal, PhotoReviewV5VisualContract.contentGutter)
+        .padding(.top, 12)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("listing-review.photos")
+    }
+
+    private var hero: some View {
+        let radius = PhotoReviewV5VisualContract.heroRadius
+        return ZStack(alignment: .bottom) {
             TabView(selection: $selectedOrdinal) {
                 ForEach(photos, id: \.ordinal) { photo in
                     ListingReviewImage(
@@ -643,7 +662,7 @@ struct ListingReviewPhotoPager: View {
                         fallbackSystemImage: "photo"
                     )
                     .frame(maxWidth: .infinity)
-                    .aspectRatio(4 / 3, contentMode: .fit)
+                    .frame(height: PhotoReviewV5VisualContract.heroHeight)
                     .clipped()
                     .tag(photo.ordinal)
                     .accessibilityLabel(
@@ -657,13 +676,9 @@ struct ListingReviewPhotoPager: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(maxWidth: .infinity)
-            .aspectRatio(4 / 3, contentMode: .fit)
 
-            // #896: a gallery reports its count with dots, not a "1 of 2" pill
-            // pinned to a corner. This is #883's Photo Review indicator, now
-            // shared, so the two photo surfaces count the same way. The dots
-            // stay silent for VoiceOver because every photo above already
+            // #896: a gallery reports its count with dots. The dots stay
+            // silent for VoiceOver because every photo above already
             // announces itself as `Photo 1 of 2, cover`.
             SnapListPageDots(
                 pageCount: photos.count,
@@ -671,9 +686,57 @@ struct ListingReviewPhotoPager: View {
             )
             .padding(.bottom, SnapListPageDots.Metrics.bottomInset)
         }
+        .frame(height: PhotoReviewV5VisualContract.heroHeight)
         .background(SnapListColorToken.quietFill.color)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("listing-review.photos")
+        .clipShape(.rect(cornerRadius: radius))
+        .overlay {
+            RoundedRectangle(cornerRadius: radius)
+                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var thumbnailStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: PhotoReviewV5VisualContract.thumbnailGap) {
+                ForEach(photos, id: \.ordinal) { photo in
+                    thumbnail(photo)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("listing-review.photo-thumbnails")
+    }
+
+    private func thumbnail(_ photo: ListingReviewPhoto) -> some View {
+        let radius = PhotoReviewV5VisualContract.thumbnailRadius
+        let size = PhotoReviewV5VisualContract.thumbnailSize
+        return Button {
+            selectedOrdinal = photo.ordinal
+        } label: {
+            ListingReviewImage(
+                url: photo.url,
+                fallbackSystemImage: "photo"
+            )
+            .frame(width: size, height: size)
+            .clipShape(.rect(cornerRadius: radius))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius)
+                    .stroke(
+                        photo.ordinal == selectedOrdinal
+                            ? SnapListColorToken.action.color : .clear,
+                        lineWidth: 3
+                    )
+            }
+            .frame(minWidth: SnapListMetrics.minimumTouchTarget,
+                   minHeight: SnapListMetrics.minimumTouchTarget)
+            .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show photo \(photo.ordinal + 1)")
+        .accessibilityAddTraits(
+            photo.ordinal == selectedOrdinal ? .isSelected : []
+        )
     }
 }
 

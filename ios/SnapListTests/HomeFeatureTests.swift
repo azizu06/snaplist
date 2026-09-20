@@ -465,7 +465,7 @@ final class TrophyWallDomainTests: XCTestCase {
                            testCase.name)
             XCTAssertEqual(
                 canonicalRow?.activation,
-                TrophyWallProcessingRowActivation.none,
+                TrophyWallProcessingRowActivation.stillWorking,
                 testCase.name
             )
             XCTAssertNil(canonicalRow?.destination, testCase.name)
@@ -547,7 +547,8 @@ final class TrophyWallDomainTests: XCTestCase {
         let row = store.processingRows.last
         XCTAssertEqual(row?.stateLabel, "Retrying")
         XCTAssertEqual(row?.accessibilityLabel, "\(fixture.matchedItemName), retrying.")
-        XCTAssertEqual(row?.activation, TrophyWallProcessingRowActivation.none)
+        // #1116: a retrying row opens the plain "Still working" state.
+        XCTAssertEqual(row?.activation, TrophyWallProcessingRowActivation.stillWorking)
         XCTAssertNil(row?.destination)
         XCTAssertNil(row?.action)
     }
@@ -1311,6 +1312,19 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(collapsed.disclosureAccessibilityLabel, "Show more items")
         XCTAssertEqual(collapsed.visibleRows.count, 3)
+    }
+
+    /// #1116: an accepted row was inert; tapping it now opens a plain-language
+    /// state. The wording carries no queue, worker, lease or provider term.
+    func testAcceptedProcessingRowOpensPlainStillWorkingState() throws {
+        let row = try makeAcceptedProcessingRow(localCoverPhotoData: nil)
+
+        XCTAssertEqual(row.activation, TrophyWallProcessingRowActivation.stillWorking)
+        XCTAssertEqual(TrophyWallProcessingRowActivation.stillWorkingTitle, "Still working on this item")
+        let message = TrophyWallProcessingRowActivation.stillWorkingMessage.lowercased()
+        for banned in ["queue", "worker", "lease", "provider", "pipeline"] {
+            XCTAssertFalse(message.contains(banned), banned)
+        }
     }
 
     private func makeAcceptedProcessingRow(
