@@ -115,6 +115,23 @@ describe("assembleDashboardRows", () => {
     expect(byId.get("bare")?.price).toBe(55);
   });
 
+  it("a bare override with no base price still degrades a junk/non-positive value to null, never NaN", () => {
+    const rows = assembleDashboardRows({
+      listings: [],
+      items: [
+        item({ id: "junk", price_override: "not-a-number" }),
+        item({ id: "negative", price_override: -5 }),
+        item({ id: "zero", price_override: 0 }),
+      ],
+      latestPrice: new Map(),
+      thumbUrlFor: noThumbs,
+    });
+    const byId = new Map(rows.map((r) => [r.itemId, r]));
+    expect(byId.get("junk")?.price).toBeNull();
+    expect(byId.get("negative")?.price).toBeNull();
+    expect(byId.get("zero")?.price).toBeNull();
+  });
+
   it("a PUBLISHED row shows listed_price (the live price), not a newer suggest-only log", () => {
     const rows = assembleDashboardRows({
       listings: [listing({ status: "published", listed_price: 100 })],

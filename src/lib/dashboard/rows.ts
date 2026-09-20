@@ -123,7 +123,10 @@ export function assembleDashboardRows(
     const override =
       item?.price_override != null ? Number(item.price_override) : null;
     const base = livePrice ?? latestPrice.get(itemId) ?? null;
-    return base != null ? effectivePrice(base, override) : override;
+    // Always route through `effectivePrice` — even with no base price — so a
+    // junk/non-positive override (legacy row, bad data) degrades to null
+    // instead of returning unvalidated NaN/negative/zero straight through.
+    return effectivePrice(base, override);
   };
 
   // #101: the recorded cost basis (numeric arrives as number OR string). An
