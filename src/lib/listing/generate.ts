@@ -222,10 +222,18 @@ const SELLER_VOICE_BANNED_PATTERNS = [
 
 const SELLER_VOICE_MULTIPLE_EXCLAMATION_MARKS = /(?:[^!]*!){2}/;
 
-// Human-written description shape (#1117): no parenthetical asides and no "Label: value"
-// colon lists in prose. A colon inside a value ("16:9") has no following whitespace and
-// is left alone.
-const DESCRIPTION_PROSE_SHAPE_PATTERNS = [/[()]/u, /:\s/u];
+// Human-written description shape (#1117): a "Label: value" LIST is the failure, not a
+// factual "(2nd Generation)" or a lone "Note: light wear". A label is a short 1-3 word
+// capitalised phrase opening a line or sentence; two or more of them make a form.
+const DESCRIPTION_LABEL_START = /^[A-Z][\w-]*(?: [\w-]+){0,2}: /u;
+
+function descriptionIsLabelList(description: string): boolean {
+  return (
+    description
+      .split(/\n|(?<=[.!?])\s+/u)
+      .filter((segment) => DESCRIPTION_LABEL_START.test(segment.trim())).length >= 2
+  );
+}
 
 const TRANSCRIPT_SHINGLE_WORDS = 5;
 
@@ -263,7 +271,7 @@ function listingViolatesSellerVoice(
   sellerContext?: SellerContext,
 ): boolean {
   return (
-    DESCRIPTION_PROSE_SHAPE_PATTERNS.some((pattern) => pattern.test(raw.description)) ||
+    descriptionIsLabelList(raw.description) ||
     descriptionRepeatsTranscript(raw.description, sellerContext) ||
     SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(raw.description)) ||
     SELLER_VOICE_MULTIPLE_EXCLAMATION_MARKS.test(raw.description) ||

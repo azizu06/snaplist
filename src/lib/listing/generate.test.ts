@@ -256,28 +256,14 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
   });
 });
 
-/**
- * A field label is a capitalized word (or short phrase) followed by a colon at the
- * start of the description or of a sentence — the `Item:` / `Condition:` / `Details:`
- * form shape a seller would never type.
- *
- * The lookahead pins the seller-note qualifier as the one deliberate exception: it is
- * the provenance disclosure the seller-context contract requires, not a form field. As
- * currently worded it would not match anyway (the `(unverified)` parenthetical breaks
- * the word run before the colon), so the lookahead is belt-and-braces — it keeps the
- * exemption true if that qualifier is ever reworded to a plain `Word:` shape.
- */
-const FIELD_LABEL_PATTERN =
-  /(?:^|[.!?]\s+)(?!Seller note \(unverified\):)[A-Z][A-Za-z]*(?: [A-Za-z]+){0,2}:/;
-
-/** Any label colon — a colon followed by whitespace — anywhere in the description. */
+/** Any label colon (a colon followed by whitespace) anywhere in the description. */
 const LABEL_COLON_PATTERN = /:\s/;
 
 describe("listing/generate — the description reads as sentences, not a form (#894)", () => {
   it("builds the core description with no field-label prefix", () => {
     const description = buildCoreListingDescription(CORE);
 
-    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(description).not.toMatch(LABEL_COLON_PATTERN);
     expect(description).not.toMatch(/\bItem:/);
     expect(description).not.toMatch(/\bCondition:/);
     expect(description).not.toMatch(/\bDetails:/);
@@ -310,7 +296,7 @@ describe("listing/generate — the description reads as sentences, not a form (#
     });
 
     expect(description).not.toMatch(/condition condition/i);
-    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(description).not.toMatch(LABEL_COLON_PATTERN);
   });
 
   it("does not strand the noun after a condition that is already a terminated phrase", () => {
@@ -370,7 +356,7 @@ describe("listing/generate — the description reads as sentences, not a form (#
       maxRetries: 0,
     });
 
-    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(listing.description).not.toMatch(LABEL_COLON_PATTERN);
   });
 
   it("returns a sentence-shaped description on the factual fallback path", async () => {
@@ -390,7 +376,7 @@ describe("listing/generate — the description reads as sentences, not a form (#
     // still reads as sentences.
     expect(calls).toHaveLength(2);
     expect(listing).toEqual(fallbackEbayListing(CORE));
-    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(listing.description).not.toMatch(LABEL_COLON_PATTERN);
   });
 });
 
@@ -935,12 +921,26 @@ describe("listing/generate — a voice transcript is context, never copy (#1117)
     expect(calls).toHaveLength(2);
   });
 
-  it.each([
-    ["a parenthetical aside", "Works well (barely used) and ships fast."],
-    ["a label colon list", "Includes case. Extras: cable and pouch."],
-  ])("retries when the model description has %s", async (_name, description) => {
+  it("accepts a factual parenthetical and a single Note: label with one model call", async () => {
     const { generate, calls } = scriptedGenerate([
-      { ...GOOD_LISTING, description },
+      {
+        ...GOOD_LISTING,
+        description:
+          "Sony WH-1000XM4 (2nd Generation) in good used condition. Note: light wear on the case.",
+      },
+    ]);
+
+    await generateEbayListing({ attributes: CORE, fewShot: EXEMPLARS, generate });
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it("retries when the model description is a Label: value list", async () => {
+    const { generate, calls } = scriptedGenerate([
+      {
+        ...GOOD_LISTING,
+        description: "Brand: Apple\nModel: A2698\nCondition: Used",
+      },
       GOOD_LISTING,
     ]);
 
@@ -948,4 +948,5 @@ describe("listing/generate — a voice transcript is context, never copy (#1117)
 
     expect(calls).toHaveLength(2);
   });
+
 });
