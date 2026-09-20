@@ -165,13 +165,6 @@ export const MARKETING_BENTO_CARDS = [
   },
 ] as const;
 
-/** Trophy Wall rows retained for the marketing phone illustration. */
-export const TROPHY_WALL_ROWS = [
-  { id: "scarf", title: "Wool blend scarf", state: "Published" },
-  { id: "lamp", title: "Ceramic table lamp", state: "Prepared" },
-  { id: "camera", title: "Vintage film camera", state: "Ready to review" },
-] as const;
-
 export const FAQ_ITEMS = [
   {
     id: "account",
