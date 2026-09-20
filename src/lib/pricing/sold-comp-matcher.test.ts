@@ -4,6 +4,7 @@ import {
   classifySoldComp,
   normalizeSoldCompCondition,
   selectSoldCompEvidence,
+  selectVerifiedSoldMatches,
   type SoldCompCandidate,
 } from "./sold-comp-matcher";
 
@@ -505,5 +506,47 @@ describe("selectSoldCompEvidence", () => {
     expect(selected.anchors.map((entry) => entry.comp.price)).toEqual([700, 740]);
     expect(selected.corroboration.map((entry) => entry.comp.price)).toEqual([560]);
     expect(selected.rejected.map((entry) => entry.comp.price)).toEqual([920]);
+  });
+});
+
+/**
+ * Issue #1120 acceptance 3 — the EVIDENCE behind keeping the title-only skip.
+ *
+ * A sold query built from the vision TITLE alone would reach a signal with no
+ * `brand`, `model` or `resolvedName`. The matcher does not reject such comps; it
+ * cannot verify them either. Every candidate comes back `identity-unverified`
+ * corroboration, never an `anchor` — and `selectVerifiedSoldMatches` keeps ONLY
+ * anchors. So an identity-less sold query is guaranteed to yield zero verified
+ * matches no matter what it retrieves, which is why the tier keeps declining
+ * instead of spending a retrieval to reach an empty set. Loosening the matcher to
+ * accept unanchored comps is out of scope by the issue's own exclusions.
+ */
+describe("sold-comp matcher — an identity-less signal can never anchor (#1120)", () => {
+  const anchored: ItemSignal = {
+    brand: "Apple",
+    model: "AirPods Pro",
+    category: "electronics",
+    condition: "very-good",
+  };
+  const identityLess: ItemSignal = {
+    category: "true wireless earbuds with charging case",
+    condition: "very-good",
+  };
+  const exactComp = candidate(
+    "Apple AirPods Pro Wireless Earbuds with Charging Case",
+    "Used",
+  );
+
+  it("anchors an exact comp while an identity is present", () => {
+    const match = classifySoldComp(exactComp, anchored);
+    expect(match.classification).toBe("anchor");
+    expect(selectVerifiedSoldMatches([match])).toHaveLength(1);
+  });
+
+  it("cannot anchor that same comp once the identity is gone", () => {
+    const match = classifySoldComp(exactComp, identityLess);
+    expect(match.classification).not.toBe("anchor");
+    expect(match.reasons).toContain("identity-unverified");
+    expect(selectVerifiedSoldMatches([match])).toHaveLength(0);
   });
 });

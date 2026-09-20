@@ -114,6 +114,12 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
   follows item/account deletion. It cannot override image, catalog, sold-evidence, or marketplace
   truth. Issue #351 owns the behavior contract; #774 implements the accepted voice-to-listing path
   with photos-only fallback for every terminal non-transcribed outcome.
+- The transcript is also offered to the vision step as an unverified identity HINT (#1120). Vision may
+  adopt a brand or model the seller named only when the photos are visually consistent with it, and
+  must ignore it when they conflict; it never overrides image, catalog, or marketplace truth. A
+  hinted identity is recorded as such and earns reduced identification completeness in the confidence
+  composite. Transcription therefore resolves before identification, and its failure still degrades to
+  photos-only identification.
 - The existing durable Pipeline remains the only analysis path. Supabase Queues carry the strict
   `{ run_id, schema_version }` wake-up envelope; the tenant-owned `pipeline_runs` record is product
   truth. Queue authority is not tenant-domain authority.
@@ -161,6 +167,11 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
   draft with the exact honest no-evidence language rather than failing the run.
 - Confidence is a composite of tier trust, comp agreement, and identification completeness. Raw model
   self-report never authorizes an action.
+- Vision COMMITS to a brand and model whenever the product's own design, markings, packaging, or
+  bundled accessories make it unmistakable; doubt about authenticity is raised through the uncertainty
+  signal, never by withholding the identity (#1120). A hedge ("AirPods Pro-style") is not an identity
+  and is discarded. A model-generated title alone is still not an identity and never earns a sold-comp
+  query: the canonical matcher can only anchor on brand, model, or a resolved product name.
 - Structured model output uses the role-keyed provider registry, Vercel AI SDK, and Zod. Optional
   listing-example retrieval is evaluation-gated, default-off, and never pricing or factual authority.
 

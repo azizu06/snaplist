@@ -604,6 +604,28 @@ export function normalizeEbaySoldCompUrls(
  * ("Sony") is NOT a product — its sold search returns arbitrary same-brand
  * items, the same false precision the branded-web tier refuses — so it yields
  * no query (→ the provider declines).
+ *
+ * #1120 DECISION — a vision TITLE alone still yields no query. A branded item that
+ * reached review with a null brand/model (an Apple AirPods Pro hedged to "AirPods
+ * Pro-style") skipped this tier entirely and was priced by the terminal LLM
+ * fallback, which raised the question of whether a title-derived query should run.
+ * It should not, for two reasons:
+ *
+ *  1. The title is model-generated for EVERY item, generic ones included ("Nike
+ *     running shoes"), so treating it as an identity is the same false precision a
+ *     bare brand is refused for — `attributesToSignal` already documents why it is
+ *     not carried as `resolvedName`.
+ *  2. It would not work even if it were safe. The canonical matcher can only anchor
+ *     on brand/model/resolvedName; with none of them present every retrieved comp
+ *     classifies `identity-unverified`, and `selectVerifiedSoldMatches` keeps only
+ *     anchors. The query would spend a retrieval (real Apify cost when the adapter
+ *     is active) to reach a guaranteed-empty verified set, and loosening the matcher
+ *     to accept unanchored comps is explicitly out of scope.
+ *
+ * The cause is fixed upstream instead: vision now COMMITS to an unmistakable
+ * brand/model (optionally helped by the seller's spoken hint), so the item reaches
+ * this tier with a real identity. When it genuinely has none, the skip stands and
+ * the honest no-evidence copy is what the seller sees.
  */
 export function buildSoldSearchQuery(signal: ItemSignal): string | null {
   const brand = signal.brand?.trim();
