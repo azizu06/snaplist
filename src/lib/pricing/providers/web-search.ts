@@ -1,3 +1,4 @@
+import { unverifiedPricingHints } from "../unverified-hints";
 import { z } from "zod";
 import type {
   ItemSignal,
@@ -332,7 +333,12 @@ export function createOpenAICompExtractor(
       model: llmModel,
       schema: webCompListSchema,
       system: EXTRACT_SYSTEM_PROMPT,
-      prompt: `Item identity:\n${identity}\n\nSearch query: ${query}\n\nSearch results:\n${hits}`,
+      // Same non-identity hints as the llm-only tier (#1120): they help the
+      // extractor judge which results are really this product. They are not
+      // identification, so they never change the query or the tier's confidence.
+      prompt:
+        `Item identity:\n${identity}${unverifiedPricingHints(signal)}` +
+        `\n\nSearch query: ${query}\n\nSearch results:\n${hits}`,
     });
     // Deterministic repair back to the internal comp shape: `title: null` (the
     // only way strict mode lets the model say "no title") becomes an absent key.

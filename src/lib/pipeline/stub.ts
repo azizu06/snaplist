@@ -75,6 +75,12 @@ export function attributesToSignal(attrs: ExtractedAttributes): ItemSignal {
     // attrs.identitySource is PROVENANCE, not a pricing signal: it rides on the
     // persisted attributes and discounts the confidence composite, and must never
     // change which tier fires.
+    //
+    // The title DOES travel as an explicit non-identity HINT for the model-backed
+    // tiers (#1120): the production run that priced an AirPods Pro at $30 sent the
+    // estimator 154 input tokens of all-null attributes. `visionTitle` is read only
+    // inside those prompts — it routes nothing and keys no query.
+    visionTitle: attrs.title,
   };
 }
 

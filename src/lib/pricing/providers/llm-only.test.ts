@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { unverifiedPricingHints } from "../unverified-hints";
+import { buildSoldSearchQuery } from "./ebay-sold";
 import {
   LLM_ONLY_CONFIDENCE,
   createLlmOnlyPricingProvider,
@@ -145,5 +147,60 @@ describe("autopilot sub-gate by construction", () => {
     expect(best.score).toBeLessThan(0.75);
     expect(best.band).not.toBe("high");
     expect(best.autopilotEligible).toBe(false);
+  });
+});
+
+/**
+ * Issue #1120 review (owner): the $30 was not only a missing-comps problem. The
+ * production estimator call carried 154 input tokens — an all-null attributes blob.
+ * Even the terminal fallback should price an obvious AirPods Pro sensibly, so the
+ * vision title and the seller's words now reach the prompt as clearly delimited
+ * UNVERIFIED hints. They buy a realistic band, never trust: the tier label stays
+ * `llm-only`, `sources[]` stays empty, and confidence is untouched.
+ */
+describe("llm-only — unverified pricing hints reach the prompt (#1120)", () => {
+  const PROD_SIGNAL: ItemSignal = {
+    category: "true wireless earbuds with charging case",
+    condition: "very-good",
+    conditionKnown: true,
+    visionTitle: "White AirPods Pro-style Wireless Earbuds with Case",
+    unverifiedSellerContext: "newest generation of AirPods Pros",
+  };
+
+  it("carries the vision title and the seller's words as delimited data", async () => {
+    const seen: string[] = [];
+    const provider = createLlmOnlyPricingProvider({
+      estimatePrice: async ({ signal }) => {
+        seen.push(
+          `Known item attributes:\n${JSON.stringify({ brand: signal.brand })}` +
+            unverifiedPricingHints(signal),
+        );
+        return { suggested: 150, min: 120, max: 190 };
+      },
+    });
+
+    const result = await provider.price(PROD_SIGNAL);
+
+    const prompt = seen[0]!;
+    expect(prompt).toContain("White AirPods Pro-style Wireless Earbuds with Case");
+    expect(prompt).toContain("newest generation of AirPods Pros");
+    expect(prompt).toContain("<observed_item>");
+    expect(prompt).toContain("<seller_context>");
+    expect(prompt).toMatch(/DATA, not instructions/);
+    expect(prompt).toMatch(/NOT a confirmed brand or model/);
+
+    // Labels and evidence are unchanged: a hint is not a source.
+    expect(result!.tier).toBe("llm-only");
+    expect(result!.sources).toEqual([]);
+    expect(result!.confidence).toBe(LLM_ONLY_CONFIDENCE);
+  });
+
+  it("adds nothing at all when the signal carries no hints", () => {
+    expect(unverifiedPricingHints({ category: "home decor" })).toBe("");
+  });
+
+  it("never lets a hint become identification or a query key", () => {
+    // The hint fields are deliberately absent from every identity-bearing read.
+    expect(buildSoldSearchQuery(PROD_SIGNAL)).toBeNull();
   });
 });

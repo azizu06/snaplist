@@ -1,3 +1,4 @@
+import { unverifiedPricingHints } from "../unverified-hints";
 import { z } from "zod";
 import type { ItemSignal, PriceResult, PricingProvider } from "../types";
 import { resolvePricingModel } from "./web-search";
@@ -104,7 +105,10 @@ export function createOpenAIPriceEstimator(
       model: llmModel,
       schema: llmPriceEstimateSchema,
       system: ESTIMATE_SYSTEM_PROMPT,
-      prompt: `Known item attributes:\n${attributes}`,
+      // The hints let the estimator price the SHAPE of the product when no
+      // identifier resolved (#1120). The result stays `llm-only` with empty
+      // sources, and confidence is unchanged — this buys a realistic band, not trust.
+      prompt: `Known item attributes:\n${attributes}${unverifiedPricingHints(signal)}`,
     });
     return object;
   };
