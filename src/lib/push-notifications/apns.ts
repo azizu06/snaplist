@@ -165,7 +165,7 @@ function assertUsableSigningKey(pem: string, variable: string): void {
 }
 
 function normalizeInlineKey(value: string): string {
-  const unescaped = value.replace(/\\r?\\n/g, "\n");
+  const unescaped = value.replace(/(?:\\r)?\\n/g, "\n");
   if (unescaped.includes("BEGIN PRIVATE KEY")) return unescaped;
   const decoded = Buffer.from(value, "base64").toString("utf8");
   return decoded.includes("BEGIN PRIVATE KEY") ? decoded : unescaped;
