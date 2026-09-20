@@ -50,4 +50,33 @@ describe("itemLabel", () => {
     expect(itemLabel(null, "abcdef123456")).toBe("Item abcdef12");
     expect(itemLabel("not an object", "abcdef123456")).toBe("Item abcdef12");
   });
+
+  describe("generated listing title fallback (#1117)", () => {
+    it("uses the listing title when attributes carry neither brand/model nor title", () => {
+      expect(itemLabel({}, "abcdef123456", "Apple AirPods Pro 2nd Gen")).toBe(
+        "Apple AirPods Pro 2nd Gen",
+      );
+    });
+
+    it("keeps brand + model ahead of the listing title", () => {
+      expect(
+        itemLabel({ brand: "Apple", model: "AirPods Pro" }, "abcdef123456", "Long SEO title"),
+      ).toBe("Apple AirPods Pro");
+    });
+
+    it("keeps the vision title ahead of the listing title", () => {
+      expect(itemLabel({ title: "Wireless earbuds" }, "abcdef123456", "Long SEO title")).toBe(
+        "Wireless earbuds",
+      );
+    });
+
+    it("ignores a blank listing title and falls to the id stub", () => {
+      expect(itemLabel({}, "abcdef123456", "   ")).toBe("Item abcdef12");
+      expect(itemLabel({}, "abcdef123456", null)).toBe("Item abcdef12");
+    });
+
+    it("uses the listing title when attributes fail to parse", () => {
+      expect(itemLabel(null, "abcdef123456", "Canon AE-1 Camera")).toBe("Canon AE-1 Camera");
+    });
+  });
 });

@@ -939,7 +939,7 @@ describe("mobile durable-run operations", () => {
     expect(supabase.from).toHaveBeenNthCalledWith(3, "listings");
     expect(query.select).toHaveBeenNthCalledWith(
       3,
-      "id,user_id,item_id,platform,source_review_revision,ebay_listing_id,ebay_status,item:items!listings_item_user_fkey(review_content_revision)",
+      "id,user_id,item_id,platform,title,source_review_revision,ebay_listing_id,ebay_status,item:items!listings_item_user_fkey(review_content_revision)",
     );
     expect(query.in).toHaveBeenCalledWith("item_id", [ITEM_ID]);
     expect(rpc).toHaveBeenNthCalledWith(1, "get_pipeline_run_retry_projection", {
@@ -955,5 +955,78 @@ describe("mobile durable-run operations", () => {
       p_operation: "cancel",
       p_run_id: RUN_ID,
     });
+  });
+
+  it("labels a finished run with the draft listing title when attributes have no name", async () => {
+    const listingId = "24100000-0000-4000-8000-000000000009";
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        readRun: vi.fn().mockResolvedValue({
+          data: runRow({ status: "succeeded", stage: "completed", listing_id: listingId }),
+          error: null,
+        }),
+        readItem: vi.fn().mockResolvedValue({
+          data: {
+            id: ITEM_ID,
+            user_id: "user_native",
+            attributes: {},
+            photos: ["user_native/items/front.jpg"],
+            listings: [{ id: listingId, title: "Apple AirPods Pro 2nd Generation" }],
+          },
+          error: null,
+        }),
+      })
+    );
+
+    const run = await operations.get({
+      runId: RUN_ID,
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+    });
+
+    expect(run?.item?.title).toBe("Apple AirPods Pro 2nd Generation");
+  });
+
+  it("labels a history entry with the draft listing title when attributes have no name", async () => {
+    const listingId = "24100000-0000-4000-8000-000000000009";
+    const historyRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+      status: "succeeded",
+      stage: "completed",
+      attributes: {},
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage: vi.fn().mockResolvedValue({ data: [historyRow], error: null }),
+        readDeliveryProjections: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: listingId,
+              user_id: "user_native",
+              item_id: ITEM_ID,
+              platform: "ebay",
+              title: "Apple AirPods Pro 2nd Generation",
+              source_review_revision: null,
+              ebay_listing_id: null,
+              ebay_status: null,
+              item: { review_content_revision: "24100000-0000-4000-8000-000000000008" },
+            },
+          ],
+          error: null,
+        }),
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 20,
+    });
+
+    expect(page.entries[0]?.run?.item?.title).toBe("Apple AirPods Pro 2nd Generation");
   });
 });
