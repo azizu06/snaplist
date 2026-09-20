@@ -150,7 +150,7 @@ export function assembleDashboardRows(
         itemId: l.item_id as string,
         listingId: l.id as string,
         title: item
-          ? itemLabel(item.attributes, item.id as string)
+          ? itemLabel(item.attributes, item.id as string, l.title as string | null)
           : ((l.title as string | null) ?? "Untitled"),
         status: (l.status as string | null) ?? "new",
         createdAt: (l.created_at as string | null) ?? "",

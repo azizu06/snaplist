@@ -491,7 +491,7 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
     });
 
     expect(calls).toHaveLength(1);
-    expect(listing).toEqual(fallbackEbayListing(CORE));
+    expect(listing).toEqual(clean);
   });
 
   it("passes a clean raw listing through byte-identically", async () => {
@@ -921,12 +921,12 @@ describe("listing/generate — a voice transcript is context, never copy (#1117)
     expect(calls).toHaveLength(2);
   });
 
-  it("accepts a factual parenthetical and a single Note: label with one model call", async () => {
+  it("accepts a core-backed parenthetical and a single Note: label with one model call", async () => {
     const { generate, calls } = scriptedGenerate([
       {
         ...GOOD_LISTING,
         description:
-          "Sony WH-1000XM4 (2nd Generation) in good used condition. Note: light wear on the case.",
+          "Sony WH-1000XM4 (over-ear) in good used condition. Note: light wear on the case.",
       },
     ]);
 
@@ -950,3 +950,108 @@ describe("listing/generate — a voice transcript is context, never copy (#1117)
   });
 
 });
+
+describe("listing/generate — the model's grounded prose is the description (#1117)", () => {
+  const voice = (text: string) => ({
+    text,
+    language: "en-US",
+    provenance: "seller_voice" as const,
+    verification: "unverified" as const,
+  });
+
+  it("ships the model description when every guard passes", async () => {
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(listing.description).toBe(GOOD_LISTING.description);
+  });
+
+  it.each([
+    ["a brand the core never established", "Sony headphones, a Bose style fit. Tested and working."],
+    ["a model token the core never established", "Sony WH-1000XM4 works with the QC35 case. Tested and working."],
+    ["a capacity absent from the core", "Sony WH-1000XM4 headphones with 128GB of storage. Tested and working."],
+    ["a generation absent from the core", "Sony WH-1000XM4 headphones, 3rd generation. Tested and working."],
+  ])("retries then falls back when the description names %s", async (_name, description) => {
+    const { generate, calls } = scriptedGenerate([{ ...GOOD_LISTING, description }]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(listing.description).toBe(buildCoreListingDescription(CORE));
+  });
+
+  it("does not let the transcript introduce identity", async () => {
+    const { generate, calls } = scriptedGenerate([
+      { ...GOOD_LISTING, description: "Sony headphones, the newest AirPods Pro generation. Tested and working." },
+    ]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      sellerContext: voice("this is the newest generation of AirPods Pros"),
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(listing.description).not.toMatch(/AirPods/);
+  });
+
+  it("lets seller-stated condition appear as ordinary prose", async () => {
+    const description = "Sony WH-1000XM4 headphones with no scratches. They work like new.";
+    const { generate, calls } = scriptedGenerate([{ ...GOOD_LISTING, description }]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      sellerContext: voice("no scratches, works like new"),
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(listing.description).toBe(description);
+  });
+
+  it("rejects a model description that mentions a seller note or unverified", async () => {
+    const { generate, calls } = scriptedGenerate([
+      { ...GOOD_LISTING, description: "Sony WH-1000XM4 headphones. Seller note unverified, sounds great." },
+      GOOD_LISTING,
+    ]);
+
+    await generateEbayListing({ attributes: CORE, fewShot: EXEMPLARS, generate });
+
+    expect(calls).toHaveLength(2);
+  });
+
+  it("humanises an enum condition grade in the template fallback", () => {
+    const description = buildCoreListingDescription({ ...CORE, condition: "very-good" });
+
+    expect(description).toContain("very good condition");
+    expect(description).not.toContain("very-good");
+  });
+
+  it("does not treat a one-word transcript as a forbidden shingle", async () => {
+    const description = "Sony WH-1000XM4 headphones in black. Tested and working.";
+    const { generate, calls } = scriptedGenerate([{ ...GOOD_LISTING, description }]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      sellerContext: voice("black"),
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(listing.description).toBe(description);
+  });
+});
+

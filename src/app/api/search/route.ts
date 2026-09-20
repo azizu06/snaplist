@@ -85,6 +85,10 @@ export async function GET(request: Request) {
   ];
 
   const ranked = searchRows(candidates, q, 8);
+  const listingTitleByItem = new Map<string, string>();
+  for (const [itemId, l] of newestPerItem) {
+    if (typeof l.title === "string") listingTitleByItem.set(itemId, l.title);
+  }
 
   // For the winners only (≤8): pull the SAME compact label the dashboard row
   // shows (itemLabel — brand + model, NOT the long eBay SEO title) plus a signed
@@ -101,7 +105,7 @@ export async function GET(request: Request) {
     const photoByItem = new Map<string, string>();
     for (const it of winnerItems ?? []) {
       const id = it.id as string;
-      labelByItem.set(id, itemLabel(it.attributes, id));
+      labelByItem.set(id, itemLabel(it.attributes, id, listingTitleByItem.get(id)));
       const first = (it.photos as string[] | null)?.[0];
       if (first) photoByItem.set(id, first);
     }
