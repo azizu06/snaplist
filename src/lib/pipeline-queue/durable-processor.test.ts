@@ -120,6 +120,7 @@ function verifiedVoiceHarness(options: {
   transcriptionAttempt?: SellerVoiceTranscriptionAttempt;
   download?: PipelineVoiceStorage["download"];
   recordTerminalOutcome?: DurableVisionPipelineProcessorOptions["recordTerminalOutcome"];
+  reserveTranscription?: DurableVisionPipelineProcessorOptions["reserveTranscription"];
 } = {}) {
   const fixture = createVerifiedVoiceFixture({ receipt: options.receipt });
   const pipeline = options.pipeline ?? stages();
@@ -138,6 +139,9 @@ function verifiedVoiceHarness(options: {
   const recordTerminalOutcome = vi.fn(
     options.recordTerminalOutcome ?? (async () => true),
   );
+  const reserveTranscription = vi.fn(
+    options.reserveTranscription ?? (async () => true),
+  );
   const context = workerContext(options.checkpoint ?? {});
   context.voice = { receipt: fixture.receipt };
   const processor = createDurableVisionPipelineProcessor(pipeline, {
@@ -149,9 +153,11 @@ function verifiedVoiceHarness(options: {
         : {}),
     } as SellerContextTranscriber,
     recordTerminalOutcome,
+    reserveTranscription,
   });
   return {
     ...fixture,
+    reserveTranscription,
     context,
     download,
     pipeline,
@@ -255,7 +261,68 @@ describe("durable vision pipeline processor", () => {
     });
   });
 
-  it("checkpoints the content-free transcription reservation before the configured adapter can run", async () => {
+  it("reserves the paid transcription durably before the adapter can run (#1120)", async () => {
+    const transcriptionAttempt: SellerVoiceTranscriptionAttempt = {
+      role: "sellerContext",
+      provider: "openai",
+      model: "gpt-4o-mini-transcribe",
+      calls: 1,
+      chargedUsd: null,
+    };
+    const saved: PipelineWorkerCheckpointWrite[] = [];
+    let reservedAtAdapterEntry = false;
+    const voice = verifiedVoiceHarness({ transcriptionAttempt });
+    voice.transcribe.mockImplementation(async () => {
+      reservedAtAdapterEntry = voice.reserveTranscription.mock.calls.length === 1;
+      return { kind: "failed" as const, providerContacted: true };
+    });
+
+    await voice.processor.process({
+      context: voice.context,
+      onCheckpoint: async (_stage, checkpoint) => {
+        saved.push(checkpoint);
+        return databaseClock.stamp(checkpoint);
+      },
+    });
+
+    expect(voice.transcribe).toHaveBeenCalledOnce();
+    // A fresh run has no `identified` yet, so it cannot reserve through a
+    // checkpoint — the RPC rejects one. The provider-usage reservation is what
+    // guards the spend, and it must be durable BEFORE the adapter is entered.
+    expect(reservedAtAdapterEntry).toBe(true);
+    expect(voice.reserveTranscription).toHaveBeenCalledWith({
+      runId: RUN_ID,
+      leaseToken: voice.context.run.lease_token,
+      attempt: transcriptionAttempt,
+    });
+    // Whatever is checkpointed still carries no transcript and no raw audio.
+    expect(JSON.stringify(saved)).not.toContain("scratch on left hinge");
+    expect(JSON.stringify(saved)).not.toContain("audio/wav");
+  });
+
+  it("blocks the adapter when the transcription reservation is refused (#1120)", async () => {
+    const transcriptionAttempt: SellerVoiceTranscriptionAttempt = {
+      role: "sellerContext",
+      provider: "openai",
+      model: "gpt-4o-mini-transcribe",
+      calls: 1,
+      chargedUsd: null,
+    };
+    const voice = verifiedVoiceHarness({
+      transcriptionAttempt,
+      reserveTranscription: async () => false,
+    });
+
+    await expect(
+      voice.processor.process({
+        context: voice.context,
+        onCheckpoint: persistTestCheckpoint,
+      }),
+    ).rejects.toMatchObject({ retryable: true });
+    expect(voice.transcribe).not.toHaveBeenCalled();
+  });
+
+  it("still reserves through the checkpoint on a resumed run (#1120)", async () => {
     const transcriptionAttempt: SellerVoiceTranscriptionAttempt = {
       role: "sellerContext",
       provider: "openai",
@@ -265,7 +332,10 @@ describe("durable vision pipeline processor", () => {
     };
     const saved: PipelineWorkerCheckpointWrite[] = [];
     let checkpointAtAdapterEntry: PipelineWorkerCheckpointWrite | undefined;
-    const voice = verifiedVoiceHarness({ transcriptionAttempt });
+    const voice = verifiedVoiceHarness({
+      transcriptionAttempt,
+      checkpoint: { identified: IDENTIFIED },
+    });
     voice.transcribe.mockImplementation(async () => {
       checkpointAtAdapterEntry = saved.at(-1);
       return { kind: "failed" as const, providerContacted: true };
@@ -287,8 +357,8 @@ describe("durable vision pipeline processor", () => {
         transcriptionAttempt,
       },
     });
-    expect(JSON.stringify(saved)).not.toContain("scratch on left hinge");
-    expect(JSON.stringify(saved)).not.toContain("audio/wav");
+    // The checkpoint already reserved it, so the direct reservation stays unused.
+    expect(voice.reserveTranscription).not.toHaveBeenCalled();
   });
 
   it("regenerates one legacy listing for the exact terminal voice binding and reuses it on replay", async () => {
@@ -626,5 +696,68 @@ describe("durable vision pipeline processor", () => {
       processor.process({ context: ctx, onCheckpoint: persistTestCheckpoint }),
     ).rejects.toMatchObject({ code: "invalid_run_photos", retryable: false });
     expect(pipeline.identify).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Issue #1120: the worker transcribed the voice note AFTER identification, so the
+ * seller saying "the newest generation of AirPods Pros" could only ever reach the
+ * listing writer — never the vision call that decides the item's identity, and
+ * therefore never the pricing tier that identity unlocks. Voice now resolves first.
+ */
+describe("durable processor — seller voice reaches identification (#1120)", () => {
+  it("hands the transcribed context to the identify stage", async () => {
+    const harness = verifiedVoiceHarness({
+      transcribe: async () => ({
+        kind: "transcribed" as const,
+        text: "the newest generation of AirPods Pros",
+        language: "en-US" as CanonicalLanguageTag,
+        providerContacted: true,
+      }),
+    });
+
+    await harness.processor.process({
+      context: harness.context,
+      onCheckpoint: persistTestCheckpoint,
+    });
+
+    expect(harness.pipeline.identify).toHaveBeenCalledWith({
+      photos: ["user_a/photo.jpg"],
+      sellerContext: {
+        text: "the newest generation of AirPods Pros",
+        language: "en-US",
+        provenance: "seller_voice",
+        verification: "unverified",
+      },
+    });
+  });
+
+  it("identifies photos-only when transcription fails (the hint is optional)", async () => {
+    const harness = verifiedVoiceHarness({
+      transcribe: async () => ({ kind: "failed" as const, providerContacted: true }),
+    });
+
+    await harness.processor.process({
+      context: harness.context,
+      onCheckpoint: persistTestCheckpoint,
+    });
+
+    expect(harness.pipeline.identify).toHaveBeenCalledWith({
+      photos: ["user_a/photo.jpg"],
+    });
+  });
+
+  it("does not re-identify a run that already has an identification checkpoint", async () => {
+    const harness = verifiedVoiceHarness({
+      checkpoint: { identified: IDENTIFIED },
+    });
+
+    await harness.processor.process({
+      context: harness.context,
+      onCheckpoint: persistTestCheckpoint,
+    });
+
+    expect(harness.pipeline.identify).not.toHaveBeenCalled();
+    expect(harness.transcribe).toHaveBeenCalledOnce();
   });
 });

@@ -92,6 +92,17 @@ export const identificationSignalsSchema = z.object({
   modelResolved: z.boolean(),
   barcodeDecoded: z.boolean(),
   categoryUnambiguous: z.boolean(),
+  /**
+   * Whether the resolved brand/model came from an identity the SELLER named in
+   * their voice note rather than from the photos (#1120). Seller speech is
+   * unverified context, never verified evidence (PRD user story 11), so a hinted
+   * identity is worth LESS here than one read off the item.
+   *
+   * OPTIONAL and absent-means-false: every signal set written before the hint
+   * existed, and every caller that has no transcript to hint from, stays scored
+   * exactly as it was.
+   */
+  identitySellerHinted: z.boolean().optional(),
 });
 
 export type IdentificationSignals = z.infer<typeof identificationSignalsSchema>;
@@ -170,14 +181,26 @@ const WEIGHT_IDENTIFICATION = 0.25;
 const WEIGHT_COMP_AGREEMENT = 0.15;
 
 /**
+ * Credit a seller-hinted brand/model earns, against 1 for one read off the item.
+ * The seller's word is real signal — it is what gets an unmistakable product in
+ * front of a sold-comp search at all — but it is unverified, so it buys half as
+ * much identification completeness (#1120). Barcode and category are untouched:
+ * both are read from the photos regardless of what the seller said.
+ */
+const SELLER_HINTED_IDENTITY_CREDIT = 0.5;
+
+/**
  * Fraction of the four identification fields that are resolved, in [0,1].
  * Counts booleans directly (no array allocation) to honor the alloc-light
  * intent of `computeConfidence`.
  */
 function identificationScore(id: IdentificationSignals): number {
+  const identityCredit = id.identitySellerHinted
+    ? SELLER_HINTED_IDENTITY_CREDIT
+    : 1;
   let resolved = 0;
-  if (id.brandResolved) resolved += 1;
-  if (id.modelResolved) resolved += 1;
+  if (id.brandResolved) resolved += identityCredit;
+  if (id.modelResolved) resolved += identityCredit;
   if (id.barcodeDecoded) resolved += 1;
   if (id.categoryUnambiguous) resolved += 1;
   return resolved / 4;

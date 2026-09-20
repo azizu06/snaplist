@@ -41,6 +41,7 @@ describe("identificationSignalsFrom", () => {
       modelResolved: false,
       barcodeDecoded: false,
       categoryUnambiguous: false,
+      identitySellerHinted: false,
     });
     expect(identificationSignalsFrom({ brand: "Sony" }).brandResolved).toBe(true);
     expect(identificationSignalsFrom({ model: "WH-1000XM4" }).modelResolved).toBe(true);
@@ -146,5 +147,28 @@ describe("confidenceSignalsFor — upc-aided-web strongly-corroborated asking ga
     // Not strongly corroborated → the asking-agreement cap applies even though
     // the provider reported a tight 0.9.
     expect(signals.compAgreement).toBe(0.4);
+  });
+});
+
+describe("identificationSignalsFrom — seller-hinted identity (#1120)", () => {
+  it("reports a seller-hinted identity so the composite can discount it", () => {
+    expect(
+      identificationSignalsFrom({
+        brand: "Apple",
+        model: "AirPods Pro",
+        category: "electronics",
+        identitySource: "seller-hinted",
+      }).identitySellerHinted,
+    ).toBe(true);
+  });
+
+  it("reports a photo-read identity, and treats a missing source as photo-read", () => {
+    expect(
+      identificationSignalsFrom({ brand: "Apple", identitySource: "photos" })
+        .identitySellerHinted,
+    ).toBe(false);
+    expect(identificationSignalsFrom({ brand: "Apple" }).identitySellerHinted).toBe(
+      false,
+    );
   });
 });

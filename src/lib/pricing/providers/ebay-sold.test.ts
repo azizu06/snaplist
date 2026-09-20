@@ -5,6 +5,7 @@ import {
   EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS,
   EBAY_SOLD_MIN_COMPS,
   assertSafeEbayUrl,
+  buildSoldSearchQuery,
   buildSoldSearchUrl,
   coreComps,
   createDefaultFetchPage,
@@ -23,6 +24,7 @@ import {
   type FetchPage,
 } from "./ebay-sold";
 import { createApifySoldPricingProvider } from "./apify-sold";
+import { attributesToSignal } from "../../pipeline/stub";
 import { withProviderUsageRun } from "../../provider-usage";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
 import {
@@ -3056,5 +3058,41 @@ describe("ebay-sold provider usage recording (#716)", () => {
         chargedUsd: null,
       },
     ]);
+  });
+});
+
+/**
+ * Issue #1120 acceptance 3, DECISION: a recognizable-looking vision TITLE does not
+ * earn a sold-comp query. The title is model-generated for every item, generic ones
+ * included ("Nike running shoes"), so promoting it to an identity would be the same
+ * false precision a bare brand is already refused for — and an identity-less signal
+ * cannot produce a single verified match anyway, because the canonical matcher can
+ * only anchor on brand/model/resolvedName (see `sold-comp-matcher.test.ts`).
+ *
+ * The cause is fixed upstream instead: the vision step now commits to an
+ * unmistakable brand/model, optionally helped by the seller's spoken hint, so the
+ * item arrives at this tier WITH an identity to search on.
+ */
+describe("buildSoldSearchQuery — a title is not an identity (#1120)", () => {
+  it("declines the exact production signal that produced the $30 AirPods estimate", () => {
+    const signal = attributesToSignal({
+      title: "White AirPods Pro-style Wireless Earbuds with Case",
+      category: "true wireless earbuds with charging case",
+      condition: "very-good",
+      specs: ["wireless charging case", "in-ear"],
+    });
+    expect(signal.resolvedName).toBeUndefined();
+    expect(buildSoldSearchQuery(signal)).toBeNull();
+  });
+
+  it("searches once the same item arrives with a committed identity", () => {
+    const signal = attributesToSignal({
+      title: "Apple AirPods Pro Wireless Earbuds with Charging Case",
+      brand: "Apple",
+      model: "AirPods Pro",
+      category: "electronics",
+      condition: "very-good",
+    });
+    expect(buildSoldSearchQuery(signal)).toBe("Apple AirPods Pro");
   });
 });

@@ -69,6 +69,18 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   override changes so publish/export revision guards fail closed.
 - **Confidence is a signal-based composite** (tier fired + comp agreement + ID completeness), **never**
   raw LLM self-report. The publish-eligibility gate is a threshold on it; eligibility never publishes.
+- **Vision commits to an unmistakable identity; doubt lowers confidence, it does not withhold facts.**
+  When a product's own design, markings, packaging, or bundled accessories make the brand/model
+  unmistakable, the vision role names them; counterfeit or authenticity doubt is raised through the
+  uncertainty signal and the confidence composite, never by returning a hedge or a null identity. A
+  hedge ("AirPods Pro-style") is not an identity and is discarded. The seller's transcribed voice note
+  may HINT an identity as clearly delimited unverified data — adopted only when the photos agree,
+  recorded as seller-hinted, and worth reduced identification completeness.
+- **A model-generated title never earns a sold-comp query.** The vision title is written for every
+  item, generic ones included, so it is not identification: it routes no tier and keys no sold or web
+  query. It may travel to the model-backed pricing tiers only as a clearly labeled non-identity hint
+  that cannot raise confidence. The canonical matcher anchors on brand, model, or a resolved product
+  name — with none of them an identity-less query can never produce a verified match.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
   search agent, not a price source.
 - **Env-configurable everything.** Sandbox→production is a credential / `EBAY_BASE_URL` flip.

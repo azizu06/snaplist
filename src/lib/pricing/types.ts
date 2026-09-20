@@ -83,6 +83,25 @@ export interface ItemSignal {
    * comp-agreement signal collapses toward zero.
    */
   specs?: string[];
+  /**
+   * The vision step's free-text display title, e.g. "White AirPods Pro-style
+   * Wireless Earbuds with Case" (#1120). It is a HINT for the model-backed tiers
+   * only: it names what the seller is holding when `brand`/`model` did not resolve,
+   * which is the difference between pricing "some earbuds" and pricing a plausible
+   * band for this shape of product.
+   *
+   * It is NOT identification. It never routes a tier, never becomes a sold-comp or
+   * web query key, and never earns confidence — a model writes one for every item,
+   * generic ones included.
+   */
+  visionTitle?: string;
+  /**
+   * What the seller SAID about this item, when a voice note transcribed (#1120).
+   * Unverified context passed to the model-backed tiers as clearly delimited data,
+   * for the same reason as `visionTitle` and under the same limits: it cannot route
+   * a tier, cannot become a query key, and cannot raise confidence.
+   */
+  unverifiedSellerContext?: string;
 }
 
 /** A comparable price point / citation behind a price recommendation. */

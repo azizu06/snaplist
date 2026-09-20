@@ -54,6 +54,18 @@ export const extractedAttributesSchema = z.object({
   /** A short human title for the item, used to seed listing copy. */
   title: z.string().optional(),
   /**
+   * Where the resolved `brand`/`model` came from (#1120). `"photos"` means the
+   * vision step read the identity off the item itself; `"seller-hinted"` means it
+   * adopted an identity the seller NAMED in their voice note after checking the
+   * photos were visually consistent with it.
+   *
+   * Seller speech is unverified context, never verified evidence (PRD user story
+   * 11), so this rides into `prediction_logs.extracted_attrs` and discounts the
+   * identification term of the confidence composite. Optional: absent on every row
+   * written before the hint existed, read as `"photos"`.
+   */
+  identitySource: z.enum(["photos", "seller-hinted"]).optional(),
+  /**
    * Garment flat-lay measurements (issue #104), present ONLY for clothing. Each is
    * a DRAFT the seller confirms on review — never silently auto-filled into item
    * specifics — and carries its own tolerance band + provenance (`method`). Stored
@@ -114,6 +126,13 @@ export interface PipelineInput {
   photos: string[];
   /** Publish-eligibility switch (legacy name). Forwarded to the confidence gate. */
   autopilotEnabled?: boolean;
+  /**
+   * Transcribed seller voice context for this run, when one exists. Forwarded to
+   * BOTH the vision step (as an unverified identity hint, #1120) and the listing
+   * generator. Absent when the item has no voice note or transcription failed —
+   * the run then proceeds photos-only.
+   */
+  sellerContext?: SellerContext;
 }
 
 /**

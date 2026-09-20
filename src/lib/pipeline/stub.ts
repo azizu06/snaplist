@@ -65,6 +65,22 @@ export function attributesToSignal(attrs: ExtractedAttributes): ItemSignal {
     // so it is NOT identification and must not enable the branded web tier.
     // signal.resolvedName is reserved for externally resolved identities
     // (e.g. a future UPC-catalog lookup).
+    //
+    // #1120 re-affirmed this against a real miss: an Apple AirPods Pro whose
+    // identity the vision step withheld reached review priced as a generic earbud.
+    // Promoting its title here would have handed the sold-comp tier a query the
+    // canonical matcher could never anchor — see the DECISION note on
+    // `buildSoldSearchQuery`. The fix is that vision now commits to the identity.
+    //
+    // attrs.identitySource is PROVENANCE, not a pricing signal: it rides on the
+    // persisted attributes and discounts the confidence composite, and must never
+    // change which tier fires.
+    //
+    // The title DOES travel as an explicit non-identity HINT for the model-backed
+    // tiers (#1120): the production run that priced an AirPods Pro at $30 sent the
+    // estimator 154 input tokens of all-null attributes. `visionTitle` is read only
+    // inside those prompts — it routes nothing and keys no query.
+    visionTitle: attrs.title,
   };
 }
 

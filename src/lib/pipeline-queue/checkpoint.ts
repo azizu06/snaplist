@@ -122,6 +122,12 @@ function requireCheckpointOrder(
       path: ["generated"],
     });
   }
+  // Voice STILL requires identification (#1120 P0). The worker transcribes before it
+  // identifies so the seller's words can hint the vision call, but the transcript is
+  // BUFFERED and written in the SAME checkpoint as `identified` — never on its own.
+  // `checkpoint_pipeline_run` enforces the identical rule (`not (p_checkpoint ?
+  // 'identified')` raises 22023); relaxing only this copy turned every voice run into
+  // a hard worker failure while the unit suites stayed green. Keep the two in step.
   if ((checkpoint.voiceAttempt || checkpoint.voice) && !checkpoint.identified) {
     context.addIssue({
       code: "custom",
@@ -180,6 +186,9 @@ export const pipelineWorkerCheckpointWriteSchema = z.preprocess(
 export type IdentifiedPipelineStage = z.infer<typeof identifiedPipelineStageSchema>;
 export type PricedPipelineStage = z.infer<typeof pricedPipelineStageSchema>;
 export type GeneratedPipelineStage = z.infer<typeof generatedPipelineStageSchema>;
+export type SellerVoiceAttemptCheckpoint = z.infer<
+  typeof sellerVoiceAttemptCheckpointSchema
+>;
 export type SellerVoiceCheckpoint = z.infer<typeof sellerVoiceCheckpointSchema>;
 export type SellerVoiceTranscriptionAttempt = z.infer<
   typeof sellerVoiceTranscriptionAttemptSchema

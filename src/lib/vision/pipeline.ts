@@ -96,8 +96,25 @@ export interface GeneratedVisionPipelineStage {
  */
 export interface VisionPipelineStages {
   run(input: PipelineInput): Promise<PipelineResult>;
-  identify(input: { photos: string[] }): Promise<IdentifiedVisionPipelineStage>;
-  price(input: { attributes: ExtractedAttributes }): Promise<PriceResult>;
+  /**
+   * Identify the item. `sellerContext` is the seller's transcribed words offered to
+   * the vision call as an UNVERIFIED identity hint (#1120): the model may adopt a
+   * brand/model the seller named when the photos are visually consistent with it,
+   * and must ignore it when they conflict. Omitted when no transcript exists.
+   */
+  identify(input: {
+    photos: string[];
+    sellerContext?: SellerContext;
+  }): Promise<IdentifiedVisionPipelineStage>;
+  /**
+   * Price the item. `sellerContext` rides along as an UNVERIFIED hint for the
+   * model-backed tiers only (#1120) — it cannot route a tier, key a query, or raise
+   * confidence. Omitted when no transcript exists.
+   */
+  price(input: {
+    attributes: ExtractedAttributes;
+    sellerContext?: SellerContext;
+  }): Promise<PriceResult>;
   generate(input: {
     attributes: ExtractedAttributes;
     sellerContext?: SellerContext;
@@ -163,6 +180,7 @@ export function createVisionPipelineStages(
 
   const beginIdentification = async (input: {
     photos: string[];
+    sellerContext?: SellerContext;
   }): Promise<PendingIdentification> => {
     if (input.photos.length === 0) {
       throw new Error("Vision pipeline requires at least one photo path");
@@ -183,6 +201,10 @@ export function createVisionPipelineStages(
       images,
       generate: options.generate,
       model,
+      // Unverified seller context as an identity HINT — the photos stay the
+      // authority (#1120, PRD user story 11). Omitted entirely when absent so the
+      // photos-only path is byte-for-byte what it always was.
+      ...(input.sellerContext ? { sellerContext: input.sellerContext } : {}),
     });
     // 2b. GARMENT MEASUREMENTS (issue #104) — only for clothing and best-effort.
     //     A second gated vision call (same `vision` registry role) estimates flat-lay
@@ -245,8 +267,17 @@ export function createVisionPipelineStages(
     };
   };
 
-  const price = async ({ attributes }: { attributes: ExtractedAttributes }) =>
-    priceItem(attributesToSignal(attributes));
+  const price: VisionPipelineStages["price"] = async ({
+    attributes,
+    sellerContext,
+  }) =>
+    priceItem({
+      ...attributesToSignal(attributes),
+      // A non-identity hint for the model-backed tiers, nothing more (#1120).
+      ...(sellerContext
+        ? { unverifiedSellerContext: sellerContext.text }
+        : {}),
+    });
 
   const generate: VisionPipelineStages["generate"] = async ({
     attributes,
@@ -292,14 +323,23 @@ export function createVisionPipelineStages(
 
   return {
     async run(input) {
-      const pending = await beginIdentification({ photos: input.photos });
+      const pending = await beginIdentification({
+        photos: input.photos,
+        ...(input.sellerContext ? { sellerContext: input.sellerContext } : {}),
+      });
       // Preserve the request pipeline's established latency contract: pricing,
       // listing generation, and auxiliary measurement extraction overlap. The
       // durable stage seam awaits measurements only so its identify checkpoint is
       // complete and reusable after a crash.
       const [priceResult, generated, identified] = await Promise.all([
-        price({ attributes: pending.baseAttributes }),
-        generate({ attributes: pending.baseAttributes }),
+        price({
+          attributes: pending.baseAttributes,
+          ...(input.sellerContext ? { sellerContext: input.sellerContext } : {}),
+        }),
+        generate({
+          attributes: pending.baseAttributes,
+          ...(input.sellerContext ? { sellerContext: input.sellerContext } : {}),
+        }),
         finishIdentification(pending),
       ]);
       return assemble({

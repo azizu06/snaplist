@@ -122,10 +122,24 @@ describe("provider-neutral pipeline worker composition", () => {
       nonRetryableLaterStageFailure: false,
     },
     {
-      name: "blocks the adapter when reserved transcription receipt persistence fails and replays conservatively",
+      // #1120: a fresh voice run transcribes before it identifies, so it has no
+      // checkpoint to carry the reservation and reserves through the provider-usage
+      // write directly. That write still BLOCKS the adapter while it is failing
+      // (asserted below: zero calls after the first consume), so the invariant
+      // "never contact a paid provider without a durable reservation" is unchanged.
+      // What changed: the retry now reserves successfully and transcribes ONCE
+      // instead of forfeiting the seller's voice note permanently. Total paid calls
+      // are still 1, and they still never precede a durable reservation.
+      name: "blocks the adapter until its reservation is durable, then transcribes exactly once",
       activation: "true",
-      expectedContext: undefined,
-      expectedCalls: 0,
+      expectedContext: {
+        text: "scratch on left hinge",
+        language: "en",
+        provenance: "seller_voice",
+        verification: "unverified",
+      },
+      expectedCalls: 1,
+      blockedBeforeRetry: true,
       providerRejects: false,
       laterStageFails: false,
       usageWriteFailsOnce: true,
@@ -133,10 +147,22 @@ describe("provider-neutral pipeline worker composition", () => {
       nonRetryableLaterStageFailure: false,
     },
     {
-      name: "preserves one reserved transcription receipt when its terminal checkpoint and fallback write fail",
+      // #1120 ACCEPTED TRADE: the voice fragments of a fresh run are buffered into
+      // the same checkpoint as `identified`, so when that write fails nothing durable
+      // records the transcription and the retry transcribes again. This is exactly
+      // how the pipeline already treats its most expensive stage — a lost
+      // identification checkpoint re-runs the vision call — and it is bounded by the
+      // run's max_attempts. A paid call still never precedes its reservation, and the
+      // AI-item credit is untouched (it settles at usable draft, not here).
+      name: "re-transcribes once, bounded, when the combined checkpoint and fallback write fail",
       activation: "true",
-      expectedContext: undefined,
-      expectedCalls: 1,
+      expectedContext: {
+        text: "scratch on left hinge",
+        language: "en",
+        provenance: "seller_voice",
+        verification: "unverified",
+      },
+      expectedCalls: 2,
       providerRejects: false,
       laterStageFails: false,
       usageWriteFailsOnce: true,
@@ -144,8 +170,9 @@ describe("provider-neutral pipeline worker composition", () => {
       nonRetryableLaterStageFailure: false,
     },
     {
-      name: "preserves one reserved transcription receipt when a non-retryable later stage and fallback write fail",
+      name: "blocks and replays when a non-retryable later stage and the reservation both fail",
       activation: "true",
+      retriesBeforeSuccess: 2,
       expectedContext: {
         text: "scratch on left hinge",
         language: "en",
@@ -173,6 +200,10 @@ describe("provider-neutral pipeline worker composition", () => {
         terminalCheckpointFailsOnce,
         nonRetryableLaterStageFailure,
       } = voiceCase;
+      const blockedBeforeRetry =
+        "blockedBeforeRetry" in voiceCase ? voiceCase.blockedBeforeRetry : false;
+      const retriesBeforeSuccess =
+        "retriesBeforeSuccess" in voiceCase ? voiceCase.retriesBeforeSuccess : 1;
     vi.stubEnv("LLM_PROVIDER", "openai");
     vi.stubEnv("OPENAI_API_KEY", "test-key");
     if (activation) {
@@ -295,6 +326,10 @@ describe("provider-neutral pipeline worker composition", () => {
       }
       for (const entry of usage.transcriptions) {
         const key = `${entry.role}:${entry.provider}:${entry.model}`;
+        // Mirrors `record_pipeline_run_provider_usage`: a transcription-only
+        // record is merged idempotently, so a second identical reservation
+        // returns success WITHOUT incrementing the stored receipt. First write
+        // wins, exactly as the RPC does.
         if (!recordedTranscriptionAttempts.has(key)) {
           recordedTranscriptionAttempts.set(key, entry.calls);
         }
@@ -358,6 +393,16 @@ describe("provider-neutral pipeline worker composition", () => {
 
     if (laterStageFails || usageWriteFailsOnce || terminalCheckpointFailsOnce) {
       await expect(worker.consume()).resolves.toMatchObject({ retrying: 1 });
+      if (blockedBeforeRetry) {
+        // The paid adapter must not have run while the reservation was failing.
+        expect(transcribe).not.toHaveBeenCalled();
+      }
+      // #1120: a run whose direct transcription reservation is ALSO refused on the
+      // retry is blocked again rather than paying — so it needs one more delivery
+      // before it can succeed. Blocked, not lost, and still bounded by max_attempts.
+      for (let retry = 1; retry < retriesBeforeSuccess; retry += 1) {
+        await expect(worker.consume()).resolves.toMatchObject({ retrying: 1 });
+      }
       await expect(worker.consume()).resolves.toMatchObject({ succeeded: 1 });
     } else {
       await expect(worker.consume()).resolves.toMatchObject({ succeeded: 1 });
@@ -367,12 +412,22 @@ describe("provider-neutral pipeline worker composition", () => {
       ...(expectedContext ? { sellerContext: expectedContext } : {}),
     });
     expect(transcribe).toHaveBeenCalledTimes(expectedCalls);
-    expect(
-      [...recordedTranscriptionAttempts.values()].reduce(
-        (total, calls) => total + calls,
-        0,
-      ),
-    ).toBe(activation ? 1 : 0);
+    const recordedTranscriptionCalls = [
+      ...recordedTranscriptionAttempts.values(),
+    ].reduce((total, calls) => total + calls, 0);
+    expect(recordedTranscriptionCalls).toBe(activation ? 1 : 0);
+    if (activation && expectedCalls > 1) {
+      // KNOWN LIMIT (#1120 round 3), pinned here so it cannot change silently:
+      // the worker reserves before EVERY paid transcription, so the client
+      // reports each paid call. The DURABLE receipt cannot represent more than
+      // one: `record_pipeline_run_provider_usage` accepts a transcription-only
+      // record only when `calls = '1'` (migration 20260811120000), and treats a
+      // repeat of the identical record as an idempotent replay so redelivery is
+      // safe. A run that loses its combined checkpoint and re-transcribes
+      // therefore pays twice and records one call. Widening it means changing
+      // that invariant — a schema change, deliberately out of scope here.
+      expect(recordedTranscriptionCalls).toBeLessThan(expectedCalls);
+    }
     if (usageWriteFailsOnce) {
       expect(persistedCheckpoint).toMatchObject({
         voiceAttempt: {
@@ -385,10 +440,10 @@ describe("provider-neutral pipeline worker composition", () => {
           },
         },
         voice: {
-          outcome:
-            providerRejects || expectedCalls === 0 || terminalCheckpointFailsOnce
-              ? "failed"
-              : "transcribed",
+          // #1120: a lost combined checkpoint no longer forfeits the transcript —
+          // the replay transcribes again (bounded) and reaches a real outcome.
+          // Every case that reaches here contacts the provider at least once.
+          outcome: providerRejects ? "failed" : "transcribed",
           transcriptionAttempt: {
             role: "sellerContext",
             provider: "openai",

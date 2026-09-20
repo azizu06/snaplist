@@ -225,6 +225,13 @@ export function applyIdentityCorrections(
     corrections.category;
   setOrDelete(next, "title", identityTitle || null);
 
+  // The seller has now TYPED this identity and confirmed it in the app, so it is no
+  // longer something the pipeline inferred from a spoken hint (#1120). Clearing the
+  // provenance keeps the prediction log honest — a typed correction must never be
+  // attributed to the voice note — and stops the confidence composite discounting an
+  // identity the seller vouched for directly.
+  delete next.identitySource;
+
   const parsed = extractedAttributesSchema.parse(next);
   const nextGarmentClass = garmentClassOf(parsed);
   if (previousGarmentClass !== nextGarmentClass) {

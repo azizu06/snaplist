@@ -18,6 +18,7 @@ import {
 import type { PipelineQueue } from "./queue";
 import type { PipelineWorkerStore } from "./worker-store";
 import {
+  checkpointTranscriptionAttemptUsage,
   consumePipelineQueue,
   type PipelineConsumerSummary,
 } from "./worker";
@@ -71,6 +72,40 @@ export function createPipelineWorker(input: {
         }),
       recordTerminalOutcome: (outcome) =>
         input.capabilities.runs.recordVoiceOutcome(outcome),
+      // A fresh voice run transcribes BEFORE it identifies, so it has no checkpoint
+      // to carry the reservation — `checkpoint_pipeline_run` refuses a checkpoint
+      // without `identified` (#1120 P0). Reserve the paid call directly instead;
+      // `record_pipeline_run_provider_usage` merges a transcription-only entry
+      // idempotently and in either order, so a replay cannot double-count it. A
+      // false return blocks the adapter.
+      //
+      // KNOWN LIMIT (#1120 round 3): this reservation runs before EVERY paid
+      // transcription, so the client reports every paid call — but the durable
+      // receipt cannot hold more than one. The RPC accepts a transcription-only
+      // record only when `calls = '1'` (migration 20260811120000), and a repeat
+      // of the identical record is an idempotent replay, which is what makes
+      // redelivery safe. A run that loses its combined checkpoint and
+      // re-transcribes therefore pays twice and records `calls: 1`. Counting
+      // truly means relaxing that invariant: a schema change, out of scope here.
+      // The under-count is bounded by `pipeline_runs.max_attempts`, and no
+      // credit, price, or seller-facing value reads this field.
+      reserveTranscription: async ({ runId, leaseToken, attempt }) => {
+        const usage = checkpointTranscriptionAttemptUsage(attempt);
+        if (!usage) return false;
+        try {
+          await input.capabilities.runs.recordProviderUsage({
+            runId,
+            leaseToken,
+            usage,
+          });
+          return true;
+        } catch {
+          // The rejection concerns a run whose transcript is in flight, so its
+          // message is not ours to repeat (see `log-safe-error`). Refusing is the
+          // whole signal the caller needs: it blocks the paid call and retries.
+          return false;
+        }
+      },
     },
   );
 

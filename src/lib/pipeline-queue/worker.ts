@@ -118,7 +118,13 @@ function transcriptionAttemptUsage(
   };
 }
 
-function checkpointTranscriptionAttemptUsage(
+/**
+ * The content-free usage record for ONE reserved transcription call. Exported so the
+ * worker composition root can reserve the same shape directly when a fresh voice run
+ * has no checkpoint to carry it (#1120 P0) — one definition, so the checkpoint-driven
+ * gate and the direct reservation can never describe the spend differently.
+ */
+export function checkpointTranscriptionAttemptUsage(
   attempt: SellerVoiceTranscriptionAttempt | undefined,
 ): ProviderUsageRecord | null {
   if (!attempt) return null;

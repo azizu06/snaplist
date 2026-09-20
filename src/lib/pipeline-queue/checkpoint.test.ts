@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { pipelineWorkerCheckpointWriteSchema } from "./checkpoint";
+import {
+  pipelineWorkerCheckpointSchema,
+  pipelineWorkerCheckpointWriteSchema,
+} from "./checkpoint";
 
 /**
  * PostgreSQL `jsonb` rejects `U+0000` (SQLSTATE 22P05) and PostgREST rejects lone
@@ -162,5 +165,68 @@ describe("pipeline checkpoint write boundary", () => {
     expect(parsed.generated?.copy.fields).toEqual({
       itemSpecifics: { Brand: "Sony" },
     });
+  });
+});
+
+/**
+ * Issue #1120 P0: the worker transcribes BEFORE it identifies so the transcript can
+ * hint the vision call — but the transcript is buffered and written in the SAME
+ * checkpoint as `identified`, never on its own. This schema is one of TWO copies of
+ * that rule; `checkpoint_pipeline_run` is the other and raises 22023. Relaxing only
+ * this copy is what broke every voice run while the unit suites stayed green, so
+ * these tests pin the agreement.
+ */
+describe("checkpoint ordering — voice is never persisted without identification (#1120)", () => {
+  const VOICE = {
+    version: 1,
+    contentSha256: "b".repeat(64),
+    outcome: "failed" as const,
+    providerContacted: false,
+    sellerContext: null,
+  };
+  const IDENTIFIED = {
+    attributes: { brand: "Apple", model: "AirPods Pro" },
+    model: "vision-model",
+  };
+
+  it("rejects a voice attempt recorded without identification", () => {
+    expect(
+      pipelineWorkerCheckpointSchema.safeParse({
+        voiceAttempt: { version: 1, contentSha256: "b".repeat(64) },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a terminal voice outcome recorded without identification", () => {
+    expect(pipelineWorkerCheckpointSchema.safeParse({ voice: VOICE }).success).toBe(
+      false,
+    );
+  });
+
+  it("accepts the combined write the worker actually performs", () => {
+    expect(
+      pipelineWorkerCheckpointSchema.safeParse({
+        identified: IDENTIFIED,
+        voiceAttempt: { version: 1, contentSha256: "b".repeat(64) },
+        voice: VOICE,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("still requires identification before pricing and generation", () => {
+    expect(
+      pipelineWorkerCheckpointSchema.safeParse({
+        voice: VOICE,
+        priced: {
+          result: {
+            suggested: 10,
+            range: { min: 5, max: 15 },
+            confidence: 0.5,
+            sources: [],
+            tier: "llm-only",
+          },
+        },
+      }).success,
+    ).toBe(false);
   });
 });

@@ -10,7 +10,12 @@ import type { VisionPipelineStages } from "@/lib/vision";
 import {
   pipelineWorkerCheckpointSchema,
   pipelineWorkerCheckpointWriteSchema,
+  sellerVoiceAttemptCheckpointSchema,
+  sellerVoiceCheckpointSchema,
   type PipelineWorkerCheckpoint,
+  type SellerVoiceAttemptCheckpoint,
+  type SellerVoiceCheckpoint,
+  type SellerVoiceTranscriptionAttempt,
 } from "./checkpoint";
 import type { PipelineWorkerContext } from "./worker-store";
 import { PipelineWorkerFailure, type DurablePipelineProcessor } from "./worker";
@@ -30,7 +35,48 @@ export interface DurableVisionPipelineProcessorOptions {
     outcome: SellerContextTranscriptionResult["kind"];
     providerContacted: boolean;
   }): Promise<boolean>;
+  /**
+   * Durably reserve ONE content-free transcription call before the paid adapter runs
+   * (#1120 P0). A fresh voice run has no `identified` yet, so it cannot reserve
+   * through a checkpoint — `checkpoint_pipeline_run` rejects a checkpoint without
+   * one. `record_pipeline_run_provider_usage` is the reservation that actually
+   * guards the money: it has no identification precondition and already merges a
+   * transcription-only entry idempotently, in either order, by design.
+   *
+   * Returning false BLOCKS the adapter, preserving "never contact a paid provider
+   * without a durable reservation". Optional so existing compositions and tests keep
+   * working; when absent the worker's checkpoint-driven gate is the only reservation,
+   * which is the pre-existing behavior for a resumed run.
+   */
+  reserveTranscription?(input: {
+    runId: string;
+    leaseToken: string;
+    attempt: SellerVoiceTranscriptionAttempt;
+  }): Promise<boolean>;
 }
+
+/**
+ * The voice-only part of a checkpoint. `resolveSellerContext` produces these and the
+ * caller decides whether to write them through immediately (a resumed run already has
+ * `identified`) or BUFFER them into the same write that carries `identified`.
+ */
+interface SellerVoiceFragment {
+  voiceAttempt?: SellerVoiceAttemptCheckpoint;
+  voice?: SellerVoiceCheckpoint;
+}
+
+type PersistSellerVoice = (
+  fragment: SellerVoiceFragment,
+) => Promise<PipelineWorkerCheckpoint>;
+
+/**
+ * Durably reserve the one paid transcription call, or throw retryable. A no-op when
+ * the voice fragment was written through to a checkpoint, because the worker's
+ * existing checkpoint-driven usage gate already reserved it there.
+ */
+type ReserveTranscription = (
+  attempt: SellerVoiceTranscriptionAttempt,
+) => Promise<void>;
 
 function voiceCheckpointStage(
   context: PipelineWorkerContext,
@@ -46,6 +92,21 @@ function voiceCheckpointStage(
       return "identifying";
   }
 }
+
+/**
+ * Report the terminal voice outcome. On a RESUMED run this fires immediately, as it
+ * always has. On a FRESH run it is BUFFERED and flushed only after the combined
+ * checkpoint is durable, because the RPC behind it chains
+ * `record_raw_seller_voice_transcription_outcome` ->
+ * `queue_raw_seller_voice_cleanup`: reporting early queues the seller's raw audio
+ * for deletion while no durable transcript exists yet. A crash inside identify would
+ * then lose BOTH, and redelivery would fall silently to photos-only — issue #1120 in
+ * miniature, reintroduced by the very reorder that fixed it.
+ */
+type ReportTerminalVoiceOutcome = (
+  outcome: SellerContextTranscriptionResult["kind"],
+  providerContacted: boolean,
+) => Promise<void>;
 
 async function recordTerminalVoiceOutcome(
   context: PipelineWorkerContext,
@@ -94,9 +155,9 @@ async function resolveSellerContext(
   context: PipelineWorkerContext,
   options: DurableVisionPipelineProcessorOptions | undefined,
   checkpoint: PipelineWorkerCheckpoint,
-  persist: (
-    checkpoint: ReturnType<typeof pipelineWorkerCheckpointWriteSchema.parse>,
-  ) => Promise<PipelineWorkerCheckpoint>,
+  persist: PersistSellerVoice,
+  reserveTranscription: ReserveTranscription,
+  reportTerminalOutcome: ReportTerminalVoiceOutcome,
 ): Promise<{
   checkpoint: PipelineWorkerCheckpoint;
   sellerContext: SellerContext | undefined;
@@ -132,72 +193,48 @@ async function resolveSellerContext(
     });
   }
   if (savedVoice?.outcome === "transcribed") {
-    await recordTerminalVoiceOutcome(
-      context,
-      options,
-      savedVoice.outcome,
-      savedVoice.providerContacted,
-    );
+    await reportTerminalOutcome(savedVoice.outcome, savedVoice.providerContacted);
     return { checkpoint, sellerContext: savedVoice.sellerContext };
   }
   if (savedVoice) {
-    await recordTerminalVoiceOutcome(
-      context,
-      options,
-      savedVoice.outcome,
-      savedVoice.providerContacted,
-    );
+    await reportTerminalOutcome(savedVoice.outcome, savedVoice.providerContacted);
     return { checkpoint, sellerContext: undefined };
   }
   if (savedAttempt) {
-    checkpoint = await persist(
-      pipelineWorkerCheckpointWriteSchema.parse({
-        ...checkpoint,
-        voice: {
-          version: receipt.version,
-          contentSha256: receipt.contentSha256,
-          outcome: "failed",
-          providerContacted: Boolean(savedAttempt.transcriptionAttempt),
-          sellerContext: null,
-          ...(savedAttempt.transcriptionAttempt
-            ? { transcriptionAttempt: savedAttempt.transcriptionAttempt }
-            : {}),
-        },
+    checkpoint = await persist({
+      voice: sellerVoiceCheckpointSchema.parse({
+        version: receipt.version,
+        contentSha256: receipt.contentSha256,
+        outcome: "failed",
+        providerContacted: Boolean(savedAttempt.transcriptionAttempt),
+        sellerContext: null,
+        ...(savedAttempt.transcriptionAttempt
+          ? { transcriptionAttempt: savedAttempt.transcriptionAttempt }
+          : {}),
       }),
-    );
-    await recordTerminalVoiceOutcome(
-      context,
-      options,
-      "failed",
-      Boolean(savedAttempt.transcriptionAttempt),
-    );
+    });
+    await reportTerminalOutcome("failed", Boolean(savedAttempt.transcriptionAttempt));
     return { checkpoint, sellerContext: undefined };
   }
 
-  checkpoint = await persist(
-    pipelineWorkerCheckpointWriteSchema.parse({
-      ...checkpoint,
-      voiceAttempt: {
-        version: receipt.version,
-        contentSha256: receipt.contentSha256,
-      },
+  checkpoint = await persist({
+    voiceAttempt: sellerVoiceAttemptCheckpointSchema.parse({
+      version: receipt.version,
+      contentSha256: receipt.contentSha256,
     }),
-  );
+  });
 
   const failOpen = async () => {
-    checkpoint = await persist(
-      pipelineWorkerCheckpointWriteSchema.parse({
-        ...checkpoint,
-        voice: {
-          version: receipt.version,
-          contentSha256: receipt.contentSha256,
-          outcome: "failed",
-          providerContacted: false,
-          sellerContext: null,
-        },
+    checkpoint = await persist({
+      voice: sellerVoiceCheckpointSchema.parse({
+        version: receipt.version,
+        contentSha256: receipt.contentSha256,
+        outcome: "failed",
+        providerContacted: false,
+        sellerContext: null,
       }),
-    );
-    await recordTerminalVoiceOutcome(context, options, "failed", false);
+    });
+    await reportTerminalOutcome("failed", false);
     return { checkpoint, sellerContext: undefined };
   };
 
@@ -224,16 +261,18 @@ async function resolveSellerContext(
 
   const reservedTranscriptionAttempt = options.transcriber.transcriptionAttempt;
   if (reservedTranscriptionAttempt) {
-    checkpoint = await persist(
-      pipelineWorkerCheckpointWriteSchema.parse({
-        ...checkpoint,
-        voiceAttempt: {
-          version: receipt.version,
-          contentSha256: receipt.contentSha256,
-          transcriptionAttempt: reservedTranscriptionAttempt,
-        },
+    checkpoint = await persist({
+      voiceAttempt: sellerVoiceAttemptCheckpointSchema.parse({
+        version: receipt.version,
+        contentSha256: receipt.contentSha256,
+        transcriptionAttempt: reservedTranscriptionAttempt,
       }),
-    );
+    });
+    // The fragment above is only DURABLE when it was written through. On a fresh run
+    // it was buffered, so the worker's checkpoint-driven usage gate has not run and
+    // the paid call still needs its own durable reservation. A refusal blocks the
+    // adapter: SnapList never contacts a paid provider it could not account for.
+    await reserveTranscription(reservedTranscriptionAttempt);
   }
 
   const result = await options.transcriber
@@ -256,11 +295,9 @@ async function resolveSellerContext(
         }
       : undefined;
   const transcriptionAttempt = reservedTranscriptionAttempt;
-  checkpoint = await persist(
-    pipelineWorkerCheckpointWriteSchema.parse({
-      ...checkpoint,
-      voice:
-        result.kind === "transcribed"
+  checkpoint = await persist({
+    voice: sellerVoiceCheckpointSchema.parse(
+      result.kind === "transcribed"
           ? {
               version: receipt.version,
               contentSha256: receipt.contentSha256,
@@ -277,14 +314,9 @@ async function resolveSellerContext(
               sellerContext: null,
               ...(transcriptionAttempt ? { transcriptionAttempt } : {}),
             },
-    }),
-  );
-  await recordTerminalVoiceOutcome(
-    context,
-    options,
-    result.kind,
-    result.providerContacted,
-  );
+    ),
+  });
+  await reportTerminalOutcome(result.kind, result.providerContacted);
   return { checkpoint, sellerContext };
 }
 
@@ -298,15 +330,130 @@ export function createDurableVisionPipelineProcessor(
       let checkpoint: PipelineWorkerCheckpoint =
         pipelineWorkerCheckpointSchema.parse(context.run.checkpoint);
 
+      // Voice resolves BEFORE identification (#1120). The seller's own words are an
+      // unverified identity HINT to the vision call, so transcribing after it would
+      // leave the hint permanently unreachable — which is exactly how an unmistakable
+      // Apple AirPods Pro reached review with a null brand/model and a generic price.
+      // `resolveSellerContext` reads nothing from the identification checkpoint, so
+      // the move is order-only: a resumed run with a saved identification still skips
+      // re-identifying, and every voice outcome/redelivery path is unchanged.
+      // A run that already has an identification checkpoint writes its voice
+      // fragments through immediately, exactly as before. A FRESH run cannot: the
+      // transcript must reach identification, and `checkpoint_pipeline_run` refuses
+      // any checkpoint without `identified` (22023). So its fragments are BUFFERED
+      // and land in the same write that carries `identified` (#1120 P0).
+      const writesVoiceThrough = checkpoint.identified !== undefined;
+      let bufferedVoice: SellerVoiceFragment = {};
+
+      // Threaded across fragments: voice resolution writes an attempt and then a
+      // terminal outcome, and the second must build on the first. Spreading the
+      // enclosing `checkpoint` each time would silently drop the attempt.
+      let voiceCheckpoint = checkpoint;
+      const persistSellerVoice: PersistSellerVoice = async (fragment) => {
+        if (writesVoiceThrough) {
+          const candidate = pipelineWorkerCheckpointWriteSchema.parse({
+            ...voiceCheckpoint,
+            ...fragment,
+          });
+          voiceCheckpoint = pipelineWorkerCheckpointSchema.parse(
+            await onCheckpoint(voiceCheckpointStage(context), candidate),
+          );
+          return voiceCheckpoint;
+        }
+        bufferedVoice = { ...bufferedVoice, ...fragment };
+        // An in-flight value, deliberately NOT schema-parsed: voice without
+        // `identified` is exactly what the schema (and the RPC) forbid persisting.
+        // It becomes a valid checkpoint when merged with `identified` below.
+        voiceCheckpoint = {
+          ...checkpoint,
+          ...bufferedVoice,
+        } as PipelineWorkerCheckpoint;
+        return voiceCheckpoint;
+      };
+
+      const reserveTranscription: ReserveTranscription = async (attempt) => {
+        // Written through: the worker's checkpoint-driven usage gate already
+        // reserved this call before the adapter could run.
+        if (writesVoiceThrough || !options?.reserveTranscription) return;
+        const reserved = await options.reserveTranscription({
+          runId: context.run.id,
+          leaseToken: context.run.lease_token,
+          attempt,
+        });
+        if (!reserved) {
+          throw new PipelineWorkerFailure({
+            code: "provider_usage_temporarily_unavailable",
+            safeMessage:
+              "SnapList could not finish this listing yet and will retry automatically.",
+            retryable: true,
+          });
+        }
+      };
+
+      // Buffered on a fresh run: reporting the terminal outcome queues the raw audio
+      // for deletion, so it must not happen until the transcript is durable.
+      let pendingTerminalOutcome:
+        | { outcome: SellerContextTranscriptionResult["kind"]; providerContacted: boolean }
+        | undefined;
+      const reportTerminalOutcome: ReportTerminalVoiceOutcome = async (
+        outcome,
+        providerContacted,
+      ) => {
+        if (writesVoiceThrough) {
+          if (!options) return;
+          await recordTerminalVoiceOutcome(
+            context,
+            options,
+            outcome,
+            providerContacted,
+          );
+          return;
+        }
+        pendingTerminalOutcome = { outcome, providerContacted };
+      };
+
+      const voice = await resolveSellerContext(
+        context,
+        options,
+        checkpoint,
+        persistSellerVoice,
+        reserveTranscription,
+        reportTerminalOutcome,
+      );
+      checkpoint = voice.checkpoint;
+      const sellerContext = voice.sellerContext;
+
       if (!checkpoint.identified) {
-        const identified = await stages.identify({ photos: context.item.photos });
+        const identified = await stages.identify({
+          photos: context.item.photos,
+          // Omitted entirely when no transcript survived, so the photos-only path is
+          // byte-for-byte what it was (PRD: voice failure degrades to photos-only).
+          ...(sellerContext ? { sellerContext } : {}),
+        });
+        // ONE write carrying identification and every buffered voice fragment. This
+        // is the first checkpoint a fresh voice run persists, and it satisfies the
+        // RPC's `identified` precondition by construction.
         const candidate = pipelineWorkerCheckpointWriteSchema.parse({
           ...checkpoint,
+          ...bufferedVoice,
           identified,
         });
         checkpoint = pipelineWorkerCheckpointSchema.parse(
           await onCheckpoint("identifying", candidate),
         );
+        // Durable now: the transcript (or the honest terminal failure) survives a
+        // crash, so the raw audio may be released. Ordering this AFTER the write is
+        // the whole point — before it, a crash inside identify would delete the
+        // audio and lose the transcript, leaving redelivery with neither.
+        if (pendingTerminalOutcome && options) {
+          await recordTerminalVoiceOutcome(
+            context,
+            options,
+            pendingTerminalOutcome.outcome,
+            pendingTerminalOutcome.providerContacted,
+          );
+          pendingTerminalOutcome = undefined;
+        }
       }
       const identified = checkpoint.identified;
       if (!identified) {
@@ -316,15 +463,6 @@ export function createDurableVisionPipelineProcessor(
           retryable: false,
         });
       }
-
-      const voice = await resolveSellerContext(
-        context,
-        options,
-        checkpoint,
-        (candidate) => onCheckpoint(voiceCheckpointStage(context), candidate),
-      );
-      checkpoint = voice.checkpoint;
-      const sellerContext = voice.sellerContext;
       const voiceBinding = context.voice?.receipt && checkpoint.voice
         ? {
             version: checkpoint.voice.version,
@@ -336,6 +474,9 @@ export function createDurableVisionPipelineProcessor(
       if (!checkpoint.priced) {
         const priced = await stages.price({
           attributes: identified.attributes,
+          // The same unverified hint the vision call received (#1120). The tier the
+          // router picks, the sold query, and the confidence composite are unaffected.
+          ...(sellerContext ? { sellerContext } : {}),
         });
         const candidate = pipelineWorkerCheckpointWriteSchema.parse({
           ...checkpoint,
