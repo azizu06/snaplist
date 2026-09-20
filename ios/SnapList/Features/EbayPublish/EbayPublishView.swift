@@ -1532,8 +1532,17 @@ private struct EbayCenteredActionScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if usesApprovedConnectVisuals {
-                    Color.clear
-                        .frame(height: 164)
+                    // #1116: the eBay wordmark fills the approved 164pt slot,
+                    // as the marketplace rows use theirs.
+                    Image("MarketplaceMarkEbay")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 56)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: 164,
+                            alignment: .bottomLeading
+                        )
                         .accessibilityHidden(true)
                 } else {
                     Spacer(minLength: 16)

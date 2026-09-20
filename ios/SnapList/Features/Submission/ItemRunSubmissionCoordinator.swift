@@ -1006,7 +1006,7 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 visibleMessage: "Item saved",
                 rendersSubmittedMedia: true,
                 statusKind: .success,
-                actionStyle: .outlined
+                actionStyle: .filled
             )
         }
     }
@@ -1071,7 +1071,7 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 visibleMessage: "Item saved",
                 rendersSubmittedMedia: true,
                 statusKind: .success,
-                actionStyle: .outlined
+                actionStyle: .filled
             )
         } else if host.isSubmitting {
             self = PhotoReviewSubmissionPresentation(

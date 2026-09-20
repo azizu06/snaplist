@@ -290,12 +290,11 @@ struct AssistedExportView: View {
             withMotion { store.toggle(destination) }
         } label: {
             HStack(spacing: 12) {
-                destinationMark(destination)
-                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(destination.displayName)
-                        .snapListTypography(.rowTitle)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    // #1116: the wordmark is the name. The full name stays the
+                    // row's accessibility label; printing it beside its own
+                    // logo said everything twice (Facebook Marketplace worst).
+                    destinationMark(destination)
                     statusLine(destination)
                 }
                 Spacer(minLength: 0)
@@ -318,11 +317,10 @@ struct AssistedExportView: View {
         .accessibilityIdentifier("assisted-export.row.\(destination.rawValue)")
     }
 
-    /// The destination's own mark, in place of a generic glyph. It sits beside
-    /// `destination.displayName` rather than instead of it (#977): the mark
-    /// alone carried no text at any Dynamic Type size and never grew with
-    /// accessibility text, so a low-vision seller or anyone unfamiliar with a
-    /// brand's mark had nothing to read. Facebook Marketplace has no wordmark
+    /// The destination's own wordmark, standing in for its name (#1116; #977
+    /// had printed the name beside it). The row's accessibility label still
+    /// carries the full name, so VoiceOver and Voice Control are unaffected.
+    /// Facebook Marketplace has no wordmark
     /// of its own that also carries Facebook's identity, so its mark is a
     /// composite lockup of the Facebook icon asset and the Marketplace
     /// wordmark asset, both sized to this row's 20pt convention; Mercari and

@@ -292,6 +292,14 @@ enum TrophyWallProcessingRowActivation: Hashable {
     /// the seller. The row still shows its plain-language state; the body
     /// simply is not a control.
     case none
+    /// #1116: accepted, analyzing and retrying rows are tappable. They open a
+    /// plain "Still working on this item" state in place, not a new
+    /// destination, so the seller is never left tapping something inert.
+    case stillWorking
+
+    static let stillWorkingTitle = "Still working on this item"
+    static let stillWorkingMessage =
+        "SnapList is still putting your listing together. It will show up as Ready to review here when it's done."
 }
 
 struct TrophyWallProcessingRow: Identifiable, Hashable {
@@ -373,37 +381,37 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
                 stateLabel = "Accepted"
                 action = nil
                 isAnalyzing = false
-                runActivation = .none
+                runActivation = .stillWorking
                 accessibilityLabel = "\(itemName), accepted."
             case .workingIdentifying:
                 stateLabel = "Identifying"
                 action = nil
                 isAnalyzing = true
-                runActivation = .none
+                runActivation = .stillWorking
                 accessibilityLabel = "\(itemName), working, identifying."
             case .workingGenerating:
                 stateLabel = "Writing listing"
                 action = nil
                 isAnalyzing = true
-                runActivation = .none
+                runActivation = .stillWorking
                 accessibilityLabel = "\(itemName), working, writing listing."
             case .workingPricing:
                 stateLabel = "Pricing"
                 action = nil
                 isAnalyzing = true
-                runActivation = .none
+                runActivation = .stillWorking
                 accessibilityLabel = "\(itemName), working, pricing."
             case .workingPersisting:
                 stateLabel = "Saving"
                 action = nil
                 isAnalyzing = true
-                runActivation = .none
+                runActivation = .stillWorking
                 accessibilityLabel = "\(itemName), working, saving."
             case .retrying:
                 stateLabel = "Retrying"
                 action = nil
                 isAnalyzing = true
-                runActivation = .none
+                runActivation = .stillWorking
                 accessibilityLabel = "\(itemName), retrying."
             case .readyToReview:
                 stateLabel = "Ready to review"

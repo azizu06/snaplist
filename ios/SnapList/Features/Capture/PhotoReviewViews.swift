@@ -4782,6 +4782,7 @@ struct PhotoReviewView: View {
                 // spinner. `.center` shares one vertical center regardless of
                 // Dynamic Type; the message still grows downward via
                 // `fixedSize(vertical: true)` below.
+                // #1116: a centered status row, not a line pinned top-left.
                 HStack(alignment: .center, spacing: 10) {
                     if let statusKind = submissionPresentation.statusKind {
                         submissionStatusIcon(statusKind)
@@ -4791,10 +4792,10 @@ struct PhotoReviewView: View {
                     Text(message)
                         .font(.system(size: submissionMessageSize, weight: .semibold))
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(width: contentWidth)
+                .frame(width: contentWidth, alignment: .center)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("photo-review.submission-message")
             }
@@ -4822,7 +4823,7 @@ struct PhotoReviewView: View {
         case .saving:
             ProgressView()
                 .controlSize(.small)
-                .tint(SnapListColorToken.textTertiary.color)
+                .tint(SnapListColorToken.inkPrimary.color)
                 .accessibilityHidden(true)
         case .offline:
             Image(systemName: "wifi.slash")
