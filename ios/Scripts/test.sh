@@ -10,7 +10,7 @@ snaplist_developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Develop
 snaplist_destination=${SNAPLIST_IOS_DESTINATION:-platform=iOS Simulator,name=iPhone 17 Pro,OS=latest}
 snaplist_derived_data=${SNAPLIST_IOS_DERIVED_DATA:-${TMPDIR:-/tmp}/snaplist-ios-derived-data}
 snaplist_test_selector_pattern='^[[:alnum:]_][[:alnum:]_.-]*(/[[:alnum:]_][[:alnum:]_.-]*){0,2}$'
-snaplist_shard_inventory=${script_directory}/test-shards.json
+snaplist_shard_inventory=${SNAPLIST_IOS_SHARD_INVENTORY_FILE:-${script_directory}/test-shards.json}
 snaplist_shard_validator=${script_directory}/validate-test-shards.rb
 # The one place the shard wall-clock budget is stated. It is issue #936's
 # acceptance criterion, not the job cap: a shard is supposed to finish inside
@@ -80,7 +80,7 @@ if [[ ${1-} == --print-shard-wall-clock-plan ]]; then
 fi
 
 if (( ${+SNAPLIST_IOS_SHARD} )); then
-  "$snaplist_shard_validator" "$snaplist_shard_inventory"
+  "$snaplist_shard_validator" "$snaplist_shard_inventory" "$repository_root"
 
   if ! ruby -rjson -e '
     inventory = JSON.parse(File.read(ARGV.fetch(0)))

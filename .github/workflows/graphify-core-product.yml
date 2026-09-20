@@ -42,12 +42,21 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
-          changed="$(git diff --name-only "$BEFORE_SHA" "$SOURCE_SHA")"
-          if printf '%s\n' "$changed" | grep -qxF 'docs/architecture/graphify-core-scope.txt' \
-            || comm -12 <(printf '%s\n' "$changed" | sort) <(sort docs/architecture/graphify-core-scope.txt) | grep -q .; then
+          # BEFORE_SHA is all-zero on the branch's first push and can name a commit no
+          # longer reachable after history changes upstream of this checkout; `git diff`
+          # on either aborts the step under `bash -eo pipefail`. Fail safe (assume the
+          # push is relevant) instead of failing the job outright.
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            changed="$(git diff --name-only "$BEFORE_SHA" "$SOURCE_SHA")"
+            if printf '%s\n' "$changed" | grep -qxF 'docs/architecture/graphify-core-scope.txt' \
+              || comm -12 <(printf '%s\n' "$changed" | sort) <(sort docs/architecture/graphify-core-scope.txt) | grep -q .; then
+              echo "relevant=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "relevant=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
       - uses: astral-sh/setup-uv@v6
         if: steps.core-change.outputs.relevant == 'true'

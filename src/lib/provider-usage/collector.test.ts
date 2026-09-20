@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  captureProviderUsageRun,
+  currentTranscriptionUsage,
+  providerUsageRunActive,
   recordModelUsage,
+  recordTranscriptionUsage,
   withProviderUsageRun,
 } from "./collector";
 
@@ -81,5 +85,117 @@ describe("withProviderUsageRun", () => {
         outputTokens: 10,
       }),
     ).not.toThrow();
+  });
+});
+
+describe("captureProviderUsageRun", () => {
+  it("captures the tally accumulated before `work` throws instead of losing it", async () => {
+    const captured = await captureProviderUsageRun(async () => {
+      recordModelUsage({
+        role: "vision",
+        provider: "openai",
+        model: "resolved-vision-model",
+        inputTokens: 100,
+        outputTokens: 50,
+      });
+      throw new Error("provider call failed mid-run");
+    });
+
+    expect(captured.ok).toBe(false);
+    if (captured.ok) throw new Error("unreachable");
+    expect(captured.error).toBeInstanceOf(Error);
+    expect((captured.error as Error).message).toBe("provider call failed mid-run");
+    expect(captured.usage.modelCalls).toBe(1);
+    expect(captured.usage.inputTokens).toBe(100);
+  });
+
+  it("re-throws through withProviderUsageRun so existing callers still see the failure", async () => {
+    await expect(
+      withProviderUsageRun(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+  });
+});
+
+describe("providerUsageRunActive", () => {
+  it("is false outside a run and true only while one is open", async () => {
+    expect(providerUsageRunActive()).toBe(false);
+
+    await withProviderUsageRun(async () => {
+      expect(providerUsageRunActive()).toBe(true);
+      return null;
+    });
+
+    expect(providerUsageRunActive()).toBe(false);
+  });
+});
+
+describe("currentTranscriptionUsage", () => {
+  it("reads [] outside a run and the accumulated transcriptions inside one", async () => {
+    expect(currentTranscriptionUsage()).toEqual([]);
+
+    await withProviderUsageRun(async () => {
+      recordTranscriptionUsage({
+        role: "sellerContext",
+        provider: "openai",
+        model: "resolved-transcription-model",
+      });
+      expect(currentTranscriptionUsage()).toEqual([
+        {
+          role: "sellerContext",
+          provider: "openai",
+          model: "resolved-transcription-model",
+          calls: 1,
+          chargedUsd: null,
+        },
+      ]);
+      return null;
+    });
+  });
+});
+
+describe("nested provider-usage runs", () => {
+  it("gives a nested run its own tally instead of merging into the enclosing one", async () => {
+    const outer = await withProviderUsageRun(async () => {
+      recordModelUsage({
+        role: "listing",
+        provider: "openai",
+        model: "resolved-listing-model",
+        inputTokens: 10,
+        outputTokens: 10,
+      });
+
+      const inner = await withProviderUsageRun(async () => {
+        recordModelUsage({
+          role: "judge",
+          provider: "google",
+          model: "resolved-judge-model",
+          inputTokens: 999,
+          outputTokens: 999,
+        });
+        return "inner result";
+      });
+
+      expect(inner.usage.modelCalls).toBe(1);
+      expect(inner.usage.inputTokens).toBe(999);
+
+      // Back in the outer scope, reporting after the nested run resumes the
+      // outer tally rather than continuing to write into the discarded inner one.
+      recordModelUsage({
+        role: "listing",
+        provider: "openai",
+        model: "resolved-listing-model",
+        inputTokens: 20,
+        outputTokens: 20,
+      });
+
+      return "outer result";
+    });
+
+    // The nested run's usage never leaked into the outer tally.
+    expect(outer.usage.modelCalls).toBe(2);
+    expect(outer.usage.inputTokens).toBe(30);
+    expect(outer.usage.models.every((m) => m.role !== "judge")).toBe(true);
   });
 });
