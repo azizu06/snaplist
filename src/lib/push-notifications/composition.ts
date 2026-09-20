@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import {
   ApnsMisconfiguredError,
   createApnsHttp2Transport,
@@ -39,16 +40,30 @@ let cachedSender:
   | { key: string; failure: string }
   | undefined;
 
+/**
+ * Detects a configuration change without keeping the configuration. The inline
+ * key is a private key; a digest is enough to notice it rotated and leaves no
+ * PEM in a string that lives as long as the process.
+ */
+export function apnsCacheKey(env: Record<string, string | undefined>): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        env.APNS_KEY_ID,
+        env.APNS_TEAM_ID,
+        env.APNS_BUNDLE_ID,
+        env.APNS_AUTH_KEY,
+        env.APNS_AUTH_KEY_PATH,
+      ]),
+    )
+    .digest("hex");
+}
+
 function senderForCurrentEnvironment():
   | { sender: ApnsSender }
   | { failure: string } {
   const env = process.env;
-  const key = JSON.stringify([
-    env.APNS_KEY_ID,
-    env.APNS_TEAM_ID,
-    env.APNS_BUNDLE_ID,
-    env.APNS_AUTH_KEY_PATH,
-  ]);
+  const key = apnsCacheKey(env);
   if (cachedSender?.key !== key) {
     try {
       cachedSender = {

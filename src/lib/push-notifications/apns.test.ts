@@ -375,7 +375,7 @@ describe("the transport that actually reaches Apple", () => {
 describe("starting up without the credential", () => {
   it("names every missing variable instead of failing on the first one", () => {
     expect(() => resolveApnsConfig({})).toThrow(
-      /APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_AUTH_KEY_PATH/,
+      /APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_AUTH_KEY or APNS_AUTH_KEY_PATH/,
     );
   });
 
@@ -417,7 +417,7 @@ describe("starting up without the credential", () => {
         APNS_TEAM_ID: TEAM_ID,
         APNS_BUNDLE_ID: BUNDLE_ID,
       }),
-    ).toThrow(/APNS_AUTH_KEY_PATH/);
+    ).toThrow(/APNS_AUTH_KEY or APNS_AUTH_KEY_PATH/);
   });
 
   it("reads the key from the path it is given and never from the value", () => {
@@ -456,5 +456,126 @@ describe("starting up without the credential", () => {
         () => "not a key",
       ),
     ).toThrow(/APNS_AUTH_KEY_PATH/);
+  });
+});
+
+describe("the auth key delivered inline (#1123)", () => {
+  const base = { APNS_KEY_ID: KEY_ID, APNS_TEAM_ID: TEAM_ID, APNS_BUNDLE_ID: BUNDLE_ID };
+  const neverRead = () => {
+    throw new Error("the key file must not be read when the key is inline");
+  };
+
+  it("accepts a PKCS8 PEM in APNS_AUTH_KEY", () => {
+    const config = resolveApnsConfig({ ...base, APNS_AUTH_KEY: privateKeyPem }, neverRead);
+    expect(config.privateKeyPem.trim()).toBe(privateKeyPem.trim());
+  });
+
+  it("restores a PEM whose newlines arrived as literal \\n escapes", () => {
+    const escaped = privateKeyPem.trim().replace(/\n/g, "\\n");
+    expect(escaped).not.toContain("\n");
+    const config = resolveApnsConfig({ ...base, APNS_AUTH_KEY: escaped }, neverRead);
+    expect(config.privateKeyPem.trim()).toBe(privateKeyPem.trim());
+  });
+
+  it("restores a PEM whose newlines arrived as literal \\r\\n escapes", () => {
+    const escaped = privateKeyPem.trim().replace(/\n/g, "\\r\\n");
+    const config = resolveApnsConfig({ ...base, APNS_AUTH_KEY: escaped }, neverRead);
+    expect(config.privateKeyPem.trim()).toBe(privateKeyPem.trim());
+  });
+
+  it("decodes a base64-encoded PEM", () => {
+    const encoded = Buffer.from(privateKeyPem, "utf8").toString("base64");
+    const config = resolveApnsConfig({ ...base, APNS_AUTH_KEY: encoded }, neverRead);
+    expect(config.privateKeyPem.trim()).toBe(privateKeyPem.trim());
+  });
+
+  it("lets APNS_AUTH_KEY win over APNS_AUTH_KEY_PATH", () => {
+    const config = resolveApnsConfig(
+      { ...base, APNS_AUTH_KEY: privateKeyPem, APNS_AUTH_KEY_PATH: "/keys/AuthKey.p8" },
+      neverRead,
+    );
+    expect(config.privateKeyPem.trim()).toBe(privateKeyPem.trim());
+  });
+
+  it("still reads APNS_AUTH_KEY_PATH when no inline key is set", () => {
+    const config = resolveApnsConfig(
+      { ...base, APNS_AUTH_KEY: "  ", APNS_AUTH_KEY_PATH: "/keys/AuthKey.p8" },
+      () => privateKeyPem,
+    );
+    expect(config.privateKeyPem).toBe(privateKeyPem);
+  });
+
+  it("refuses a malformed inline key as ApnsMisconfiguredError without echoing it", () => {
+    const secret = "SUPER-SECRET-NOT-A-KEY";
+    let caught: unknown;
+    try {
+      resolveApnsConfig({ ...base, APNS_AUTH_KEY: secret }, neverRead);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApnsMisconfiguredError);
+    const message = (caught as Error).message;
+    expect(message).toMatch(/does not point at an APNs auth key/);
+    expect(message).not.toContain(secret);
+    expect(message).not.toContain(Buffer.from(secret).toString("base64"));
+  });
+
+  it("names both key variables when neither is set", () => {
+    expect(() => resolveApnsConfig(base)).toThrow(
+      /Missing: APNS_AUTH_KEY or APNS_AUTH_KEY_PATH\./,
+    );
+    expect(() => resolveApnsConfig({})).toThrow(
+      /APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_AUTH_KEY or APNS_AUTH_KEY_PATH/,
+    );
+  });
+});
+
+describe("a key that cannot sign is refused at resolve time (#1123)", () => {
+  const base = { APNS_KEY_ID: KEY_ID, APNS_TEAM_ID: TEAM_ID, APNS_BUNDLE_ID: BUNDLE_ID };
+  const pem = (type: "rsa" | "p384") =>
+    (type === "rsa"
+      ? generateKeyPairSync("rsa", { modulusLength: 2048 })
+      : generateKeyPairSync("ec", { namedCurve: "P-384" })
+    ).privateKey
+      .export({ format: "pem", type: "pkcs8" })
+      .toString();
+
+  function resolveFails(env: Record<string, string>, readKey?: () => string): Error {
+    try {
+      resolveApnsConfig({ ...base, ...env }, readKey);
+    } catch (error) {
+      return error as Error;
+    }
+    throw new Error("expected resolveApnsConfig to throw");
+  }
+
+  it.each([
+    ["a truncated PEM", () => privateKeyPem.trim().slice(0, 90)],
+    ["a PEM body cut off before the footer", () => privateKeyPem.trim().split("\n").slice(0, 2).join("\n")],
+    ["an RSA PKCS8 key", () => pem("rsa")],
+    ["an EC P-384 key", () => pem("p384")],
+  ])("rejects %s from APNS_AUTH_KEY as ApnsMisconfiguredError", (_name, make) => {
+    const value = make();
+    const error = resolveFails({ APNS_AUTH_KEY: value });
+    expect(error).toBeInstanceOf(ApnsMisconfiguredError);
+    expect(error.message).toMatch(/is not a usable APNs auth key \(expected an EC P-256 PKCS8 key\)/);
+    for (const line of value.split("\n").filter((l) => l.length > 20 && !l.includes("-----"))) {
+      expect(error.message).not.toContain(line);
+    }
+  });
+
+  it("applies the same check to a key read from APNS_AUTH_KEY_PATH", () => {
+    const error = resolveFails({ APNS_AUTH_KEY_PATH: "/keys/AuthKey.p8" }, () => pem("rsa"));
+    expect(error).toBeInstanceOf(ApnsMisconfiguredError);
+    expect(error.message).toMatch(/APNS_AUTH_KEY_PATH is not a usable APNs auth key/);
+  });
+
+  it("accepts a valid P-256 key from either source", () => {
+    expect(resolveApnsConfig({ ...base, APNS_AUTH_KEY: privateKeyPem }).privateKeyPem.trim()).toBe(
+      privateKeyPem.trim(),
+    );
+    expect(
+      resolveApnsConfig({ ...base, APNS_AUTH_KEY_PATH: "/k.p8" }, () => privateKeyPem).privateKeyPem,
+    ).toBe(privateKeyPem);
   });
 });

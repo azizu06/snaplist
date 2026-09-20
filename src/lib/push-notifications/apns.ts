@@ -1,3 +1,4 @@
+import { createPrivateKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connect, type ClientHttp2Session } from "node:http2";
 import { SignJWT, importPKCS8 } from "jose";
@@ -40,7 +41,7 @@ const GONE_REASONS = new Set(["Unregistered", "BadDeviceToken"]);
 export interface ApnsConfig {
   bundleId: string;
   keyId: string;
-  /** PKCS8 PEM, read from disk at startup. Never logged, never serialised. */
+  /** PKCS8 PEM, from `APNS_AUTH_KEY` or read from disk. Never logged, never serialised. */
   privateKeyPem: string;
   teamId: string;
 }
@@ -88,13 +89,14 @@ export function resolveApnsConfig(
   const keyId = env.APNS_KEY_ID?.trim();
   const teamId = env.APNS_TEAM_ID?.trim();
   const bundleId = env.APNS_BUNDLE_ID?.trim();
+  const inlineKey = env.APNS_AUTH_KEY?.trim();
   const keyPath = env.APNS_AUTH_KEY_PATH?.trim();
 
   const missing = [
     ["APNS_KEY_ID", keyId],
     ["APNS_TEAM_ID", teamId],
     ["APNS_BUNDLE_ID", bundleId],
-    ["APNS_AUTH_KEY_PATH", keyPath],
+    ["APNS_AUTH_KEY or APNS_AUTH_KEY_PATH", inlineKey || keyPath],
   ]
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -105,23 +107,68 @@ export function resolveApnsConfig(
   }
 
   let privateKeyPem: string;
-  try {
-    privateKeyPem = readKey(keyPath!);
-  } catch (error) {
-    // The path, never the contents. A key that failed to load is still a key.
-    throw new Error(
-      `Seller push could not read APNS_AUTH_KEY_PATH (${keyPath}): ${
-        error instanceof Error ? error.name : typeof error
-      }.`,
-    );
-  }
-  if (!privateKeyPem.includes("BEGIN PRIVATE KEY")) {
-    throw new Error(
-      "APNS_AUTH_KEY_PATH does not point at an APNs auth key. Apple issues it as a PKCS8 .p8 file.",
-    );
+  if (inlineKey) {
+    // A serverless deployment has no durable file to point at, so the key
+    // arrives as a value. Dashboards flatten a PEM's newlines to literal `\n`
+    // or to base64; both are undone here. The error names the variable and
+    // never the value: a key that failed to parse is still a key.
+    privateKeyPem = normalizeInlineKey(inlineKey);
+    if (!privateKeyPem.includes("BEGIN PRIVATE KEY")) {
+      throw new ApnsMisconfiguredError(
+        "APNS_AUTH_KEY does not point at an APNs auth key. Apple issues it as a PKCS8 .p8 file.",
+      );
+    }
+  } else {
+    try {
+      privateKeyPem = readKey(keyPath!);
+    } catch (error) {
+      // The path, never the contents. A key that failed to load is still a key.
+      throw new Error(
+        `Seller push could not read APNS_AUTH_KEY_PATH (${keyPath}): ${
+          error instanceof Error ? error.name : typeof error
+        }.`,
+      );
+    }
+    if (!privateKeyPem.includes("BEGIN PRIVATE KEY")) {
+      throw new Error(
+        "APNS_AUTH_KEY_PATH does not point at an APNs auth key. Apple issues it as a PKCS8 .p8 file.",
+      );
+    }
   }
 
+  assertUsableSigningKey(privateKeyPem, inlineKey ? "APNS_AUTH_KEY" : "APNS_AUTH_KEY_PATH");
+
   return { bundleId: bundleId!, keyId: keyId!, privateKeyPem, teamId: teamId! };
+}
+
+/**
+ * A key that carries the PEM marker can still be truncated or the wrong kind,
+ * and would only fail at signing time, after the once-only delivery claim was
+ * spent. Parse it here so a bad key reads as "not configured" before anything
+ * is claimed. Names the variable, never the material.
+ */
+function assertUsableSigningKey(pem: string, variable: string): void {
+  let usable = false;
+  try {
+    const key = createPrivateKey({ key: pem, format: "pem" });
+    usable =
+      key.asymmetricKeyType === "ec" &&
+      key.asymmetricKeyDetails?.namedCurve === "prime256v1";
+  } catch {
+    usable = false;
+  }
+  if (!usable) {
+    throw new ApnsMisconfiguredError(
+      `${variable} is not a usable APNs auth key (expected an EC P-256 PKCS8 key).`,
+    );
+  }
+}
+
+function normalizeInlineKey(value: string): string {
+  const unescaped = value.replace(/(?:\\r)?\\n/g, "\n");
+  if (unescaped.includes("BEGIN PRIVATE KEY")) return unescaped;
+  const decoded = Buffer.from(value, "base64").toString("utf8");
+  return decoded.includes("BEGIN PRIVATE KEY") ? decoded : unescaped;
 }
 
 export function createHttpApnsSender(input: {

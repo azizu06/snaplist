@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearApnsTestEnv, configureApnsTestEnv } from "@/test/apns-test-config";
-import { createSellerPushDispatcherFor } from "./composition";
+import { apnsCacheKey, createSellerPushDispatcherFor } from "./composition";
 import type { SellerPushRpcClient } from "./store";
 
 /**
@@ -283,5 +283,54 @@ describe("recovering from a transient resolveApnsConfig failure", () => {
     } finally {
       if (existsSync(keyPath)) unlinkSync(keyPath);
     }
+  });
+});
+
+describe("an unusable inline key never reaches the delivery claim (#1123)", () => {
+  it("reports not configured and makes no database call for a truncated key", async () => {
+    clearApnsTestEnv();
+    process.env.APNS_KEY_ID = "TEST_KEY_ID";
+    process.env.APNS_TEAM_ID = "TEST_TEAM_ID";
+    process.env.APNS_BUNDLE_ID = "com.snaplist.app.test";
+    process.env.APNS_AUTH_KEY = "-----BEGIN PRIVATE KEY-----\nTRUNCATED";
+    try {
+      const log = vi.fn();
+      const client = recordingClient();
+      await createSellerPushDispatcherFor(client, log).listingReady({
+        userId: "user-1",
+        runId: "run-1",
+        itemName: "Lamp",
+      });
+      expect(log).toHaveBeenCalledWith(
+        "push_not_configured",
+        expect.objectContaining({
+          reason: expect.stringContaining("not a usable APNs auth key"),
+        }),
+      );
+      expect(client.rpc).not.toHaveBeenCalled();
+    } finally {
+      clearApnsTestEnv();
+    }
+  });
+});
+
+describe("the sender cache key (#1123)", () => {
+  it("changes when APNS_AUTH_KEY changes and never contains the key material", () => {
+    const pemA = generateKeyPairSync("ec", { namedCurve: "P-256" })
+      .privateKey.export({ format: "pem", type: "pkcs8" })
+      .toString();
+    const pemB = generateKeyPairSync("ec", { namedCurve: "P-256" })
+      .privateKey.export({ format: "pem", type: "pkcs8" })
+      .toString();
+    const body = pemA.split("\n")[1];
+    expect(body.length).toBeGreaterThan(20);
+
+    const keyA = apnsCacheKey({ APNS_KEY_ID: "K", APNS_AUTH_KEY: pemA });
+    const keyB = apnsCacheKey({ APNS_KEY_ID: "K", APNS_AUTH_KEY: pemB });
+
+    expect(keyA).not.toBe(keyB);
+    expect(keyA).not.toContain(body);
+    expect(keyA).not.toContain("PRIVATE KEY");
+    expect(keyA).toBe(apnsCacheKey({ APNS_KEY_ID: "K", APNS_AUTH_KEY: pemA }));
   });
 });
