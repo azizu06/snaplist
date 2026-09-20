@@ -950,6 +950,20 @@ final class TrophyWallStore {
         }
     }
 
+    private static func resolvedItemName(
+        linked: String?,
+        existing: String?,
+        projected: String?,
+        projectedState: TrophyWallCardState
+    ) -> String? {
+        switch projectedState {
+        case .readyToReview, .readyToReviewLocked:
+            return linked ?? projected ?? existing
+        default:
+            return linked ?? existing ?? projected
+        }
+    }
+
     func ingest(_ acceptedRun: TrophyWallCanonicalAcceptedRun) {
         guard acceptedRun.principalScope == principalScope else {
             return
@@ -1012,7 +1026,16 @@ final class TrophyWallStore {
             principalScope: principalScope,
             runID: acceptedRun.runID,
             state: state,
-            itemName: linkedItemName ?? existingCanonicalCard?.itemName ?? acceptedRun.itemName,
+            // #1126: while a run is in flight the name already on the wall
+            // stays put. Once the run succeeds the server's projection is the
+            // truth, so the `Item <id>` stub fetched while analyzing cannot
+            // survive completion.
+            itemName: Self.resolvedItemName(
+                linked: linkedItemName,
+                existing: existingCanonicalCard?.itemName,
+                projected: acceptedRun.itemName,
+                projectedState: acceptedRun.state
+            ),
             coverPhotoURL: acceptedRun.coverPhotoURL
                 ?? existingCanonicalCard?.coverPhotoURL,
             localCoverPhotoData: localCoverPhotoData,

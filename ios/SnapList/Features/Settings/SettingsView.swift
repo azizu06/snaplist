@@ -148,6 +148,7 @@ struct SettingsView: View {
                                     )
                                     Image(systemName: "chevron.right")
                                         .foregroundStyle(.tertiary)
+                                        .accessibilityHidden(true)
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
@@ -876,7 +877,9 @@ struct SettingsSignOutRow: View {
             HStack {
                 Text(SettingsSignOutCopy.rowLabel)
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             // Same `settingsCardRow` fixed-height touch-target gap
             // `LegalLinkRow` and "Create an account" needed (#831).
@@ -907,7 +910,9 @@ struct SettingsLocalRemovalRow: View {
             HStack {
                 Text("Remove unsent photos and voice notes")
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .frame(
                 maxWidth: .infinity,
@@ -943,7 +948,9 @@ struct SettingsDeleteAccountRow: View {
             HStack {
                 Text("Delete account")
                 Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             // Same `settingsCardRow` fixed-height touch-target gap
             // `LegalLinkRow` and "Create an account" needed (#831).

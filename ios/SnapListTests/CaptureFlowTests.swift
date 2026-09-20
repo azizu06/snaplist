@@ -9,16 +9,48 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
-    /// #1116: an accepted item's Done is the filled primary; Cancel while
-    /// saving stays secondary so the seller is not nudged to abort.
-    func testSubmissionBarDoneIsFilledAndSavingCancelStaysOutlined() {
-        let accepted = PhotoReviewSubmissionPresentation.visualState(.accepted)
+    /// #1126 (owner pick B): status lives inside the button. While saving the
+    /// primary reads "Saving your item" and Cancel is a separate small link;
+    /// accepted shows "Item saved" for one beat and then the filled Done.
+    func testSubmissionBarStatusLivesInsideTheButton() {
         let saving = PhotoReviewSubmissionPresentation.visualState(.saving)
+        XCTAssertEqual(saving.barPhase(savedBeatFinished: false), .saving)
+        XCTAssertEqual(saving.barPhase(savedBeatFinished: true), .saving)
+        XCTAssertEqual(saving.statusButtonLabel, "Saving your item")
+        XCTAssertEqual(saving.cancelLinkLabel, "Cancel")
+        XCTAssertEqual(saving.cancelLinkEvent, .cancelSubmission)
 
+        let accepted = PhotoReviewSubmissionPresentation.visualState(.accepted)
+        XCTAssertEqual(accepted.barPhase(savedBeatFinished: false), .savedBeat)
+        XCTAssertEqual(accepted.statusButtonLabel, "Item saved")
+        XCTAssertEqual(accepted.barPhase(savedBeatFinished: true), .done)
         XCTAssertEqual(accepted.primaryActionLabel, "Done")
         XCTAssertEqual(accepted.actionStyle, .filled)
-        XCTAssertEqual(saving.primaryActionLabel, "Cancel")
-        XCTAssertEqual(saving.actionStyle, .outlined)
+        XCTAssertNil(accepted.cancelLinkLabel)
+        XCTAssertEqual(PhotoReviewSubmissionPresentation.savedBeatSeconds, 1.0)
+    }
+
+    /// Offline, unknown, conflict, cancelled and photos-too-large keep their
+    /// copy and actions in the standard status-row layout, with no Cancel link.
+    func testSubmissionBarRejectionStatesKeepStandardLayout() {
+        let states: [PhotoReviewSubmissionVisualStateID] = [
+            .cancelled, .offline, .unknown, .conflict, .photosTooLarge,
+        ]
+        for state in states {
+            let presentation = PhotoReviewSubmissionPresentation.visualState(state)
+            XCTAssertEqual(
+                presentation.barPhase(savedBeatFinished: false),
+                .standard,
+                "\(state)"
+            )
+            XCTAssertNil(presentation.cancelLinkLabel, "\(state)")
+            XCTAssertNotNil(presentation.visibleMessage, "\(state)")
+        }
+        XCTAssertEqual(
+            PhotoReviewSubmissionPresentation.idle
+                .barPhase(savedBeatFinished: false),
+            .standard
+        )
     }
 
     /// The photo-count pill reads `PhotoReviewCapacityPolicy.photoLimit`, not a
