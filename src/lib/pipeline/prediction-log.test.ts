@@ -422,3 +422,40 @@ describe("readPredictionLogs ordering contract", () => {
     expect(unmatchedGoldIds).toEqual([]);
   });
 });
+
+/**
+ * Issue #1120 acceptance 2: "Record in the prediction log that identity was
+ * seller-hinted so confidence can reflect it." It rides on `extracted_attrs`
+ * (`identitySource`), which is the existing JSONB attribute surface — no new column,
+ * no migration — and the eval harness therefore reads it for free.
+ */
+describe("buildPredictionLogRow — seller-hinted identity provenance (#1120)", () => {
+  it("carries a seller-hinted identity into extracted_attrs", () => {
+    const result = makeResult({
+      attributes: {
+        brand: "Apple",
+        model: "AirPods Pro",
+        category: "electronics",
+        identitySource: "seller-hinted",
+      },
+    });
+    const row = buildPredictionLogRow("user-1", "item-1", result);
+    expect(row.extracted_attrs.identitySource).toBe("seller-hinted");
+  });
+
+  it("carries a photo-read identity, and leaves a legacy row's absent source alone", () => {
+    expect(
+      buildPredictionLogRow(
+        "user-1",
+        "item-1",
+        makeResult({
+          attributes: { brand: "Sony", identitySource: "photos" },
+        }),
+      ).extracted_attrs.identitySource,
+    ).toBe("photos");
+    expect(
+      buildPredictionLogRow("user-1", "item-1", makeResult()).extracted_attrs
+        .identitySource,
+    ).toBeUndefined();
+  });
+});

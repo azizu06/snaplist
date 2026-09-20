@@ -628,3 +628,66 @@ describe("durable vision pipeline processor", () => {
     expect(pipeline.identify).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Issue #1120: the worker transcribed the voice note AFTER identification, so the
+ * seller saying "the newest generation of AirPods Pros" could only ever reach the
+ * listing writer — never the vision call that decides the item's identity, and
+ * therefore never the pricing tier that identity unlocks. Voice now resolves first.
+ */
+describe("durable processor — seller voice reaches identification (#1120)", () => {
+  it("hands the transcribed context to the identify stage", async () => {
+    const harness = verifiedVoiceHarness({
+      transcribe: async () => ({
+        kind: "transcribed" as const,
+        text: "the newest generation of AirPods Pros",
+        language: "en-US" as CanonicalLanguageTag,
+        providerContacted: true,
+      }),
+    });
+
+    await harness.processor.process({
+      context: harness.context,
+      onCheckpoint: persistTestCheckpoint,
+    });
+
+    expect(harness.pipeline.identify).toHaveBeenCalledWith({
+      photos: ["user_a/photo.jpg"],
+      sellerContext: {
+        text: "the newest generation of AirPods Pros",
+        language: "en-US",
+        provenance: "seller_voice",
+        verification: "unverified",
+      },
+    });
+  });
+
+  it("identifies photos-only when transcription fails (the hint is optional)", async () => {
+    const harness = verifiedVoiceHarness({
+      transcribe: async () => ({ kind: "failed" as const, providerContacted: true }),
+    });
+
+    await harness.processor.process({
+      context: harness.context,
+      onCheckpoint: persistTestCheckpoint,
+    });
+
+    expect(harness.pipeline.identify).toHaveBeenCalledWith({
+      photos: ["user_a/photo.jpg"],
+    });
+  });
+
+  it("does not re-identify a run that already has an identification checkpoint", async () => {
+    const harness = verifiedVoiceHarness({
+      checkpoint: { identified: IDENTIFIED },
+    });
+
+    await harness.processor.process({
+      context: harness.context,
+      onCheckpoint: persistTestCheckpoint,
+    });
+
+    expect(harness.pipeline.identify).not.toHaveBeenCalled();
+    expect(harness.transcribe).toHaveBeenCalledOnce();
+  });
+});

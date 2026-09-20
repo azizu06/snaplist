@@ -298,8 +298,29 @@ export function createDurableVisionPipelineProcessor(
       let checkpoint: PipelineWorkerCheckpoint =
         pipelineWorkerCheckpointSchema.parse(context.run.checkpoint);
 
+      // Voice resolves BEFORE identification (#1120). The seller's own words are an
+      // unverified identity HINT to the vision call, so transcribing after it would
+      // leave the hint permanently unreachable — which is exactly how an unmistakable
+      // Apple AirPods Pro reached review with a null brand/model and a generic price.
+      // `resolveSellerContext` reads nothing from the identification checkpoint, so
+      // the move is order-only: a resumed run with a saved identification still skips
+      // re-identifying, and every voice outcome/redelivery path is unchanged.
+      const voice = await resolveSellerContext(
+        context,
+        options,
+        checkpoint,
+        (candidate) => onCheckpoint(voiceCheckpointStage(context), candidate),
+      );
+      checkpoint = voice.checkpoint;
+      const sellerContext = voice.sellerContext;
+
       if (!checkpoint.identified) {
-        const identified = await stages.identify({ photos: context.item.photos });
+        const identified = await stages.identify({
+          photos: context.item.photos,
+          // Omitted entirely when no transcript survived, so the photos-only path is
+          // byte-for-byte what it was (PRD: voice failure degrades to photos-only).
+          ...(sellerContext ? { sellerContext } : {}),
+        });
         const candidate = pipelineWorkerCheckpointWriteSchema.parse({
           ...checkpoint,
           identified,
@@ -316,15 +337,6 @@ export function createDurableVisionPipelineProcessor(
           retryable: false,
         });
       }
-
-      const voice = await resolveSellerContext(
-        context,
-        options,
-        checkpoint,
-        (candidate) => onCheckpoint(voiceCheckpointStage(context), candidate),
-      );
-      checkpoint = voice.checkpoint;
-      const sellerContext = voice.sellerContext;
       const voiceBinding = context.voice?.receipt && checkpoint.voice
         ? {
             version: checkpoint.voice.version,

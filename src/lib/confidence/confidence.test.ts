@@ -242,3 +242,72 @@ describe("computeConfidence — threshold validation (autopilot safety gate)", (
     expect(() => computeConfidence(ideal, { threshold: 1 })).not.toThrow();
   });
 });
+
+/**
+ * Issue #1120: an identity the SELLER named in their voice note is unverified
+ * context, not verified evidence (PRD user story 11). It is worth having — it is
+ * what puts the item in front of a real sold-comp search at all — but it must not
+ * score the same as an identity read off the item, so brand and model each earn
+ * HALF credit toward identification completeness when the identity was hinted.
+ *
+ * This adds one signal INPUT; the composite's three weights are untouched.
+ */
+describe("computeConfidence — a seller-hinted identity earns half credit (#1120)", () => {
+  const base: ConfidenceSignals = {
+    tier: "sold",
+    compAgreement: 0.8,
+    identification: {
+      brandResolved: true,
+      modelResolved: true,
+      barcodeDecoded: false,
+      categoryUnambiguous: true,
+    },
+  };
+
+  it("scores a hinted identity below the same photo-read identity", () => {
+    const photoRead = computeConfidence(base);
+    const hinted = computeConfidence({
+      ...base,
+      identification: { ...base.identification, identitySellerHinted: true },
+    });
+    expect(hinted.score).toBeLessThan(photoRead.score);
+  });
+
+  it("halves only the brand and model terms, leaving barcode and category whole", () => {
+    // 3 of 4 resolved photo-read → 0.75; hinted brand+model → (0.5+0.5+0+1)/4 = 0.5.
+    const photoRead = computeConfidence(base);
+    const hinted = computeConfidence({
+      ...base,
+      identification: { ...base.identification, identitySellerHinted: true },
+    });
+    expect(photoRead.score - hinted.score).toBeCloseTo(0.25 * 0.25, 10);
+  });
+
+  it("treats an absent flag exactly as a photo-read identity (legacy rows)", () => {
+    expect(
+      computeConfidence({
+        ...base,
+        identification: { ...base.identification, identitySellerHinted: false },
+      }).score,
+    ).toBe(computeConfidence(base).score);
+  });
+
+  it("cannot discount what was never resolved", () => {
+    const none: ConfidenceSignals = {
+      tier: "llm_only",
+      compAgreement: 0.3,
+      identification: {
+        brandResolved: false,
+        modelResolved: false,
+        barcodeDecoded: false,
+        categoryUnambiguous: true,
+      },
+    };
+    expect(
+      computeConfidence({
+        ...none,
+        identification: { ...none.identification, identitySellerHinted: true },
+      }).score,
+    ).toBe(computeConfidence(none).score);
+  });
+});

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { pipelineWorkerCheckpointWriteSchema } from "./checkpoint";
+import {
+  pipelineWorkerCheckpointSchema,
+  pipelineWorkerCheckpointWriteSchema,
+} from "./checkpoint";
 
 /**
  * PostgreSQL `jsonb` rejects `U+0000` (SQLSTATE 22P05) and PostgREST rejects lone
@@ -162,5 +165,51 @@ describe("pipeline checkpoint write boundary", () => {
     expect(parsed.generated?.copy.fields).toEqual({
       itemSpecifics: { Brand: "Sony" },
     });
+  });
+});
+
+/**
+ * Issue #1120: the worker now transcribes the seller's voice BEFORE identification,
+ * so the transcript can be offered to the vision call as an identity hint. The
+ * checkpoint schema used to forbid exactly that ordering.
+ */
+describe("checkpoint ordering — voice may precede identification (#1120)", () => {
+  const VOICE = {
+    version: 1,
+    contentSha256: "b".repeat(64),
+    outcome: "failed" as const,
+    providerContacted: false,
+    sellerContext: null,
+  };
+
+  it("accepts a voice attempt recorded before any identification", () => {
+    expect(
+      pipelineWorkerCheckpointSchema.safeParse({
+        voiceAttempt: { version: 1, contentSha256: "b".repeat(64) },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts a terminal voice outcome recorded before any identification", () => {
+    expect(pipelineWorkerCheckpointSchema.safeParse({ voice: VOICE }).success).toBe(
+      true,
+    );
+  });
+
+  it("still requires identification before pricing and generation", () => {
+    expect(
+      pipelineWorkerCheckpointSchema.safeParse({
+        voice: VOICE,
+        priced: {
+          result: {
+            suggested: 10,
+            range: { min: 5, max: 15 },
+            confidence: 0.5,
+            sources: [],
+            tier: "llm-only",
+          },
+        },
+      }).success,
+    ).toBe(false);
   });
 });

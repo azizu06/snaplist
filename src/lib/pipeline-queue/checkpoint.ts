@@ -122,13 +122,12 @@ function requireCheckpointOrder(
       path: ["generated"],
     });
   }
-  if ((checkpoint.voiceAttempt || checkpoint.voice) && !checkpoint.identified) {
-    context.addIssue({
-      code: "custom",
-      message: "A seller voice checkpoint requires an identification checkpoint",
-      path: ["voice"],
-    });
-  }
+  // Voice deliberately has NO identification prerequisite (#1120). The worker now
+  // transcribes before it identifies, so the seller's own words can reach the vision
+  // call as an unverified identity hint; requiring identification first is what made
+  // that hint unreachable. Pricing and generation still require identification, and
+  // `voiceGenerations` still requires the base generation, so the stages that
+  // actually consume an identity stay ordered.
   if (checkpoint.voiceGenerations && !checkpoint.generated) {
     context.addIssue({
       code: "custom",
