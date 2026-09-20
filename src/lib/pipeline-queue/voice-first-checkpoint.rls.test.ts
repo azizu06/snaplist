@@ -66,6 +66,8 @@ let user: ClerkTestUser;
 let itemId: string;
 let runId: string;
 let messageId: string;
+let crashRunId: string;
+let crashMessageId: string;
 let queueLease: ExclusiveTestResourceLease | undefined;
 
 beforeAll(async () => {
@@ -108,6 +110,20 @@ beforeAll(async () => {
       admin as unknown as PipelineQueueRpcClient,
     );
     messageId = await queue.enqueue(createPipelineQueueEnvelope(runId));
+
+    const { data: crashRun, error: crashRunError } = await user.client
+      .from("pipeline_runs")
+      .insert({
+        user_id: user.id,
+        item_id: itemId,
+        idempotency_key: `voice-first-crash-${Date.now()}`,
+        autopilot_enabled: false,
+      })
+      .select("id")
+      .single();
+    expect(crashRunError).toBeNull();
+    crashRunId = crashRun!.id;
+    crashMessageId = await queue.enqueue(createPipelineQueueEnvelope(crashRunId));
   });
 });
 
@@ -115,6 +131,9 @@ afterAll(async () => {
   try {
     if (!reachable || !admin) return;
     await admin.rpc("ack_pipeline_message", { p_message_id: messageId });
+    if (crashMessageId) {
+      await admin.rpc("ack_pipeline_message", { p_message_id: crashMessageId });
+    }
     if (user) await cleanupClerkTestUsers(admin, [user.id]);
   } finally {
     await queueLease?.release();
@@ -160,6 +179,104 @@ function stages(): VisionPipelineStages {
 }
 
 describe("voice-first pipeline checkpoints against the real RPC (#1120)", () => {
+  /**
+   * Round-3 review: reporting the terminal voice outcome queues the seller's RAW
+   * AUDIO for deletion (`record_raw_seller_voice_transcription_outcome` ->
+   * `queue_raw_seller_voice_cleanup`). On a fresh run that report must wait until
+   * the combined checkpoint is durable, or a crash inside identify loses the audio
+   * AND the transcript, and redelivery falls silently to photos-only — #1120 again.
+   */
+  it("keeps the raw audio until the transcript is durable, and replays with both", async (testContext) => {
+    skipIfStackUnreachable(testContext, reachable);
+
+    const store = createSupabasePipelineWorkerStore(
+      admin as unknown as PipelineWorkerRpcClient,
+    );
+    const attempt = acquired(
+      await store.acquire({ runId: crashRunId, messageId: crashMessageId, leaseSeconds: 120 }),
+    );
+    const voice = createVerifiedVoiceFixture();
+    const workerContext = {
+      ...attempt.context,
+      voice: {
+        receipt: { ...voice.receipt, storagePath: `${user.id}/intake/voice.wav` },
+      },
+    };
+    const transcribe = vi.fn(async () => ({
+      kind: "transcribed" as const,
+      text: "the newest generation of AirPods Pros",
+      language: "en-US" as CanonicalLanguageTag,
+      providerContacted: true,
+    }));
+    const terminalOutcomes: string[] = [];
+    const recordTerminalOutcome = vi.fn(async (input: { outcome: string }) => {
+      terminalOutcomes.push(input.outcome);
+      return true;
+    });
+
+    // Pass 1: identification throws AFTER transcription, before the combined write.
+    const crashing = stages();
+    crashing.identify = vi.fn(async () => {
+      throw new Error("identification crashed");
+    });
+    const crashProcessor = createDurableVisionPipelineProcessor(crashing, {
+      voiceStorage: { download: async () => voice.bytes },
+      transcriber: { transcribe } as unknown as SellerContextTranscriber,
+      recordTerminalOutcome,
+    });
+    await expect(
+      crashProcessor.process({
+        context: workerContext,
+        onCheckpoint: async (stage, checkpoint) =>
+          store.checkpoint({
+            runId: crashRunId,
+            leaseToken: workerContext.run.lease_token,
+            stage,
+            checkpoint,
+            leaseSeconds: 120,
+          }),
+      }),
+    ).rejects.toThrow(/identification crashed/);
+
+    // The audio was NOT released: no terminal outcome was reported, so
+    // `queue_raw_seller_voice_cleanup` never ran for this run.
+    expect(recordTerminalOutcome).not.toHaveBeenCalled();
+    expect(terminalOutcomes).toEqual([]);
+
+    // Pass 2: redelivery. The audio is still there, so the transcript is
+    // re-derived and reaches identification exactly as on a first delivery.
+    const replay = stages();
+    const replayProcessor = createDurableVisionPipelineProcessor(replay, {
+      voiceStorage: { download: async () => voice.bytes },
+      transcriber: { transcribe } as unknown as SellerContextTranscriber,
+      recordTerminalOutcome,
+    });
+    const result = await replayProcessor.process({
+      context: workerContext,
+      onCheckpoint: async (stage, checkpoint) =>
+        store.checkpoint({
+          runId: crashRunId,
+          leaseToken: workerContext.run.lease_token,
+          stage,
+          checkpoint,
+          leaseSeconds: 120,
+        }),
+    });
+
+    expect(replay.identify).toHaveBeenCalledWith({
+      photos: workerContext.item.photos,
+      sellerContext: {
+        text: "the newest generation of AirPods Pros",
+        language: "en-US",
+        provenance: "seller_voice",
+        verification: "unverified",
+      },
+    });
+    expect(result.attributes.brand).toBe("Apple");
+    // Only now, with the transcript durable, is the audio released.
+    expect(terminalOutcomes).toEqual(["transcribed"]);
+  });
+
   it("requires local Supabase to prove the checkpoint contract", () => {
     if (!reachable) {
       console.warn(

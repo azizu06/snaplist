@@ -119,12 +119,25 @@ export interface ExtractItemAttributesResult {
  * field with a non-answer ("generic", "unbranded", "Unknown Brand").
  *
  * Split by how ambiguous each marker is, because real product names contain some of
- * these words. A HYPHEN-attached "-style"/"-like"/"-ish" is always a hedge, anywhere
- * in the value ("AirPods Pro-style earbuds"). A space-separated trailing word is a
- * hedge only when it is never part of a real name (`lookalike`, `replica`, `dupe`) —
- * so the Electro-Harmonix "Small Clone" and a model ending in " Style" survive, while
- * "Apple lookalike" does not. Leading qualifiers ("faux", "imitation", "compatible
- * with") and whole-value placeholders ("Unknown Brand", "No Brand") round it out.
+ * these words.
+ *
+ * The ambiguous markers — `style`, `like`, `type`, `ish`, `esque`, `inspired` — are
+ * separated from real names by CASE, because English writes them differently in the
+ * two roles: a hedge is a lowercase modifier ("Apple-style", "AirPods Pro style"),
+ * while inside a proper name the same token is capitalized (the Jaguar "E-Type", the
+ * Bachmann "Life-Like", "Gibson Les Paul Custom Style"). Capitalization is the one
+ * signal that actually distinguishes them; a word list cannot, because the two uses
+ * share the same words. Trailing markers need something to qualify, so a bare
+ * "Style" with nothing in front of it is not a hedge.
+ *
+ * The unambiguous markers (`lookalike`, `replica`, `dupe`, `knockoff`, `imitation`,
+ * `faux`) are never part of a real name, so they hedge in any case. Leading
+ * qualifiers ("faux", "imitation", "compatible with") and whole-value placeholders
+ * ("Unknown Brand", "No Brand") round it out.
+ *
+ * The deliberate residue: an ALL-CAPS hedge ("APPLE-STYLE") reads as capitalized and
+ * survives. Dropping it would also drop "E-TYPE", and the model writes ordinary title
+ * case — an all-caps hedge is the rarer and cheaper miss of the two.
  *
  * The prompt asks the model to commit instead of hedging (#1120); this is the
  * deterministic half, for a provider that ignores the contract anyway. Dropping the
@@ -133,7 +146,13 @@ export interface ExtractItemAttributesResult {
  * place trades one false negative (no comps) for a worse false positive (comps for a
  * DIFFERENT product cited as this item's evidence).
  */
-const HEDGE_SUFFIX_RE = /-\s*(style|styled|like|ish|esque|inspired|type)\b/i;
+/**
+ * An ambiguous marker in its LOWERCASE modifier form, attached by a hyphen or
+ * trailing after at least one other token. Both forms require something to
+ * qualify, so a lone "style" is left to the placeholder rule.
+ */
+const HEDGE_MODIFIER_RE =
+  /(\S-\s*|\S\s+)(style|styled|like|ish|esque|inspired|type)\b/;
 const HEDGE_PREFIX_RE =
   /^(faux|imitation|replica|fake|counterfeit|knock[\s-]?off|dupe|copy of|compatible with|for use with|fits|similar to|inspired by)\b/i;
 const HEDGE_WORD_RE =
@@ -145,7 +164,7 @@ export function isHedgedIdentity(value: string | undefined | null): boolean {
   const text = (value ?? "").trim();
   if (!text) return true;
   return (
-    HEDGE_SUFFIX_RE.test(text) ||
+    HEDGE_MODIFIER_RE.test(text) ||
     HEDGE_PREFIX_RE.test(text) ||
     HEDGE_WORD_RE.test(text) ||
     PLACEHOLDER_RE.test(text)
@@ -197,14 +216,41 @@ function identitySourceFor(
 }
 
 /**
+ * Ordinary English words that are ALSO common model names. This is the collision
+ * set that makes a ONE-token match meaningless: a seller saying "the switch on the
+ * side is broken" has not named a Nintendo Switch, and "it comes with the air
+ * filter" has not named a MacBook Air.
+ *
+ * It is deliberately a short collision list, not a dictionary. A one-word identity
+ * that is an ordinary word but NOT a common model name — "Apple" — still
+ * corroborates, because a seller who says "it's an Apple" did name the brand.
+ */
+const COMMON_WORD_MODEL_NAMES = new Set([
+  "air", "band", "book", "case", "charge", "classic", "dot", "echo", "edge",
+  "fit", "flip", "go", "home", "light", "lite", "max", "mini", "note", "one",
+  "play", "plus", "pro", "series", "solo", "sport", "studio", "switch", "tab",
+  "view", "watch", "wave",
+]);
+
+/**
  * Did the seller actually say this identity? Folds case and punctuation, requires the
  * tokens in order and on whole-token boundaries — "Pro" must not match inside
  * "Professional" — and tolerates a plural on the last token, because a seller says
  * "AirPods Pros" for an AirPods Pro. Pure and total.
+ *
+ * Round-3 review: a match must also be SPECIFIC enough to mean something. Two or
+ * more tokens in order is specific; a single token is only specific when it is not
+ * an ordinary word that doubles as a common model name. Without that floor the
+ * sentence "the switch on the side is broken" corroborates the model "Switch",
+ * relabels a photo-read identity as seller-hinted, and discounts the confidence
+ * composite for a hint the seller never gave.
  */
 function spokenIdentity(transcript: string, identity: string): boolean {
   const tokens = identity.toLowerCase().match(/[a-z0-9]+/g);
   if (!tokens?.length) return false;
+  if (tokens.length === 1 && COMMON_WORD_MODEL_NAMES.has(tokens[0])) {
+    return false;
+  }
   const spoken = transcript.toLowerCase().replace(/[^a-z0-9]+/g, " ");
   const pattern = new RegExp(
     `(?<![a-z0-9])${tokens.join("\\s+")}s?(?![a-z0-9])`,

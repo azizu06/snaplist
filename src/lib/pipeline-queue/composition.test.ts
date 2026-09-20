@@ -326,6 +326,10 @@ describe("provider-neutral pipeline worker composition", () => {
       }
       for (const entry of usage.transcriptions) {
         const key = `${entry.role}:${entry.provider}:${entry.model}`;
+        // Mirrors `record_pipeline_run_provider_usage`: a transcription-only
+        // record is merged idempotently, so a second identical reservation
+        // returns success WITHOUT incrementing the stored receipt. First write
+        // wins, exactly as the RPC does.
         if (!recordedTranscriptionAttempts.has(key)) {
           recordedTranscriptionAttempts.set(key, entry.calls);
         }
@@ -408,12 +412,22 @@ describe("provider-neutral pipeline worker composition", () => {
       ...(expectedContext ? { sellerContext: expectedContext } : {}),
     });
     expect(transcribe).toHaveBeenCalledTimes(expectedCalls);
-    expect(
-      [...recordedTranscriptionAttempts.values()].reduce(
-        (total, calls) => total + calls,
-        0,
-      ),
-    ).toBe(activation ? 1 : 0);
+    const recordedTranscriptionCalls = [
+      ...recordedTranscriptionAttempts.values(),
+    ].reduce((total, calls) => total + calls, 0);
+    expect(recordedTranscriptionCalls).toBe(activation ? 1 : 0);
+    if (activation && expectedCalls > 1) {
+      // KNOWN LIMIT (#1120 round 3), pinned here so it cannot change silently:
+      // the worker reserves before EVERY paid transcription, so the client
+      // reports each paid call. The DURABLE receipt cannot represent more than
+      // one: `record_pipeline_run_provider_usage` accepts a transcription-only
+      // record only when `calls = '1'` (migration 20260811120000), and treats a
+      // repeat of the identical record as an idempotent replay so redelivery is
+      // safe. A run that loses its combined checkpoint and re-transcribes
+      // therefore pays twice and records one call. Widening it means changing
+      // that invariant — a schema change, deliberately out of scope here.
+      expect(recordedTranscriptionCalls).toBeLessThan(expectedCalls);
+    }
     if (usageWriteFailsOnce) {
       expect(persistedCheckpoint).toMatchObject({
         voiceAttempt: {

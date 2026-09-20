@@ -323,6 +323,12 @@ describe("vision/extract — identity commitment contract (#1120)", () => {
     // Unambiguous trailing words.
     ["Apple lookalike", true],
     ["Rolex knockoff", true],
+    // Round-3 review: a lowercase marker trailing after a real token hedges just
+    // as much as the hyphenated form — the space is punctuation, not meaning.
+    ["AirPods Pro style", true],
+    ["Apple like", true],
+    ["Apple type", true],
+    ["Sony-type", true],
     // Whole-value placeholders.
     ["generic", true],
     ["Unbranded", true],
@@ -342,6 +348,15 @@ describe("vision/extract — identity commitment contract (#1120)", () => {
     ["Gibson Les Paul Custom Style", false],
     ["Liketa", false],
     ["Copyright Press", false],
+    // Round-3 review: the same markers CAPITALIZED are real model names. The
+    // Jaguar E-Type and the Bachmann Life-Like brand are identities, not hedges.
+    ["E-Type", false],
+    ["X-Type", false],
+    ["S-Type", false],
+    ["Jaguar E-Type", false],
+    ["Life-Like", false],
+    // A bare marker with nothing to qualify is not a hedge either.
+    ["Style", false],
   ] as const)("classifies %s as hedged=%s", (value, hedged) => {
     expect(isHedgedIdentity(value)).toBe(hedged);
   });
@@ -521,6 +536,46 @@ describe("vision/extract — deterministic hint corroboration (#1120)", () => {
     });
     expect(result.attributes.identitySource).toBe("photos");
   });
+
+  /**
+   * Round-3 review: corroboration must be SPECIFIC. A single ordinary word that
+   * doubles as a model name is said for a hundred reasons that have nothing to do
+   * with naming the item, and mislabelling that as a seller hint discounts the
+   * confidence composite for a hint the seller never gave.
+   */
+  it.each([
+    // Not specific enough: one common word, said about something else entirely.
+    [
+      "the switch on the side is broken",
+      { model: "Switch" },
+      "photos",
+    ],
+    ["it comes with the air filter too", { model: "Air" }, "photos"],
+    ["I have one of these left", { model: "One" }, "photos"],
+    ["it plays fine, no notes", { model: "Note" }, "photos"],
+    // Specific enough: two tokens in order.
+    [
+      "it is a Nintendo Switch, boxed",
+      { brand: "Nintendo", model: "Switch" },
+      "seller-hinted",
+    ],
+    ["MacBook Air, 2020", { model: "MacBook Air" }, "seller-hinted"],
+    // Specific enough: one token that is not a common model name.
+    ["it's an Apple, the small one", { brand: "Apple" }, "seller-hinted"],
+  ] as const)(
+    "reads %j as identitySource=%s",
+    async (text, identity, expected) => {
+      const { generate } = scriptedGenerate([
+        { ...identity, category: "electronics" },
+      ]);
+      const result = await extractItemAttributes({
+        images: ["a"],
+        generate,
+        sellerContext: { ...TRANSCRIPT, text },
+      });
+      expect(result.attributes.identitySource).toBe(expected);
+    },
+  );
 
   it("matches whole tokens, not fragments", async () => {
     const { generate } = scriptedGenerate([

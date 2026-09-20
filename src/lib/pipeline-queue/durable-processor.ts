@@ -93,6 +93,21 @@ function voiceCheckpointStage(
   }
 }
 
+/**
+ * Report the terminal voice outcome. On a RESUMED run this fires immediately, as it
+ * always has. On a FRESH run it is BUFFERED and flushed only after the combined
+ * checkpoint is durable, because the RPC behind it chains
+ * `record_raw_seller_voice_transcription_outcome` ->
+ * `queue_raw_seller_voice_cleanup`: reporting early queues the seller's raw audio
+ * for deletion while no durable transcript exists yet. A crash inside identify would
+ * then lose BOTH, and redelivery would fall silently to photos-only — issue #1120 in
+ * miniature, reintroduced by the very reorder that fixed it.
+ */
+type ReportTerminalVoiceOutcome = (
+  outcome: SellerContextTranscriptionResult["kind"],
+  providerContacted: boolean,
+) => Promise<void>;
+
 async function recordTerminalVoiceOutcome(
   context: PipelineWorkerContext,
   options: DurableVisionPipelineProcessorOptions,
@@ -142,6 +157,7 @@ async function resolveSellerContext(
   checkpoint: PipelineWorkerCheckpoint,
   persist: PersistSellerVoice,
   reserveTranscription: ReserveTranscription,
+  reportTerminalOutcome: ReportTerminalVoiceOutcome,
 ): Promise<{
   checkpoint: PipelineWorkerCheckpoint;
   sellerContext: SellerContext | undefined;
@@ -177,21 +193,11 @@ async function resolveSellerContext(
     });
   }
   if (savedVoice?.outcome === "transcribed") {
-    await recordTerminalVoiceOutcome(
-      context,
-      options,
-      savedVoice.outcome,
-      savedVoice.providerContacted,
-    );
+    await reportTerminalOutcome(savedVoice.outcome, savedVoice.providerContacted);
     return { checkpoint, sellerContext: savedVoice.sellerContext };
   }
   if (savedVoice) {
-    await recordTerminalVoiceOutcome(
-      context,
-      options,
-      savedVoice.outcome,
-      savedVoice.providerContacted,
-    );
+    await reportTerminalOutcome(savedVoice.outcome, savedVoice.providerContacted);
     return { checkpoint, sellerContext: undefined };
   }
   if (savedAttempt) {
@@ -207,12 +213,7 @@ async function resolveSellerContext(
           : {}),
       }),
     });
-    await recordTerminalVoiceOutcome(
-      context,
-      options,
-      "failed",
-      Boolean(savedAttempt.transcriptionAttempt),
-    );
+    await reportTerminalOutcome("failed", Boolean(savedAttempt.transcriptionAttempt));
     return { checkpoint, sellerContext: undefined };
   }
 
@@ -233,7 +234,7 @@ async function resolveSellerContext(
         sellerContext: null,
       }),
     });
-    await recordTerminalVoiceOutcome(context, options, "failed", false);
+    await reportTerminalOutcome("failed", false);
     return { checkpoint, sellerContext: undefined };
   };
 
@@ -315,12 +316,7 @@ async function resolveSellerContext(
             },
     ),
   });
-  await recordTerminalVoiceOutcome(
-    context,
-    options,
-    result.kind,
-    result.providerContacted,
-  );
+  await reportTerminalOutcome(result.kind, result.providerContacted);
   return { checkpoint, sellerContext };
 }
 
@@ -394,12 +390,35 @@ export function createDurableVisionPipelineProcessor(
         }
       };
 
+      // Buffered on a fresh run: reporting the terminal outcome queues the raw audio
+      // for deletion, so it must not happen until the transcript is durable.
+      let pendingTerminalOutcome:
+        | { outcome: SellerContextTranscriptionResult["kind"]; providerContacted: boolean }
+        | undefined;
+      const reportTerminalOutcome: ReportTerminalVoiceOutcome = async (
+        outcome,
+        providerContacted,
+      ) => {
+        if (writesVoiceThrough) {
+          if (!options) return;
+          await recordTerminalVoiceOutcome(
+            context,
+            options,
+            outcome,
+            providerContacted,
+          );
+          return;
+        }
+        pendingTerminalOutcome = { outcome, providerContacted };
+      };
+
       const voice = await resolveSellerContext(
         context,
         options,
         checkpoint,
         persistSellerVoice,
         reserveTranscription,
+        reportTerminalOutcome,
       );
       checkpoint = voice.checkpoint;
       const sellerContext = voice.sellerContext;
@@ -422,6 +441,19 @@ export function createDurableVisionPipelineProcessor(
         checkpoint = pipelineWorkerCheckpointSchema.parse(
           await onCheckpoint("identifying", candidate),
         );
+        // Durable now: the transcript (or the honest terminal failure) survives a
+        // crash, so the raw audio may be released. Ordering this AFTER the write is
+        // the whole point — before it, a crash inside identify would delete the
+        // audio and lose the transcript, leaving redelivery with neither.
+        if (pendingTerminalOutcome && options) {
+          await recordTerminalVoiceOutcome(
+            context,
+            options,
+            pendingTerminalOutcome.outcome,
+            pendingTerminalOutcome.providerContacted,
+          );
+          pendingTerminalOutcome = undefined;
+        }
       }
       const identified = checkpoint.identified;
       if (!identified) {
