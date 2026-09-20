@@ -3,6 +3,7 @@ import {
   extractedAttributesSchema,
   type ExtractedAttributes,
   type Identification,
+  type SellerContext,
 } from "../pipeline/types";
 import { resolveLanguageModel, resolveModelId } from "../llm";
 import { ITEM_CONDITIONS } from "../items/condition";
@@ -58,6 +59,12 @@ export type VisionGenerateResult = Partial<ExtractedAttributes> & {
   uncertaintyReason?: string;
   /** Plausible alternative identities the model considered. */
   candidates?: string[];
+  /**
+   * Whether the model adopted an identity the SELLER named (only meaningful when a
+   * transcript was supplied). Advisory: `identitySource` is derived from this plus
+   * the facts SnapList controls, never from this flag alone.
+   */
+  identityHintUsed?: boolean;
   [key: string]: unknown;
 };
 
@@ -69,6 +76,12 @@ export type VisionGenerate = (args: {
   images: VisionImageInput[];
   /** Which attempt this is (0-based) — lets the real wrapper nudge the prompt on retry. */
   attempt: number;
+  /**
+   * The seller's own words about this item, when a voice note transcribed. UNVERIFIED
+   * context offered to the model as an identity HINT — the photos stay the authority
+   * (PRD user story 11). Absent when no transcript exists.
+   */
+  sellerContext?: SellerContext;
 }) => Promise<VisionGenerateResult>;
 
 export interface ExtractItemAttributesInput {
@@ -80,6 +93,11 @@ export interface ExtractItemAttributesInput {
   maxRetries?: number;
   /** Model id override (else `VISION_MODEL` env, else `DEFAULT_VISION_MODEL`). */
   model?: string;
+  /**
+   * Transcribed seller voice context, forwarded to the model as an unverified
+   * identity hint. Omitted entirely when the item has no transcript.
+   */
+  sellerContext?: SellerContext;
 }
 
 export interface ExtractItemAttributesResult {
@@ -89,6 +107,68 @@ export interface ExtractItemAttributesResult {
   identification: Identification;
   /** The model id used (logged for evaluation). */
   model: string;
+}
+
+// ---------------------------------------------------------------------------
+// Hedged identities: a hedge is NOT an identity
+// ---------------------------------------------------------------------------
+
+/**
+ * Lookalike/placeholder phrasings that name a product without claiming to BE it
+ * ("AirPods Pro-style", "Apple lookalike", "compatible with Apple") or that fill the
+ * field with a non-answer ("generic", "unbranded", "unknown").
+ *
+ * The prompt asks the model to commit instead of hedging (#1120); this is the
+ * deterministic half, for a provider that ignores the contract anyway. Dropping the
+ * hedge matters beyond tidiness: a hedged `brand` + `model` pair is what
+ * `buildSoldSearchQuery` would turn into a real sold-comp search, so leaving it in
+ * place trades one false negative (no comps) for a worse false positive (comps for a
+ * DIFFERENT product cited as this item's evidence).
+ */
+const HEDGED_IDENTITY_RE =
+  /(^|[\s-])(style|styled|lookalike|look[\s-]?a[\s-]?like|like|inspired|esque|replica|clone|knock[\s-]?off|dupe|copy)$|^(compatible with|for use with|fits)\b|^(generic|unbranded|no[\s-]?name|unknown|unidentified|n\/?a|none|other|various|assorted)$/i;
+
+/**
+ * True when a brand/model value is a hedge or placeholder rather than an identity.
+ * Pure and total — the empty string and whitespace count as hedges (no identity).
+ */
+export function isHedgedIdentity(value: string | undefined | null): boolean {
+  const text = (value ?? "").trim();
+  if (!text) return true;
+  return HEDGED_IDENTITY_RE.test(text);
+}
+
+/** Drop hedged `brand`/`model` values so they never reach the pricing signal. */
+function withoutHedgedIdentity(raw: VisionGenerateResult): VisionGenerateResult {
+  const next = { ...raw };
+  if (typeof next.brand === "string" && isHedgedIdentity(next.brand)) {
+    next.brand = undefined;
+  }
+  if (typeof next.model === "string" && isHedgedIdentity(next.model)) {
+    next.model = undefined;
+  }
+  return next;
+}
+
+/**
+ * Where the resolved identity came from (#1120).
+ *
+ * `"seller-hinted"` requires ALL THREE of: a transcript actually supplied, the model
+ * reporting that it adopted the seller-named identity, and an identity having
+ * resolved at all. The model's flag alone is never enough — `identitySource`
+ * discounts the confidence composite, so a provider that sets the flag unprompted
+ * (or sets it while resolving nothing) must not be able to move the score.
+ */
+function identitySourceFor(
+  attrs: ExtractedAttributes,
+  raw: VisionGenerateResult,
+  sellerContext: SellerContext | undefined,
+): "photos" | "seller-hinted" {
+  const adopted =
+    sellerContext !== undefined &&
+    raw.identityHintUsed === true &&
+    (attrs.brand != null || attrs.model != null);
+  return adopted ? "seller-hinted" : "photos";
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +266,7 @@ function resolveModel(model?: string): string {
 export async function extractItemAttributes(
   input: ExtractItemAttributesInput,
 ): Promise<ExtractItemAttributesResult> {
-  const { images, maxRetries = 2 } = input;
+  const { images, maxRetries = 2, sellerContext } = input;
 
   if (images.length < MIN_IMAGES) {
     throw new Error(
@@ -207,7 +287,12 @@ export async function extractItemAttributes(
   for (let attempt = 0; attempt < attempts; attempt++) {
     let raw: VisionGenerateResult;
     try {
-      raw = await generate({ model, images, attempt });
+      raw = await generate({
+        model,
+        images,
+        attempt,
+        ...(sellerContext ? { sellerContext } : {}),
+      });
     } catch (err) {
       // The real `generateObject` validates internally and THROWS
       // (NoObjectGeneratedError) on a parse/schema failure rather than returning an
@@ -217,9 +302,13 @@ export async function extractItemAttributes(
       lastIssues = err instanceof Error ? err.message : String(err);
       continue;
     }
+    raw = withoutHedgedIdentity(raw);
     const parsed = extractedAttributesSchema.safeParse(raw);
     if (parsed.success) {
-      const attributes = parsed.data;
+      const attributes: ExtractedAttributes = {
+        ...parsed.data,
+        identitySource: identitySourceFor(parsed.data, raw, sellerContext),
+      };
       return {
         attributes,
         identification: deriveIdentification(attributes, raw),
@@ -257,8 +346,26 @@ export async function extractItemAttributes(
  * also TELL us when it's unsure.
  */
 export const visionResponseSchema = z.object({
-  brand: z.string().nullable(),
-  model: z.string().nullable(),
+  brand: z
+    .string()
+    .nullable()
+    .describe(
+      "The manufacturer brand. COMMIT to it whenever the product's own design, " +
+        "markings, packaging, or accessories make it unmistakable — a distinctive " +
+        "industrial design is visible evidence, not a guess. Never a hedge or a " +
+        "placeholder: \"Apple-style\", \"Apple lookalike\", \"compatible with Apple\", " +
+        "\"generic\", \"unbranded\" and \"unknown\" are all rejected and read as no brand " +
+        "at all. Null only when you genuinely cannot tell who made it.",
+    ),
+  model: z
+    .string()
+    .nullable()
+    .describe(
+      "The product model or product line, e.g. \"AirPods Pro\", \"WH-1000XM4\". COMMIT " +
+        "to the line when the design is unmistakable; name the generation ONLY when it " +
+        "is visibly determinable, otherwise give the line alone. Never a hedge such as " +
+        "\"AirPods Pro-style\" or \"-like\" — a hedge is rejected and read as no model.",
+    ),
   category: z.string().nullable(),
   // The taxonomy, not a free string (issue #798). Strict structured decoding
   // enforces an enum at the provider, so the model cannot emit `"Good"` and
@@ -298,6 +405,14 @@ export const visionResponseSchema = z.object({
     .array(z.string())
     .nullable()
     .describe("Plausible alternative identities when unsure, instead of guessing one."),
+  identityHintUsed: z
+    .boolean()
+    .nullable()
+    .describe(
+      "True only if the brand/model you returned came from the seller's spoken " +
+        "context rather than from the photos alone. Null or false when the photos " +
+        "alone established the identity, or when you rejected what the seller said.",
+    ),
 });
 
 /**
@@ -311,8 +426,16 @@ function nullsToUndefined(obj: Record<string, unknown>): VisionGenerateResult {
   return out as VisionGenerateResult;
 }
 
-/** System guidance: extract faithfully + SPECIFICALLY, READ every label, and flag uncertainty. */
-const EXTRACTION_SYSTEM_PROMPT =
+/**
+ * System guidance: extract faithfully + SPECIFICALLY, READ every label, COMMIT to an
+ * unmistakable identity, and flag uncertainty through the uncertainty signal.
+ *
+ * Exported so the contract tests can pin the directives that a production run proved
+ * load-bearing (#1120): withholding `brand`/`model` behind a "-style" hedge removes
+ * the item from every evidence-backed pricing tier, which is a far worse outcome than
+ * a committed identity carried at honest confidence.
+ */
+export const EXTRACTION_SYSTEM_PROMPT =
   "You identify a used item for resale from one or more photos. Extract only what you can " +
   "actually see — never invent. Read EVERY visible label, sticker, box, screen, spec sheet, and " +
   "engraving. Capture brand, model, category, condition, and any decoded barcode (ISBN for " +
@@ -321,9 +444,22 @@ const EXTRACTION_SYSTEM_PROMPT =
   "model/version numbers, generation/year, capacity or size (storage, RAM, screen size), and " +
   "specific component models — always in the most specific form visible (e.g. \"RTX 3060\" not " +
   "\"RTX\"; \"256GB SSD\" not \"SSD\"). Omit a spec rather than give a vague one. Provide a short title. " +
-  "Do NOT guess a brand, model, or spec you cannot confirm from the photos — if the item is ambiguous, " +
-  "generic, or the photo is unclear, set ambiguous=true, give a short uncertaintyReason, and list " +
-  "plausible candidates instead of committing to one identity.";
+  "COMMIT to brand and model whenever the product's own design, markings, packaging, or bundled " +
+  "accessories make it unmistakable — a distinctive industrial design IS visible evidence. Never " +
+  "answer with a hedge or lookalike phrasing (\"AirPods Pro-style\", \"Apple-like\", \"compatible with\", " +
+  "\"generic\", \"unbranded\"); such a value is rejected and read as no identity at all, which strips the " +
+  "item of every evidence-backed price source. Suspicion that a unit may be counterfeit, replica, or " +
+  "otherwise not authentic is NOT a reason to withhold the identity: still name the brand and model " +
+  "you see, and raise the doubt by setting ambiguous=true with a short uncertaintyReason. " +
+  "Do NOT guess a brand, model, or spec you cannot confirm from the photos — if the item is genuinely " +
+  "ambiguous, generic, or the photo is unclear, set ambiguous=true, give a short uncertaintyReason, and " +
+  "list plausible candidates instead of inventing one identity. " +
+  "You may also be given the SELLER'S OWN SPOKEN WORDS about the item. That is unverified " +
+  "context, not evidence: it can point you at an identity, but it can never outrank what the " +
+  "photos, labels, or a decoded barcode actually show. Adopt a brand or model the seller names " +
+  "ONLY when the photos are visually consistent with it, and set identityHintUsed=true when you " +
+  "do. If the seller's words conflict with the photos, IGNORE them and keep what you can see. " +
+  "Never take condition, specs, completeness, or authenticity from the seller's words alone.";
 
 /**
  * Build the real generate: a lazy wrapper around the AI SDK's `generateObject` with
@@ -334,7 +470,7 @@ const EXTRACTION_SYSTEM_PROMPT =
 export function createOpenAIVisionGenerate(
   apiKey: string | undefined = undefined,
 ): VisionGenerate {
-  return async ({ model, images, attempt }) => {
+  return async ({ model, images, attempt, sellerContext }) => {
     const { generateObject } = await import("ai");
     const llmModel = await resolveLanguageModel("vision", { modelId: model, apiKey });
 
@@ -349,6 +485,20 @@ export function createOpenAIVisionGenerate(
         ? "Identify this item and extract its attributes from the photo(s)."
         : "Your previous response was not valid. Re-extract, strictly matching the schema.";
 
+    // The seller's transcript rides as its OWN labelled text part, never spliced into
+    // the instruction: the label is what keeps it readable as unverified context
+    // rather than as another system directive (#1120, PRD user story 11).
+    const hintParts = sellerContext
+      ? [
+          {
+            type: "text" as const,
+            text:
+              "Unverified seller context (the seller's own words, spoken about this " +
+              `item): "${sellerContext.text}"`,
+          },
+        ]
+      : [];
+
     const { object } = await generateObject({
       model: llmModel,
       schema: visionResponseSchema,
@@ -356,7 +506,11 @@ export function createOpenAIVisionGenerate(
       messages: [
         {
           role: "user",
-          content: [{ type: "text", text: instruction }, ...imageParts],
+          content: [
+            { type: "text", text: instruction },
+            ...hintParts,
+            ...imageParts,
+          ],
         },
       ],
     });

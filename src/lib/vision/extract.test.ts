@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { extractedAttributesSchema } from "../pipeline/types";
+import {
+  extractedAttributesSchema,
+  type SellerContext,
+} from "../pipeline/types";
 import { ITEM_CONDITIONS } from "../items/condition";
 import {
+  EXTRACTION_SYSTEM_PROMPT,
   extractItemAttributes,
+  isHedgedIdentity,
   visionResponseSchema,
   type VisionGenerate,
   type VisionGenerateResult,
@@ -229,6 +234,7 @@ describe("vision/extract — the provider schema constrains condition (#798)", (
     ambiguous: null,
     uncertaintyReason: null,
     candidates: null,
+    identityHintUsed: null,
   };
 
   it("accepts every canonical taxonomy value", () => {
@@ -264,5 +270,160 @@ describe("vision/extract — default generate is lazy (no eager SDK import)", ()
     const spy = vi.fn(async () => STRONG);
     await extractItemAttributes({ images: ["x"], generate: spy });
     expect(spy).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * Issue #1120: a genuine Apple AirPods Pro (photographed with its case) came back
+ * as `brand: null, model: null, title: "White AirPods Pro-style Wireless Earbuds
+ * with Case"`. Withholding the identity is what removed the item from every
+ * evidence-backed pricing tier, so the contract now says: COMMIT when the design
+ * is unmistakable, and express doubt through the uncertainty signal instead.
+ *
+ * The prompt and the model-facing `.describe()` text ARE the contract the provider
+ * sees, so they are pinned here; the hedge filter is the deterministic half that a
+ * provider ignoring the contract cannot get past.
+ */
+describe("vision/extract — identity commitment contract (#1120)", () => {
+  /** The exact hedged payload the production run produced. */
+  const HEDGED_PROD_PAYLOAD: VisionGenerateResult = {
+    title: "White AirPods Pro-style Wireless Earbuds with Case",
+    category: "true wireless earbuds with charging case",
+    condition: "very-good",
+    specs: ["wireless charging case", "in-ear"],
+  };
+
+  it("instructs the model to commit to an unmistakable brand/model", () => {
+    expect(EXTRACTION_SYSTEM_PROMPT).toMatch(/unmistakable/i);
+    expect(EXTRACTION_SYSTEM_PROMPT).toMatch(/-style|lookalike|hedge/i);
+  });
+
+  it("routes counterfeit caution to the uncertainty signal, not to a withheld identity", () => {
+    expect(EXTRACTION_SYSTEM_PROMPT).toMatch(/counterfeit|replica|authentic/i);
+    expect(EXTRACTION_SYSTEM_PROMPT).toMatch(/ambiguous=true|uncertaintyReason/);
+  });
+
+  it("carries the commitment rule in the model-facing brand/model descriptions", () => {
+    expect(visionResponseSchema.shape.brand.description).toMatch(/-style|hedge/i);
+    expect(visionResponseSchema.shape.model.description).toMatch(/-style|hedge/i);
+  });
+
+  it("classifies hedges and placeholders as non-identities", () => {
+    for (const hedge of [
+      "Apple-style",
+      "AirPods Pro style",
+      "Apple lookalike",
+      "AirPods Pro-like",
+      "generic",
+      "Unbranded",
+      "unknown",
+      "n/a",
+      "compatible with Apple",
+    ]) {
+      expect(isHedgedIdentity(hedge), hedge).toBe(true);
+    }
+    for (const real of ["Apple", "AirPods Pro", "WH-1000XM4", "Lifestyle"]) {
+      expect(isHedgedIdentity(real), real).toBe(false);
+    }
+  });
+
+  it("drops a hedged brand/model instead of pricing against it", async () => {
+    const { generate } = scriptedGenerate([
+      { ...HEDGED_PROD_PAYLOAD, brand: "Apple-style", model: "AirPods Pro-like" },
+    ]);
+    const result = await extractItemAttributes({ images: ["a"], generate });
+    expect(result.attributes.brand).toBeUndefined();
+    expect(result.attributes.model).toBeUndefined();
+  });
+
+  it("keeps a committed brand/model untouched", async () => {
+    const { generate } = scriptedGenerate([
+      { ...HEDGED_PROD_PAYLOAD, brand: "Apple", model: "AirPods Pro" },
+    ]);
+    const result = await extractItemAttributes({ images: ["a"], generate });
+    expect(result.attributes.brand).toBe("Apple");
+    expect(result.attributes.model).toBe("AirPods Pro");
+  });
+});
+
+/**
+ * Issue #1120 acceptance 2: the seller's voice transcript is an identity HINT to the
+ * vision step — unverified seller context, never an override of what the photos show
+ * (PRD user story 11). The run that failed had the seller saying "the newest
+ * generation of AirPods Pros" while the vision call never saw a word of it.
+ */
+describe("vision/extract — seller context as an identity hint (#1120)", () => {
+  const TRANSCRIPT: SellerContext = {
+    text: "The newest generation of AirPods Pros, barely used.",
+    language: "en",
+    provenance: "seller_voice",
+    verification: "unverified",
+  };
+
+  it("hands the transcript to the model call", async () => {
+    const { generate, calls } = scriptedGenerate([STRONG]);
+    await extractItemAttributes({
+      images: ["a"],
+      generate,
+      sellerContext: TRANSCRIPT,
+    });
+    expect(calls[0]?.sellerContext).toEqual(TRANSCRIPT);
+  });
+
+  it("omits the hint entirely when there is no transcript", async () => {
+    const { generate, calls } = scriptedGenerate([STRONG]);
+    await extractItemAttributes({ images: ["a"], generate });
+    expect(calls[0]?.sellerContext).toBeUndefined();
+  });
+
+  it("records a seller-hinted identity so confidence can discount it", async () => {
+    const { generate } = scriptedGenerate([
+      { ...STRONG, identityHintUsed: true },
+    ]);
+    const result = await extractItemAttributes({
+      images: ["a"],
+      generate,
+      sellerContext: TRANSCRIPT,
+    });
+    expect(result.attributes.identitySource).toBe("seller-hinted");
+  });
+
+  it("records a photo-read identity when the model did not adopt the hint", async () => {
+    const { generate } = scriptedGenerate([
+      { ...STRONG, identityHintUsed: false },
+    ]);
+    const result = await extractItemAttributes({
+      images: ["a"],
+      generate,
+      sellerContext: TRANSCRIPT,
+    });
+    expect(result.attributes.identitySource).toBe("photos");
+  });
+
+  it("cannot be marked seller-hinted without a transcript to hint from", async () => {
+    const { generate } = scriptedGenerate([
+      { ...STRONG, identityHintUsed: true },
+    ]);
+    const result = await extractItemAttributes({ images: ["a"], generate });
+    expect(result.attributes.identitySource).toBe("photos");
+  });
+
+  it("cannot be marked seller-hinted when no identity was resolved at all", async () => {
+    const { generate } = scriptedGenerate([
+      { category: "true wireless earbuds", identityHintUsed: true },
+    ]);
+    const result = await extractItemAttributes({
+      images: ["a"],
+      generate,
+      sellerContext: TRANSCRIPT,
+    });
+    expect(result.attributes.identitySource).toBe("photos");
+  });
+
+  it("carries the hint rules in the model-facing contract", () => {
+    expect(EXTRACTION_SYSTEM_PROMPT).toMatch(/seller/i);
+    expect(visionResponseSchema.shape.identityHintUsed.description).toMatch(
+      /seller/i,
+    );
   });
 });
