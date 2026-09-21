@@ -3364,6 +3364,7 @@ struct PhotoReviewView: View {
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
     @State private var isVoiceNotePresented = false
+    @State private var isKeepingVoiceNoteForStart = false
     @State private var submissionEffectConsumer =
         PhotoReviewSubmissionEffectConsumer()
     @State private var saveFailureAnnouncementConsumer =
@@ -3571,6 +3572,7 @@ struct PhotoReviewView: View {
                 .ignoresSafeArea()
                 // The scrim blocks touch; this keeps VoiceOver inside the
                 // panel too, so nothing behind it (Start listing) is reachable.
+                .accessibilityElement(children: .contain)
                 .accessibilityAddTraits(.isModal)
                 .zIndex(10)
             }
@@ -5030,9 +5032,17 @@ struct PhotoReviewView: View {
             if event == .startListing,
                let voiceNoteStore,
                voiceNoteStore.hasUnsavedTake {
+                isKeepingVoiceNoteForStart = true
                 Task {
-                    await voiceNoteStore.commitUnsavedTake()
-                    openBoundary(event)
+                    let kept = await voiceNoteStore.commitUnsavedTake()
+                    isKeepingVoiceNoteForStart = false
+                    // A failed save reopens the panel on its failure state
+                    // rather than submitting photos-only behind the seller.
+                    if kept {
+                        openBoundary(event)
+                    } else {
+                        presentVoiceNotePresentation()
+                    }
                 }
                 return
             }
@@ -5061,6 +5071,7 @@ struct PhotoReviewView: View {
                 isPickerActive: store.activePickerRequest != nil
             )
                 || (isCommitting && !allowsPrimaryActionDuringCommit)
+                || isKeepingVoiceNoteForStart
         )
         .accessibilityIdentifier("photo-review.start-listing")
         .accessibilityFocused($focusedStartListing)

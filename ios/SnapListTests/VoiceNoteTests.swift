@@ -542,7 +542,7 @@ final class VoiceNoteTests: XCTestCase {
         store.stopRecording()
 
         XCTAssertTrue(store.hasUnsavedTake)
-        await store.commitUnsavedTake()
+        _ = await store.commitUnsavedTake()
 
         XCTAssertEqual(store.savedNote?.duration, 4)
         XCTAssertEqual(files.committedURLs, [audio.provisionalURL])
@@ -582,11 +582,40 @@ final class VoiceNoteTests: XCTestCase {
         )
         store.stopRecording()
 
-        await store.commitUnsavedTake()
+        let landed = await store.commitUnsavedTake()
 
+        XCTAssertTrue(landed)
         XCTAssertEqual(store.savedNote, kept)
         XCTAssertFalse(store.hasUnsavedTake)
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
+    }
+
+    /// A failed implicit save must say so, so Start listing does not go out
+    /// photos-only while the seller believes the note is attached.
+    func testImplicitSaveReportsAFailedCommitAndKeepsTheTakeReviewable()
+        async
+    {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: VoiceNoteFileStoreStub(),
+            authority: VoiceNoteCommitAuthority(
+                save: { _, _, _ in nil },
+                delete: { _ in true }
+            )
+        )
+        await store.startRecording()
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            meterLevels: [0.4]
+        )
+        store.stopRecording()
+
+        let landed = await store.commitUnsavedTake()
+
+        XCTAssertFalse(landed)
+        XCTAssertEqual(store.phase, .saveFailed)
+        XCTAssertNil(store.savedNote)
     }
 
     func testOnlyAStopIntoReviewIsAnnounced() {
@@ -620,7 +649,7 @@ final class VoiceNoteTests: XCTestCase {
         let store = VoiceNoteStore(audio: audio, files: files)
 
         XCTAssertFalse(store.hasUnsavedTake)
-        await store.commitUnsavedTake()
+        _ = await store.commitUnsavedTake()
 
         XCTAssertEqual(files.committedURLs, [])
         XCTAssertEqual(store.phase, .ready)
