@@ -37,44 +37,28 @@ struct ForegroundPushNotification: Equatable {
     }
 }
 
-/// Whether iOS draws its own banner for a push that landed with the app open.
+/// How a push that landed with the app open is presented.
 ///
-/// Suppressing the system banner and drawing the replacement are two things
-/// that happen in two places, and the dangerous failure is the first without
-/// the second: no banner, no in-app surface, and a seller whose listing just
-/// finished is told nothing anywhere. So suppression is not a decision about
-/// the payload. It is a report from the surface that actually drew it, and
-/// every other path leaves the notification to iOS.
+/// Always by iOS (#1137). The custom in-app banner (#891) did not look like a
+/// notification, so nothing in the app may take a SnapList push from the
+/// system: the banner, sound, and Notification Center entry are Apple's, and
+/// the payload is not consulted. Being one fixed answer is the point; a
+/// conditional here is how a suppressed banner with nothing drawn in its place
+/// comes back.
 enum ForegroundPushPolicy {
-    /// What iOS is asked to do when the app is not showing the notification
-    /// itself.
-    static let systemBanner: UNNotificationPresentationOptions =
+    static let systemPresentation: UNNotificationPresentationOptions =
         [.banner, .sound, .list]
 
-    /// What iOS is asked to do when the app drew the notification itself.
-    ///
-    /// Not the empty set, and this is deliberate. An empty set means show
-    /// nothing anywhere, which drops the notification out of Notification
-    /// Center as well, and the in-app banner is transient by design. A seller
-    /// who glanced away for a few seconds, or had SnapList foregrounded beside
-    /// something they were actually reading, would be left with a listing that
-    /// finished and no record of it anywhere on the phone. `.list` suppresses
-    /// the banner and the sound, which is the entire point of drawing our own,
-    /// and still files it where the seller can pull it down and find it.
-    static let drawnInApp: UNNotificationPresentationOptions = [.list]
-
-    static func presentationOptions(
-        for userInfo: [AnyHashable: Any],
-        showInApp: (ForegroundPushNotification) -> Bool
-    ) -> UNNotificationPresentationOptions {
-        guard let notification = ForegroundPushNotification(userInfo: userInfo),
-              showInApp(notification)
-        else { return systemBanner }
-        return drawnInApp
+    static func presentationOptions() -> UNNotificationPresentationOptions {
+        systemPresentation
     }
 }
 
 /// Holds the one notification the app is currently showing itself.
+///
+/// Dead since #1137: nothing calls `show` any more, so `visible` stays nil and
+/// `ForegroundPushBanner` never draws. It survives only because the shell
+/// (`AppShellView`) still mounts it; #1134 removes that mount and this type.
 ///
 /// `mounted` is the honest half of the contract: it is set by the surface that
 /// can actually draw, and until something does, `show` refuses and the system
@@ -102,7 +86,8 @@ final class ForegroundPushPresenter {
     }
 }
 
-/// The in-app replacement for the system banner.
+/// The retired in-app replacement for the system banner. Never drawn since
+/// #1137; delete with the `AppShellView` mount (#1134).
 ///
 /// Candidate visual (#891). No design package covers this family yet, so it
 /// borrows entirely from frozen V1 rather than proposing anything: the

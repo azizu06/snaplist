@@ -11,9 +11,8 @@ import UserNotifications
  to do with the token, stays in the coordinator.
 
  Issue #891 adds the second callback iOS offers nowhere else: what to draw when
- a notification lands with the app already open. The decision itself is in
- `ForegroundPushPolicy`, and it is a report from the surface that drew the
- replacement rather than a choice made here.
+ a notification lands with the app already open. Since #1137 the answer is
+ always "let iOS draw it", stated once in `ForegroundPushPolicy`.
  */
 final class PushRegistrationAppDelegate: NSObject, UIApplicationDelegate {
     func application(
@@ -45,18 +44,14 @@ final class PushRegistrationAppDelegate: NSObject, UIApplicationDelegate {
 }
 
 extension PushRegistrationAppDelegate: UNUserNotificationCenterDelegate {
-    /// Suppressing Apple's banner and drawing the replacement are two things in
-    /// two places. Only the second one reporting success may suppress the
-    /// first, so a seller whose in-app surface is not mounted still sees the
-    /// system banner rather than nothing at all.
+    /// iOS draws the banner, plays the sound, and files the notification, the
+    /// same as it does with the app closed. Tapping it is likewise iOS's: the
+    /// app opens, exactly as from the background.
     @MainActor
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        ForegroundPushPolicy.presentationOptions(
-            for: notification.request.content.userInfo,
-            showInApp: { PushRegistrationComposition.foregroundPresenter.show($0) }
-        )
+        ForegroundPushPolicy.presentationOptions()
     }
 }
