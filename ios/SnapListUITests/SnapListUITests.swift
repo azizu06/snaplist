@@ -53,17 +53,66 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: ["--camera-status=unavailable"])
 
         XCTAssertTrue(app.staticTexts["scan.recovery-title"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.otherElements["trophy.wall"].exists)
-        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
+        // #1129: Scan is a drawer over Trophy Wall rather than a second root.
+        // The wall and its dock stay mounted behind the drawer, out of
+        // reach. `HomeUITests` pins the geometry that proves it is a drawer.
+        XCTAssertTrue(app.descendants(matching: .any)["scan.drawer"].exists, app.debugDescription)
+        XCTAssertFalse(app.otherElements["trophy.wall"].isHittable, app.debugDescription)
+        XCTAssertFalse(app.buttons["dock.scan"].isHittable, app.debugDescription)
 
-        app.buttons["dock.trophy-wall"].tap()
-        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
+        // The dock sits behind the drawer, so the way back to the wall is the
+        // drawer's own close control.
+        app.buttons["scan.close"].tap()
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
+        XCTAssertTrue(drawer.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.otherElements["trophy.wall"].isHittable, app.debugDescription)
         XCTAssertFalse(app.staticTexts["scan.recovery-title"].exists)
 
         XCTAssertFalse(app.buttons["dock.inbox"].exists)
         XCTAssertFalse(app.buttons["dock.insights"].exists)
         XCTAssertFalse(app.buttons["Runs"].exists)
         XCTAssertFalse(app.buttons["You"].exists)
+    }
+
+    /// #1129: the camera-unavailable and permission-denied surfaces gained the
+    /// drawer's close control. Adding it must not drag the recovery message
+    /// off-centre, and the control has to sit below the grab band like the
+    /// live preview's does.
+    func testCameraRecoveryInsideTheDrawerStaysCentredAndClosable() {
+        for status in ["unavailable", "denied"] {
+            let app = launch(extraArguments: ["--camera-status=\(status)"])
+            let title = app.staticTexts["scan.recovery-title"]
+            XCTAssertTrue(title.waitForExistence(timeout: 2), app.debugDescription)
+            let drawer = app.descendants(matching: .any)["scan.drawer"]
+            XCTAssertTrue(drawer.exists, app.debugDescription)
+            let window = app.windows.firstMatch.frame
+
+            XCTAssertEqual(
+                title.frame.midX,
+                window.midX,
+                accuracy: 1,
+                "\(status): title=\(title.frame) window=\(window)"
+            )
+            let library = app.buttons["scan.choose-library"]
+            XCTAssertEqual(
+                library.frame.midX,
+                window.midX,
+                accuracy: 1,
+                "\(status): library=\(library.frame) window=\(window)"
+            )
+            let close = app.buttons["scan.close"]
+            XCTAssertGreaterThanOrEqual(
+                close.frame.minY,
+                drawer.frame.minY + 32 - 0.5,
+                "\(status): close=\(close.frame) drawer=\(drawer.frame)"
+            )
+            close.tap()
+            XCTAssertTrue(
+                drawer.waitForNonExistence(timeout: 2),
+                "\(status): \(app.debugDescription)"
+            )
+            app.terminate()
+        }
     }
 
     func testSettingsProofFixturesRenderApprovedStatesWithoutDeletionCommit() {
@@ -1154,8 +1203,9 @@ final class SnapListUITests: XCTestCase {
             return
         }
         XCTAssertEqual(back.label, "Back to camera")
-        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        // Inside the drawer frames carry a fractional origin (#1129).
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.width), "\(back.frame)")
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.height), "\(back.frame)")
         back.tap()
 
         let returnedReview = app.buttons["scan.review"]
@@ -1608,7 +1658,24 @@ final class SnapListUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [beatEnded], timeout: 3), .completed)
         done.tap()
-        XCTAssertEqual(done.label, "Start listing")
+
+        // #1129: Done used to hand the seller straight back to Photo Review's
+        // "Start listing" button — on the owner's device that read as "where
+        // did the item go?". The server has already accepted it, so finishing
+        // drops the Scan drawer onto Trophy Wall instead, and never returns to
+        // the camera. The drawer's absence is the discriminator: the wall is
+        // mounted under the drawer the whole time, so its presence alone would
+        // hold either way.
+        let drawer = accepted.descendants(matching: .any)["scan.drawer"]
+        XCTAssertTrue(
+            drawer.waitForNonExistence(timeout: 5),
+            accepted.debugDescription
+        )
+        XCTAssertTrue(
+            accepted.otherElements["trophy.wall"].exists,
+            accepted.debugDescription
+        )
+        XCTAssertFalse(done.exists, accepted.debugDescription)
     }
 
     /// #1136: the bottom bar is one button at one height in every phase, so
@@ -1926,7 +1993,11 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
-    func testAcceptedSubmissionRendersSavedWithoutSubmittedMediaThenReturnsToReadyScan() {
+    /// #1129: Done drops the Scan drawer onto Trophy Wall. It used to return
+    /// to a ready camera, which on the owner's device read as "where did the
+    /// item go?". The exact clear still happens underneath: the next time the
+    /// seller opens Scan, it is ready for a new item.
+    func testAcceptedSubmissionRendersSavedWithoutSubmittedMediaThenDropsOntoTrophyWall() {
         let acknowledgmentNotification =
             "dev.snaplist.ios.test.submission-ack.\(UUID().uuidString)"
         let app = XCUIApplication()
@@ -1988,6 +2059,22 @@ final class SnapListUITests: XCTestCase {
             true
         )
 
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
+        XCTAssertTrue(
+            drawer.waitForNonExistence(timeout: 5),
+            "Done must drop the drawer onto Trophy Wall, not return to the camera."
+        )
+        XCTAssertTrue(
+            app.otherElements["trophy.wall"].isHittable,
+            app.debugDescription
+        )
+        XCTAssertFalse(screen.exists)
+        XCTAssertFalse(startListing.exists)
+        XCTAssertFalse(app.buttons["scan.library"].exists)
+        XCTAssertFalse(app.buttons["scan.choose-library"].exists)
+
+        // Scanning the next item stays one tap away, and finds Scan cleared.
+        app.buttons["dock.scan"].tap()
         let liveLibrary = app.buttons["scan.library"]
         let recoveryLibrary = app.buttons["scan.choose-library"]
         let readyScan = XCTNSPredicateExpectation(
@@ -1999,7 +2086,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [readyScan], timeout: 5),
             .completed,
-            "Matching acknowledgment must finish exact clear and return to ready Scan."
+            "Matching acknowledgment must finish exact clear, leaving Scan ready."
         )
 
         XCTAssertFalse(screen.exists)
@@ -2009,34 +2096,80 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(addPhoto.exists)
         assertReviewIsPresentButInert(
             in: app,
-            because: "Returning to a cleared Scan leaves Review in the row, inert."
+            because: "A cleared Scan leaves Review in the row, inert."
         )
         XCTAssertFalse(app.descendants(matching: .any)["scan.photo-1"].exists)
-
-        // Which ready Scan surface mounts decides whether a dock exists at all.
-        // Issue #805 made the live camera preview full-bleed: the dock is absent
-        // from the hierarchy there (`if isVisible` in FloatingDock.swift), and
-        // `scan.close` is the approved way back out of capture. Recovery
-        // surfaces are not the live preview, so they still carry the dock.
-        // This assertion previously demanded a selected `dock.scan` on both,
-        // which the live preview can no longer satisfy.
         if liveLibrary.exists {
             XCTAssertEqual(liveLibrary.label, "Library")
             XCTAssertTrue(liveLibrary.isEnabled)
-            XCTAssertTrue(app.buttons["scan.close"].exists)
-            XCTAssertFalse(app.buttons["dock.scan"].exists)
-            XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
         } else {
             XCTAssertEqual(recoveryLibrary.label, "Choose from library")
             XCTAssertTrue(recoveryLibrary.isEnabled)
-            XCTAssertTrue(app.buttons["dock.scan"].isSelected)
-            XCTAssertFalse(app.buttons["dock.trophy-wall"].isSelected)
         }
+        // Both ready surfaces close through the drawer's own control; the
+        // dock is under the drawer.
+        XCTAssertTrue(app.buttons["scan.close"].exists)
+        XCTAssertFalse(app.buttons["dock.scan"].isHittable)
 
         XCTAssertFalse(app.staticTexts["Listing Review"].exists)
         XCTAssertFalse(app.buttons["Cancel"].exists)
         // Announcement delivery remains the direct B1 effect-consumer contract.
         // Accessibility focus remains the direct B2 mounted-Library contract.
+    }
+
+    /// #1129: dismissing the drawer is a presentation change, never a
+    /// cancellation. The held fixture keeps the submission in flight for ten
+    /// minutes, so however slow the runner, dragging the drawer away by its
+    /// header and bringing it back through the entry control finds the same
+    /// item still sending. `delayed` resolves after eight seconds, and a
+    /// resolved submission reads exactly like a cancelled one.
+    func testDismissingTheDrawerMidSubmissionNeitherCancelsNorDropsTheItem() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--submission-fixture=held"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        app.buttons["photo-review.start-listing"].tap()
+
+        // While saving it is a live status, not a button (#1130).
+        let status = app.descendants(matching: .any)["photo-review.start-listing"]
+        let saving = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in status.label == "Saving your item" },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [saving], timeout: 3), .completed)
+
+        // The drawer's marker sits on its top edge; the 32pt grab band, the
+        // only place the drag starts, is directly below it.
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
+        let header = drawer
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .withOffset(CGVector(dx: 0, dy: 16))
+        header.press(
+            forDuration: 0.05,
+            thenDragTo: header.withOffset(CGVector(dx: 0, dy: 500))
+        )
+        XCTAssertTrue(
+            drawer.waitForNonExistence(timeout: 3),
+            app.debugDescription
+        )
+
+        app.buttons["dock.scan"].tap()
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(
+            status.label,
+            "Saving your item",
+            "Dismissing must not cancel the submission."
+        )
+        XCTAssertTrue(app.buttons["photo-review.thumbnail.1"].exists)
     }
 
     // v1.2 primary_action.position is a sticky bottom action above the home-indicator
@@ -2176,14 +2309,12 @@ final class SnapListUITests: XCTestCase {
                 app.buttons["photo-review.start-listing"]
             ] {
                 XCTAssertTrue(control.waitForExistence(timeout: 3), typeSize)
-                XCTAssertGreaterThanOrEqual(
-                    control.frame.width,
-                    44,
+                XCTAssertTrue(
+                    TouchTargetFloor.isMet(control.frame.width),
                     "\(control.identifier) width at \(typeSize)"
                 )
-                XCTAssertGreaterThanOrEqual(
-                    control.frame.height,
-                    44,
+                XCTAssertTrue(
+                    TouchTargetFloor.isMet(control.frame.height),
                     "\(control.identifier) height at \(typeSize)"
                 )
             }
@@ -3145,8 +3276,10 @@ final class SnapListUITests: XCTestCase {
 
         let removeSecond = app.buttons["scan.photo-2.remove"]
         XCTAssertTrue(removeSecond.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(removeSecond.frame.height, 44)
+        // #1129: inside the drawer the card starts at a fractional y, so a
+        // 44pt control's frame comes back as 43.99999999999997.
+        XCTAssertTrue(TouchTargetFloor.isMet(removeSecond.frame.width), "\(removeSecond.frame)")
+        XCTAssertTrue(TouchTargetFloor.isMet(removeSecond.frame.height), "\(removeSecond.frame)")
     }
 
     func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
@@ -3537,8 +3670,8 @@ final class SnapListUITests: XCTestCase {
         let voice = app.buttons["photo-review.voice"]
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(back.exists)
-        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.width))
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.height))
         XCTAssertTrue(voice.exists)
         XCTAssertEqual(
             voice.label,
@@ -3845,6 +3978,88 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(flash.frame.height, 48, accuracy: 0.5)
     }
 
+    /// #1129's 1:1 oracle, and the reason the drawer is drawn rather than
+    /// presented. On iOS 26.5 a `.fraction(0.9)` sheet renders as an inset
+    /// card and scales its contents: the 56pt shutter measured 53.33pt and
+    /// every 44pt control 42.25pt, under the touch-target floor.
+    ///
+    /// The camera rendered at the root is the reference. Inside the drawer
+    /// every control keeps its real size, the shutter row keeps its distance
+    /// from the bottom edge (the drawer reaches the home indicator, so it has
+    /// to hand that inset back), and the close control starts below the grab
+    /// band rather than under a strip that swallows its taps.
+    func testDrawerControlsKeepTheirRealSizeAgainstTheRootRenderedOracle() {
+        let controlIdentifiers = [
+            "scan.shutter",
+            "scan.close",
+            "scan.flash",
+            "scan.library",
+            "scan.review"
+        ]
+        let root = launch(extraArguments: ["--visual-state=CAM-03"])
+        XCTAssertTrue(
+            root.buttons["scan.shutter"].waitForExistence(timeout: 3),
+            root.debugDescription
+        )
+        let rootWindow = root.windows.firstMatch.frame
+        var oracle: [String: CGRect] = [:]
+        for identifier in controlIdentifiers {
+            let frame = root.buttons[identifier].frame
+            XCTAssertGreaterThan(frame.width, 0, "\(identifier) \(root.debugDescription)")
+            oracle[identifier] = frame
+        }
+        root.terminate()
+
+        let drawered = XCUIApplication()
+        drawered.launchArguments = [
+            "--restored-capture-fixture",
+            "--zero-network-fixtures"
+        ]
+        drawered.launchAfterRetiringPriorInstance()
+        XCTAssertTrue(
+            drawered.buttons["scan.shutter"].waitForExistence(timeout: 5),
+            drawered.debugDescription
+        )
+        let drawer = drawered.descendants(matching: .any)["scan.drawer"]
+        XCTAssertTrue(
+            drawer.exists,
+            "The oracle is only meaningful if the controls really are inside "
+                + "the drawer. \(drawered.debugDescription)"
+        )
+        let drawerWindow = drawered.windows.firstMatch.frame
+
+        for identifier in controlIdentifiers {
+            let expected = oracle[identifier] ?? .zero
+            let actual = drawered.buttons[identifier].frame
+            XCTAssertEqual(
+                actual.width,
+                expected.width,
+                accuracy: 0.5,
+                "\(identifier) root=\(expected) drawer=\(actual)"
+            )
+            XCTAssertEqual(
+                actual.height,
+                expected.height,
+                accuracy: 0.5,
+                "\(identifier) root=\(expected) drawer=\(actual)"
+            )
+        }
+
+        let rootShutter = oracle["scan.shutter"] ?? .zero
+        let drawerShutter = drawered.buttons["scan.shutter"].frame
+        XCTAssertEqual(
+            drawerWindow.maxY - drawerShutter.maxY,
+            rootWindow.maxY - rootShutter.maxY,
+            accuracy: 0.5,
+            "root=\(rootShutter) drawer=\(drawerShutter)"
+        )
+        XCTAssertGreaterThanOrEqual(
+            drawered.buttons["scan.close"].frame.minY,
+            drawer.frame.minY + 32 - 0.5,
+            "close=\(drawered.buttons["scan.close"].frame) drawer=\(drawer.frame)"
+        )
+    }
+
     func testCaptureGuidanceRespectsLandscapeSafeAreas() {
         let app = launch(
             extraArguments: ["--visual-state=CAP-02b2"],
@@ -3864,8 +4079,7 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
-        let app = launch()
-        app.buttons["dock.trophy-wall"].tap()
+        let app = launch(extraArguments: ["--fixture=trophy-wall"])
         let processing = app.buttons["trophy.wall.processing"]
         let account = app.buttons["trophy.wall.account"]
 
@@ -3884,7 +4098,9 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testKeyboardHidesTheFloatingDock() {
-        let app = launch(extraArguments: ["--keyboard-probe"])
+        // #1129: the probe lives on the home surface, so this launches onto
+        // the wall rather than behind the Scan drawer.
+        let app = launch(extraArguments: ["--fixture=trophy-wall", "--keyboard-probe"])
         let probe = app.textFields["fixture.keyboard-probe"]
 
         probe.tap()
@@ -4114,8 +4330,10 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testAccessibilityDynamicTypeKeepsFoundationControlsReachable() {
-        let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
-        app.buttons["dock.trophy-wall"].tap()
+        let app = launch(extraArguments: [
+            "--fixture=trophy-wall",
+            "--dynamic-type=accessibility3"
+        ])
 
         XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["trophy.wall.processing"].exists)
@@ -4173,7 +4391,14 @@ final class SnapListUITests: XCTestCase {
 
         let scanDock = app.buttons["dock.scan"]
         XCTAssertTrue(scanDock.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(scanDock.isSelected)
+        // #1129: the Scan slot is the drawer's entry control, not a selected
+        // destination, so the drawer being up is what proves the seller
+        // landed on the real Scan surface.
+        XCTAssertFalse(scanDock.isSelected, app.debugDescription)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
         XCTAssertEqual(scanDock.label, "Scan")
 
         let liveLibrary = app.buttons["scan.library"]
@@ -4265,12 +4490,14 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
+        // #1129: a relaunch with nothing staged lands on Trophy Wall, the
+        // launch destination, with the drawer down; onboarding stays done.
         XCTAssertTrue(
-            app.buttons["scan.library"].waitForExistence(timeout: 2)
-                || app.buttons["scan.choose-library"].waitForExistence(timeout: 2),
+            app.otherElements["trophy.wall"].waitForExistence(timeout: 3),
             app.debugDescription
         )
+        XCTAssertTrue(app.buttons["dock.scan"].isHittable, app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["scan.drawer"].exists)
         XCTAssertFalse(
             app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists
         )

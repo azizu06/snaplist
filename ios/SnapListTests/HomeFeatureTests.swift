@@ -2474,7 +2474,7 @@ final class TrophyWallDomainTests: XCTestCase {
             repository.requestedPages.count == 1
                 && store.collectionOutcome == .unavailable
         }
-        let initialTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        let initialTaskID = driver.refreshState.taskID(trophyWallReturns: 0)
 
         XCTAssertFalse(driver.refreshState.observePrincipal(nil))
         let signedIn = TrophyWallPrincipalIdentity(
@@ -2488,7 +2488,7 @@ final class TrophyWallDomainTests: XCTestCase {
             )
         )
         XCTAssertTrue(driver.refreshState.observePrincipal(signedIn))
-        let principalTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        let principalTaskID = driver.refreshState.taskID(trophyWallReturns: 0)
         XCTAssertNotEqual(principalTaskID, initialTaskID)
 
         await host.settle()
@@ -2500,13 +2500,77 @@ final class TrophyWallDomainTests: XCTestCase {
             findModifiedContent(root.feature.body, as: TrophyWallView.self)
         )
         renderedWall.onTryAgain()
-        let retryTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        let retryTaskID = driver.refreshState.taskID(trophyWallReturns: 0)
         XCTAssertNotEqual(retryTaskID, principalTaskID)
 
         await host.settle()
         await waitForTrophyWallCondition {
             repository.requestedPages.count == 3
         }
+    }
+
+    /// #1129: Scan used to be a tab, and selecting Trophy Wall again is what
+    /// refetched the wall. As a drawer, coming back changes no tab, so a seller
+    /// who submitted from the drawer returned to a wall that did not show the
+    /// item processing. The wall refetches once each time the drawer comes down;
+    /// a dismissal of a drawer that is already down refetches nothing.
+    func testTheWallRefetchesOnceEachTimeTheScanDrawerComesDown() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        // A load that succeeds: a failed one retries on its own timer, and
+        // those fetches would be counted as drawer returns.
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.page(TrophyWallRunHistoryPage(entries: [], nextCursor: nil))]
+        )
+        let router = AppRouter(initialTab: .trophyWall)
+        let root = TrophyWallFeatureTestRoot(
+            driver: TrophyWallRefreshTestDriver(),
+            router: router,
+            store: store,
+            repository: repository
+        )
+        let host = HostedTrophyWallTestWindow(
+            rootView: root,
+            size: CGSize(width: 390, height: 844)
+        )
+        defer { host.close() }
+
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 1
+        }
+
+        router.applyScanDrawer(.scanEntryControlTapped)
+        await host.settle()
+        XCTAssertEqual(
+            repository.requestedPages.count,
+            1,
+            "Raising the drawer covers the wall; it does not refetch it."
+        )
+
+        router.applyScanDrawer(.dismissed)
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 2
+        }
+
+        router.applyScanDrawer(.dismissed)
+        await host.settle()
+        await host.settle()
+        XCTAssertEqual(
+            repository.requestedPages.count,
+            2,
+            "The drawer was already down, so the seller never left the wall."
+        )
+
+        router.applyScanDrawer(.scanSurfaceRestored)
+        router.applyScanDrawer(.submissionCompleted)
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 3
+        }
+        await host.settle()
+        XCTAssertEqual(repository.requestedPages.count, 3)
     }
 
     /// A local pending card only means something while the intake that produced it
@@ -3064,6 +3128,9 @@ private struct TrophyWallFeatureTestRoot: View {
             accountInitials: "S",
             correctionAvailability: .notOffered,
             forceReducedMotion: false,
+            startNewItem: {},
+            returnToTrophyWall: {},
+            scrollToTopToken: 0,
             activationListingReviewOpened: {},
             activationListingReviewDismissed: {},
             activationGuestClaimPresentationChanged: { _ in },

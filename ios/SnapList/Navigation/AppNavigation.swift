@@ -123,50 +123,79 @@ enum RunDeepLink: Equatable, Sendable {
 @MainActor
 @Observable
 final class AppRouter {
-    var selectedTab: PrimaryTab
+    /// #1129: Scan is no longer a second root. Trophy Wall is the app's home
+    /// surface and Scan rises over it as a drawer, so the only presentation
+    /// question left is whether that drawer is up — answered by
+    /// `ScanDrawerPolicy`, never by assigning to this directly.
+    private(set) var scanDrawer = ScanDrawerState()
+    /// How many times the drawer has come down onto Trophy Wall. The wall's
+    /// collection refresh keys on it: selecting the Trophy Wall tab again used
+    /// to refetch the wall, and a drawer changes no tab. Counted here, where the
+    /// drawer moves, so every way down counts once and a dismissal of a drawer
+    /// that is already down counts nothing (#1129).
+    private(set) var trophyWallReturns = 0
+    /// Whether the launch fixture asked to start in Scan. The shell replays it
+    /// as a drawer event on first appear rather than seeding the state here,
+    /// so a launch straight into Scan takes exactly the same path — and starts
+    /// the camera exactly the same way — as tapping the entry control.
+    let launchesIntoScan: Bool
     var presentedFullScreen: AppFullScreen?
     var presentedAccountEntry = false
     private(set) var captureBoundaryRequest: CaptureBoundaryRequest?
     private(set) var photoReviewScanReturn: PhotoReviewScanReturn?
 
-    private var scanPath: [AppRoute] = []
-    private var trophyWallPath: [AppRoute] = []
+    /// One stack. Scan used to own a second one; a drawer over the wall has
+    /// nothing to push, so the wall's is the only path there is.
+    private var wallPath: [AppRoute] = []
 
     init(
         initialTab: PrimaryTab = .scan,
         initialRoute: AppRoute? = nil,
         initialFullScreen: AppFullScreen? = nil
     ) {
-        selectedTab = initialTab
+        launchesIntoScan = initialTab == .scan
         presentedFullScreen = initialFullScreen
         if let initialRoute {
-            setPath([initialRoute], for: initialTab)
+            wallPath = [initialRoute]
         }
     }
 
-    /// The routes pushed onto the tab the seller is currently looking at.
-    /// Read-only, and observed: #1056's activation surface resolution has to
-    /// see a pushed route, because a coach mark anchored to a tab's chrome must
-    /// not draw over a screen pushed on top of it.
-    var selectedPath: [AppRoute] { path(for: selectedTab) }
+    var isScanPresented: Bool { scanDrawer.isPresented }
 
-    func pathBinding(for tab: PrimaryTab) -> Binding<[AppRoute]> {
-        Binding(
-            get: { [weak self] in self?.path(for: tab) ?? [] },
-            set: { [weak self] in self?.setPath($0, for: tab) }
-        )
+    /// The one way the drawer moves. Returns the reduction so the caller can
+    /// carry out the camera session work it names — which is the shell's job,
+    /// since only the shell can start or stop a capture session. The one place
+    /// that discards it is documented at its call site.
+    @discardableResult
+    func applyScanDrawer(
+        _ event: ScanDrawerEvent,
+        context: ScanDrawerContext = ScanDrawerContext()
+    ) -> ScanDrawerReduction {
+        let reduction = ScanDrawerPolicy.reduce(scanDrawer, event, context: context)
+        if scanDrawer.isPresented, !reduction.state.isPresented {
+            trophyWallReturns += 1
+        }
+        scanDrawer = reduction.state
+        return reduction
     }
 
-    func select(_ tab: PrimaryTab) {
-        selectedTab = tab
+    /// The routes pushed onto the wall's stack. Read-only, and observed:
+    /// #1056's activation surface resolution has to see a pushed route,
+    /// because a coach mark anchored to a screen's chrome must not draw over
+    /// a screen pushed on top of it.
+    var selectedPath: [AppRoute] { wallPath }
+
+    var pathBinding: Binding<[AppRoute]> {
+        Binding(
+            get: { [weak self] in self?.wallPath ?? [] },
+            set: { [weak self] in self?.wallPath = $0 }
+        )
     }
 
     func navigate(to route: AppRoute) {
         switch AppRoutePresentation.resolve(route) {
         case .push(let pushed):
-            var current = path(for: selectedTab)
-            current.append(pushed)
-            setPath(current, for: selectedTab)
+            wallPath.append(pushed)
         case .accountEntryModal:
             presentedAccountEntry = true
         }
@@ -190,26 +219,32 @@ final class AppRouter {
     /// before any navigation state moves, because a stale card that switched tabs
     /// and then failed to open anything left the seller on Scan with no
     /// explanation, and one whose intake had been replaced opened the wrong item.
+    /// Reports whether the recovery was accepted, so the shell only raises the
+    /// drawer for a card that actually opened something. A refusal that had
+    /// already moved navigation state is exactly the defect above.
+    @discardableResult
     func openLocalRecovery(
         _ logicalIdentity: TrophyWallLogicalIdentity,
         matching recoverableIdentity: TrophyWallLogicalIdentity?,
         photos: [StagedCapturePhoto]
-    ) {
+    ) -> Bool {
         guard logicalIdentity == recoverableIdentity,
               (1...5).contains(photos.count) else {
-            return
+            return false
         }
-        reset(tab: .trophyWall)
-        selectedTab = .scan
+        resetWallPath()
         openCaptureBoundary(
             destination: .photoReview,
             photos: photos,
             opener: .trophyWallTab
         )
+        return true
     }
 
+    /// Leaving Photo Review lands back on the camera, which is the same
+    /// drawer Photo Review was already inside — so this moves the surface
+    /// within the drawer and never the drawer itself.
     func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {
-        selectedTab = .scan
         photoReviewScanReturn = request
         captureBoundaryRequest = nil
         presentedFullScreen = .guidedCamera
@@ -226,23 +261,30 @@ final class AppRouter {
         guard let deepLink = RunDeepLink(url: url) else { return false }
         switch deepLink {
         case .run:
-            selectedTab = .trophyWall
             presentedFullScreen = nil
             // The account boundary lives beside the typed path rather than on it
             // (#799), so `setPath` no longer clears it. Left presented, the sheet
             // covers the screen the deep link just brought forward.
             presentedAccountEntry = false
-            setPath([.home(.processing)], for: .trophyWall)
+            wallPath = [.home(.processing)]
         }
         return true
     }
 
+    /// A relaunch that recovered a durable draft puts the seller back in the
+    /// drawer, on their own staged photos.
+    ///
+    /// This is the one place a drawer event's camera command is deliberately
+    /// discarded: the app root owns this sequence and already starts the
+    /// session immediately afterwards, because `restore()` lands a staged photo
+    /// on `.captured` rather than a live session (#864). Starting it from here
+    /// as well would race that call.
     func handleCaptureRestoration(
         _ restoration: CaptureRestoration,
         resumingVoiceReviewOf heldTakePhotos: [StagedCapturePhoto]? = nil
     ) {
         guard restoration == .stagedPhoto else { return }
-        selectedTab = .scan
+        applyScanDrawer(.scanSurfaceRestored)
         // #1136. A voice take held under review reopens Photo Review, where
         // the seller left it, instead of the camera.
         if let heldTakePhotos, (1...5).contains(heldTakePhotos.count) {
@@ -256,22 +298,8 @@ final class AppRouter {
         presentedFullScreen = .guidedCamera
     }
 
-    func reset(tab: PrimaryTab) {
-        setPath([], for: tab)
-    }
-
-    private func path(for tab: PrimaryTab) -> [AppRoute] {
-        switch tab {
-        case .scan: scanPath
-        case .trophyWall: trophyWallPath
-        }
-    }
-
-    private func setPath(_ path: [AppRoute], for tab: PrimaryTab) {
-        switch tab {
-        case .scan: scanPath = path
-        case .trophyWall: trophyWallPath = path
-        }
+    func resetWallPath() {
+        wallPath = []
     }
 }
 

@@ -180,6 +180,11 @@ struct FloatingDock: View {
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("dock.\(tab.rawValue)")
+        // #1129: the Scan slot is the Scan drawer's entry control, so it
+        // publishes its frame under the stable `scanEntry` anchor. A mark
+        // that points at "start an item" then keeps pointing at the right
+        // control if the entry stops being a dock slot.
+        .modifier(ScanEntryAnchor(isScanEntry: tab == .scan) { select(tab) })
     }
 }
 
@@ -219,6 +224,24 @@ extension View {
                         .transition(.opacity)
                 }
             }
+        }
+    }
+}
+
+
+/// Publishes the Scan entry control's frame under `ActivationSpotlightTarget
+/// .scanEntry`, and only for the one slot that is the entry. `isScanEntry` is
+/// fixed per slot, so the branch below is decided once at composition and
+/// never flips a live view's identity.
+private struct ScanEntryAnchor: ViewModifier {
+    let isScanEntry: Bool
+    let select: () -> Void
+
+    func body(content: Content) -> some View {
+        if isScanEntry {
+            content.activationSpotlightTarget(.scanEntry, action: select)
+        } else {
+            content
         }
     }
 }

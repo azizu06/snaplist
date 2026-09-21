@@ -153,6 +153,12 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   are not primary implementation owners. The implementation task may spawn
   fresh-context, read-only Standards and Spec reviewers (and other bounded
   reviewer roles) that did not author the code.
+- **Hackathon PR CI fast path (temporary, captain-authorized).** Pull-request iOS CI runs only the
+  `unit` shard (plus validation and Release configuration); every long UI shard (`ui-1`..`ui-4`) is
+  intentionally skipped on PRs. The complete serial suite still runs on main pushes. Local focused
+  simulator evidence, TDD, and independent review remain required. `ios/Scripts/test-contract.test.sh`
+  pins the shard selection. Revert (restore all UI shards in `ios.yml` and the contract test) when
+  the captain ends hackathon-speed mode.
 - **Tracer-bullet + TDD.** Thin end-to-end threads: one or two backend pieces + minimal frontend to
   exercise them + tests, proven working before the next. No full-backend-then-frontend; no
   layer-by-layer. Always keep something that runs. A tracer bullet proves one finite observable

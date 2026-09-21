@@ -9,6 +9,12 @@ import UIKit
 /// swallowed until the seller acts or taps Got it.
 enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
     case scanShutter
+    /// #1129: the one control on Trophy Wall that raises the Scan drawer.
+    /// Whatever chrome hosts it — today the dock's Scan slot — reports its
+    /// frame under this name, so a mark that points at "start an item"
+    /// survives the control moving. No coach mark names it yet; #1133 owns
+    /// the activation strip that will.
+    case scanEntry
     case photoReviewThumbnailStrip
     case photoReviewVoiceNote
     case trophyWallProcessing
@@ -26,6 +32,7 @@ enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
     var accessibilityLabel: String {
         switch self {
         case .scanShutter: "Take photo"
+        case .scanEntry: "Scan an item"
         case .photoReviewThumbnailStrip: "Photos"
         case .photoReviewVoiceNote: "Voice note"
         case .trophyWallProcessing: "Processing"
@@ -41,8 +48,8 @@ enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
     /// stand-in replaces one button honestly, but nothing can replace a form.
     var standsInForOneControl: Bool {
         switch self {
-        case .scanShutter, .photoReviewThumbnailStrip, .photoReviewVoiceNote,
-             .trophyWallProcessing, .settingsMarketplaces:
+        case .scanShutter, .scanEntry, .photoReviewThumbnailStrip,
+             .photoReviewVoiceNote, .trophyWallProcessing, .settingsMarketplaces:
             true
         case .listingReviewForm:
             false
