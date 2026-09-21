@@ -128,6 +128,12 @@ final class AppRouter {
     /// question left is whether that drawer is up — answered by
     /// `ScanDrawerPolicy`, never by assigning to this directly.
     private(set) var scanDrawer = ScanDrawerState()
+    /// How many times the drawer has come down onto Trophy Wall. The wall's
+    /// collection refresh keys on it: selecting the Trophy Wall tab again used
+    /// to refetch the wall, and a drawer changes no tab. Counted here, where the
+    /// drawer moves, so every way down counts once and a dismissal of a drawer
+    /// that is already down counts nothing (#1129).
+    private(set) var trophyWallReturns = 0
     /// Whether the launch fixture asked to start in Scan. The shell replays it
     /// as a drawer event on first appear rather than seeding the state here,
     /// so a launch straight into Scan takes exactly the same path — and starts
@@ -172,13 +178,6 @@ final class AppRouter {
         scanDrawer = reduction.state
         return reduction
     }
-
-    /// How many times the drawer has come down onto Trophy Wall. The wall's
-    /// collection refresh keys on it: selecting the Trophy Wall tab again used
-    /// to refetch the wall, and a drawer changes no tab. Counted here, where the
-    /// drawer moves, so every way down counts once and a dismissal of a drawer
-    /// that is already down counts nothing (#1129).
-    private(set) var trophyWallReturns = 0
 
     /// The routes pushed onto the wall's stack. Read-only, and observed:
     /// #1056's activation surface resolution has to see a pushed route,

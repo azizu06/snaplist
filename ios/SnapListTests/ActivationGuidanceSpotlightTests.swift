@@ -95,30 +95,34 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
     /// #1129: Settings is pushed onto the wall's stack and the drawer rises over
     /// that whole stack, so while the drawer is up it is what the seller sees.
     /// Answering `.settings` there drew the Settings mark on top of the camera,
-    /// anchored to a screen the drawer covers. Photo Review is still the drawer's
-    /// own top surface, so it keeps answering first.
-    func testAnOpenDrawerCoversSettingsPushedOntoTheWall() {
-        for fullScreen in [nil, AppFullScreen.guidedCamera] {
-            XCTAssertEqual(
-                ActivationSurfaceResolutionPolicy.surface(
-                    hasPhotoReviewSession: false,
-                    isScanPresented: true,
-                    pushedPath: [.settings],
-                    presentedFullScreen: fullScreen
-                ),
-                .scan,
-                "full screen \(String(describing: fullScreen))"
-            )
-            XCTAssertEqual(
-                ActivationSurfaceResolutionPolicy.surface(
-                    hasPhotoReviewSession: true,
-                    isScanPresented: true,
-                    pushedPath: [.settings],
-                    presentedFullScreen: fullScreen
-                ),
-                .photoReview,
-                "full screen \(String(describing: fullScreen))"
-            )
+    /// anchored to a screen the drawer covers. Any other pushed route is covered
+    /// the same way. Photo Review is still the drawer's own top surface, so it
+    /// keeps answering first.
+    func testAnOpenDrawerCoversWhateverIsPushedOntoTheWall() {
+        for pushedPath: [AppRoute] in [[.settings], [.home(.processing)]] {
+            for fullScreen in [nil, AppFullScreen.guidedCamera] {
+                let context = "pushed \(pushedPath), full screen \(String(describing: fullScreen))"
+                XCTAssertEqual(
+                    ActivationSurfaceResolutionPolicy.surface(
+                        hasPhotoReviewSession: false,
+                        isScanPresented: true,
+                        pushedPath: pushedPath,
+                        presentedFullScreen: fullScreen
+                    ),
+                    .scan,
+                    context
+                )
+                XCTAssertEqual(
+                    ActivationSurfaceResolutionPolicy.surface(
+                        hasPhotoReviewSession: true,
+                        isScanPresented: true,
+                        pushedPath: pushedPath,
+                        presentedFullScreen: fullScreen
+                    ),
+                    .photoReview,
+                    context
+                )
+            }
         }
     }
 

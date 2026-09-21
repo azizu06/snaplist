@@ -2455,9 +2455,9 @@ struct TrophyWallPrincipalFence {
     }
 }
 
-/// Trophy Wall refreshes on tab entry, and also whenever the shell proves the
-/// saved collection can no longer be trusted — a principal transition, or the
-/// seller asking to try again after a failed load.
+/// Trophy Wall refreshes each time the Scan drawer comes down onto it, and also
+/// whenever the shell proves the saved collection can no longer be trusted — a
+/// principal transition, or the seller asking to try again after a failed load.
 struct TrophyWallCollectionRefreshKey: Equatable {
     let trophyWallReturns: Int
     let generation: Int
