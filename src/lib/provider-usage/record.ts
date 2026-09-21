@@ -16,6 +16,78 @@ import type { LlmProvider, LlmRole, TranscriptionRole } from "../llm";
  *     id the registry resolved, a provider name, or a number.
  */
 
+/**
+ * The closed vocabulary for `SoldCompUsage.reason` (#1138).
+ *
+ * Closed on purpose. `reason` is the first string this record has carried that is
+ * not a routing label, and the record is written to a tenant table, so anything
+ * that could become free text is a place a query or an item description could
+ * leak into telemetry. These three constants plus `all-rejected:<matcher reason>`
+ * — itself drawn from the matcher's own fixed reason union — are the whole
+ * grammar, and `isSoldCompUsageReason` is what the persistence schema and the
+ * content-leak test both hold callers to.
+ */
+export const SOLD_COMP_TERMINAL_REASONS = [
+  /** The strategy retrieved nothing at all; the provider reported no failure. */
+  "no-candidates",
+  /** The provider itself failed: non-success status, or a run that failed its own requests. */
+  "provider-error",
+  /** The retrieval path was refused before any candidate existed (e.g. an edge 403). */
+  "blocked",
+  /**
+   * Candidates survived the matcher as corroboration but none anchored. The
+   * retrieval worked and the evidence was real; it never cleared the bar.
+   */
+  "no-anchors",
+] as const;
+
+export type SoldCompTerminalReason = (typeof SOLD_COMP_TERMINAL_REASONS)[number];
+
+/** Prefix for "candidates came back, the matcher accepted none of them". */
+export const SOLD_COMP_ALL_REJECTED_PREFIX = "all-rejected:";
+
+/**
+ * How informative each reason is, so a later report cannot DOWNGRADE an earlier
+ * one (#1138).
+ *
+ * Every path ends with the matcher being handed an empty candidate list, so the
+ * last reason written is almost always the least informative one. A run whose
+ * Actor timed out would have been filed as `no-candidates` — the exact
+ * "broken provider looks like an item with no comps" confusion this field exists
+ * to end. Ranking makes the order of reports irrelevant: what the provider saw
+ * outranks what the matcher inferred from the provider's silence.
+ */
+const SOLD_COMP_REASON_RANK = new Map<string, number>([
+  ["no-candidates", 1],
+  // Candidates existed; the matcher kept none of them as anchors. More than
+  // silence, less than a failure — and the same weight as `all-rejected:*`,
+  // which says the same thing with a cause attached.
+  ["no-anchors", 2],
+  ["blocked", 3],
+  ["provider-error", 4],
+]);
+/** Candidates existed and all were rejected — more than silence, less than a failure. */
+const SOLD_COMP_ALL_REJECTED_RANK = 2;
+
+function soldCompReasonRank(reason: string): number {
+  return (
+    SOLD_COMP_REASON_RANK.get(reason) ??
+    (reason.startsWith(SOLD_COMP_ALL_REJECTED_PREFIX) ? SOLD_COMP_ALL_REJECTED_RANK : 0)
+  );
+}
+
+/** The matcher reason suffix shape — lowercase words joined by hyphens, bounded. */
+const ALL_REJECTED_SUFFIX_RE = /^[a-z][a-z-]{0,39}$/;
+
+/** Whether a string is a legal `SoldCompUsage.reason` value. */
+export function isSoldCompUsageReason(value: string): boolean {
+  if ((SOLD_COMP_TERMINAL_REASONS as readonly string[]).includes(value)) return true;
+  return (
+    value.startsWith(SOLD_COMP_ALL_REJECTED_PREFIX) &&
+    ALL_REJECTED_SUFFIX_RE.test(value.slice(SOLD_COMP_ALL_REJECTED_PREFIX.length))
+  );
+}
+
 /** Token counts for one (role, provider, model) triple within a run. */
 export interface ProviderUsageModelTotals {
   /** The registry role that routed these calls (`vision`, `listing`, …). */
@@ -49,6 +121,27 @@ export interface SoldCompUsage {
   attempts: number;
   /** How many candidate results came back BEFORE matching/ranking filtered them. */
   results: number;
+  /**
+   * How many of those candidates the provider-neutral matcher ACCEPTED as anchors
+   * (#1138). `results` alone could not tell a broken retrieval apart from a
+   * retrieval the matcher threw away, and production had to be diagnosed from the
+   * provider's own console because of it.
+   *
+   * Anchors, not the at-most-five matches the seller is shown: the display cap is
+   * applied later and would understate how much evidence the strategy produced.
+   */
+  accepted: number;
+  /**
+   * A short bounded machine reason for a strategy that produced no usable
+   * evidence, else null (#1138). One of `no-candidates`, `provider-error`,
+   * `blocked`, or `all-rejected:<top matcher reject reason>`. Never free text,
+   * never anything derived from the seller's item: every value is a constant this
+   * codebase writes or a member of the matcher's own reason vocabulary.
+   *
+   * Invariant: a non-null reason means `accepted === 0`. A strategy that ends up
+   * contributing an anchor clears whatever an earlier attempt reported.
+   */
+  reason: string | null;
   /**
    * The charge the provider reported for its own run, when it reports one.
    * Null when the strategy has no metered charge or did not report it — never
@@ -102,6 +195,20 @@ export interface SoldCompUsageReport {
   strategy: string;
   results: number;
   chargedUsd?: number | null;
+  /** Why THIS attempt produced no candidates: `provider-error`, `blocked`, `no-candidates`. */
+  reason?: string | null;
+}
+
+/**
+ * What one sold-comp strategy produced after the provider-neutral matcher ran
+ * (#1138). Reported once per strategy pass, not per attempt: anchors are decided
+ * over the combined candidate set, not inside a single retrieval.
+ */
+export interface SoldCompOutcomeReport {
+  strategy: string;
+  accepted: number;
+  /** `all-rejected:<top reject reason>` when candidates existed but none anchored. */
+  reason?: string | null;
 }
 
 export interface TranscriptionUsageReport {
@@ -153,12 +260,7 @@ export class ProviderUsageTally {
   }
 
   addSoldCompRetrieval(report: SoldCompUsageReport): void {
-    const totals = this.soldComps.get(report.strategy) ?? {
-      strategy: report.strategy,
-      attempts: 0,
-      results: 0,
-      chargedUsd: null,
-    };
+    const totals = this.soldCompTotals(report.strategy);
     totals.attempts += 1;
     totals.results += count(report.results);
     // A reported charge accumulates; strategies that report nothing stay null so
@@ -166,7 +268,59 @@ export class ProviderUsageTally {
     if (typeof report.chargedUsd === "number" && Number.isFinite(report.chargedUsd)) {
       totals.chargedUsd = (totals.chargedUsd ?? 0) + report.chargedUsd;
     }
+    this.setSoldCompReason(totals, report.reason);
     this.soldComps.set(report.strategy, totals);
+  }
+
+  /**
+   * Record what the matcher accepted from one strategy's combined candidates
+   * (#1138). Separate from `addSoldCompRetrieval` because it is not an attempt:
+   * reporting it there would inflate `attempts`, which is the paid-run count the
+   * cost record reads.
+   */
+  addSoldCompOutcome(report: SoldCompOutcomeReport): void {
+    const totals = this.soldCompTotals(report.strategy);
+    totals.accepted += count(report.accepted);
+    this.setSoldCompReason(totals, report.reason);
+    this.soldComps.set(report.strategy, totals);
+  }
+
+  private soldCompTotals(strategy: string): SoldCompUsage {
+    return (
+      this.soldComps.get(strategy) ?? {
+        strategy,
+        attempts: 0,
+        results: 0,
+        accepted: 0,
+        reason: null,
+        chargedUsd: null,
+      }
+    );
+  }
+
+  /**
+   * A reason only ever describes an EMPTY contribution, so accepting an anchor
+   * clears it: the first attempt of a pass can legitimately report
+   * `no-candidates` and the expansion can still anchor, and a row that kept the
+   * stale reason would read as a failure that did not happen.
+   */
+  private setSoldCompReason(totals: SoldCompUsage, reason: string | null | undefined): void {
+    if (totals.accepted > 0) {
+      totals.reason = null;
+      return;
+    }
+    const value = typeof reason === "string" ? reason.trim() : "";
+    // Enforced HERE rather than trusted from the call site: every reporter funnels
+    // through this tally, so one check covers all of them, and an unrecognised
+    // value is dropped instead of stored.
+    if (!value || !isSoldCompUsageReason(value)) return;
+    if (
+      totals.reason != null &&
+      soldCompReasonRank(value) <= soldCompReasonRank(totals.reason)
+    ) {
+      return;
+    }
+    totals.reason = value;
   }
 
   addTranscriptionCall(report: TranscriptionUsageReport): void {

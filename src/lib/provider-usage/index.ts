@@ -7,6 +7,7 @@ export {
   currentTranscriptionUsage,
   providerUsageRunActive,
   recordModelUsage,
+  recordSoldCompOutcome,
   recordSoldCompUsage,
   recordTranscriptionUsage,
   withProviderUsageRun,
@@ -20,10 +21,15 @@ export {
 // registry, and the lists read as undefined. Both correction paths import
 // `./post-completion` directly.
 export {
+  isSoldCompUsageReason,
   ProviderUsageTally,
+  SOLD_COMP_ALL_REJECTED_PREFIX,
+  SOLD_COMP_TERMINAL_REASONS,
   type ModelUsageReport,
   type ProviderUsageModelTotals,
   type ProviderUsageRecord,
+  type SoldCompOutcomeReport,
+  type SoldCompTerminalReason,
   type SoldCompUsage,
   type SoldCompUsageReport,
   type ProviderUsageTranscriptionTotals,

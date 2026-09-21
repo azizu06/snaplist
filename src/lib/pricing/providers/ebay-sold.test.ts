@@ -275,7 +275,9 @@ describe("buildSoldSearchUrl", () => {
       model: "XPS 15",
       specs: ["RTX 4070", " ", "32GB", "1TB SSD", "OLED"],
     });
-    expect(new URL(url!).searchParams.get("_nkw")).toBe("Dell XPS 15 RTX 4070 32GB 1TB SSD");
+    // Only the extracted TOKENS travel (#1138 review): "1TB SSD" contributes the
+    // capacity it is narrowing on, not the medium noun beside it.
+    expect(new URL(url!).searchParams.get("_nkw")).toBe("Dell XPS 15 RTX 4070 32GB 1TB");
   });
 
   it("does NOT append specs to a bare UPC/ISBN query (an exact code key, not a keyword search)", () => {
@@ -3055,6 +3057,95 @@ describe("ebay-sold provider usage recording (#716)", () => {
         strategy: "ebay-sold",
         attempts: 1,
         results: 10,
+        // Anchors the matcher ACCEPTED, not the five the seller is shown:
+        // best-five retention happens later, in `selectVerifiedSoldMatches`, and
+        // a row that recorded the display cap would hide how much evidence the
+        // strategy actually produced (#1138).
+        accepted: 10,
+        reason: null,
+        chargedUsd: null,
+      },
+    ]);
+  });
+});
+
+/**
+ * Issue #1138: the public-page strategy's zero has to name itself too.
+ *
+ * eBay now answers the sold/completed search page with an Akamai 403 to plain
+ * HTTP clients — reproduced from a residential IP, direct and through the
+ * operator proxy template, with a clean `Apple AirPods Pro` query. That is a
+ * BLOCKED retrieval, not an item without comps, and the row has to say so or the
+ * tier reads as "no comps exist" forever.
+ */
+describe("ebay-sold usage reasons (#1138)", () => {
+  it("records a blocked page fetch as blocked, using exactly one request", async () => {
+    let requests = 0;
+    const blocked: FetchPage = async () => {
+      requests += 1;
+      throw new Error("eBay sold fetch failed: 403 Forbidden");
+    };
+
+    const { usage, value } = await withProviderUsageRun(() =>
+      createEbaySoldPricingProvider({
+        fetchPage: blocked,
+        emitDiagnostic: () => undefined,
+      }).price(BRANDED_SIGNAL),
+    );
+
+    expect(value).toBeNull();
+    // No fallback egress is wired in production, so a blocked run costs exactly
+    // one request and never retries the path that just refused it.
+    expect(requests).toBe(1);
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "ebay-sold",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "blocked",
+        chargedUsd: null,
+      },
+    ]);
+  });
+
+  it.each([
+    ["a timeout", new DOMException("aborted", "AbortError"), "provider-error"],
+    ["a 5xx", new Error("eBay sold fetch failed: 503 Service Unavailable"), "provider-error"],
+    ["a parse throw", new TypeError("Cannot read properties of undefined"), "provider-error"],
+    ["a 403", new Error("eBay sold fetch failed: 403 Forbidden"), "blocked"],
+    ["a 429", new Error("eBay sold fetch failed: 429 Too Many Requests"), "blocked"],
+  ])(
+    "files %s as %s — a refusal and a failure are different operator problems",
+    async (_label, error, expected) => {
+      const { usage } = await withProviderUsageRun(() =>
+        createEbaySoldPricingProvider({
+          fetchPage: async () => {
+            throw error;
+          },
+          emitDiagnostic: () => undefined,
+        }).price(BRANDED_SIGNAL),
+      );
+
+      expect(usage.soldComps[0]!.reason).toBe(expected);
+    },
+  );
+
+  it("separates a page that parsed nothing from a page that was refused", async () => {
+    const { usage } = await withProviderUsageRun(() =>
+      createEbaySoldPricingProvider({
+        fetchPage: fakeFetch("<html><body>no sold cards here</body></html>"),
+        emitDiagnostic: () => undefined,
+      }).price(BRANDED_SIGNAL),
+    );
+
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "ebay-sold",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "no-candidates",
         chargedUsd: null,
       },
     ]);
@@ -3094,5 +3185,184 @@ describe("buildSoldSearchQuery — a title is not an identity (#1120)", () => {
       condition: "very-good",
     });
     expect(buildSoldSearchQuery(signal)).toBe("Apple AirPods Pro");
+  });
+});
+
+/**
+ * Issue #1138: the sold tier sent eBay a keyword-stuffed query.
+ *
+ * `specs` is DOCUMENTED as price-determining configuration ("RTX 3060", "256GB
+ * SSD"), but the vision step returns whatever attribute prose it can read off the
+ * photos, and this builder appended the first three of them verbatim. The two
+ * strings below are the exact keywords the Caffein Actor received in production
+ * (runs of 2026-09-21 and 2026-08-16). eBay AND-matches keywords, so a colour, an
+ * accessory and a material starve the search of the item itself — and unlike the
+ * web-search tier, the sold tier issues ONE query with no broad fallback behind
+ * it, so a stuffed query is terminal for the whole tier.
+ *
+ * A spec may still narrow the query, but only when it names the SKU: a measured
+ * capacity/size, a component family, or a generation. Descriptive attributes are
+ * dropped and the tier falls back to the identity it can actually search on.
+ */
+describe("buildSoldSearchQuery — descriptive specs must not starve the sold query (#1138)", () => {
+  it("drops the colour/accessory/material prose that produced the zero-result AirPods run", () => {
+    const signal = attributesToSignal({
+      brand: "Apple",
+      model: "AirPods Pro",
+      category: "electronics",
+      condition: "very-good",
+      specs: ["White", "charging case", "Silicone ear tips"],
+    });
+    expect(buildSoldSearchQuery(signal)).toBe("Apple AirPods Pro");
+  });
+
+  it("drops free-text attribute prose that produced the zero-result Logitech run", () => {
+    const signal = attributesToSignal({
+      brand: "Logitech",
+      model: "MX Master 3S",
+      category: "electronics",
+      condition: "good",
+      specs: [
+        "Model M-R0077",
+        "5.0V 500mA input rating",
+        "Device-switch button with positions 1, 2, and 3",
+      ],
+    });
+    expect(buildSoldSearchQuery(signal)).toBe("Logitech MX Master 3S");
+  });
+
+  it("still narrows on SKU-defining configuration so multi-config comps stay clustered", () => {
+    const signal = attributesToSignal({
+      brand: "Dell",
+      model: "XPS 15",
+      category: "electronics",
+      condition: "good",
+      specs: ["Silver", "RTX 4070", "backlit keyboard", "32GB", "1TB SSD"],
+    });
+    expect(buildSoldSearchQuery(signal)).toBe("Dell XPS 15 RTX 4070 32GB 1TB");
+  });
+});
+
+/**
+ * Issue #1138 round 1 review (Standards P2): the spec filter decided per WHOLE
+ * string but emitted that whole string, so one enforceable token dragged its
+ * prose into the query with it — the same starvation, one layer down.
+ * "Large silicone ear tips included" carries a named size, so it passed the
+ * filter and was appended verbatim.
+ *
+ * Only the tokens the extractors actually matched may reach the query.
+ */
+describe("buildSoldSearchQuery — only extracted tokens reach the query (#1138)", () => {
+  it("emits the size token from prose that merely contains one", () => {
+    // Round 2 narrowed WHICH tokens qualify: a bare "Large" is only a size for
+    // an apparel/footwear category, so this case carries one to keep the
+    // extraction claim honest. Electronics prose is covered by the round-2
+    // suite below, where the same spec must yield nothing at all.
+    expect(
+      buildSoldSearchQuery({
+        category: "apparel",
+        brand: "Patagonia",
+        model: "Better Sweater",
+        specs: ["Large fleece pullover, zip pockets"],
+      }),
+    ).toBe("Patagonia Better Sweater Large");
+  });
+
+  it("emits the capacity token from prose that merely contains one", () => {
+    expect(
+      buildSoldSearchQuery({
+        brand: "Apple",
+        model: "iPhone 13",
+        specs: ["256GB storage capacity model"],
+      }),
+    ).toBe("Apple iPhone 13 256GB");
+  });
+
+  it("emits nothing from prose carrying no enforceable token", () => {
+    expect(
+      buildSoldSearchQuery({
+        brand: "Apple",
+        model: "AirPods Pro",
+        specs: ["Silicone ear tips included", "White colourway", "charging case"],
+      }),
+    ).toBe("Apple AirPods Pro");
+  });
+
+  it("caps at three TOKENS, not three specs", () => {
+    expect(
+      buildSoldSearchQuery({
+        brand: "Dell",
+        model: "XPS 15",
+        specs: ["RTX 4070 graphics", "32GB RAM and 1TB SSD", "15.6 inch display"],
+      }),
+    ).toBe("Dell XPS 15 RTX 4070 32GB 1TB");
+  });
+});
+
+/**
+ * Issue #1138 round 2: a bare named size is an adjective, not a SKU.
+ *
+ * "Large silicone ear tips" describes the tips. Sending "Large" into an AirPods
+ * query AND-matches it against every sold title and starves the search, which is
+ * the same failure the round-1 fix was meant to close — one word further down.
+ */
+describe("buildSoldSearchQuery keeps adjectives out of the query (#1138 round 2)", () => {
+  const base = { category: "electronics", condition: "very-good", conditionKnown: true } as const;
+
+  it("takes no token from a bare named size", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        brand: "Apple",
+        model: "AirPods Pro",
+        specs: ["Large silicone ear tips included", "White charging case"],
+      }),
+    ).toBe("Apple AirPods Pro");
+  });
+
+  it("takes the size when a qualifier makes it one", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        brand: "Nike",
+        model: "Air Max 90",
+        specs: ["Size Large"],
+      }),
+    ).toBe("Nike Air Max 90 Size Large");
+  });
+
+  it("takes a bare named size for an apparel category", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        category: "apparel",
+        brand: "Patagonia",
+        model: "Better Sweater",
+        specs: ["Large", "Navy"],
+      }),
+    ).toBe("Patagonia Better Sweater Large");
+  });
+
+  it("keeps only the number from a gendered size", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        category: "sneakers",
+        brand: "Nike",
+        model: "Air Max 90",
+        specs: ["Mens 10.5"],
+      }),
+    ).toBe("Nike Air Max 90 10.5");
+  });
+
+  it("drops a token the brand and model already carry", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        brand: "Apple",
+        model: "iPhone 13 256GB",
+        specs: ["256GB storage capacity model", "Blue"],
+      }),
+    ).toBe("Apple iPhone 13 256GB");
   });
 });

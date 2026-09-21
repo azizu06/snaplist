@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   createInMemoryTtlCache,
@@ -1575,7 +1577,16 @@ describe("Apify sold-comp usage recording (#716)", () => {
     const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
 
     expect(usage.soldComps).toEqual([
-      { strategy: "apify", attempts: 1, results: 3, chargedUsd: 0.0247 },
+      {
+        strategy: "apify",
+        attempts: 1,
+        results: 3,
+        // All three comps match the signal, so the matcher anchors every one
+        // and the strategy reports no reason at all (#1138).
+        accepted: 3,
+        reason: null,
+        chargedUsd: 0.0247,
+      },
     ]);
   });
 
@@ -1595,7 +1606,16 @@ describe("Apify sold-comp usage recording (#716)", () => {
     const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
 
     expect(usage.soldComps).toEqual([
-      { strategy: "apify", attempts: 1, results: 0, chargedUsd: 0.0031 },
+      {
+        strategy: "apify",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        // FAILED is the Actor's own failure, so it outranks the `no-candidates`
+        // the matcher would otherwise infer from the empty list (#1138).
+        reason: "provider-error",
+        chargedUsd: 0.0031,
+      },
     ]);
   });
 
@@ -1617,7 +1637,255 @@ describe("Apify sold-comp usage recording (#716)", () => {
     const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
 
     expect(usage.soldComps).toEqual([
-      { strategy: "apify", attempts: 1, results: 3, chargedUsd: null },
+      {
+        strategy: "apify",
+        attempts: 1,
+        results: 3,
+        accepted: 3,
+        reason: null,
+        chargedUsd: null,
+      },
     ]);
+  });
+});
+
+/**
+ * Issue #1138: the pinned Actor build was the actor-side cause of zero candidates.
+ *
+ * Build `1.18.3` (pinned by the #188/#198 evaluation) now fails its own upstream
+ * fetch: every production run logged `L1 failed in 120-320ms: upstream fetch 400`
+ * and finished `Total 1 requests: 0 succeeded, 1 failed`. The Actor still EXITS
+ * `SUCCEEDED` with an empty dataset, so SnapList paid the Actor-start charge and
+ * recorded "no results" for what was really a broken provider. The same Actor at
+ * build `1.23.3` returns real ebay.com sold items for the same keywords.
+ *
+ * The pin stays an EXPLICIT version and never the floating `latest` tag: a tag
+ * moves under us, and the whole point of pinning is that the build we evaluated is
+ * the build that runs.
+ */
+describe("APIFY_SOLD_ACTOR_BUILD_DEFAULT (#1138)", () => {
+  it("pins the build proved to return sold items, as an explicit version", () => {
+    expect(APIFY_SOLD_ACTOR_BUILD_DEFAULT).toBe("1.23.3");
+    expect(APIFY_SOLD_ACTOR_BUILD_DEFAULT).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+});
+
+/**
+ * Issue #1138 acceptance: the usage row must distinguish candidates FETCHED from
+ * candidates ACCEPTED, and name why a strategy contributed nothing.
+ *
+ * The production row that forced this was `apify: attempts 2, results 0`, which
+ * reads identically whether the Actor was broken, the matcher rejected everything,
+ * or the item has no comps. Attempts 2 was itself the tell: the 20-candidate
+ * expansion only runs when the initial batch came back non-null, which requires
+ * status SUCCEEDED — so both runs succeeded and returned an EMPTY dataset.
+ */
+describe("sold-comp usage reasons (#1138)", () => {
+  it("names an empty successful run rather than leaving it indistinguishable", async () => {
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      emitDiagnostic: () => undefined,
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        chargedTotalUsd: 0.0001,
+        items: [],
+      }),
+    });
+
+    const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    // Two attempts, no candidates, and a reason — the shape of the production row
+    // that could not be diagnosed without the provider's own console.
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "apify",
+        attempts: 2,
+        results: 0,
+        accepted: 0,
+        reason: "no-candidates",
+        chargedUsd: 0.0002,
+      },
+    ]);
+  });
+
+  it("reports a non-success run as a provider error, not as an absence of comps", async () => {
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      emitDiagnostic: () => undefined,
+      runActor: async () => ({
+        status: "TIMED-OUT",
+        chargedTotalUsd: 0.0031,
+        items: [],
+      }),
+    });
+
+    const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "apify",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "provider-error",
+        chargedUsd: 0.0031,
+      },
+    ]);
+  });
+
+  it("separates retrieval that worked from a matcher that kept nothing", async () => {
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      emitDiagnostic: () => undefined,
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        chargedTotalUsd: 0.012,
+        items: [
+          rawItem({
+            itemId: "x",
+            url: "https://www.ebay.com/itm/x",
+            soldPrice: "170",
+            title: "Bose QuietComfort 45 Headphones",
+          }),
+          rawItem({
+            itemId: "y",
+            url: "https://www.ebay.com/itm/y",
+            soldPrice: "180",
+            title: "Bose QuietComfort Ultra Headphones",
+          }),
+        ],
+      }),
+    });
+
+    const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    const [entry] = usage.soldComps;
+    expect(entry).toMatchObject({ strategy: "apify", accepted: 0 });
+    expect(entry!.results).toBeGreaterThan(0);
+    // These comps survive as corroboration — real evidence that never cleared the
+    // anchor bar — which is a different operator answer from "the matcher threw
+    // them all out" (#1138 review). The `all-rejected:<cause>` form is asserted
+    // directly against the matcher in `sold-comp-matcher.test.ts`.
+    expect(entry!.reason).toBe("no-anchors");
+  });
+
+  it("records what the matcher accepted when the strategy does produce anchors", async () => {
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        chargedTotalUsd: 0.0247,
+        items: [
+          rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+          rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "180" }),
+          rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "190" }),
+        ],
+      }),
+    });
+
+    const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    const [entry] = usage.soldComps;
+    expect(entry).toMatchObject({ strategy: "apify", results: 3, reason: null });
+    expect(entry!.accepted).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Issue #1138 contract: a mainstream branded item must come out of the Actor
+ * response with real anchors, and an accessory-polluted response must not.
+ *
+ * The fixtures are SCHEMA-DERIVED, not captured: no operator Apify token was
+ * obtainable in this environment, so the rows are built from the Actor's
+ * published output schema and documented sample record. What they pin is the
+ * contract SnapList depends on — field names, types, and value shapes — and the
+ * matcher behaviour on top of it. What they cannot pin is whether the live Actor
+ * still emits that shape; the build pin and the production verification SQL in
+ * the PR cover that.
+ */
+describe("Apify sold response contract — AirPods Pro (schema-derived fixture, #1138)", () => {
+  const AIRPODS_SIGNAL: ItemSignal = {
+    brand: "Apple",
+    model: "AirPods Pro",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    specs: ["White", "charging case", "Silicone ear tips"],
+  };
+
+  function fixtureItems(scenario: "mainstream" | "accessory-polluted") {
+    const raw = readFileSync(
+      fileURLToPath(
+        new URL(`./fixtures/apify-sold.airpods-pro.${scenario}.json`, import.meta.url),
+      ),
+      "utf8",
+    );
+    return (JSON.parse(raw) as { items: Record<string, unknown>[] }).items;
+  }
+
+  function providerFor(scenario: "mainstream" | "accessory-polluted") {
+    return createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      emitDiagnostic: () => undefined,
+      now: () => Date.parse("2026-09-21T01:28:00.000Z"),
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        chargedTotalUsd: 0.02,
+        items: fixtureItems(scenario),
+      }),
+    });
+  }
+
+  it("yields at least three accepted anchors for a mainstream branded item", async () => {
+    const { value, usage } = await withProviderUsageRun(() =>
+      providerFor("mainstream").price(AIRPODS_SIGNAL),
+    );
+
+    const [entry] = usage.soldComps;
+    expect(entry!.accepted).toBeGreaterThanOrEqual(3);
+    expect(entry!.reason).toBeNull();
+    expect(value).not.toBeNull();
+    expect(value!.tier).toBe("ebay-sold");
+    // Never padded, never more than the five the PRD allows on display.
+    expect(value!.evidence!.length).toBeGreaterThanOrEqual(3);
+    expect(value!.evidence!.length).toBeLessThanOrEqual(5);
+  });
+
+  it("rejects cases, ear tips, single earbuds and parts from a polluted response", async () => {
+    const { value } = await withProviderUsageRun(() =>
+      providerFor("accessory-polluted").price(AIRPODS_SIGNAL),
+    );
+
+    // Assert the result EXISTS before asserting what it excludes (#1138 review):
+    // a null result would satisfy every "does not contain" check below while
+    // proving nothing at all.
+    expect(value).not.toBeNull();
+    expect(value!.evidence!.length).toBeGreaterThanOrEqual(2);
+    const titles = value!.evidence!.map((match) => match.title ?? "");
+    // The two genuine sales survived; the assertions below are about what did not.
+    expect(titles.filter((title) => /AirPods Pro/i.test(title)).length).toBeGreaterThanOrEqual(2);
+    for (const pollutant of [
+      /ear tips/i,
+      /charging case only/i,
+      /case cover/i,
+      /right earbud only/i,
+      /for parts/i,
+    ]) {
+      expect(titles.some((title) => pollutant.test(title))).toBe(false);
+    }
+    // The two genuine sales are around $140-$150; an accessory at $6.50 or a
+    // parts unit at $29.99 leaking through would drag the recommendation down.
+    expect(value!.suggested).toBeGreaterThan(100);
+    expect(value!.evidence!.every((match) => match.price > 100)).toBe(true);
   });
 });

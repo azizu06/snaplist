@@ -4,7 +4,7 @@ import {
   SOLD_HALFLIFE_DAYS_DEFAULT,
   SOLD_STALE_DAYS_DEFAULT,
 } from "../freshness";
-import { selectSoldCompEvidence } from "../sold-comp-matcher";
+import { selectSoldCompEvidence, soldCompRetrievalReason } from "../sold-comp-matcher";
 import {
   pricingEvidenceShippingSchema,
   type ItemSignal,
@@ -14,7 +14,7 @@ import {
   type PricingProvider,
 } from "../types";
 import { logEvent, type LogFields } from "../../observability";
-import { recordSoldCompUsage } from "../../provider-usage";
+import { recordSoldCompOutcome, recordSoldCompUsage } from "../../provider-usage";
 import {
   buildSoldSearchQuery,
   canonicalEbayItemUrl,
@@ -23,9 +23,23 @@ import {
   type EbaySoldComp,
 } from "./ebay-sold";
 
-/** The exact Caffein Dev Actor and build evaluated by issues #188/#198. */
+/** The exact Caffein Dev Actor evaluated by issues #188/#198. */
 export const APIFY_SOLD_ACTOR_ID = "oTtB3VgfuE9GtxQt2";
-export const APIFY_SOLD_ACTOR_BUILD_DEFAULT = "1.18.3";
+/**
+ * The pinned Actor build (#1138).
+ *
+ * Was `1.18.3`, the build issues #188/#198 evaluated. That build's own upstream
+ * fetch now answers 400 in ~120-320ms — every production run logged `L1 failed`
+ * then `Total 1 requests: 0 succeeded, 1 failed` — while the Actor still exits
+ * SUCCEEDED with an empty dataset, so SnapList paid the Actor-start charge and
+ * booked a broken provider as "no results". The same Actor and the same keywords
+ * at build `1.23.3` return real ebay.com sold items.
+ *
+ * Kept as an EXPLICIT version, never the floating `latest` tag: a tag moves
+ * underneath us, which defeats the reason for pinning at all. Moving it is an
+ * operator decision backed by a live check, not a routine dependency bump.
+ */
+export const APIFY_SOLD_ACTOR_BUILD_DEFAULT = "1.23.3";
 export const APIFY_SOLD_INITIAL_RESULTS = 10;
 export const APIFY_SOLD_MAX_RESULTS_DEFAULT = 20;
 export const APIFY_SOLD_EXPANSION_THRESHOLD = 3;
@@ -224,6 +238,17 @@ export interface ApifySoldRunRequest {
 export interface ApifySoldRunResult {
   status: string;
   items: readonly Record<string, unknown>[];
+  /**
+   * The Actor's own process exit code when the platform reports one (#1138).
+   *
+   * The platform's run stats do NOT expose a failed-request count — `ActorRunStats`
+   * carries memory, CPU, and duration only — so this is the only provider-side
+   * failure signal beyond `status`, and even it stays undefined for a run that
+   * finished cleanly while every one of its own fetches failed. That gap is the
+   * reason a SUCCEEDED-but-empty run is recorded as `no-candidates` and raised as
+   * its own diagnostic rather than guessed at as a provider error.
+   */
+  exitCode?: number;
   /**
    * What the Actor itself reported charging for this run (#716). Optional
    * because it is the PROVIDER's report, not a figure derived from a rate we
@@ -485,7 +510,12 @@ export function createDefaultApifySoldActorRunner(token: string): RunApifySoldAc
       log: null,
     });
     if (run.status !== "SUCCEEDED" || !run.defaultDatasetId) {
-      return { status: run.status, items: [], chargedTotalUsd: run.usageTotalUsd };
+      return {
+        status: run.status,
+        items: [],
+        chargedTotalUsd: run.usageTotalUsd,
+        ...(typeof run.exitCode === "number" ? { exitCode: run.exitCode } : {}),
+      };
     }
     const readClient = new ApifyClient({
       token,
@@ -500,7 +530,12 @@ export function createDefaultApifySoldActorRunner(token: string): RunApifySoldAc
       (item): item is Record<string, unknown> =>
         Boolean(item) && typeof item === "object" && !Array.isArray(item),
     );
-    return { status: run.status, items, chargedTotalUsd: run.usageTotalUsd };
+    return {
+      status: run.status,
+      items,
+      chargedTotalUsd: run.usageTotalUsd,
+      ...(typeof run.exitCode === "number" ? { exitCode: run.exitCode } : {}),
+    };
   };
 }
 
@@ -1152,11 +1187,27 @@ export function createApifySoldPricingProvider(
       // returns null, so a throwing counter would discard the comps of an Actor
       // run we already paid for and report the tier as failed. Telemetry never
       // costs a run its evidence.
+      // #1138: the count alone could not tell a broken Actor from an item with no
+      // comps, so each attempt now also names WHY it produced nothing. A
+      // non-success status (or a non-zero exit code behind one) is the Actor's
+      // own failure; a successful run with an empty dataset is reported as what
+      // we can actually prove — no candidates — and separately raised as a
+      // diagnostic, because the platform exposes no failed-request count to
+      // justify calling it an error.
+      const failedProviderSide =
+        result.status !== "SUCCEEDED" ||
+        (typeof result.exitCode === "number" && result.exitCode !== 0);
+      const attemptReason = failedProviderSide
+        ? "provider-error"
+        : result.items.length === 0
+          ? "no-candidates"
+          : null;
       try {
         recordSoldCompUsage({
           strategy: "apify",
           results: result.items.length,
           chargedUsd: result.chargedTotalUsd,
+          reason: attemptReason,
         });
       } catch (usageError) {
         emitDiagnostic("pricing.apify_sold.usage_recording_failed", {
@@ -1169,6 +1220,15 @@ export function createApifySoldPricingProvider(
       if (result.status !== "SUCCEEDED") {
         recordFailure(boundedStatus(result.status));
         return null;
+      }
+      if (result.items.length === 0) {
+        // The #1138 fingerprint: the Actor reports success and hands back nothing.
+        // It is not a failure we can prove, so it must not open the circuit — but
+        // an operator watching this tier needs it to be visible as its own event
+        // and not just a zero in a count.
+        emitDiagnostic("pricing.apify_sold.empty_success", {
+          reason: "no-candidates",
+        });
       }
       const comps = normalizeApifySoldItems(result.items, maxItems);
       circuit.consecutiveFailures = 0;
@@ -1351,6 +1411,16 @@ export function createApifySoldPricingProvider(
         normalizeEbaySoldCompUrls(comps),
         signal,
       );
+      // #1138: report what the provider-neutral matcher kept. Recorded here, at
+      // the one place the strategy's accepted count is known for the whole run,
+      // rather than per attempt — anchors are decided over the combined candidate
+      // set, and a run served entirely from cache still contributed evidence even
+      // though it made no paid attempt.
+      recordSoldCompOutcome({
+        strategy: "apify",
+        accepted: evidence.anchors.length,
+        reason: soldCompRetrievalReason(evidence),
+      });
       // Retrieval is Actor-specific; every evidence decision after canonical
       // matching runs through the one shared finalization seam (#363).
       const clock = now?.();

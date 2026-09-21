@@ -9,6 +9,32 @@ depreciation, or LLM-only fallback tiers; it does not fail the listing pipeline.
 This seam is unrelated to the transactional eBay adapter. It cannot create a
 listing, send a message, or use seller OAuth.
 
+## Status, 2026-09-21 (#1138): the public page is blocked
+
+eBay now answers the sold/completed search page with an Akamai `403` to plain HTTP
+clients. Reproduced from a residential IP with a clean `Apple AirPods Pro` query,
+direct and through the operator proxy template, against the exact URL and headers
+the provider builds:
+
+```
+$ pnpm smoke:sold-comps -- --live --confirm-one-request Apple "AirPods Pro" electronics
+{"status":"fallback","egressMode":"direct","externalRequests":1,
+ "sourceUrls":[],"fallbackReason":"egress-blocked"}
+```
+
+The response is a 1831-byte eBay error page with `server: AkamaiGHost` and
+`x-cdn: Akamai`. It is not our user-agent string: the same request from the same
+IP with a plain Chrome UA, and with curl's own UA, is refused identically.
+
+Nothing here changes as a result. The provider was always fail-soft, and it stays
+wired as the fallback behind the Apify strategy — an edge policy can be relaxed as
+easily as it was applied, and a provider that is dead today is not a provider worth
+deleting the seam for. What DID change is honesty: a blocked retrieval now records
+`blocked` in the run's usage row instead of a bare zero that reads as "this item
+has no comps", and a blocked run costs exactly one request — the optional fallback
+egress is a different operator-configured path, never a retry of the one that just
+refused us, and nothing wires it in production.
+
 ## Default-off Caffein Apify retrieval adapter
 
 Issue #200 adds a second retrieval strategy inside the same provider-neutral
@@ -26,7 +52,9 @@ normalization keeps only canonical eBay URL, title, positive USD sold price,
 condition, sale date, and Best Offer disclosure. Seller fields, images, raw
 payload fields, malformed URLs/prices, non-USD rows, and duplicates are dropped.
 
-The tested default pins Actor `oTtB3VgfuE9GtxQt2` to build `1.18.3`. One logical
+The tested default pins Actor `oTtB3VgfuE9GtxQt2` to build `1.23.3` (#1138 moved
+it off `1.18.3`, which had begun succeeding with an empty dataset after its own
+upstream fetch started answering 400). One logical
 pricing pass requests exactly 10 candidates first and makes one 20-candidate
 expansion only when fewer than three anchors survive the canonical matcher. A
 terminal initial failure falls through without expansion. Each request is capped

@@ -7,6 +7,25 @@ const used = (extra: BenchmarkTag[] = []): BenchmarkTag[] => ["used", ...extra];
  * tenant, listing, or customer data. Queries are stored exactly as the existing
  * production `buildSoldSearchUrl` normalizes them, so both providers receive the
  * same strings.
+ *
+ * That makes `query` a DERIVED field, not a record of what a past paid run sent:
+ * when the builder changes, these follow, and `benchmark.test.ts` fails until they
+ * do. #1138 stopped descriptive specs from entering a sold query, which shortened
+ * nine entries here — "Body Only", "Complete", "Sealed", a colour, a printing.
+ * Every size, capacity, and dimension spec still narrows its query, because those
+ * are the ones the canonical matcher can enforce. Its round-1 review then reduced
+ * four more to the extracted TOKEN rather than the whole spec, dropping the medium
+ * noun ("1TB SSD" -> "1TB") and the audience word ("Mens Medium" -> "Medium"); the
+ * matcher's own capacity and audience rules still enforce both.
+ *
+ * EXPECTED RECALL CHANGE: these queries are broader than the ones the #188 run
+ * issued, so a re-run should retrieve MORE candidates per query and lean harder on
+ * the matcher to reject them. Q06 is the clearest case — it no longer narrows to
+ * "Body Only", so lens kits and bundles will now be retrieved, and its `humanRule`
+ * forbidden phrases ("lens only", "battery grip") are what must reject them. That
+ * moves work from retrieval to matching by design; it is not a regression, but a
+ * re-benchmark should expect different per-query precision. The historical #188
+ * run's own inputs and results remain in `docs/benchmarks/sold-comps/`.
  */
 export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   {
@@ -46,7 +65,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q06",
-    query: "Canon EOS 80D Body Only",
+    query: "Canon EOS 80D",
     signal: { brand: "Canon", model: "EOS 80D", specs: ["Body Only"], category: "electronics", condition: "good", conditionKnown: true },
     tags: used(["electronics", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["80d"]], forbiddenPhrases: ["lens only", "battery grip", "for parts", "90d"], targetCondition: "used" },
@@ -74,14 +93,14 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q10",
-    query: "Apple AirPods Pro 2nd Generation USB-C",
+    query: "Apple AirPods Pro 2nd Generation",
     signal: { brand: "Apple", model: "AirPods Pro 2nd Generation", specs: ["USB-C"], category: "electronics", condition: "good", conditionKnown: true },
     tags: used(["electronics", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["airpods pro"], ["2nd", "2nd generation", "usb-c", "usb c"]], forbiddenPhrases: ["case only", "left earbud", "right earbud", "1st generation"], targetCondition: "used" },
   },
   {
     id: "Q11",
-    query: "Dell XPS 15 9530 RTX 4070 32GB 1TB SSD",
+    query: "Dell XPS 15 9530 RTX 4070 32GB 1TB",
     signal: { brand: "Dell", model: "XPS 15 9530", specs: ["RTX 4070", "32GB", "1TB SSD"], category: "electronics", condition: "good", conditionKnown: true },
     tags: used(["electronics", "ambiguous-variant", "product-research-subset"]),
     humanRule: { requiredPhraseGroups: [["xps 15", "9530"], ["4070"], ["32gb", "32 gb"]], forbiddenPhrases: ["rtx 4060", "16gb", "parts"], targetCondition: "used" },
@@ -95,7 +114,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q13",
-    query: "Nintendo Switch OLED Model White",
+    query: "Nintendo Switch OLED Model",
     signal: { brand: "Nintendo", model: "Switch OLED Model", specs: ["White"], category: "video-games", condition: "good", conditionKnown: true },
     tags: used(["video-games", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["switch oled"], ["white"]], forbiddenPhrases: ["lite", "tablet only", "dock only", "box only"], targetCondition: "used" },
@@ -130,7 +149,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q18",
-    query: "Nintendo Joy-Con Pair Neon Red Blue",
+    query: "Nintendo Joy-Con Pair",
     signal: { brand: "Nintendo", model: "Joy-Con Pair", specs: ["Neon Red Blue"], category: "video-games", condition: "good", conditionKnown: true },
     tags: used(["video-games", "accessory-as-product", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["joy-con", "joy con"], ["pair", "left right"]], forbiddenPhrases: ["single", "left only", "right only", "strap only"], targetCondition: "used" },
@@ -151,7 +170,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q21",
-    query: "Stonemaier Games Wingspan 2nd Printing",
+    query: "Stonemaier Games Wingspan",
     signal: { brand: "Stonemaier Games", model: "Wingspan", specs: ["2nd Printing"], category: "board-games", condition: "good", conditionKnown: true },
     tags: used(["board-games", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["wingspan"]], forbiddenPhrases: ["european expansion", "oceania expansion", "nesting box", "replacement"], targetCondition: "used" },
@@ -172,28 +191,28 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q24",
-    query: "LEGO 75192 Millennium Falcon Complete",
+    query: "LEGO 75192 Millennium Falcon",
     signal: { brand: "LEGO", model: "75192 Millennium Falcon", specs: ["Complete"], category: "lego", condition: "good", conditionKnown: true },
     tags: used(["lego", "ambiguous-variant", "product-research-subset"]),
     humanRule: { requiredPhraseGroups: [["75192"]], forbiddenPhrases: ["box only", "instructions only", "minifigures only", "75105"], targetCondition: "used" },
   },
   {
     id: "Q25",
-    query: "LEGO 10307 Eiffel Tower Complete",
+    query: "LEGO 10307 Eiffel Tower",
     signal: { brand: "LEGO", model: "10307 Eiffel Tower", specs: ["Complete"], category: "lego", condition: "good", conditionKnown: true },
     tags: used(["lego"]),
     humanRule: { requiredPhraseGroups: [["10307"]], forbiddenPhrases: ["box only", "instructions only", "21044"], targetCondition: "used" },
   },
   {
     id: "Q26",
-    query: "LEGO Ideas 21330 Home Alone Complete",
+    query: "LEGO Ideas 21330 Home Alone",
     signal: { brand: "LEGO Ideas", model: "21330 Home Alone", specs: ["Complete"], category: "lego", condition: "good", conditionKnown: true },
     tags: used(["lego"]),
     humanRule: { requiredPhraseGroups: [["21330"]], forbiddenPhrases: ["box only", "minifigures only", "instructions only"], targetCondition: "used" },
   },
   {
     id: "Q27",
-    query: "LEGO 40516 Everyone Is Awesome Sealed",
+    query: "LEGO 40516 Everyone Is Awesome",
     signal: { brand: "LEGO", model: "40516 Everyone Is Awesome", specs: ["Sealed"], category: "lego", condition: "new", conditionKnown: true },
     tags: ["lego", "new"],
     humanRule: { requiredPhraseGroups: [["40516"]], forbiddenPhrases: ["used", "open box", "incomplete"], targetCondition: "new" },
@@ -207,7 +226,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q29",
-    query: "New Balance 990v5 Mens Size 10",
+    query: "New Balance 990v5 Size 10",
     signal: { brand: "New Balance", model: "990v5", specs: ["Mens Size 10"], category: "sneakers", condition: "good", conditionKnown: true },
     tags: used(["sneakers", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["990v5"], ["size 10", "sz 10"]], forbiddenPhrases: ["990v6", "women", "size 10.5"], targetCondition: "used" },
@@ -228,14 +247,14 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q32",
-    query: "Patagonia Better Sweater Full Zip Mens Medium",
+    query: "Patagonia Better Sweater Full Zip Medium",
     signal: { brand: "Patagonia", model: "Better Sweater Full Zip", specs: ["Mens Medium"], category: "clothing", condition: "good", conditionKnown: true },
     tags: used(["clothing"]),
     humanRule: { requiredPhraseGroups: [["better sweater"], ["medium", "size m"]], forbiddenPhrases: ["quarter zip", "women", "vest"], targetCondition: "used" },
   },
   {
     id: "Q33",
-    query: "The North Face 1996 Retro Nuptse Mens Medium",
+    query: "The North Face 1996 Retro Nuptse Medium",
     signal: { brand: "The North Face", model: "1996 Retro Nuptse", specs: ["Mens Medium"], category: "clothing", condition: "good", conditionKnown: true },
     tags: used(["clothing", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["nuptse", "1996"], ["medium", "size m"]], forbiddenPhrases: ["women", "kids", "vest"], targetCondition: "used" },

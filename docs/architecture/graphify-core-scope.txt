@@ -549,6 +549,7 @@ supabase/migrations/20260820120000_condition_only_review_rerun_is_free.sql
 supabase/migrations/20260821220000_post_completion_provider_usage_overflow_guard.sql
 supabase/migrations/20260821221000_post_completion_provider_usage_replay_fence.sql
 supabase/migrations/20260909120000_operator_pro_allowance.sql
+supabase/migrations/20260921000000_sold_comp_usage_reasons.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

@@ -66,7 +66,7 @@ All optional, all documented in `.env.example`. Each may only *tighten* its
 in-code ceiling — a larger value is clamped down, so these cannot be used to raise
 the spend ceiling:
 
-`APIFY_SOLD_ACTOR_BUILD` (default `1.18.3`), `APIFY_SOLD_DAYS_TO_SCRAPE` (90, max
+`APIFY_SOLD_ACTOR_BUILD` (default `1.23.3`), `APIFY_SOLD_DAYS_TO_SCRAPE` (90, max
 180), `APIFY_SOLD_TIMEOUT_SECS` (55), `APIFY_SOLD_WAIT_SECS` (60),
 `APIFY_SOLD_REQUEST_RETRIES` (2), `APIFY_SOLD_MAX_TOTAL_CHARGE_USD` (0.11),
 `APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS` (15000).
@@ -280,10 +280,19 @@ the vendor's rate.
   derivable from public pricing.
 - **Current account balance and plan.** The $3.66/$5.00 figure is from
   2026-08-11 and can drift. Re-check before relying on the "eleven runs" estimate.
-- **Whether pinned build `1.18.3` returns usable hero-domain evidence.** The audit
+- **Whether the pinned build returns usable hero-domain evidence.** The audit
   proved the current public schema is compatible with the in-repo normalizer and
   that the pinned build exists and succeeded. It did not prove retrieval quality.
   That remains the separately authorized canary.
+
+  Issue #1138 then proved the pin itself can rot. Build `1.18.3` kept succeeding
+  and kept returning an EMPTY dataset: its own upstream fetch began answering 400
+  (`L1 failed in 120-320ms`, `Total 1 requests: 0 succeeded, 1 failed`) while the
+  Actor still exited `SUCCEEDED`, so SnapList paid the Actor-start charge and
+  recorded a broken provider as "no results". The pin is now `1.23.3`, verified
+  from the owner's Apify console to return real `ebay.com/itm` sold rows for
+  `["Apple AirPods Pro"]`. Re-verify the pinned build whenever sold-comp results
+  fall off, and keep it an explicit version — never the floating `latest` tag.
 - **Any proxy vendor rate**, per above.
 
 ---

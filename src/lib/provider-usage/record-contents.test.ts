@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveLanguageModel } from "../llm/registry";
 import {
+  isSoldCompUsageReason,
   recordModelUsage,
   recordSoldCompUsage,
   recordTranscriptionUsage,
@@ -63,6 +64,7 @@ const SOLD_COMP_SHAPE = {
   strategy: "string",
   attempts: "number",
   results: "number",
+  accepted: "number",
 } as const;
 
 const TRANSCRIPTION_SHAPE = {
@@ -98,7 +100,7 @@ function expectOnlyAllowlistedFields(record: ProviderUsageRecord): void {
   }
   for (const entry of record.soldComps) {
     expect(Object.keys(entry).sort()).toEqual(
-      [...Object.keys(SOLD_COMP_SHAPE), "chargedUsd"].sort(),
+      [...Object.keys(SOLD_COMP_SHAPE), "chargedUsd", "reason"].sort(),
     );
     for (const [key, type] of Object.entries(SOLD_COMP_SHAPE)) {
       expect(typeof entry[key as keyof typeof SOLD_COMP_SHAPE]).toBe(type);
@@ -106,6 +108,10 @@ function expectOnlyAllowlistedFields(record: ProviderUsageRecord): void {
     expect(
       entry.chargedUsd === null || typeof entry.chargedUsd === "number",
     ).toBe(true);
+    // `reason` is the only string field added since this allowlist was written
+    // (#1138), so it is held to the same rule as the routing labels: a member of
+    // a closed vocabulary, never free text a caller could smuggle content through.
+    expect(entry.reason === null || isSoldCompUsageReason(entry.reason)).toBe(true);
   }
   for (const entry of record.transcriptions) {
     expect(Object.keys(entry).sort()).toEqual(
