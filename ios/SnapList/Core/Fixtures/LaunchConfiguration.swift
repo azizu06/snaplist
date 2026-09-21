@@ -182,6 +182,11 @@ enum AssistedExportFixture: String, Equatable {
 
 enum SubmissionFixture: String, Equatable {
     case delayed
+    /// Stays in flight for ten minutes, past the end of any test, unless the
+    /// app cancels it. `delayed` resolves after eight seconds, which a slow
+    /// runner can spend on a proof that steps away and comes back
+    /// mid-submission (#1129).
+    case held
     case acceptedPresentationGated = "accepted-presentation-gated"
     case rateLimited = "rate-limited"
     /// A `401` against a seller who is signed in — the credential existed and the

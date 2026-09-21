@@ -634,6 +634,15 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertNil(invalidNotification.submissionAcknowledgmentNotification)
     }
 
+    func testHeldSubmissionFixtureIsTypedAndZeroNetworkOnly() {
+        let held = LaunchConfiguration.parse(
+            arguments: ["--submission-fixture=held"]
+        )
+
+        XCTAssertEqual(held.submissionFixture, .held)
+        XCTAssertTrue(held.usesZeroNetworkFixtures)
+    }
+
     func testExplicitVisualStateUsesItsOwningFamilyOverTheDefaultOnboardingFixture() {
         let onboarding = LaunchConfiguration.parse(arguments: ["--visual-state=ONB-01"])
         let capture = LaunchConfiguration.parse(arguments: ["--visual-state=CAP-01"])

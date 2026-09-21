@@ -1963,14 +1963,16 @@ final class SnapListUITests: XCTestCase {
     }
 
     /// #1129: dismissing the drawer is a presentation change, never a
-    /// cancellation. The delayed fixture holds the submission in flight for
-    /// eight seconds — room to drag the drawer away by its header, bring it
-    /// back through the entry control, and find the same item still sending.
+    /// cancellation. The held fixture keeps the submission in flight for ten
+    /// minutes, so however slow the runner, dragging the drawer away by its
+    /// header and bringing it back through the entry control finds the same
+    /// item still sending. `delayed` resolves after eight seconds, and a
+    /// resolved submission reads exactly like a cancelled one.
     func testDismissingTheDrawerMidSubmissionNeitherCancelsNorDropsTheItem() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
-            "--submission-fixture=delayed"
+            "--submission-fixture=held"
         ]
         app.launchAfterRetiringPriorInstance()
 
