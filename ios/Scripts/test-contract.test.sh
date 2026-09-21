@@ -258,9 +258,16 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       shard_job.fetch("runs-on") == "macos-26"
     abort "all shard failures must remain visible" unless
       shard_job.fetch("strategy").fetch("fail-fast") == false
-    abort "automatic suite must match the manifest-declared deterministic shards" unless
+    # Hackathon-speed policy (captain-authorized): pull requests run only the
+    # unit and ui-1 shards. ui-2..ui-4 stay declared in the manifest and are
+    # covered by the complete serial suite on main pushes.
+    abort "pull requests must run exactly the unit and ui-1 shards" unless
       shard_job.fetch("strategy").fetch("matrix").fetch("shard") ==
-        expected_shards
+        ["unit", "ui-1"]
+    skipped_on_pull_request = expected_shards -
+      shard_job.fetch("strategy").fetch("matrix").fetch("shard")
+    abort "pull requests must skip exactly ui-2, ui-3, and ui-4" unless
+      skipped_on_pull_request == ["ui-2", "ui-3", "ui-4"]
 
     checkout_step = shard_job.fetch("steps").find do |step|
       step["uses"] == "actions/checkout@v4"
@@ -327,6 +334,24 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       aggregate_step.fetch("env").fetch("SHARD_RESULT") == "${{ needs.shard.result }}"
     abort "aggregate check must observe the Release configuration result" unless
       aggregate_step.fetch("env").fetch("RELEASE_RESULT") == "${{ needs.release.result }}"
+
+    # Aggregate behavior without launching Xcode: run the real gate script.
+    aggregate_script = aggregate_step.fetch("run")
+    gate = lambda do |validate, shard, release|
+      system(
+        { "VALIDATE_RESULT" => validate, "SHARD_RESULT" => shard, "RELEASE_RESULT" => release },
+        "bash", "-c", aggregate_script,
+        out: File::NULL, err: File::NULL
+      )
+    end
+    abort "aggregate must pass when the reduced matrix succeeds" unless
+      gate.call("success", "success", "success")
+    abort "aggregate must fail when a reduced-matrix shard fails" unless
+      !gate.call("success", "failure", "success")
+    abort "aggregate must fail when validation fails" unless
+      !gate.call("failure", "skipped", "success")
+    abort "aggregate must fail when Release configuration fails" unless
+      !gate.call("success", "success", "failure")
 
     serial_job = jobs.fetch("serial")
     abort "serial confidence must remain on main pushes" unless
