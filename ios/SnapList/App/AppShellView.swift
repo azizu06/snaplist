@@ -832,7 +832,9 @@ struct AppShellView: View {
         )
         switch reduction.cameraCommand {
         case .start:
-            Task { await captureFlow.startCamera() }
+            // The task can run after a quick dismissal, so it starts the
+            // camera only if the drawer is still up when it does.
+            Task { await captureFlow.startCameraIfDrawerIsUp(in: router) }
         case .stop:
             // Stops the session and leaves the staged intake exactly where it
             // is. Nothing here touches the submission host, which is what

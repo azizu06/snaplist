@@ -205,10 +205,12 @@ enum ScanDrawerPolicy {
 }
 
 extension CaptureFlowModel {
-    /// Restarts the camera after an asynchronous Photo Review exit, but only
-    /// while the Scan drawer is up. Those exits can finish after the seller has
-    /// pulled the drawer down, and a session started then would run behind a
-    /// closed drawer; raising the drawer again starts it through the reducer.
+    /// Starts the camera, but only while the Scan drawer is up. The drawer's
+    /// own start and the Photo Review exits all run asynchronously and can
+    /// begin after the seller has pulled the drawer down; raising the drawer
+    /// again starts it through the reducer. A dismissal that lands after this
+    /// check is `startCamera()`'s to catch: the dismissal cancels the camera,
+    /// and a cancelled start never reports a live session.
     func startCameraIfDrawerIsUp(in router: AppRouter) async {
         guard router.isScanPresented else { return }
         await startCamera()

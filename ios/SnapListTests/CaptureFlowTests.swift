@@ -1942,6 +1942,56 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(captureFlow.stagedPhotos.count, 2)
     }
 
+    /// #1129: dismissing the drawer stops the camera, but a start still waiting on
+    /// the session used to finish afterwards and report a live camera. The flow
+    /// then believed one sat behind Trophy Wall, and restarted it on the next
+    /// return to the foreground.
+    func testCancellingWhileTheCameraIsStartingLeavesItOff() async {
+        let camera = GatedStartCaptureCamera(authorization: .authorized, holdsStart: true)
+        let flow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+
+        let start = Task { await flow.startCamera() }
+        await waitUntilTrue { camera.isStartPending }
+        flow.cancelCamera()
+        camera.finishStart()
+        await start.value
+
+        XCTAssertEqual(flow.phase, .idle)
+        XCTAssertFalse(camera.isSessionActive)
+        await flow.handleSceneBecameActive()
+        XCTAssertEqual(
+            camera.startCount,
+            1,
+            "Coming back to the foreground must not restart a cancelled camera."
+        )
+    }
+
+    /// #1129: the same race one step earlier. A first-run start waits on camera
+    /// permission; if the drawer comes down before the answer, the answer must
+    /// not start a session behind Trophy Wall.
+    func testCancellingWhileCameraPermissionIsPendingNeverStartsTheCamera() async {
+        let camera = GatedStartCaptureCamera(authorization: .notDetermined, holdsStart: false)
+        let flow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+
+        let start = Task { await flow.startCamera() }
+        await waitUntilTrue { camera.isAuthorizationPending }
+        flow.cancelCamera()
+        camera.grantAuthorization()
+        await start.value
+
+        XCTAssertEqual(camera.startCount, 0)
+        XCTAssertFalse(camera.isSessionActive)
+        XCTAssertEqual(flow.phase, .idle)
+    }
+
     func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
         let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
             name: "snaplist-conflict-submission-review",
@@ -11841,6 +11891,80 @@ private final class TestCaptureCamera: CaptureCamera {
     }
 
     private static let photoData = Data([0xFF, 0xD8, 0xFF, 0xD9])
+}
+
+/// Holds camera permission, and optionally the first session start, open until
+/// the test lets them finish, so a test can cancel the camera while a start is
+/// still in flight (#1129). Only the first start is held: a regression that
+/// restarts the camera must fail its assertion, not hang the run.
+private final class GatedStartCaptureCamera: CaptureCamera {
+    let session = AVCaptureSession()
+    let isAvailable = true
+    private var holdsStart: Bool
+    private let lock = NSLock()
+    private var authorization: CaptureCameraAuthorization
+    private var pendingAuthorization: CheckedContinuation<CaptureCameraAuthorization, Never>?
+    private var pendingStart: CheckedContinuation<Void, Never>?
+    private var starts = 0
+    private var sessionActive = false
+
+    init(authorization: CaptureCameraAuthorization, holdsStart: Bool) {
+        self.authorization = authorization
+        self.holdsStart = holdsStart
+    }
+
+    var startCount: Int { lock.withLock { starts } }
+    var isSessionActive: Bool { lock.withLock { sessionActive } }
+    var isAuthorizationPending: Bool { lock.withLock { pendingAuthorization != nil } }
+    var isStartPending: Bool { lock.withLock { pendingStart != nil } }
+
+    func authorizationStatus() -> CaptureCameraAuthorization {
+        lock.withLock { authorization }
+    }
+
+    func requestAuthorization() async -> CaptureCameraAuthorization {
+        await withCheckedContinuation { continuation in
+            lock.withLock { pendingAuthorization = continuation }
+        }
+    }
+
+    /// Like the real camera, the session is asked to run the moment `start` is
+    /// called, and a later `stop()` still wins; only the report back is held.
+    func start(frameHandler: @escaping (CaptureFrame) -> Void) async throws {
+        let holds = lock.withLock {
+            starts += 1
+            sessionActive = true
+            defer { holdsStart = false }
+            return holdsStart
+        }
+        guard holds else { return }
+        await withCheckedContinuation { continuation in
+            lock.withLock { pendingStart = continuation }
+        }
+    }
+
+    func stop() {
+        lock.withLock { sessionActive = false }
+    }
+
+    func capturePhoto() async throws -> Data { Data() }
+
+    func grantAuthorization() {
+        let continuation = lock.withLock {
+            authorization = .authorized
+            defer { pendingAuthorization = nil }
+            return pendingAuthorization
+        }
+        continuation?.resume(returning: .authorized)
+    }
+
+    func finishStart() {
+        let continuation = lock.withLock {
+            defer { pendingStart = nil }
+            return pendingStart
+        }
+        continuation?.resume()
+    }
 }
 
 private enum TestCaptureError: Error {

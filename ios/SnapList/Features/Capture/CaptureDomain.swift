@@ -1421,6 +1421,11 @@ final class CaptureFlowModel {
     private var activeIntakeID: UUID?
     private var activeIntakeActivationID: UUID?
     private var resumeAfterBackground = false
+    /// `cancelCamera()` advances this. A start still waiting on camera
+    /// permission or on the session compares it on the way back, so a cancel
+    /// that lands mid-start (the Scan drawer pulled down, #1129) leaves the
+    /// camera off rather than being overwritten when the start finishes.
+    private var cameraStartGeneration = 0
     private var pendingPhotoLimitAnnouncement: String?
     private var intakeEventTask: Task<Void, Never>?
     private var snapshotWaiters: [SnapshotWaiter] = []
@@ -1640,10 +1645,12 @@ final class CaptureFlowModel {
             return
         }
 
+        let generation = cameraStartGeneration
         phase = .requestingPermission
         var authorization = camera.authorizationStatus()
         if authorization == .notDetermined {
             authorization = await camera.requestAuthorization()
+            guard generation == cameraStartGeneration else { return }
         }
 
         switch authorization {
@@ -1668,10 +1675,15 @@ final class CaptureFlowModel {
                     await self?.process(frame: frame)
                 }
             }
+            // No `stop()` here: the camera runs `start` and `stop` in call
+            // order, so the cancel's own `stop()` has already turned this
+            // session off, and a second one could stop a newer start.
+            guard generation == cameraStartGeneration else { return }
             phase = .camera
             resumeAfterBackground = true
             recordScanStartedIfNeeded()
         } catch {
+            guard generation == cameraStartGeneration else { return }
             phase = .unavailable
         }
     }
@@ -2144,6 +2156,7 @@ final class CaptureFlowModel {
     }
 
     func cancelCamera() {
+        cameraStartGeneration += 1
         activeIntakeID = nil
         activeCaptureID = nil
         activeIntakeActivationID = nil
