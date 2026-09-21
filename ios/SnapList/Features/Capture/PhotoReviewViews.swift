@@ -2715,14 +2715,35 @@ final class PhotoReviewLiveSession {
                         expectedActivationID: intakeActivationID,
                         while: isActive
                     ) ?? false
+                },
+                hold: { [weak captureFlow] url, duration, isActive in
+                    await captureFlow?.holdVoiceTake(
+                        provisionalURL: url,
+                        duration: duration,
+                        expectedActivationID: intakeActivationID,
+                        while: isActive
+                    )
+                },
+                release: { [weak captureFlow] in
+                    await captureFlow?.releaseVoiceTake(
+                        expectedActivationID: intakeActivationID
+                    )
                 }
             )
         }
+        // #1136. A take held before the app was terminated reopens on review.
+        // Only a session that can release it through the intake restores it.
+        let heldTake = authority == nil
+            ? nil
+            : captureFlow?.intakeSnapshot?.heldVoiceTake.map {
+                VoiceNoteAsset(url: $0.mediaURL, duration: $0.duration)
+            }
         let voiceNoteStore = VoiceNoteStore(
             savedNote: savedNote,
             audio: AVFoundationVoiceNoteAudioClient(),
             files: VoiceNoteLocalFileStore(rootDirectory: provisionalRoot),
-            authority: authority
+            authority: authority,
+            heldTake: heldTake
         )
 #if DEBUG
         if launchArguments.contains(
@@ -3590,7 +3611,10 @@ struct PhotoReviewView: View {
             value: isVoiceNotePresented
         )
         .onAppear {
-            if presentsVoiceNoteOnAppear, voiceNoteStore != nil {
+            // A take restored after relaunch lands back on review with the
+            // panel open, where the seller left it (#1136).
+            if let voiceNoteStore,
+               presentsVoiceNoteOnAppear || voiceNoteStore.hasUnsavedTake {
                 isVoiceNotePresented = true
             }
         }

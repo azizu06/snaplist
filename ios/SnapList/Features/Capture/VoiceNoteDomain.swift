@@ -172,6 +172,18 @@ struct VoiceNoteCommitAuthority {
         (
             @escaping @MainActor @Sendable () -> Bool
         ) async -> Bool
+    /// #1136. Write-ahead for a take under review, so relaunch can bring it
+    /// back. Holding is not saving; the intake drops the held take on its
+    /// own when a save lands.
+    var hold:
+        (
+            (
+                URL,
+                TimeInterval,
+                @escaping @MainActor @Sendable () -> Bool
+            ) async -> Void
+        )? = nil
+    var release: (() async -> Void)? = nil
 }
 
 final class VoiceNoteLocalFileStore: VoiceNoteFileStoring {
@@ -326,8 +338,8 @@ final class VoiceNoteStore {
     /// `phase` so review keeps one state whether or not it is audible.
     private(set) var isPlayingTake = false
     /// The authority save in flight and the mutation it belongs to, so a
-    /// second save of the same take (Start listing, backgrounding, Save
-    /// recording) joins it instead of superseding it (#1136).
+    /// second save of the same take (Start listing, Save recording) joins it
+    /// instead of superseding it (#1136).
     private var authoritySave: (mutationID: UUID, task: Task<Void, Never>)?
 
     private let audio: VoiceNoteAudioClient
@@ -337,6 +349,14 @@ final class VoiceNoteStore {
     private var provisionalDuration: TimeInterval?
     private var pendingFocusRequest: VoiceNoteFocusRequest?
     private var authorityMutationID: UUID?
+    /// The intake owns the held take's record. `heldTakeRecord` serialises
+    /// hold and release so they land in the order the seller acted, and a
+    /// save waits on it so a late hold cannot bring back a saved take.
+    private var heldTakeRecord: Task<Void, Never>?
+    private var takeIsHeld = false
+    /// A take restored from the intake plays and saves from the intake's own
+    /// file, which only the intake may remove.
+    private var provisionalIsIntakeOwned = false
 #if DEBUG
     private var launchFixturePhaseApplied = false
 #endif
@@ -345,13 +365,23 @@ final class VoiceNoteStore {
         savedNote: VoiceNoteAsset? = nil,
         audio: VoiceNoteAudioClient,
         files: VoiceNoteFileStoring,
-        authority: VoiceNoteCommitAuthority? = nil
+        authority: VoiceNoteCommitAuthority? = nil,
+        heldTake: VoiceNoteAsset? = nil
     ) {
         self.savedNote = savedNote
         self.audio = audio
         self.files = files
         self.authority = authority
         phase = savedNote == nil ? .ready : .saved(isPlaying: false)
+        if let heldTake,
+           heldTake.duration > 0,
+           heldTake.duration <= Self.maximumDuration {
+            provisionalURL = heldTake.url
+            provisionalDuration = heldTake.duration
+            provisionalIsIntakeOwned = true
+            takeIsHeld = true
+            phase = .takeReady(duration: heldTake.duration)
+        }
         refreshSavedNoteWaveform()
         audio.interruptionHandler = { [weak self] in
             self?.handleInterruption()
@@ -440,6 +470,7 @@ final class VoiceNoteStore {
             audio.stopRecording()
             provisionalDuration = Self.maximumDuration
             phase = .takeReady(duration: Self.maximumDuration)
+            holdTakeForRecovery()
             return
         }
 
@@ -473,6 +504,7 @@ final class VoiceNoteStore {
         case .timeLimitReached:
             provisionalDuration = Self.maximumDuration
             phase = .takeReady(duration: Self.maximumDuration)
+            holdTakeForRecovery()
         case .failed:
             handleInterruption()
         }
@@ -495,6 +527,7 @@ final class VoiceNoteStore {
         let duration = min(max(snapshot.elapsed, 0), Self.maximumDuration)
         provisionalDuration = duration
         phase = .takeReady(duration: duration)
+        holdTakeForRecovery()
     }
 
     /// Returns the authority commit when there is one, so a caller that must
@@ -537,12 +570,14 @@ final class VoiceNoteStore {
         if let authority {
             let mutationID = UUID()
             authorityMutationID = mutationID
+            let pendingHold = heldTakeRecord
             let task = Task {
                 defer {
                     if authoritySave?.mutationID == mutationID {
                         authoritySave = nil
                     }
                 }
+                await pendingHold?.value
                 let committed = await authority.save(
                     provisionalURL,
                     provisionalDuration,
@@ -552,7 +587,9 @@ final class VoiceNoteStore {
                 )
                 guard authorityMutationID == mutationID,
                       self.provisionalURL == provisionalURL else {
-                    try? files.discardProvisional(at: provisionalURL)
+                    if !provisionalIsIntakeOwned {
+                        try? files.discardProvisional(at: provisionalURL)
+                    }
                     return
                 }
                 authorityMutationID = nil
@@ -560,9 +597,12 @@ final class VoiceNoteStore {
                     audio.stopPlaying()
                     isPlayingTake = false
                     setSavedNote(committed)
-                    self.provisionalURL = nil
-                    self.provisionalDuration = nil
-                    try? files.discardProvisional(at: provisionalURL)
+                    // The intake cleared the held take with this save.
+                    let ownsFile = !provisionalIsIntakeOwned
+                    clearProvisional()
+                    if ownsFile {
+                        try? files.discardProvisional(at: provisionalURL)
+                    }
                     phase = .saved(isPlaying: false)
                     pendingFocusRequest = .savedNoteSummary
                 } else {
@@ -607,9 +647,10 @@ final class VoiceNoteStore {
         return false
     }
 
-    /// Starting a listing (or leaving the app) with a take still under
-    /// review keeps it rather than losing it silently; the review's Save
-    /// recording is the explicit path, this is the implicit one (#1136).
+    /// Starting a listing with a take still under review keeps it rather
+    /// than losing it silently; the review's Save recording is the explicit
+    /// path, this is the implicit one (#1136). Leaving the app does not save:
+    /// the intake already holds the take for relaunch.
     /// Returns once the commit has settled, authority path included, and
     /// whether nothing was lost.
     @discardableResult
@@ -941,13 +982,59 @@ final class VoiceNoteStore {
         guard let provisionalURL else {
             return true
         }
-        do {
-            try files.discardProvisional(at: provisionalURL)
-        } catch {
-            return false
+        if !provisionalIsIntakeOwned {
+            do {
+                try files.discardProvisional(at: provisionalURL)
+            } catch {
+                return false
+            }
         }
-        self.provisionalURL = nil
-        provisionalDuration = nil
+        let wasHeld = takeIsHeld
+        clearProvisional()
+        if wasHeld {
+            releaseHeldTake()
+        }
         return true
+    }
+
+    private func clearProvisional() {
+        provisionalURL = nil
+        provisionalDuration = nil
+        provisionalIsIntakeOwned = false
+        takeIsHeld = false
+    }
+
+    private func holdTakeForRecovery() {
+        guard let hold = authority?.hold,
+              let url = provisionalURL,
+              let duration = provisionalDuration,
+              duration > 0 else {
+            return
+        }
+        takeIsHeld = true
+        enqueueHeldTakeRecord { [weak self] in
+            await hold(url, duration) {
+                self?.provisionalURL == url && self?.hasUnsavedTake == true
+            }
+        }
+    }
+
+    private func releaseHeldTake() {
+        guard let release = authority?.release else {
+            return
+        }
+        enqueueHeldTakeRecord {
+            await release()
+        }
+    }
+
+    private func enqueueHeldTakeRecord(
+        _ record: @escaping @MainActor () async -> Void
+    ) {
+        let prior = heldTakeRecord
+        heldTakeRecord = Task {
+            await prior?.value
+            await record()
+        }
     }
 }

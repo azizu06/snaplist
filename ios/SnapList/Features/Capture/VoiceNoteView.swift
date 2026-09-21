@@ -165,12 +165,9 @@ struct VoiceNoteSheet: View {
             case .inactive:
                 store.handleSceneInactive()
             case .background:
+                // A take under review is already held by the intake, so
+                // leaving the app keeps it without saving it (#1136).
                 store.handleSceneInactive()
-                // #1136: a take under review survives relaunch, as it did
-                // when the check mark committed it.
-                Task {
-                    await store.commitUnsavedTake()
-                }
             @unknown default:
                 store.handleSceneInactive()
             }

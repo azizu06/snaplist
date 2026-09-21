@@ -618,7 +618,7 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertNil(store.savedNote)
     }
 
-    /// Start listing, backgrounding and Save recording can all ask for the
+    /// Start listing and Save recording can both ask for the
     /// same take; they share one authority save instead of superseding it
     /// and discarding the file the other is reading.
     func testConcurrentSavesOfOneTakeShareOneAuthorityCommit() async {
@@ -659,6 +659,156 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(authoritySaves, 1)
         XCTAssertEqual(files.discardedURLs, [audio.provisionalURL])
         XCTAssertEqual(store.savedNote, kept)
+    }
+
+    /// #1136. Stopping into review writes the take ahead to the intake, so an
+    /// app-switcher termination or a suspension that never resumes cannot lose
+    /// it. Holding is not saving: the store stays on review.
+    func testStoppingOrReachingTheCapHoldsTheTakeWithoutSavingIt() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let recorder = HeldTakeAuthorityRecorder()
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: VoiceNoteFileStoreStub(),
+            authority: recorder.authority
+        )
+        await store.startRecording()
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            meterLevels: [0.4]
+        )
+        store.stopRecording()
+        await settle()
+
+        XCTAssertEqual(recorder.holds, [.init(url: audio.provisionalURL, duration: 4)])
+        XCTAssertEqual(recorder.saves, 0)
+        XCTAssertEqual(store.phase, .takeReady(duration: 4))
+
+        await store.rerecord()
+        audio.finishRecordingAtTimeLimit()
+        await settle()
+
+        XCTAssertEqual(recorder.holds.last, .init(
+            url: audio.provisionalURL,
+            duration: VoiceNoteStore.maximumDuration
+        ))
+        XCTAssertEqual(store.phase, .takeReady(duration: VoiceNoteStore.maximumDuration))
+    }
+
+    func testDeleteRerecordAndCloseReleaseTheHeldTake() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let recorder = HeldTakeAuthorityRecorder()
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: VoiceNoteFileStoreStub(),
+            authority: recorder.authority
+        )
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            meterLevels: [0.4]
+        )
+        await store.startRecording()
+        store.stopRecording()
+        XCTAssertTrue(store.discardTake())
+        await settle()
+        XCTAssertEqual(recorder.releases, 1)
+
+        await store.startRecording()
+        store.stopRecording()
+        await store.rerecord()
+        await settle()
+        XCTAssertEqual(recorder.releases, 2)
+
+        store.stopRecording()
+        XCTAssertTrue(store.dismiss())
+        await settle()
+        XCTAssertEqual(recorder.releases, 3)
+        XCTAssertEqual(recorder.log.last, "release")
+    }
+
+    /// The intake clears the held take itself when the save lands, so Save
+    /// recording releases nothing; it waits for the hold so the hold can never
+    /// land after the save and bring the take back.
+    func testSaveFollowsTheHoldAndReleasesNothing() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let recorder = HeldTakeAuthorityRecorder()
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: VoiceNoteFileStoreStub(),
+            authority: recorder.authority
+        )
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            meterLevels: [0.4]
+        )
+        await store.startRecording()
+        store.stopRecording()
+        await store.save()?.value
+
+        XCTAssertEqual(recorder.log, ["hold", "save"])
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+    }
+
+    /// Relaunch finds the held take and lands back on review with it. Its
+    /// bytes belong to the intake, so leaving review releases them through
+    /// the intake instead of deleting them behind its back.
+    func testAHeldTakeRestoresToReviewAndLeavesItsBytesToTheIntake() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let files = VoiceNoteFileStoreStub()
+        let recorder = HeldTakeAuthorityRecorder()
+        let held = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/intake-held-take.wav"),
+            duration: 7
+        )
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: files,
+            authority: recorder.authority,
+            heldTake: held
+        )
+
+        XCTAssertEqual(store.phase, .takeReady(duration: 7))
+        XCTAssertTrue(store.hasUnsavedTake)
+        XCTAssertNil(store.savedNote)
+        store.toggleTakePlayback()
+        XCTAssertEqual(audio.playedURLs, [held.url])
+
+        XCTAssertTrue(store.discardTake())
+        await settle()
+        XCTAssertEqual(files.discardAttempts, [])
+        XCTAssertEqual(recorder.releases, 1)
+        XCTAssertEqual(recorder.holds, [], "A restored take is already held.")
+        XCTAssertEqual(store.phase, .ready)
+    }
+
+    func testSavingARestoredTakeCommitsItsBytesAndLeavesThemToTheIntake() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let files = VoiceNoteFileStoreStub()
+        let recorder = HeldTakeAuthorityRecorder()
+        let held = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/intake-held-take.wav"),
+            duration: 7
+        )
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: files,
+            authority: recorder.authority,
+            heldTake: held
+        )
+
+        let landed = await store.commitUnsavedTake()
+
+        XCTAssertTrue(landed)
+        XCTAssertEqual(recorder.savedURLs, [held.url])
+        XCTAssertEqual(files.discardAttempts, [])
+        XCTAssertEqual(recorder.releases, 0)
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+    }
+
+    private func settle() async {
+        for _ in 0..<20 {
+            await Task.yield()
+        }
     }
 
     func testOnlyAStopIntoReviewIsAnnounced() {
@@ -1331,5 +1481,48 @@ private final class VoiceNoteFileStoreStub: VoiceNoteFileStoring {
         }
         deletedAssets.append(note)
         authoritativeAssets = []
+    }
+}
+
+/// Records what the store asks the intake to do with a take, in order.
+@MainActor
+private final class HeldTakeAuthorityRecorder {
+    struct Hold: Equatable {
+        let url: URL
+        let duration: TimeInterval
+    }
+
+    private(set) var holds: [Hold] = []
+    private(set) var savedURLs: [URL] = []
+    private(set) var releases = 0
+    private(set) var log: [String] = []
+    var saves: Int { savedURLs.count }
+
+    var authority: VoiceNoteCommitAuthority {
+        VoiceNoteCommitAuthority(
+            save: { [self] url, duration, _ in
+                for _ in 0..<3 {
+                    await Task.yield()
+                }
+                savedURLs.append(url)
+                log.append("save")
+                return VoiceNoteAsset(
+                    url: URL(fileURLWithPath: "/tmp/intake-voice.wav"),
+                    duration: duration
+                )
+            },
+            delete: { _ in true },
+            hold: { [self] url, duration, _ in
+                for _ in 0..<3 {
+                    await Task.yield()
+                }
+                holds.append(Hold(url: url, duration: duration))
+                log.append("hold")
+            },
+            release: { [self] in
+                releases += 1
+                log.append("release")
+            }
+        )
     }
 }
