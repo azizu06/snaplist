@@ -42,7 +42,27 @@ describe("confirmed-publish push (#891)", () => {
       listingId: listing.id,
       externalListingId: outcome.ebayListingId,
       itemName: "Sony WH-1000XM4 Headphones",
+      runId: null,
     });
+  });
+
+  it("names the run that produced the listing so a tap opens that exact item (#1137)", async () => {
+    const runId = "22222222-2222-4222-8222-222222222222";
+    const { client, listing } = fakePublishClient(null);
+    listing.run_id = runId;
+    const push = dispatcherSpy();
+
+    await publishListingToEbayAndNotify(
+      client,
+      "user-1",
+      listing.id,
+      new MockEbayAdapter(),
+      { push },
+    );
+
+    expect(push.listingPublished).toHaveBeenCalledWith(
+      expect.objectContaining({ runId }),
+    );
   });
 
   it("tells a guest, because the guest owns the listing", async () => {

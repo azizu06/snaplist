@@ -55,6 +55,8 @@ export interface SellerPushPublishedEvent {
   /** The confirmed eBay listing. Two publishes resolving here are one moment. */
   externalListingId: string;
   itemName: string | null;
+  /** The run that produced the listing; the tap opens that item (#1137). */
+  runId?: string | null;
 }
 
 export interface SellerPushDispatcher {
@@ -80,6 +82,7 @@ export function createSellerPushDispatcher(input: {
     userId: string,
     eventKey: string,
     itemName: string | null,
+    runId: string | null,
   ): Promise<void> {
     try {
       if (!(await input.store.claimDelivery({ userId, moment, eventKey }))) {
@@ -88,7 +91,7 @@ export function createSellerPushDispatcher(input: {
       const devices = await input.store.devicesForUser(userId);
       const message = buildSellerPushMessage({ moment, itemName });
       for (const device of devices) {
-        await deliver(device, moment, eventKey, message, userId);
+        await deliver(device, moment, eventKey, message, userId, runId);
       }
     } catch (error) {
       // Includes the claim itself. A database SnapList cannot reach is a reason
@@ -103,6 +106,7 @@ export function createSellerPushDispatcher(input: {
     eventKey: string,
     message: ReturnType<typeof buildSellerPushMessage>,
     userId: string,
+    runId: string | null,
   ): Promise<void> {
     let result;
     try {
@@ -110,6 +114,7 @@ export function createSellerPushDispatcher(input: {
         device,
         message,
         moment,
+        runId,
         collapseId: `${moment}:${eventKey}`,
       });
     } catch (error) {
@@ -140,6 +145,7 @@ export function createSellerPushDispatcher(input: {
         event.userId,
         event.runId,
         event.itemName,
+        event.runId,
       );
     },
     listingPublished(event) {
@@ -148,6 +154,7 @@ export function createSellerPushDispatcher(input: {
         event.userId,
         event.externalListingId,
         event.itemName,
+        event.runId ?? null,
       );
     },
   };

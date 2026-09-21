@@ -215,11 +215,14 @@ export function createHttpApnsSender(input: {
               alert: { title: request.message.title, body: request.message.body },
               sound: "default",
             },
-            // Read by the app when it is open and iOS asks whether to draw the
-            // system banner. The collapse id says the same thing, but it rides
-            // an APNs header the device never sees. Nothing about the seller
-            // is in here: it is one of two fixed words.
+            // Read by the app when a notification is tapped, foreground or
+            // background alike (#1137). The collapse id says the same thing,
+            // but it rides an APNs header the device never sees. Nothing about
+            // the seller is in here: one of two fixed words, and the opaque run
+            // id the app needs to open the exact item. The app re-fetches that
+            // run under the seller's own session, so the id grants nothing.
             moment: request.moment,
+            ...(isRunId(request.runId) ? { runId: request.runId } : {}),
           }),
         });
       } catch (error) {
@@ -238,6 +241,14 @@ export function createHttpApnsSender(input: {
       return { outcome: "failed", reason: reason ?? `apns_status_${response.status}` };
     },
   };
+}
+
+const RUN_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Only a real run uuid rides the payload, never a placeholder or free text. */
+function isRunId(value: string | null | undefined): value is string {
+  return typeof value === "string" && RUN_ID_PATTERN.test(value);
 }
 
 /**

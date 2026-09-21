@@ -53,6 +53,8 @@ struct AppShellView: View {
     /// Shared with the app delegate, which is the only thing that receives a
     /// foreground push (#891).
     private let foregroundPush = PushRegistrationComposition.foregroundPresenter
+    /// The notification tap the wall has not opened yet (#1137).
+    private let pushTaps = PushRegistrationComposition.tapRouter
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -307,10 +309,8 @@ struct AppShellView: View {
             reduceMotion ? nil : .easeInOut(duration: 0.16),
             value: foregroundPush.visible
         )
-        // The delegate reads this to decide whether it may suppress Apple's
-        // banner. It is set from the surface that actually draws, because a
-        // presenter that claimed to be mounted while nothing was on screen
-        // would swallow the notification entirely.
+        // Dead since #1137: iOS draws every foreground push and nothing calls
+        // `show`, so this banner never appears. Removed with its types (#1134).
         .onAppear { foregroundPush.mounted = true }
         .onDisappear { foregroundPush.mounted = false }
         // Attached above the shell/onboarding split so both sign-in entry points
@@ -659,6 +659,13 @@ struct AppShellView: View {
                     }
                 }
             }
+        }
+        // #1137. A tapped notification opens its item from the wall, so the
+        // wall comes forward first. Attached to the shell, not the root, so a
+        // seller still in onboarding is not pulled out of it by a tap that
+        // expires unopened.
+        .onChange(of: pushTaps.pending, initial: true) { _, pending in
+            if pending != nil { router.showTrophyWallForPushTap() }
         }
         // #385. Above the stack, not on the settings destination. The deletion
         // tail is pushed by a `navigationDestination` nested two levels inside
@@ -2391,6 +2398,9 @@ struct TrophyWallFeatureView: View {
     /// there is no tile in that flow — so it falls back to the plain push.
     @State private var zoomTransitionRunID: UUID?
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// #1137. Injected so the tap the delegate received is the one the wall
+    /// opens, and so a test can hand the wall its own.
+    var pushTaps = PushRegistrationComposition.tapRouter
 
     private var reduceMotion: Bool {
         systemReduceMotion || forceReducedMotion
@@ -2418,6 +2428,12 @@ struct TrophyWallFeatureView: View {
         .task(id: refreshState.taskID(tab: router.selectedTab)) {
             guard router.selectedTab == .trophyWall else { return }
             await store.recoverCollection(using: repository)
+        }
+        // #1137. Not `.task(id:)`: taking the tap changes what it observes, and
+        // a task keyed on it would cancel the open it just started.
+        .onChange(of: pushTaps.pending, initial: true) { _, pending in
+            guard pending != nil, router.selectedTab == .trophyWall else { return }
+            Task { await openPushTap() }
         }
         .navigationDestination(
             isPresented: Binding(
@@ -2493,6 +2509,19 @@ struct TrophyWallFeatureView: View {
             )
         } else {
             destination
+        }
+    }
+
+    /// The same open a tile tap performs, so a tapped notification and a tapped
+    /// tile cannot disagree about what opens or who may see it. An item already
+    /// on screen is dismissed first: the tap is the newer request.
+    private func openPushTap() async {
+        if listingReviewPresentation.isPresented {
+            listingReviewPresentation.dismiss()
+            await Task.yield()
+        }
+        _ = await PushTapOpener.open(from: pushTaps) { runID in
+            await openListing(runID)
         }
     }
 

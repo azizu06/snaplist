@@ -237,6 +237,16 @@ final class AppRouter {
         return true
     }
 
+    /// A notification tap brings the wall forward over whatever was open, popped
+    /// back to its root, because the item opens from the wall (#1137). Settings,
+    /// the camera, and the account sheet are the seller's to return to.
+    func showTrophyWallForPushTap() {
+        selectedTab = .trophyWall
+        presentedFullScreen = nil
+        presentedAccountEntry = false
+        setPath([], for: .trophyWall)
+    }
+
     func handleCaptureRestoration(_ restoration: CaptureRestoration) {
         guard restoration == .stagedPhoto else { return }
         selectedTab = .scan

@@ -30,6 +30,12 @@ export interface ApnsSendRequest {
   message: SellerPushMessage;
   moment: SellerPushMoment;
   /**
+   * The run that produced the item, so a tap opens that exact item (#1137).
+   * Optional because a published listing can predate its run link; the app
+   * then opens Trophy Wall, which is the honest place to land.
+   */
+  runId?: string | null;
+  /**
    * Collapses duplicates on the device itself. APNs replaces an unread
    * notification carrying the same id, which is a second, independent guard
    * against the seller seeing one moment twice.

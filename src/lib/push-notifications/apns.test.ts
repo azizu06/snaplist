@@ -162,6 +162,46 @@ describe("addressing a device", () => {
   });
 });
 
+describe("naming the item a tap opens (#1137)", () => {
+  const RUN_ID = "33333333-3333-4333-8333-333333333333";
+
+  it.each(["listingReady", "listingPublished"] as const)(
+    "carries the run id in the %s payload so a tap opens that exact item",
+    async (moment) => {
+      const transport = recordingTransport();
+
+      await senderWith(transport).send({
+        ...sendOf(PRODUCTION_DEVICE),
+        moment,
+        runId: RUN_ID,
+      });
+
+      expect(JSON.parse(transport.requests[0]!.body)).toEqual({
+        aps: {
+          alert: { title: MESSAGE.title, body: MESSAGE.body },
+          sound: "default",
+        },
+        moment,
+        runId: RUN_ID,
+      });
+    },
+  );
+
+  it.each([undefined, null, "run-1", "", "33333333-3333-4333-8333-33333333333"])(
+    "leaves the run id out rather than send %j, which is not a run identity",
+    async (runId) => {
+      const transport = recordingTransport();
+
+      await senderWith(transport).send({
+        ...sendOf(PRODUCTION_DEVICE),
+        runId: runId as string | null | undefined,
+      });
+
+      expect(JSON.parse(transport.requests[0]!.body)).not.toHaveProperty("runId");
+    },
+  );
+});
+
 describe("proving who is sending", () => {
   it("signs with the key id in the header and the team id as the issuer", async () => {
     const transport = recordingTransport();

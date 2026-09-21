@@ -21,6 +21,10 @@ enum PushRegistrationComposition {
     /// lives here.
     static let foregroundPresenter = ForegroundPushPresenter()
 
+    /// The tap the shell has not opened yet (#1137). The delegate receives it,
+    /// possibly before any view exists, and the wall opens it.
+    static let tapRouter = PushTapRouter()
+
     static func start(
         apiOrigin: URL,
         tokenProvider: any BearerTokenProviding,

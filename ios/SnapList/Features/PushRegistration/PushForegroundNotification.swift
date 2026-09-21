@@ -59,10 +59,6 @@ enum ForegroundPushPolicy {
 /// Dead since #1137: nothing calls `show` any more, so `visible` stays nil and
 /// `ForegroundPushBanner` never draws. It survives only because the shell
 /// (`AppShellView`) still mounts it; #1134 removes that mount and this type.
-///
-/// `mounted` is the honest half of the contract: it is set by the surface that
-/// can actually draw, and until something does, `show` refuses and the system
-/// banner stands.
 @MainActor
 @Observable
 final class ForegroundPushPresenter {
