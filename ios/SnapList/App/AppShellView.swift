@@ -83,6 +83,9 @@ struct AppShellView: View {
     @State private var activationAuthentication = ActivationAuthenticationState.unknown
     @State private var isCompletingActivation = false
     @State private var activationTour = ActivationTourProgress()
+    /// Scout's farewell while it is on screen. Held apart from the tour record
+    /// because the record retires the instant the line is shown.
+    @State private var activationClosingLine: String?
     @State private var activationListingReviewPresented = false
     @State private var activationGuestClaimPresented = false
     /// The registry a spotlit control publishes its action to, so VoiceOver
@@ -268,6 +271,18 @@ struct AppShellView: View {
         // #1133: nothing leaves the accessibility tree any more. The tour dims
         // nothing and blocks nothing, so every control the seller could reach
         // before a step is still reachable during it.
+        // The tour just ended. Recording it here rather than in the view is
+        // what makes the line show exactly once: the record retires the tour
+        // immediately, and the dwell is what the seller actually sees.
+        .onChange(of: activationTourPresentation, initial: true) { _, presentation in
+            guard case .closingLine(let line) = presentation else { return }
+            activationClosingLine = line
+            retireActivationTour()
+            Task {
+                try? await Task.sleep(for: Self.activationClosingLineDwell)
+                activationClosingLine = nil
+            }
+        }
         // Arriving on Scan is step one's real action: the seller tapped the
         // camera entry, whichever control the shell puts it on. Eligibility is
         // part of the key because it resolves after the first layout — reading
@@ -1177,7 +1192,14 @@ struct AppShellView: View {
                         safeAreaBottom: geometry.safeAreaInsets.bottom
                     )
                 )
-            case .closingLine(let line):
+            case .closingLine:
+                // Drawn from `activationClosingLine` below, not from here: the
+                // tour retires the moment the line appears, which would take
+                // the line off screen again in the same frame.
+                EmptyView()
+            }
+
+            if let line = activationClosingLine {
                 ActivationTourClosingLine(
                     line: line,
                     prefersDark: activationTourPrefersDarkSurface
@@ -1193,7 +1215,6 @@ struct AppShellView: View {
                         safeAreaBottom: geometry.safeAreaInsets.bottom
                     )
                 )
-                .task { retireActivationTour() }
             }
         }
         .frame(
@@ -1205,7 +1226,21 @@ struct AppShellView: View {
             reduceMotion ? nil : .easeOut(duration: 0.22),
             value: presentation
         )
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.22),
+            value: activationClosingLine
+        )
+        // The overlay is attached outside the shell's own fixture overrides,
+        // so a simulated Dynamic Type size would otherwise reach every screen
+        // except this one — and the strip's own accessibility screenshots
+        // would be the default size wearing an AX3 label. A real device sets
+        // this from the system, where it reaches both.
+        .fixtureAccessibilityOverrides(configuration)
     }
+
+    /// How long Scout's farewell stays on screen. It is not dismissible — there
+    /// is nothing left to act on — so it reads and then leaves.
+    private static let activationClosingLineDwell = Duration.seconds(3)
 
     /// The Scan camera is the one dark surface the tour speaks on, and the
     /// closing line can land anywhere, so it asks the surface rather than a

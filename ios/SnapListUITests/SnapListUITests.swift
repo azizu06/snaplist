@@ -4704,6 +4704,9 @@ final class SnapListUITests: XCTestCase {
             let arguments: [String]
             let line: String
             var opensReview = false
+            /// The publish row sits below the fold on Listing Review, so the
+            /// screenshot for step six has to bring it into view first.
+            var scrollsToPublish = false
         }
 
         let reviewAction =
@@ -4720,8 +4723,11 @@ final class SnapListUITests: XCTestCase {
                 line: "Tap the camera to start a listing."
             ),
             Step(
+                // CAM-01 is the camera surface the simulator can actually
+                // render, so the shutter — and therefore its halo — is on
+                // screen rather than the camera-unavailable recovery state.
                 name: "step-2-take-photo",
-                arguments: [],
+                arguments: ["--visual-state=CAM-01"],
                 line: "Snap up to five photos."
             ),
             Step(
@@ -4754,20 +4760,25 @@ final class SnapListUITests: XCTestCase {
                     "--activation-guidance-step=publishOrShare"
                 ],
                 line: "Publish to eBay, or share it.",
-                opensReview: true
+                opensReview: true,
+                scrollsToPublish: true
             ),
             Step(
                 name: "step-2-reduced-motion",
-                arguments: ["--reduced-motion"],
+                arguments: ["--visual-state=CAM-01", "--reduced-motion"],
                 line: "Snap up to five photos."
             ),
             Step(
                 name: "step-2-dynamic-type-ax3",
-                arguments: ["--dynamic-type=accessibility3"],
+                arguments: [
+                    "--visual-state=CAM-01",
+                    "--dynamic-type=accessibility3"
+                ],
                 line: "Snap up to five photos."
             )
         ]
 
+        var heights: [String: CGFloat] = [:]
         for step in steps {
             let app = launch(extraArguments: [
                 "--activation-onboarded-fixture",
@@ -4780,6 +4791,19 @@ final class SnapListUITests: XCTestCase {
                     "\(step.name): \(app.debugDescription)"
                 )
                 app.buttons[reviewAction].tap()
+            }
+            if step.scrollsToPublish {
+                let publish = app.descendants(matching: .any)[
+                    "listing-review.ebay-publish"
+                ]
+                XCTAssertTrue(
+                    publish.waitForExistence(timeout: 5),
+                    "\(step.name): \(app.debugDescription)"
+                )
+                while !publish.isHittable {
+                    app.descendants(matching: .any)["listing-review"]
+                        .swipeUp(velocity: .slow)
+                }
             }
 
             let strip = activationStrip(in: app)
@@ -4798,9 +4822,24 @@ final class SnapListUITests: XCTestCase {
                 "\(step.name) must not offer a Next-shaped dismissal"
             )
 
+            // The strip is the height option E specifies, with Scout hanging
+            // off its leading edge rather than being clipped into it.
+            XCTAssertGreaterThanOrEqual(strip.frame.height, 64, step.name)
+            XCTAssertLessThanOrEqual(strip.frame.height, 200, step.name)
+            heights[step.name] = strip.frame.height
+
             addScreenshot(named: "activation-tour-\(step.name).png")
             app.terminate()
         }
+
+        // The strip's copy is Dynamic Type, not a fixed point size: at AX3 the
+        // same step has to be taller than it is at the default size, or the
+        // line is being drawn at 13pt to an accessibility reader.
+        XCTAssertGreaterThan(
+            heights["step-2-dynamic-type-ax3"] ?? 0,
+            (heights["step-2-take-photo"] ?? 0) + 8,
+            "AX3 must grow the strip: \(heights)"
+        )
     }
 
     /// Skip is offered on step one only; from step two the chevron folds the

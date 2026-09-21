@@ -8,10 +8,17 @@ enum ActivationTourStripMetrics {
     static let height: CGFloat = 68
     static let horizontalMargin: CGFloat = 12
     static let cornerRadius: CGFloat = 18
-    static let scoutSize: CGFloat = 52
-    /// How far Scout overlaps the strip's leading edge and its top.
-    static let scoutLeadingOverlap: CGFloat = -14
-    static let scoutTopOverlap: CGFloat = -10
+    static let scoutSize: CGFloat = 58
+    /// How far Scout hangs past the strip's leading edge and its top. He is
+    /// drawn as an overlay rather than as a child, because the strip clips its
+    /// own rounded corners and would otherwise take a bite out of him.
+    static let scoutLeadingOverhang: CGFloat = 10
+    static let scoutTopOverhang: CGFloat = 10
+    /// The band the copy leaves clear for Scout, measured from the strip's own
+    /// leading edge.
+    static var scoutReservedWidth: CGFloat {
+        scoutSize - scoutLeadingOverhang + 8
+    }
     static let collapsedDiameter: CGFloat = 58
     static let collapsedScoutSize: CGFloat = 42
     /// The gap the strip keeps above whatever is docked below it, so it never
@@ -133,22 +140,30 @@ struct ActivationTourStrip: View {
     let skip: () -> Void
     let collapse: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The strip grows with the copy rather than clipping it, so the approved
+    /// height is a floor at the default size and a starting point above it.
+    @ScaledMetric(relativeTo: .callout)
+    private var minimumHeight = ActivationTourStripMetrics.height
 
     private var prefersDark: Bool { model.step.prefersDarkSurface }
 
     var body: some View {
         HStack(spacing: 0) {
-            ActivationTourScoutImage(
-                pose: model.step.scoutPose,
-                size: ActivationTourStripMetrics.scoutSize,
-                beatToken: model.step
-            )
-            .padding(.leading, ActivationTourStripMetrics.scoutLeadingOverlap)
-            .padding(.top, ActivationTourStripMetrics.scoutTopOverlap)
+            // Scout's reserved band. He is drawn over the top of it below, so
+            // the strip's own clip cannot cut him.
+            // Zero height on purpose: `Color.clear` is flexible in both
+            // axes, and left unbounded it takes the whole overlay's height
+            // with it.
+            Color.clear
+                .frame(
+                    width: ActivationTourStripMetrics.scoutReservedWidth,
+                    height: 0
+                )
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.step.instruction)
-                    .font(.system(size: 13, weight: .semibold))
+                    .snapListTypography(.status)
+                    .fontWeight(.semibold)
                     .foregroundStyle(textColor)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
@@ -159,13 +174,12 @@ struct ActivationTourStrip: View {
                     prefersDark: prefersDark
                 )
             }
-            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             trailingControl
         }
         .padding(.trailing, 10)
-        .frame(minHeight: ActivationTourStripMetrics.height)
+        .frame(minHeight: minimumHeight)
         .background(background)
         .clipShape(
             .rect(cornerRadius: ActivationTourStripMetrics.cornerRadius)
@@ -178,6 +192,19 @@ struct ActivationTourStrip: View {
             .stroke(borderColor, lineWidth: 1)
         }
         .shadow(color: .black.opacity(prefersDark ? 0.4 : 0.14), radius: 18, y: 10)
+        // Attached after the clip so Scout can hang off the strip's leading
+        // edge and its top the way option E draws him — no box of his own.
+        .overlay(alignment: .leading) {
+            ActivationTourScoutImage(
+                pose: model.step.scoutPose,
+                size: ActivationTourStripMetrics.scoutSize,
+                beatToken: model.step
+            )
+            .offset(
+                x: -ActivationTourStripMetrics.scoutLeadingOverhang,
+                y: -ActivationTourStripMetrics.scoutTopOverhang
+            )
+        }
         // Read as one region, with the count no pixel on screen carries.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(model.step.announcement)
@@ -195,7 +222,8 @@ struct ActivationTourStrip: View {
         if model.showsSkip {
             Button(action: skip) {
                 Text("Skip tour")
-                    .font(.system(size: 12, weight: .bold))
+                    .snapListTypography(.metadata)
+                    .fontWeight(.bold)
                     .foregroundStyle(
                         prefersDark
                             ? SnapListColorToken.actionOnDark.color
@@ -302,7 +330,8 @@ struct ActivationTourClosingLine: View {
 
     var body: some View {
         Text(line)
-            .font(.system(size: 13, weight: .semibold))
+            .snapListTypography(.status)
+            .fontWeight(.semibold)
             .multilineTextAlignment(.center)
             .foregroundStyle(
                 prefersDark
