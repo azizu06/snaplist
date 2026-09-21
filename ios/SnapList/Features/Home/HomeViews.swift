@@ -260,9 +260,7 @@ struct TrophyWallView: View {
                 .accessibilityIdentifier("trophy.wall.grid")
                 .reportingDockScrollOffset(to: dockScrollScale, reduceMotion: reduceMotion)
                 .onChange(of: scrollToTopToken) { _, _ in
-                    guard ScanDrawerMotionPolicy.shouldAnimatePresentation(
-                        reduceMotion: reduceMotion
-                    ) else {
+                    guard !reduceMotion else {
                         proxy.scrollTo(Self.topAnchorID, anchor: .top)
                         return
                     }

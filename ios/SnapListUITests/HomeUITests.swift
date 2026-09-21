@@ -181,11 +181,7 @@ final class HomeUITests: XCTestCase {
 
         app.buttons["scan.close"].tap()
 
-        let drawerGone = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !drawer.exists },
-            object: nil
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [drawerGone], timeout: 5), .completed)
+        XCTAssertTrue(drawer.waitForNonExistence(timeout: 5))
         XCTAssertTrue(wall.isHittable, app.debugDescription)
     }
 

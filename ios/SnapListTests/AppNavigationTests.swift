@@ -323,6 +323,29 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertNil(router.presentedFullScreen)
     }
 
+    /// #1129: the shell raises the drawer in the same turn the card asks for
+    /// Photo Review, before the Photo Review session has been built. The
+    /// drawer is about to show Photo Review, not the camera, so raising it
+    /// must not start a capture session nobody can see.
+    @MainActor
+    func testRaisingTheDrawerOverARecoveredCardLeavesTheCameraOff() {
+        let photos = Self.recoveryPhotos(count: 2)
+        let cardIdentity = Self.logicalIdentity(1)
+        let router = Self.processingRouter()
+        XCTAssertTrue(
+            router.openLocalRecovery(
+                cardIdentity,
+                matching: cardIdentity,
+                photos: photos
+            )
+        )
+
+        let reduction = router.applyScanDrawer(.scanSurfaceRestored)
+
+        XCTAssertTrue(reduction.state.isPresented)
+        XCTAssertNil(reduction.cameraCommand)
+    }
+
     /// A pending card names one specific local item. Recovery used to ignore that
     /// name and open whatever happened to be staged, after it had already switched
     /// tabs — so a stale card either opened the wrong intake or opened nothing and

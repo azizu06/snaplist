@@ -19,13 +19,10 @@ enum ScanDrawerEvent: Equatable {
     case submissionCompleted
 }
 
-/// The work already in flight when an event arrives. The reducer reads it so a
-/// dismissal's meaning can be stated against the case that matters — a seller
-/// swiping the drawer away while an item is being submitted — rather than only
-/// against an empty drawer.
+/// What the drawer holds when an event arrives, as far as the camera session
+/// is concerned. Staged photos and an in-flight submission are deliberately
+/// not here: no event may touch them, so the reducer has no use for them.
 struct ScanDrawerContext: Equatable {
-    var hasUnfinishedIntake = false
-    var isSubmissionInFlight = false
     /// Photo Review, not the camera, is what the drawer shows.
     var isPhotoReviewOpen = false
 }
@@ -57,9 +54,11 @@ enum ScanDrawerIntakeDisposition: Equatable {
 }
 
 /// A reduction carries the next state, the camera session work it implies, and
-/// what it does to the seller's intake. It deliberately holds no reference to
-/// an intake or a submission, so "dismissing cannot cancel my item" is a fact
-/// about the type rather than a promise made by its callers.
+/// what it does to the seller's intake. It holds no reference to an intake or
+/// a submission, so the reducer itself cannot cancel an item. Neither
+/// disposition asks the shell to act; the shell keeps its half of the promise
+/// by touching only the camera, which the mid-submission dismissal UI test
+/// pins.
 struct ScanDrawerReduction: Equatable {
     let state: ScanDrawerState
     let cameraCommand: ScanDrawerCameraCommand?
@@ -119,22 +118,12 @@ enum ScanDrawerDragPolicy {
     /// The downward speed, in points per second, that dismisses regardless of
     /// distance — a flick.
     static let dismissVelocity: CGFloat = 800
-    /// How much of an upward drag the drawer gives before it stops. It has
-    /// nowhere to go up, so the give is resistance, not travel.
-    static let upwardResistance: CGFloat = 0.55
 
-    static func offset(
-        forTranslation translation: CGFloat,
-        drawerHeight: CGFloat
-    ) -> CGFloat {
-        // Downward, the drawer is going where the finger is going.
-        guard translation < 0 else { return translation }
-        // Upward it is already at its full height, so the travel is squeezed
-        // into an asymptote: always some give, always less than the finger,
-        // never more than the drawer's own height however hard it is pulled.
-        let limit = max(drawerHeight, 1)
-        let pull = -translation
-        return -limit * (1 - 1 / (pull / limit * upwardResistance + 1))
+    /// Downward, the drawer goes where the finger goes. Upward it stays put:
+    /// the card is pinned to the screen's bottom edge, and lifting it would
+    /// open a gap under it that shows the wall through the floor.
+    static func offset(forTranslation translation: CGFloat) -> CGFloat {
+        max(0, translation)
     }
 
     static func outcome(
@@ -282,7 +271,7 @@ struct ScanDrawerSurface<Content: View>: View {
     }
 
     private var scrim: some View {
-        Color.black
+        SnapListColorToken.scrimOverlay.color
             .opacity(ScanDrawerMetrics.scrimOpacity)
             .ignoresSafeArea()
             .contentShape(.rect)
@@ -323,15 +312,7 @@ struct ScanDrawerSurface<Content: View>: View {
                     .accessibilityLabel("Scan drawer")
                     .accessibilityIdentifier("scan.drawer")
             }
-            .offset(
-                y: max(
-                    0,
-                    ScanDrawerDragPolicy.offset(
-                        forTranslation: dragTranslation,
-                        drawerHeight: height
-                    )
-                )
-            )
+            .offset(y: ScanDrawerDragPolicy.offset(forTranslation: dragTranslation))
             // No `.isModal` here: the card is not an accessibility element,
             // so the trait lands on every element inside it — each one a
             // modal of its own. The shell takes the wall and the dock out of
@@ -374,8 +355,7 @@ struct ScanDrawerSurface<Content: View>: View {
             .onEnded { value in
                 let outcome = ScanDrawerDragPolicy.outcome(
                     translation: value.translation.height,
-                    velocity: value.predictedEndTranslation.height
-                        - value.translation.height,
+                    velocity: value.velocity.height,
                     drawerHeight: drawerHeight
                 )
                 dragTranslation = 0

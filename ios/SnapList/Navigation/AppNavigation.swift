@@ -165,6 +165,13 @@ final class AppRouter {
         _ event: ScanDrawerEvent,
         context: ScanDrawerContext = ScanDrawerContext()
     ) -> ScanDrawerReduction {
+        var context = context
+        // A requested Photo Review is what the drawer shows, even in the turn
+        // before the host has built its session: a pending card reopened from
+        // the wall asks for it and raises the drawer in the same call.
+        if captureBoundaryRequest != nil {
+            context.isPhotoReviewOpen = true
+        }
         let reduction = ScanDrawerPolicy.reduce(scanDrawer, event, context: context)
         scanDrawer = reduction.state
         return reduction

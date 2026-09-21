@@ -31,11 +31,7 @@ final class ScanDrawerScreenshotTests: XCTestCase {
 
         app.buttons["scan.close"].tap()
         // The wall never left, so wait out the drawer instead.
-        let drawerGone = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !drawer.exists },
-            object: nil
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [drawerGone], timeout: 5), .completed)
+        XCTAssertTrue(drawer.waitForNonExistence(timeout: 5))
         capture("03-back-on-the-wall")
         app.terminate()
 

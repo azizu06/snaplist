@@ -821,16 +821,13 @@ struct AppShellView: View {
 
     /// Applies a drawer event and carries out the camera session work it
     /// names. Every path that opens or closes the drawer comes through here,
-    /// which is why there is exactly one place the capture session starts and
-    /// exactly one place it stops.
+    /// so the drawer's own transitions start and stop the capture session in
+    /// this one place. Capture's close and boundary controls also stop the
+    /// session before they leave; a second stop is harmless.
     private func applyScanDrawer(_ event: ScanDrawerEvent) {
         let reduction = router.applyScanDrawer(
             event,
-            context: ScanDrawerContext(
-                hasUnfinishedIntake: !captureFlow.stagedPhotos.isEmpty,
-                isSubmissionInFlight: submissionHost.isSubmitting,
-                isPhotoReviewOpen: isPhotoReviewInDrawer
-            )
+            context: ScanDrawerContext(isPhotoReviewOpen: isPhotoReviewInDrawer)
         )
         switch reduction.cameraCommand {
         case .start:
@@ -1934,7 +1931,12 @@ enum AppShellDepartedPhotoReviewTransaction {
         guard host.session != nil else { return false }
         setReturnFocus(.addPhotoButton)
         guard host.leaveForDepartedIntake(using: router) else { return false }
-        await captureFlow.startCamera()
+        // #1129: the intake can depart while the drawer is down. Scan is
+        // still what the drawer holds next, but the camera only runs while
+        // the drawer is up; raising it again starts the session.
+        if router.isScanPresented {
+            await captureFlow.startCamera()
+        }
         return true
     }
 }
@@ -2096,7 +2098,12 @@ enum AppShellPhotoReviewSubmissionTransaction {
             return
         }
         captureFlow.dropIntakeDiscardedElsewhere()
-        await captureFlow.startCamera()
+        // #1129: Done acknowledges and drops the drawer in one turn, and this
+        // clear lands after it, so the camera only comes back for a drawer
+        // that is still up. Raising the drawer later starts it there.
+        if router.isScanPresented {
+            await captureFlow.startCamera()
+        }
         guard host.session === session else {
             return
         }

@@ -19,17 +19,15 @@ final class ScanDrawerPolicyTests: XCTestCase {
     }
 
     /// The seller can swipe the drawer away, tap its close control or use the
-    /// escape gesture while an item is being submitted. That is a
-    /// presentation change and nothing else: the staged intake and the
-    /// in-flight submission both outlive it.
-    func testDismissingMidSubmissionClosesTheDrawerWithoutSettlingTheIntake() {
+    /// escape gesture at any point, an item mid-submission included. That is
+    /// a presentation change and nothing else: the staged intake and any
+    /// in-flight submission outlive it. The UI test
+    /// `testDismissingTheDrawerMidSubmissionNeitherCancelsNorDropsTheItem`
+    /// proves the shell's half.
+    func testDismissingClosesTheDrawerWithoutSettlingTheIntake() {
         let reduction = ScanDrawerPolicy.reduce(
             ScanDrawerState(isPresented: true),
-            .dismissed,
-            context: ScanDrawerContext(
-                hasUnfinishedIntake: true,
-                isSubmissionInFlight: true
-            )
+            .dismissed
         )
 
         XCTAssertFalse(reduction.state.isPresented)
@@ -43,8 +41,7 @@ final class ScanDrawerPolicyTests: XCTestCase {
     func testDoneAfterDurableAcceptanceClosesTheDrawerAndSettlesTheIntake() {
         let reduction = ScanDrawerPolicy.reduce(
             ScanDrawerState(isPresented: true),
-            .submissionCompleted,
-            context: ScanDrawerContext(hasUnfinishedIntake: false)
+            .submissionCompleted
         )
 
         XCTAssertFalse(reduction.state.isPresented)
@@ -80,8 +77,7 @@ final class ScanDrawerPolicyTests: XCTestCase {
     func testRestoringScanOverAnUnfinishedIntakePresentsTheDrawerAndTheCamera() {
         let reduction = ScanDrawerPolicy.reduce(
             ScanDrawerState(),
-            .scanSurfaceRestored,
-            context: ScanDrawerContext(hasUnfinishedIntake: true)
+            .scanSurfaceRestored
         )
 
         XCTAssertTrue(reduction.state.isPresented)
@@ -97,10 +93,7 @@ final class ScanDrawerPolicyTests: XCTestCase {
         let reduction = ScanDrawerPolicy.reduce(
             ScanDrawerState(),
             .scanEntryControlTapped,
-            context: ScanDrawerContext(
-                hasUnfinishedIntake: true,
-                isPhotoReviewOpen: true
-            )
+            context: ScanDrawerContext(isPhotoReviewOpen: true)
         )
 
         XCTAssertTrue(reduction.state.isPresented)
@@ -251,33 +244,17 @@ final class ScanDrawerDragPolicyTests: XCTestCase {
 
     func testDownwardDragFollowsTheFingerExactly() {
         XCTAssertEqual(
-            ScanDrawerDragPolicy.offset(forTranslation: 120, drawerHeight: drawerHeight),
+            ScanDrawerDragPolicy.offset(forTranslation: 120),
             120,
             accuracy: 0.001
         )
     }
 
-    /// Upward, the drawer gives a little and resists: some travel, always less
-    /// than the finger, and never more than the drawer's own height however
-    /// far the drag goes.
-    func testUpwardDragIsRubberBandedRatherThanFollowedOrFrozen() {
-        let modest = ScanDrawerDragPolicy.offset(
-            forTranslation: -100,
-            drawerHeight: drawerHeight
-        )
-        XCTAssertLessThan(modest, 0, "The drawer has to give something.")
-        XCTAssertGreaterThan(modest, -100, "It must not follow the finger.")
-
-        let extreme = ScanDrawerDragPolicy.offset(
-            forTranslation: -100_000,
-            drawerHeight: drawerHeight
-        )
-        XCTAssertGreaterThan(
-            extreme,
-            -drawerHeight,
-            "However hard it is pulled, the give stays bounded."
-        )
-        XCTAssertLessThan(extreme, modest, "Pulling harder still gives more.")
+    /// Upward, the drawer stays pinned to the bottom edge: lifting it would
+    /// open a gap under the card that shows the wall through the floor.
+    func testUpwardDragLeavesTheDrawerPinnedToTheBottomEdge() {
+        XCTAssertEqual(ScanDrawerDragPolicy.offset(forTranslation: -100), 0)
+        XCTAssertEqual(ScanDrawerDragPolicy.offset(forTranslation: -100_000), 0)
     }
 }
 

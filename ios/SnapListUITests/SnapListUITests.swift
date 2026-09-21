@@ -64,11 +64,7 @@ final class SnapListUITests: XCTestCase {
         // drawer's own close control.
         app.buttons["scan.close"].tap()
         let drawer = app.descendants(matching: .any)["scan.drawer"]
-        let drawerGone = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !drawer.exists },
-            object: nil
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [drawerGone], timeout: 2), .completed)
+        XCTAssertTrue(drawer.waitForNonExistence(timeout: 2))
         XCTAssertTrue(app.otherElements["trophy.wall"].isHittable, app.debugDescription)
         XCTAssertFalse(app.staticTexts["scan.recovery-title"].exists)
 
@@ -1207,8 +1203,9 @@ final class SnapListUITests: XCTestCase {
             return
         }
         XCTAssertEqual(back.label, "Back to camera")
-        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        // Inside the drawer frames carry a fractional origin (#1129).
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.width), "\(back.frame)")
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.height), "\(back.frame)")
         back.tap()
 
         let returnedReview = app.buttons["scan.review"]
@@ -1596,13 +1593,8 @@ final class SnapListUITests: XCTestCase {
         // mounted under the drawer the whole time, so its presence alone would
         // hold either way.
         let drawer = accepted.descendants(matching: .any)["scan.drawer"]
-        let drawerDropped = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !drawer.exists },
-            object: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [drawerDropped], timeout: 5),
-            .completed,
+        XCTAssertTrue(
+            drawer.waitForNonExistence(timeout: 5),
             accepted.debugDescription
         )
         XCTAssertTrue(
@@ -1913,13 +1905,8 @@ final class SnapListUITests: XCTestCase {
         )
 
         let drawer = app.descendants(matching: .any)["scan.drawer"]
-        let droppedOntoWall = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !drawer.exists },
-            object: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [droppedOntoWall], timeout: 5),
-            .completed,
+        XCTAssertTrue(
+            drawer.waitForNonExistence(timeout: 5),
             "Done must drop the drawer onto Trophy Wall, not return to the camera."
         )
         XCTAssertTrue(
@@ -2012,13 +1999,8 @@ final class SnapListUITests: XCTestCase {
             forDuration: 0.05,
             thenDragTo: header.withOffset(CGVector(dx: 0, dy: 500))
         )
-        let dismissed = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in !drawer.exists },
-            object: nil
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [dismissed], timeout: 3),
-            .completed,
+        XCTAssertTrue(
+            drawer.waitForNonExistence(timeout: 3),
             app.debugDescription
         )
 
@@ -2170,14 +2152,12 @@ final class SnapListUITests: XCTestCase {
                 app.buttons["photo-review.start-listing"]
             ] {
                 XCTAssertTrue(control.waitForExistence(timeout: 3), typeSize)
-                XCTAssertGreaterThanOrEqual(
-                    control.frame.width,
-                    44,
+                XCTAssertTrue(
+                    TouchTargetFloor.isMet(control.frame.width),
                     "\(control.identifier) width at \(typeSize)"
                 )
-                XCTAssertGreaterThanOrEqual(
-                    control.frame.height,
-                    44,
+                XCTAssertTrue(
+                    TouchTargetFloor.isMet(control.frame.height),
                     "\(control.identifier) height at \(typeSize)"
                 )
             }
@@ -3139,8 +3119,10 @@ final class SnapListUITests: XCTestCase {
 
         let removeSecond = app.buttons["scan.photo-2.remove"]
         XCTAssertTrue(removeSecond.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(removeSecond.frame.height, 44)
+        // #1129: inside the drawer the card starts at a fractional y, so a
+        // 44pt control's frame comes back as 43.99999999999997.
+        XCTAssertTrue(TouchTargetFloor.isMet(removeSecond.frame.width), "\(removeSecond.frame)")
+        XCTAssertTrue(TouchTargetFloor.isMet(removeSecond.frame.height), "\(removeSecond.frame)")
     }
 
     func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
@@ -3531,8 +3513,8 @@ final class SnapListUITests: XCTestCase {
         let voice = app.buttons["photo-review.voice"]
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(back.exists)
-        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.width))
+        XCTAssertTrue(TouchTargetFloor.isMet(back.frame.height))
         XCTAssertTrue(voice.exists)
         XCTAssertEqual(
             voice.label,
@@ -3839,20 +3821,16 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(flash.frame.height, 48, accuracy: 0.5)
     }
 
-    /// #1129's reason for drawing the drawer instead of presenting a sheet.
+    /// #1129's 1:1 oracle, and the reason the drawer is drawn rather than
+    /// presented. On iOS 26.5 a `.fraction(0.9)` sheet renders as an inset
+    /// card and scales its contents: the 56pt shutter measured 53.33pt and
+    /// every 44pt control 42.25pt, under the touch-target floor.
     ///
-    /// iOS 26 renders a sheet that does not reach the screen edges as an
-    /// inset card and scales its contents: with a `.fraction(0.9)` detent the
-    /// 56pt shutter measured 53.3pt and every 44pt control came back 42.2pt,
-    /// under the touch-target floor. The drawer is an in-app overlay so its
-    /// controls keep their real size, and this is the guard on that — the
-    /// same control, rendered at the root and inside the drawer.
-    /// #1129's 1:1 oracle. The camera rendered at the root is the reference:
-    /// inside the drawer every control keeps its real size (an iOS 26 inset
-    /// sheet scaled them), the shutter row keeps its distance from the bottom
-    /// edge (the drawer reaches the home indicator, so it has to hand that
-    /// inset back), and the close control starts below the grab band rather
-    /// than under a strip that swallows its taps.
+    /// The camera rendered at the root is the reference. Inside the drawer
+    /// every control keeps its real size, the shutter row keeps its distance
+    /// from the bottom edge (the drawer reaches the home indicator, so it has
+    /// to hand that inset back), and the close control starts below the grab
+    /// band rather than under a strip that swallows its taps.
     func testDrawerControlsKeepTheirRealSizeAgainstTheRootRenderedOracle() {
         let controlIdentifiers = [
             "scan.shutter",
@@ -4355,12 +4333,14 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
+        // #1129: a relaunch with nothing staged lands on Trophy Wall, the
+        // launch destination, with the drawer down; onboarding stays done.
         XCTAssertTrue(
-            app.buttons["scan.library"].waitForExistence(timeout: 2)
-                || app.buttons["scan.choose-library"].waitForExistence(timeout: 2),
+            app.otherElements["trophy.wall"].waitForExistence(timeout: 3),
             app.debugDescription
         )
+        XCTAssertTrue(app.buttons["dock.scan"].isHittable, app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["scan.drawer"].exists)
         XCTAssertFalse(
             app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists
         )
