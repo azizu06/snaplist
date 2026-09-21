@@ -1557,14 +1557,14 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(savingStatus.label, "Saving your item")
         XCTAssertFalse(savingAction.exists)
         // #1136: Cancel lives in the header where Back is, not under the bar.
-        let cancelLink = saving.buttons["photo-review.cancel-submission"]
-        XCTAssertTrue(cancelLink.isHittable)
-        XCTAssertEqual(cancelLink.label, "Cancel saving")
-        XCTAssertGreaterThanOrEqual(cancelLink.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(cancelLink.frame.height, 44)
+        let headerCancel = saving.buttons["photo-review.cancel-submission"]
+        XCTAssertTrue(headerCancel.isHittable)
+        XCTAssertEqual(headerCancel.label, "Cancel saving")
+        XCTAssertGreaterThanOrEqual(headerCancel.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(headerCancel.frame.height, 44)
         XCTAssertFalse(saving.buttons["photo-review.back"].exists)
-        cancelLink.tap()
-        XCTAssertFalse(cancelLink.exists)
+        headerCancel.tap()
+        XCTAssertFalse(headerCancel.exists)
 
         let cancelledMessage = saving.staticTexts[
             "photo-review.submission-message"
@@ -1614,10 +1614,13 @@ final class SnapListUITests: XCTestCase {
     /// #1136: the bottom bar is one button at one height in every phase, so
     /// nothing under it moves between idle, saving, saved and done.
     func testSubmissionBarIsOneConstantHeightButtonAcrossEveryPhase() {
+        typealias BarMetrics = (height: CGFloat, maxY: CGFloat)
+        // Samples the bar once per label, in order, within one launch, so
+        // SUB-05 measures both its one-second saved beat and the Done after.
         func barMetrics(
             _ arguments: [String],
-            label: String? = nil
-        ) -> (height: CGFloat, maxY: CGFloat) {
+            labels: [String] = []
+        ) -> [BarMetrics] {
             let app = XCUIApplication()
             app.launchArguments = arguments
             app.launchAfterRetiringPriorInstance()
@@ -1625,7 +1628,11 @@ final class SnapListUITests: XCTestCase {
                 "photo-review.start-listing"
             ]
             XCTAssertTrue(bar.waitForExistence(timeout: 3))
-            if let label {
+            var samples: [BarMetrics] = []
+            if labels.isEmpty {
+                samples.append((bar.frame.height, bar.frame.maxY))
+            }
+            for label in labels {
                 let settled = XCTNSPredicateExpectation(
                     predicate: NSPredicate { _, _ in bar.label == label },
                     object: bar
@@ -1633,34 +1640,40 @@ final class SnapListUITests: XCTestCase {
                 XCTAssertEqual(
                     XCTWaiter.wait(for: [settled], timeout: 3),
                     .completed,
-                    "\(arguments)"
+                    "\(arguments) \(label)"
                 )
+                samples.append((bar.frame.height, bar.frame.maxY))
             }
-            let metrics = (bar.frame.height, bar.frame.maxY)
             app.terminate()
-            return metrics
+            return samples
         }
 
         let idle = barMetrics(
             ["--photo-review-state=REV-02", "--zero-network-fixtures"]
-        )
+        )[0]
         let saving = barMetrics(
             [
                 "--photo-review-state=REV-02",
                 "--submission-visual-state=SUB-01",
                 "--zero-network-fixtures",
             ],
-            label: "Saving your item"
-        )
-        let done = barMetrics(
+            labels: ["Saving your item"]
+        )[0]
+        let accepted = barMetrics(
             [
                 "--photo-review-state=REV-02",
                 "--submission-visual-state=SUB-05",
                 "--zero-network-fixtures",
             ],
-            label: "Done"
+            labels: ["Item saved", "Done"]
         )
-        for (name, metrics) in [("saving", saving), ("done", done)] {
+        XCTAssertEqual(accepted.count, 2)
+        let phases: [(String, BarMetrics)] = [
+            ("saving", saving),
+            ("saved beat", accepted[0]),
+            ("done", accepted[1]),
+        ]
+        for (name, metrics) in phases {
             XCTAssertEqual(
                 metrics.height - idle.height, 0, accuracy: 0.5, name
             )

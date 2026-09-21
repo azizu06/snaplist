@@ -5012,6 +5012,11 @@ struct PhotoReviewView: View {
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
         let button = Button {
+            // #1136: Start listing is the implicit Save recording, so a take
+            // still under review is kept rather than silently dropped.
+            if submissionPresentation.primaryActionEvent == .startListing {
+                voiceNoteStore?.commitUnsavedTake()
+            }
             openBoundary(submissionPresentation.primaryActionEvent)
         } label: {
             Text(submissionPresentation.primaryActionLabel)
