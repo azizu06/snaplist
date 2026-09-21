@@ -2459,6 +2459,7 @@ struct TrophyWallPrincipalFence {
 /// saved collection can no longer be trusted — a principal transition, or the
 /// seller asking to try again after a failed load.
 struct TrophyWallCollectionRefreshKey: Equatable {
+    let trophyWallReturns: Int
     let generation: Int
 }
 
@@ -2480,8 +2481,11 @@ struct TrophyWallCollectionRefreshState {
         generation += 1
     }
 
-    func taskID() -> TrophyWallCollectionRefreshKey {
-        TrophyWallCollectionRefreshKey(generation: generation)
+    func taskID(trophyWallReturns: Int) -> TrophyWallCollectionRefreshKey {
+        TrophyWallCollectionRefreshKey(
+            trophyWallReturns: trophyWallReturns,
+            generation: generation
+        )
     }
 }
 
@@ -2578,7 +2582,7 @@ struct TrophyWallFeatureView: View {
             namespace: zoomTransitionNamespace,
             scrollToTopToken: scrollToTopToken
         )
-        .task(id: refreshState.taskID()) {
+        .task(id: refreshState.taskID(trophyWallReturns: router.trophyWallReturns)) {
             await store.recoverCollection(using: repository)
         }
         .navigationDestination(
