@@ -212,6 +212,22 @@
     "SnapListUITests/UIProcessTerminationBoundaryTests/testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves": 0.119,
     "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest": 0.13,
     "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved": 0.112,
-    "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget": 0.112
+    "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget": 0.112,
+    "SnapListUITests/AssistedExportUITests/testAPackUpdateTakesDownAConfirmQuestionTheSellerIsLookingAt": 29.919,
+    "SnapListUITests/AssistedExportUITests/testRepeatedSaveTapsWritePhotosOnce": 13.177,
+    "SnapListUITests/AssistedExportUITests/testClosingAndReopeningTheSheetResumesOnTheRightStep": 15.0,
+    "SnapListUITests/AssistedExportUITests/testGuideSheetCompletesToTheSellersOwnSharedClaim": 15.0,
+    "SnapListUITests/AssistedExportUITests/testRowTapOpensTheSheetAndThePrimaryActionAdvancesOneStep": 15.0,
+    "SnapListUITests/AssistedExportUITests/testSlidingTheSheetDownIsAFullCancel": 15.0,
+    "SnapListUITests/HomeUITests/testListingReviewShowsPhotoCarouselWithThumbnailStrip": 15.0,
+    "SnapListUITests/HomeUITests/testProcessingRetryingRowOpensPlainStillWorkingState": 15.0,
+    "SnapListUITests/ListingReviewUITests/testReleaseEquivalentConfigurationLeavesIdentitySpecificsEditableWithNoFalseSpentClaim": 15.0,
+    "SnapListUITests/SnapListUITests/testIssue1009ScanBottomRowIsGalleryShutterReviewWithFlashMovedToTheTopBar": 15.0,
+    "SnapListUITests/SnapListUITests/testIssue1045CaptureSurfaceHasNoNumericPhotoCountText": 15.0,
+    "SnapListUITests/SnapListUITests/testIssue1045FramingCornersAndShutterDoNotMoveWhenPhotosAreStaged": 15.0,
+    "SnapListUITests/SnapListUITests/testIssue1045LibraryAndReviewSitAtAMatchingReducedOffsetFromTheShutter": 15.0,
+    "SnapListUITests/SnapListUITests/testIssue1045ShutterStaysHorizontallyCenteredEmptyAndStaged": 15.0,
+    "SnapListUITests/SnapListUITests/testIssue954StagedScanControlsFitThreeRowsAtEveryDynamicTypeSize": 15.0,
+    "SnapListUITests/SnapListUITests/testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive": 15.0
   }
 }
