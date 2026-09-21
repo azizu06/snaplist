@@ -14,7 +14,6 @@ enum SnapListColorToken: String, CaseIterable {
     case hairline = "#ECEDEF"
     case proGateReassuranceDivider = "#E6E7EA"
     case divider = "#F1F2F4"
-    case durableSuccess = "#1B7A43"
     case caution = "#9A6A1B"
     case cautionFill = "#FBF3E7"
     case infoChipFill = "#E4ECFF"
