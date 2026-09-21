@@ -145,9 +145,12 @@ create table public.pipeline_run_provider_usage (
     )
   ),
   constraint pipeline_run_provider_usage_sold_comps_check check (
+    -- #1138 widened the entry with 'accepted' and 'reason'. This file mirrors the
+    -- migrations, so the allowlist has to move with them or the contract this
+    -- suite proves would be one no deployed database has.
     private.provider_usage_entries_coarse(
       sold_comps,
-      array['strategy', 'attempts', 'results', 'chargedUsd'],
+      array['strategy', 'attempts', 'results', 'accepted', 'reason', 'chargedUsd'],
       16
     )
   ),
@@ -526,7 +529,7 @@ as $$
     )
     and private.provider_usage_entries_coarse(
       p_snapshot->'soldComps',
-      array['strategy', 'attempts', 'results', 'chargedUsd'],
+      array['strategy', 'attempts', 'results', 'accepted', 'reason', 'chargedUsd'],
       16
     );
 $$;
