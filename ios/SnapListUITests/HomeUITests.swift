@@ -132,20 +132,23 @@ final class HomeUITests: XCTestCase {
             app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
             app.debugDescription
         )
-        XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
+        // The dock is under the drawer: mounted, and out of reach.
+        XCTAssertFalse(app.buttons["dock.scan"].isHittable, app.debugDescription)
     }
 
     /// #1129. Scan stopped being a second root and became a drawer over the
     /// wall.
     ///
-    /// Two discriminators, because either alone is weak. Geometry: the
-    /// retired shell mounted exactly one destination's stack, so Scan filled
-    /// the screen from the very top, while a drawer starts partway down with
-    /// the wall showing above it. And mounting: the wall is still in the tree
-    /// underneath, which a torn-down root could not be.
+    /// Geometry is the discriminator: the retired shell mounted exactly one
+    /// destination's stack, so Scan filled the screen from the very top, while
+    /// the drawer covers the bottom nine tenths with the wall showing above
+    /// it. The wall stays mounted behind the drawer and out of reach, and is
+    /// back in reach the moment it closes. XCUITest's element tree still
+    /// lists SwiftUI views hidden from VoiceOver, so the wall's
+    /// `accessibilityHidden` is not observable from here — reach is.
     ///
-    /// The drawer carries `.isModal`, which XCUI reports as an `Alert`
-    /// element rather than an `Other` — hence the `descendants` query.
+    /// The drawer's marker is queried as any descendant, so the assertion
+    /// does not hang on the element type XCUI happens to assign it.
     func testScanOpensAsADrawerOverTrophyWallInsteadOfReplacingIt() {
         let app = launch("HOME-02")
         let wall = app.otherElements["trophy.wall"]
@@ -165,20 +168,25 @@ final class HomeUITests: XCTestCase {
                 + "start at the top of the screen. drawer=\(drawer.frame) "
                 + "window=\(window)"
         )
-        XCTAssertLessThan(
+        XCTAssertEqual(
             drawer.frame.minY,
-            window.minY + window.height * 0.25,
-            "It is a drawer, not a small card. drawer=\(drawer.frame) "
+            window.maxY - window.height * 0.9,
+            accuracy: 1,
+            "The drawer is nine tenths of the screen. drawer=\(drawer.frame) "
                 + "window=\(window)"
         )
-        // And the wall is still mounted under it rather than torn down and
-        // rebuilt, which is the thing a second root could not do.
+        // Mounted underneath, not replaced — and behind the drawer.
         XCTAssertTrue(wall.exists, app.debugDescription)
+        XCTAssertFalse(wall.isHittable, app.debugDescription)
 
         app.buttons["scan.close"].tap()
 
-        XCTAssertTrue(wall.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(drawer.exists, app.debugDescription)
+        let drawerGone = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in !drawer.exists },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [drawerGone], timeout: 5), .completed)
+        XCTAssertTrue(wall.isHittable, app.debugDescription)
     }
 
     /// One dock, two destinations, on every screen that shows it. The Scan
@@ -200,14 +208,13 @@ final class HomeUITests: XCTestCase {
         // #1129: the Scan slot stopped being a destination and became the
         // drawer's entry control, so nothing about the dock changes when it
         // is tapped — except that the drawer now rises over it. The dock is
-        // chrome on the surface underneath, so it must not be reachable
-        // while the drawer is up; if it were drawn on top it would still
+        // chrome on the surface underneath, so while the drawer is up it is
+        // under the drawer and out of reach; drawn on top it would still
         // take touches.
         XCTAssertTrue(
             app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
             app.debugDescription
         )
-        XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
         XCTAssertFalse(app.buttons["dock.scan"].isHittable, app.debugDescription)
         XCTAssertFalse(
             app.buttons["dock.trophy-wall"].isHittable,
@@ -554,7 +561,8 @@ final class HomeUITests: XCTestCase {
             app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
             app.debugDescription
         )
-        XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
+        // The dock is under the drawer: mounted, and out of reach.
+        XCTAssertFalse(app.buttons["dock.scan"].isHittable, app.debugDescription)
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 

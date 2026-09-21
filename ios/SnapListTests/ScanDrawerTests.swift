@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import SnapList
 
@@ -17,10 +18,10 @@ final class ScanDrawerPolicyTests: XCTestCase {
         XCTAssertEqual(reduction.cameraCommand, .start)
     }
 
-    /// A system sheet can be dismissed by an interactive swipe the shell never
-    /// initiated, and the seller can do it while an item is being submitted.
-    /// That is a presentation change and nothing else: the staged intake and
-    /// the in-flight submission both outlive it.
+    /// The seller can swipe the drawer away, tap its close control or use the
+    /// escape gesture while an item is being submitted. That is a
+    /// presentation change and nothing else: the staged intake and the
+    /// in-flight submission both outlive it.
     func testDismissingMidSubmissionClosesTheDrawerWithoutSettlingTheIntake() {
         let reduction = ScanDrawerPolicy.reduce(
             ScanDrawerState(isPresented: true),
@@ -52,7 +53,7 @@ final class ScanDrawerPolicyTests: XCTestCase {
     }
 
     /// The drawer's events arrive from several places at once — the entry
-    /// control, a restoration, the system's own dismissal — so a reduction
+    /// control, a restoration, a drag or close-control dismissal — so a reduction
     /// that does not move the presentation must not move the camera either.
     /// Restarting a live session drops the seller's framing; stopping one
     /// nobody started tears down a session the drawer does not own.
@@ -87,21 +88,91 @@ final class ScanDrawerPolicyTests: XCTestCase {
         XCTAssertEqual(reduction.cameraCommand, .start)
         XCTAssertEqual(reduction.intakeDisposition, .preserve)
     }
+
+    /// A seller who swiped the drawer away from Photo Review and opens it
+    /// again lands back on Photo Review, not the camera. Starting a capture
+    /// session there would run the camera behind a screen that cannot show
+    /// it; Photo Review starts it itself when the seller goes back to Scan.
+    func testReopeningOntoPhotoReviewLeavesTheCameraOff() {
+        let reduction = ScanDrawerPolicy.reduce(
+            ScanDrawerState(),
+            .scanEntryControlTapped,
+            context: ScanDrawerContext(
+                hasUnfinishedIntake: true,
+                isPhotoReviewOpen: true
+            )
+        )
+
+        XCTAssertTrue(reduction.state.isPresented)
+        XCTAssertNil(reduction.cameraCommand)
+        XCTAssertEqual(reduction.intakeDisposition, .preserve)
+    }
 }
 
 /// #1129. The drawer's layout and motion contract, stated as values so the
 /// acceptance numbers are assertable without measuring a rendered sheet.
 final class ScanDrawerPresentationTests: XCTestCase {
-    /// The owner asked for a drawer that stops short of the top so the Trophy
-    /// Wall edge stays visible behind it — 80 to 90 percent of the screen.
-    func testTheDrawerLeavesTheTrophyWallEdgeVisibleAboveIt() {
-        XCTAssertGreaterThanOrEqual(ScanDrawerMetrics.heightFraction, 0.8)
-        XCTAssertLessThanOrEqual(ScanDrawerMetrics.heightFraction, 0.9)
+    /// The accepted phase-1 height: nine tenths of the physical screen, so the
+    /// Trophy Wall edge stays visible above it. Measured from the screen's
+    /// edges, not the safe area — an iPhone 17 Pro is 874pt tall, of which a
+    /// GeometryReader sees 778pt between its 62pt top and 34pt bottom insets.
+    func testTheDrawerCoversNineTenthsOfThePhysicalScreen() {
+        let layout = ScanDrawerLayout(
+            safeAreaSize: CGSize(width: 402, height: 778),
+            safeAreaInsets: EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)
+        )
+
+        XCTAssertEqual(layout.drawerHeight, 786.6, accuracy: 0.001)
     }
 
-    /// Reduced Motion drops the drawer's spring travel. The sheet's own
-    /// presentation animation is UIKit's, so the shell disables it through a
-    /// transaction and this is the seam that decides.
+    /// The drawer reaches the bottom edge, so its content has to be handed
+    /// the home indicator's 34pt back; and the grab band owns the top 32pt,
+    /// so the camera's close control has to start below it rather than under
+    /// a band that swallows its taps.
+    func testTheDrawerContentClearsTheGrabBandAndTheHomeIndicator() {
+        let layout = ScanDrawerLayout(
+            safeAreaSize: CGSize(width: 402, height: 778),
+            safeAreaInsets: EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)
+        )
+
+        XCTAssertEqual(
+            layout.contentInsets,
+            EdgeInsets(top: 32, leading: 0, bottom: 34, trailing: 0)
+        )
+    }
+
+    /// Landscape puts the Dynamic Island and the rounded corners at the sides.
+    /// The drawer spans the full width, so its content has to be handed those
+    /// side insets back, and the height still comes from the physical screen.
+    func testLandscapeHandsTheSideInsetsBackToTheDrawerContent() {
+        let layout = ScanDrawerLayout(
+            safeAreaSize: CGSize(width: 750, height: 382),
+            safeAreaInsets: EdgeInsets(top: 0, leading: 62, bottom: 20, trailing: 62)
+        )
+
+        XCTAssertEqual(layout.drawerHeight, 361.8, accuracy: 0.001)
+        XCTAssertEqual(
+            layout.contentInsets,
+            EdgeInsets(top: 32, leading: 62, bottom: 20, trailing: 62)
+        )
+    }
+
+    /// The keyboard arrives as a taller bottom inset and a shorter safe area.
+    /// The drawer keeps its height and hands the keyboard's inset to its
+    /// content, so nothing in the drawer ends up underneath the keys.
+    func testTheKeyboardInsetsTheDrawerContentWithoutMovingTheDrawer() {
+        let layout = ScanDrawerLayout(
+            safeAreaSize: CGSize(width: 402, height: 476),
+            safeAreaInsets: EdgeInsets(top: 62, leading: 0, bottom: 336, trailing: 0)
+        )
+
+        XCTAssertEqual(layout.drawerHeight, 786.6, accuracy: 0.001)
+        XCTAssertEqual(layout.contentInsets.bottom, 336)
+    }
+
+    /// Reduced Motion drops the drawer's travel for a short cross-fade. The
+    /// drawer's transition and animation both derive from this answer, so
+    /// this is the seam that decides.
     func testReducedMotionPresentsTheDrawerWithoutSpringTravel() {
         XCTAssertTrue(
             ScanDrawerMotionPolicy.shouldAnimatePresentation(reduceMotion: false)

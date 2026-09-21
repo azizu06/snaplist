@@ -624,6 +624,19 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(configuration.initialRoute, .home(.processing))
     }
 
+    /// #1129: Photo Review lives inside the Scan drawer, so a fixture that
+    /// names a Photo Review state names the drawer too. Without a `--fixture`
+    /// the default is onboarding, whose home is the wall; the fixture has to
+    /// open the drawer over it rather than render Photo Review as a root the
+    /// real app can never reach.
+    func testPhotoReviewFixtureLaunchesWithTheScanDrawerUp() {
+        let configuration = LaunchConfiguration.parse(
+            arguments: ["--photo-review-state=REV-02"]
+        )
+
+        XCTAssertEqual(configuration.initialTab, .scan)
+    }
+
     @MainActor
     func testEveryFoundationFixtureProducesItsTypedInitialState() {
         for fixture in FoundationFixture.allCases {

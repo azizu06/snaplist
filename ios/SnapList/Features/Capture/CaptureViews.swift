@@ -1090,7 +1090,7 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
     let close: () -> Void
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             SnapListColorToken.cameraSurface.color.ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -1156,10 +1156,14 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                 }
             }
             .safeAreaPadding(.vertical, 2)
-
+        }
+        // An overlay rather than a ZStack sibling, so it cannot pull the
+        // message column off-centre, and at the live preview's own offset so
+        // the control does not move when the camera becomes unavailable.
+        .overlay(alignment: .topLeading) {
             ScanCloseCameraButton(close: close)
-                .padding(.leading, 14)
-                .padding(.top, 8)
+                .padding(.leading, 18)
+                .padding(.top, 10)
         }
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.18),

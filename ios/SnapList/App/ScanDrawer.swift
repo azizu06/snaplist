@@ -6,9 +6,10 @@ import SwiftUI
 enum ScanDrawerEvent: Equatable {
     /// The one Scan entry control on Trophy Wall, whatever chrome hosts it.
     case scanEntryControlTapped
-    /// The grabber's downward swipe, the drawer's own close control, or a
-    /// system interactive dismissal the shell never initiated. They are the
-    /// same event because they mean the same thing to the seller's work.
+    /// The header's downward drag, the drawer's own close control, a tap on
+    /// the dock's Trophy Wall slot, or the accessibility escape gesture. They
+    /// are the same event because they mean the same thing to the seller's
+    /// work.
     case dismissed
     /// Scan goes back on screen without the seller touching the entry
     /// control: a relaunch that restored an unfinished intake, a Trophy Wall
@@ -25,6 +26,8 @@ enum ScanDrawerEvent: Equatable {
 struct ScanDrawerContext: Equatable {
     var hasUnfinishedIntake = false
     var isSubmissionInFlight = false
+    /// Photo Review, not the camera, is what the drawer shows.
+    var isPhotoReviewOpen = false
 }
 
 /// Whether the Scan drawer is over Trophy Wall. Deliberately the whole of the
@@ -63,16 +66,13 @@ struct ScanDrawerReduction: Equatable {
     let intakeDisposition: ScanDrawerIntakeDisposition
 }
 
-/// The drawer's layout contract. A fraction rather than `.large` because the
-/// owner asked for the Trophy Wall edge to stay visible above the drawer: the
-/// wall is the home surface and the camera is a layer over it, so the seller
-/// should be able to see what they are coming back to.
+/// The drawer's layout contract. A fraction rather than full height because
+/// the owner asked for the Trophy Wall edge to stay visible above the drawer:
+/// the wall is the home surface and the camera is a layer over it, so the
+/// seller should be able to see what they are coming back to.
 enum ScanDrawerMetrics {
-    /// 0.85 of the screen, inside the 85-90% the owner asked for. It is the
-    /// share that clears Trophy Wall's title rather than cutting it in half:
-    /// at 0.9 the drawer's top edge lands in the middle of the header, which
-    /// reads as a rendering fault rather than as a wall behind a drawer.
-    static let heightFraction: CGFloat = 0.85
+    /// The accepted phase-1 height, as a share of the physical screen.
+    static let heightFraction: CGFloat = 0.9
     static let cornerRadius: CGFloat = 28
     /// How far the wall behind the drawer is dimmed.
     static let scrimOpacity: Double = 0.32
@@ -80,6 +80,27 @@ enum ScanDrawerMetrics {
     /// gesture lives here and nowhere else, so it can never take a swipe
     /// meant for the photo pager or the thumbnail reorder underneath it.
     static let grabHandleBandHeight: CGFloat = 32
+}
+
+/// Where the drawer sits, derived from what a GeometryReader reports: the
+/// safe-area size and the insets around it. Pure so the device geometry the
+/// drawer has to honour is assertable without rendering one.
+struct ScanDrawerLayout: Equatable {
+    let drawerHeight: CGFloat
+    let contentInsets: EdgeInsets
+
+    init(safeAreaSize: CGSize, safeAreaInsets: EdgeInsets) {
+        let screenHeight = safeAreaSize.height
+            + safeAreaInsets.top
+            + safeAreaInsets.bottom
+        drawerHeight = screenHeight * ScanDrawerMetrics.heightFraction
+        contentInsets = EdgeInsets(
+            top: ScanDrawerMetrics.grabHandleBandHeight,
+            leading: safeAreaInsets.leading,
+            bottom: safeAreaInsets.bottom,
+            trailing: safeAreaInsets.trailing
+        )
+    }
 }
 
 /// What a finished drag does.
@@ -130,10 +151,9 @@ enum ScanDrawerDragPolicy {
     }
 }
 
-/// Whether the drawer springs up or simply appears. The sheet's presentation
-/// animation belongs to UIKit, so the shell suppresses it with a transaction
-/// rather than a SwiftUI `.animation`; this is the pure seam that decides,
-/// and the seam Reduced Motion is asserted against.
+/// Whether the drawer slides up or fades in. The shell takes its transition
+/// and animation from here, so this is the seam Reduced Motion is asserted
+/// against.
 enum ScanDrawerMotionPolicy {
     static func shouldAnimatePresentation(reduceMotion: Bool) -> Bool {
         !reduceMotion
@@ -176,12 +196,13 @@ enum ScanDrawerPolicy {
 
         // The camera follows the *transition*, not the event. Several call
         // sites can ask for the same presentation in a row — the entry
-        // control, a restoration, and the system's own dismissal notice all
+        // control, a restoration, and a drag or escape dismissal all
         // arrive independently — and restarting a live session would drop the
-        // seller's framing mid-shot.
+        // seller's framing mid-shot. Photo Review owns the drawer's content
+        // while it is open, so rising onto it leaves the camera off.
         let cameraCommand: ScanDrawerCameraCommand?
         switch (state.isPresented, presents) {
-        case (false, true): cameraCommand = .start
+        case (false, true): cameraCommand = context.isPhotoReviewOpen ? nil : .start
         case (true, false): cameraCommand = .stop
         case (true, true), (false, false): cameraCommand = nil
         }
@@ -211,37 +232,53 @@ enum AppShellSubmissionCompletionCopy {
 /// the wall dimmed behind it, and the swipe, the grabber and the escape
 /// gesture implemented rather than inherited.
 struct ScanDrawerSurface<Content: View>: View {
+    let isPresented: Bool
     let reduceMotion: Bool
     let dismiss: () -> Void
-    @ViewBuilder let content: Content
+    @ViewBuilder let content: () -> Content
 
     @State private var dragTranslation: CGFloat = 0
 
     var body: some View {
-        GeometryReader { geometry in
-            let drawerHeight = geometry.size.height * ScanDrawerMetrics.heightFraction
-
-            ZStack(alignment: .bottom) {
-                scrim
-                card(height: drawerHeight)
-            }
-            .frame(
-                maxWidth: .infinity,
-                maxHeight: .infinity,
-                alignment: .bottom
+        // Mounted whether or not the drawer is up, so neither reader is ever
+        // the view that slides. The outer one respects the safe area, the
+        // keyboard's included, so its proxy reports the real insets. The
+        // inner one ignores them to span the screen edge to edge — a reader,
+        // because it takes exactly the size it is offered; a flexible frame
+        // holding a card taller than the safe area landed 8.6pt short of the
+        // bottom edge. The drawer's content is handed the insets back, which
+        // is what the camera at the root gets from the window.
+        GeometryReader { safeArea in
+            let layout = ScanDrawerLayout(
+                safeAreaSize: safeArea.size,
+                safeAreaInsets: safeArea.safeAreaInsets
             )
+
+            GeometryReader { _ in
+                ZStack(alignment: .bottom) {
+                    if isPresented {
+                        scrim
+                            .transition(.opacity)
+                        card(layout)
+                            .transition(
+                                ScanDrawerMotionPolicy.transition(
+                                    reduceMotion: reduceMotion
+                                )
+                            )
+                    }
+                }
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .bottom
+                )
+            }
+            .ignoresSafeArea()
         }
-        // Measured against the whole screen, so the drawer's own height is
-        // what the seller sees and its content reaches the bottom edge the
-        // way the camera does at the root. Anything inside that needs an
-        // inset already asks for its own.
-        .ignoresSafeArea()
-        // The wall behind is dimmed, inert and out of the accessibility tree;
-        // the drawer is the only thing on screen that answers.
-        .accessibilityAddTraits(.isModal)
-        // VoiceOver's and the keyboard's escape gesture close the drawer,
-        // which is the same promise the close control and the swipe make.
-        .accessibilityAction(.escape, dismiss)
+        .animation(
+            ScanDrawerMotionPolicy.presentationAnimation(reduceMotion: reduceMotion),
+            value: isPresented
+        )
     }
 
     private var scrim: some View {
@@ -253,8 +290,13 @@ struct ScanDrawerSurface<Content: View>: View {
             .accessibilityHidden(true)
     }
 
-    private func card(height: CGFloat) -> some View {
-        content
+    private func card(_ layout: ScanDrawerLayout) -> some View {
+        let height = layout.drawerHeight
+        return content()
+            // Padding for what respects the safe area — the camera's controls,
+            // Photo Review's header and action bar — while the preview, which
+            // ignores it, still fills the card edge to edge.
+            .safeAreaPadding(layout.contentInsets)
             .frame(maxWidth: .infinity)
             .frame(height: height)
             .background(SnapListColorToken.canvas.color)
@@ -290,6 +332,14 @@ struct ScanDrawerSurface<Content: View>: View {
                     )
                 )
             )
+            // No `.isModal` here: the card is not an accessibility element,
+            // so the trait lands on every element inside it — each one a
+            // modal of its own. The shell takes the wall and the dock out of
+            // the tree instead, which leaves the drawer the only thing that
+            // answers. VoiceOver's and the keyboard's escape gesture close
+            // the drawer, the same promise the close control and the swipe
+            // make.
+            .accessibilityAction(.escape, dismiss)
     }
 
     /// The grabber, and the only place the downward drag starts.

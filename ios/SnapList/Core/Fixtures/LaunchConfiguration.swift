@@ -707,6 +707,10 @@ struct LaunchConfiguration: Equatable {
         if visualState?.ownerIssue == 729 || visualState == .runDetail {
             return .trophyWall
         }
+        // Photo Review is drawn inside the Scan drawer.
+        if photoReviewState != nil {
+            return .scan
+        }
         return fixture.initialTab
     }
 

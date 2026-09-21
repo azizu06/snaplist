@@ -143,18 +143,10 @@ struct AppShellView: View {
                     configuration: configuration,
                     continueToCapture: onboardingModel.continueToCaptureBoundary
                 )
-            } else if let photoReviewState = configuration.photoReviewState {
-#if DEBUG
-                PhotoReviewFixtureView(
-                    state: photoReviewState,
-                    forceReducedMotion: configuration.forceReducedMotion,
-                    submissionPresentation: configuration.submissionVisualState
-                        .map(PhotoReviewSubmissionPresentation.visualState)
-                        ?? .idle
-                )
-#else
+            } else if configuration.photoReviewState != nil {
+                // #1129: Photo Review fixtures render inside the Scan drawer,
+                // where the real Photo Review lives, so they get the shell.
                 shell
-#endif
             } else if let assistedExportFixture = configuration.assistedExportFixture {
 #if DEBUG
                 AssistedExportFixtureView(fixture: assistedExportFixture)
@@ -564,107 +556,107 @@ struct AppShellView: View {
     private func photoReviewSurface(
         _ session: PhotoReviewLiveSession
     ) -> some View {
-            PhotoReviewView(
-                store: session.store,
-                isCommitting: photoReviewHost.isCommitting,
-                submissionPresentation: PhotoReviewSubmissionPresentation(
-                    host: submissionHost,
-                    proGateIntakeAdvisory: proGateStore?.intakeAdvisory
-                ),
-                focusStartListingRequest: proGateFocusRequest,
-                acknowledgeSubmissionPresentation: { eventID in
-                    submissionHost.acknowledgePresentation(eventID: eventID)
-                },
-                backToCamera: {
-                    returnFromPhotoReview(session)
-                },
-                delete: {
-                    await deleteFromPhotoReview(session)
-                },
-                saveFailure: photoReviewSaveFailure?.sessionID == session.id
-                    ? photoReviewSaveFailure
-                    : nil,
-                retrySave: {
-                    retryPhotoReviewSaveFailure(session)
-                },
-                discardPhotos: {
-                    discardPhotoReviewSaveFailure(session)
-                },
-                commitReorder: { photoID, destinationIndex in
-                    let reordered = await session.commitReorder(
-                        photoID: photoID,
-                        destinationIndex: destinationIndex,
-                        captureFlow: captureFlow
+        PhotoReviewView(
+            store: session.store,
+            isCommitting: photoReviewHost.isCommitting,
+            submissionPresentation: PhotoReviewSubmissionPresentation(
+                host: submissionHost,
+                proGateIntakeAdvisory: proGateStore?.intakeAdvisory
+            ),
+            focusStartListingRequest: proGateFocusRequest,
+            acknowledgeSubmissionPresentation: { eventID in
+                submissionHost.acknowledgePresentation(eventID: eventID)
+            },
+            backToCamera: {
+                returnFromPhotoReview(session)
+            },
+            delete: {
+                await deleteFromPhotoReview(session)
+            },
+            saveFailure: photoReviewSaveFailure?.sessionID == session.id
+                ? photoReviewSaveFailure
+                : nil,
+            retrySave: {
+                retryPhotoReviewSaveFailure(session)
+            },
+            discardPhotos: {
+                discardPhotoReviewSaveFailure(session)
+            },
+            commitReorder: { photoID, destinationIndex in
+                let reordered = await session.commitReorder(
+                    photoID: photoID,
+                    destinationIndex: destinationIndex,
+                    captureFlow: captureFlow
+                )
+                if reordered != nil {
+                    advanceActivationGuidance(for: .reorderedPhotos)
+                }
+                return reordered
+            },
+            // Photo Review consumes #469's Voice note event locally. Start
+            // listing submits the committed NativeIntake snapshot: displayed
+            // photo order plus #541's optional recovered WAV under one key.
+            openBoundary: { event in
+                if event == .openVoiceNote {
+                    advanceActivationGuidance(for: .openedVoiceNote)
+                }
+                // #1129: Done is handled before the generic consumer so
+                // the drawer's completion cannot take a second route. The
+                // consumer's own handling of this case is exactly the
+                // acknowledgement below, so nothing is skipped; what is
+                // added is the part the owner's device pass found missing
+                // — Done used to leave the seller back on the camera,
+                // asking where the item went.
+                if case .completeSavedSubmission(let eventID) = event {
+                    completeSavedSubmission(eventID: eventID)
+                    return
+                }
+                if PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                    event,
+                    submissionHost: submissionHost
+                ) {
+                    return
+                }
+                switch event {
+                case .startListing,
+                     .createAccount,
+                     .openSubscriptionSettings,
+                     .retryReceiptMismatch,
+                     .retryAmbiguousSubmission:
+                    break
+                case .openVoiceNote,
+                     .cancelSubmission,
+                     .completeSavedSubmission,
+                     .reviewSubmission,
+                     .reviewConflictedSubmission:
+                    return
+                }
+                if event == .startListing,
+                   proGateStore?.intakeAdvisory != nil {
+                    Task { await reopenProGate() }
+                    return
+                }
+                Task {
+                    await AppShellPhotoReviewSubmissionTransaction.perform(
+                        primaryAction: event,
+                        session: session,
+                        captureFlow: captureFlow,
+                        host: photoReviewHost,
+                        router: router,
+                        submissionHost: submissionHost,
+                        setReturnFocus: { pendingScanReturnFocus = $0 },
+                        onPersistenceRejected: {
+                            recordPhotoReviewSaveFailure(
+                                for: .backToCamera,
+                                session: session
+                            )
+                        }
                     )
-                    if reordered != nil {
-                        advanceActivationGuidance(for: .reorderedPhotos)
-                    }
-                    return reordered
-                },
-                // Photo Review consumes #469's Voice note event locally. Start
-                // listing submits the committed NativeIntake snapshot: displayed
-                // photo order plus #541's optional recovered WAV under one key.
-                openBoundary: { event in
-                    if event == .openVoiceNote {
-                        advanceActivationGuidance(for: .openedVoiceNote)
-                    }
-                    // #1129: Done is handled before the generic consumer so
-                    // the drawer's completion cannot take a second route. The
-                    // consumer's own handling of this case is exactly the
-                    // acknowledgement below, so nothing is skipped; what is
-                    // added is the part the owner's device pass found missing
-                    // — Done used to leave the seller back on the camera,
-                    // asking where the item went.
-                    if case .completeSavedSubmission(let eventID) = event {
-                        completeSavedSubmission(eventID: eventID)
-                        return
-                    }
-                    if PhotoReviewSubmissionPrimaryActionConsumer.consume(
-                        event,
-                        submissionHost: submissionHost
-                    ) {
-                        return
-                    }
-                    switch event {
-                    case .startListing,
-                         .createAccount,
-                         .openSubscriptionSettings,
-                         .retryReceiptMismatch,
-                         .retryAmbiguousSubmission:
-                        break
-                    case .openVoiceNote,
-                         .cancelSubmission,
-                         .completeSavedSubmission,
-                         .reviewSubmission,
-                         .reviewConflictedSubmission:
-                        return
-                    }
-                    if event == .startListing,
-                       proGateStore?.intakeAdvisory != nil {
-                        Task { await reopenProGate() }
-                        return
-                    }
-                    Task {
-                        await AppShellPhotoReviewSubmissionTransaction.perform(
-                            primaryAction: event,
-                            session: session,
-                            captureFlow: captureFlow,
-                            host: photoReviewHost,
-                            router: router,
-                            submissionHost: submissionHost,
-                            setReturnFocus: { pendingScanReturnFocus = $0 },
-                            onPersistenceRejected: {
-                                recordPhotoReviewSaveFailure(
-                                    for: .backToCamera,
-                                    session: session
-                                )
-                            }
-                        )
-                    }
-                },
-                voiceNoteStore: session.voiceNoteStore,
-                intake: photoReviewIntake
-            )
+                }
+            },
+            voiceNoteStore: session.voiceNoteStore,
+            intake: photoReviewIntake
+        )
     }
 
     private var shell: some View {
@@ -681,8 +673,13 @@ struct AppShellView: View {
                 }
 #endif
             }
+            // Inside the stack as well as around the shell, so hiding the
+            // wall does not depend on the modifier crossing the stack's
+            // UIKit hosting of its screens.
+            .accessibilityHidden(router.isScanPresented)
             .navigationDestination(for: AppRoute.self) { route in
                 destination(for: route)
+                    .accessibilityHidden(router.isScanPresented)
             }
         }
         // A launch fixture that asks to start in Scan replays the same drawer
@@ -719,34 +716,30 @@ struct AppShellView: View {
                 }
             }
         )
+        // With the drawer up, the wall and the dock are behind a scrim: inert
+        // to VoiceOver as well as to touch. This covers the dock; the
+        // stack's own screens are hidden inside it, in `shell`.
+        .accessibilityHidden(router.isScanPresented)
         // #1129. The Scan drawer, drawn rather than presented.
         //
         // A system sheet was the first choice — its grabber, swipe and
         // interactive dismiss are free. But iOS 26 renders a sheet that does
         // not reach the screen edges as an inset card and *scales its
-        // contents*: measured against the same camera rendered at the root,
-        // a 56pt shutter came back 53.3pt and every 44pt control became
-        // 42.2pt. The drawer has to cover 85-90% with the wall showing above
-        // it, and it may not buy that with a 4% shrink under the touch-target
-        // floor, so the presentation is ours. Attached after the dock so it
-        // draws over it.
+        // contents*: measured on iOS 26.5 against the same camera rendered at
+        // the root, a 56pt shutter came back 53.33pt and every 44pt control
+        // became 42.25pt. The drawer covers 0.9 of the screen with the wall
+        // showing above it, and it may not buy that with a 4% shrink under
+        // the touch-target floor, so the presentation is ours. Attached after
+        // the dock so it draws over it.
         .overlay {
-            if router.isScanPresented {
-                ScanDrawerSurface(
-                    reduceMotion: reduceMotion,
-                    dismiss: { applyScanDrawer(.dismissed) }
-                ) {
-                    scanDrawerContent
-                }
-                .transition(
-                    ScanDrawerMotionPolicy.transition(reduceMotion: reduceMotion)
-                )
+            ScanDrawerSurface(
+                isPresented: router.isScanPresented,
+                reduceMotion: reduceMotion,
+                dismiss: { applyScanDrawer(.dismissed) }
+            ) {
+                scanDrawerContent
             }
         }
-        .animation(
-            ScanDrawerMotionPolicy.presentationAnimation(reduceMotion: reduceMotion),
-            value: router.isScanPresented
-        )
         .animation(
             reduceMotion ? nil : .easeInOut(duration: 0.16),
             value: isKeyboardVisible
@@ -796,8 +789,6 @@ struct AppShellView: View {
         applyScanDrawer(.scanSurfaceRestored)
     }
 
-    /// Puts the seller back on the wall: clears the pushed stack, and drops the
-    /// drawer if it happens to be up.
     /// #1129: what Done means now. The item is already on its way — the
     /// acceptance was ingested when the server took it — so finishing drops
     /// the drawer onto Trophy Wall rather than returning to the camera, which
@@ -805,6 +796,12 @@ struct AppShellView: View {
     /// item stays one tap on the Scan entry control.
     private func completeSavedSubmission(eventID: UUID) {
         submissionHost.acknowledgePresentation(eventID: eventID)
+        finishOnTrophyWall()
+    }
+
+    /// Done's landing, shared by a live submission and the Photo Review
+    /// fixtures so both end in the same place.
+    private func finishOnTrophyWall() {
         router.resetWallPath()
         applyScanDrawer(.submissionCompleted)
         // The wall may be scrolled anywhere from before the item was started,
@@ -815,6 +812,8 @@ struct AppShellView: View {
         ).post()
     }
 
+    /// Puts the seller back on the wall: clears the pushed stack, and drops the
+    /// drawer if it happens to be up.
     private func returnToTrophyWall() {
         router.resetWallPath()
         applyScanDrawer(.dismissed)
@@ -829,7 +828,8 @@ struct AppShellView: View {
             event,
             context: ScanDrawerContext(
                 hasUnfinishedIntake: !captureFlow.stagedPhotos.isEmpty,
-                isSubmissionInFlight: submissionHost.isSubmitting
+                isSubmissionInFlight: submissionHost.isSubmitting,
+                isPhotoReviewOpen: isPhotoReviewInDrawer
             )
         )
         switch reduction.cameraCommand {
@@ -851,13 +851,44 @@ struct AppShellView: View {
     @ViewBuilder
     private var scanDrawerContent: some View {
         Group {
-            if let session = photoReviewHost.session {
-                photoReviewSurface(session)
+#if DEBUG
+            if let photoReviewState = configuration.photoReviewState {
+                PhotoReviewFixtureView(
+                    state: photoReviewState,
+                    forceReducedMotion: configuration.forceReducedMotion,
+                    submissionPresentation: configuration.submissionVisualState
+                        .map(PhotoReviewSubmissionPresentation.visualState)
+                        ?? .idle,
+                    completeSavedSubmission: finishOnTrophyWall
+                )
             } else {
-                scanCameraSurface
+                liveScanDrawerContent
             }
+#else
+            liveScanDrawerContent
+#endif
         }
         .fixtureAccessibilityOverrides(configuration)
+    }
+
+    @ViewBuilder
+    private var liveScanDrawerContent: some View {
+        if let session = photoReviewHost.session {
+            photoReviewSurface(session)
+        } else {
+            scanCameraSurface
+        }
+    }
+
+    /// Whether the drawer shows Photo Review rather than the camera, which
+    /// is what decides if raising it starts a capture session.
+    private var isPhotoReviewInDrawer: Bool {
+#if DEBUG
+        if configuration.photoReviewState != nil {
+            return true
+        }
+#endif
+        return photoReviewHost.session != nil
     }
 
     private var scanCameraSurface: some View {
