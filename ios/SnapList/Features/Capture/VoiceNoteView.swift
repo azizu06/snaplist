@@ -489,6 +489,7 @@ struct VoiceNoteSheet: View {
                             width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                             height: VoiceNotePresentation.compactSheetControlLayoutTarget
                         )
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Re-record")
@@ -504,6 +505,7 @@ struct VoiceNoteSheet: View {
                             width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                             height: VoiceNotePresentation.compactSheetControlLayoutTarget
                         )
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Delete")

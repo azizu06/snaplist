@@ -1334,10 +1334,8 @@ final class SnapListUITests: XCTestCase {
             "Start listing control must reach the accepted Done boundary."
         )
         XCTAssertTrue(startListing.isEnabled)
-        XCTAssertEqual(
-            app.staticTexts["photo-review.submission-message"].label,
-            "Item saved"
-        )
+        // Status lives inside the button since #1126, so there is no separate
+        // "Item saved" message row to read.
         XCTAssertFalse(app.buttons["photo-review.add"].isEnabled)
     }
 
