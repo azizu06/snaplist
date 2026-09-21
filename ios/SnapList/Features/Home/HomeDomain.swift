@@ -47,9 +47,9 @@ enum TrophyWallEmptyMetrics {
 /// @3x, and the bytes are reduced to it once, off the main thread, before the
 /// wall ever holds them.
 enum TrophyWallProcessingPhotoMetrics {
-    static let sidePoints: CGFloat = 44
-    static let cornerRadiusPoints: CGFloat = 10
-    static let maximumPixelSize = 132
+    static let sidePoints: CGFloat = 52
+    static let cornerRadiusPoints: CGFloat = 12
+    static let maximumPixelSize = 156
 }
 
 /// Presentation-only framing for a cleared bundled fixture photo. It does not
@@ -328,6 +328,28 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             return nil
         }
         return route
+    }
+
+    /// #1130: ready to review first, then needs retry, then everything still
+    /// working. The sort is stable, so each group keeps the wall's own
+    /// chronological order and a finished item is never buried under items
+    /// that are still in progress.
+    static func sortedForDisplay(
+        _ rows: [TrophyWallProcessingRow]
+    ) -> [TrophyWallProcessingRow] {
+        func group(_ row: TrophyWallProcessingRow) -> Int {
+            switch row.action {
+            case .review: 0
+            case .retry, .scan: 1
+            case .none: 2
+            }
+        }
+        return rows.enumerated()
+            .sorted { lhs, rhs in
+                let (l, r) = (group(lhs.element), group(rhs.element))
+                return l != r ? l < r : lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     fileprivate init?(card: TrophyWallCard) {
@@ -659,7 +681,9 @@ final class TrophyWallStore {
     private var persistedCoverPhotos: [UUID: Data] = [:]
 
     var processingRows: [TrophyWallProcessingRow] {
-        cards.compactMap(TrophyWallProcessingRow.init(card:))
+        TrophyWallProcessingRow.sortedForDisplay(
+            cards.compactMap(TrophyWallProcessingRow.init(card:))
+        )
     }
 
     var settledTiles: [TrophyWallSettledTile] {

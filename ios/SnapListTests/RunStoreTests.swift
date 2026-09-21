@@ -650,7 +650,10 @@ final class RunStoreTests: XCTestCase {
             )
             XCTAssertEqual(
                 wall.processingRows.first { $0.id == .run(runID) }?.activation,
-                TrophyWallProcessingRowActivation.none,
+                // A retried row is queued or retrying: no button left, and
+                // per #1119 its body answers a tap with the still-working
+                // state instead of being inert.
+                TrophyWallProcessingRowActivation.stillWorking,
                 testCase.name
             )
             XCTAssertNil(

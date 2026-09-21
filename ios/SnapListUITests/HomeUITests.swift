@@ -328,8 +328,10 @@ final class HomeUITests: XCTestCase {
         XCTAssertEqual(scanAction.label, "Scan a new photo for Nintendo Game Boy")
         for action in [reviewAction, retryAction, scanAction] {
             XCTAssertTrue(action.isHittable)
-            XCTAssertGreaterThanOrEqual(action.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(action.frame.height, 44)
+            // Frames are laid out in fractional points; 0.01 absorbs float
+            // noise (43.99999999999997) without admitting a real shortfall.
+            XCTAssertGreaterThanOrEqual(action.frame.width, 44 - 0.01)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44 - 0.01)
         }
 
         let actionScreenshot = XCTAttachment(
