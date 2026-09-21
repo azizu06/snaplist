@@ -117,7 +117,10 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(wall.waitForExistence(timeout: 2))
     }
 
-    func testEmptyWallScanActionSelectsTheScanDestination() {
+    /// #1129: the empty wall's Scan action used to select a second root, so
+    /// the proof was a selected dock slot. It now raises the drawer, and a
+    /// dock slot is never selected for Scan again.
+    func testEmptyWallScanActionOpensTheScanDrawer() {
         let app = launch("HOME-02")
         let scan = app.buttons["trophy.wall.scan"]
 
@@ -125,9 +128,11 @@ final class HomeUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(scan.frame.height, 44)
         scan.tap()
 
-        let dockScan = app.buttons["dock.scan"]
-        XCTAssertTrue(dockScan.waitForExistence(timeout: 3))
-        XCTAssertTrue(dockScan.isSelected)
+        XCTAssertTrue(
+            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
     }
 
     /// #1129. Scan stopped being a second root and became a drawer over the
@@ -174,8 +179,22 @@ final class HomeUITests: XCTestCase {
 
         app.buttons["dock.scan"].tap()
 
-        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
-        XCTAssertTrue(app.buttons["dock.trophy-wall"].exists)
+        // #1129: the Scan slot stopped being a destination and became the
+        // drawer's entry control, so nothing about the dock changes when it
+        // is tapped — except that the drawer now rises over it. The dock is
+        // chrome on the surface underneath, so it must not be reachable
+        // while the drawer is up; if it were drawn on top it would still
+        // take touches.
+        XCTAssertTrue(
+            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
+        XCTAssertFalse(app.buttons["dock.scan"].isHittable, app.debugDescription)
+        XCTAssertFalse(
+            app.buttons["dock.trophy-wall"].isHittable,
+            app.debugDescription
+        )
         XCTAssertFalse(app.buttons["dock.capture"].exists)
         XCTAssertFalse(app.buttons["scan.tab"].exists)
         XCTAssertFalse(app.buttons["trophy-wall.tab"].exists)
@@ -511,9 +530,13 @@ final class HomeUITests: XCTestCase {
 
         scan.tap()
 
-        let scanDock = app.buttons["dock.scan"]
-        XCTAssertTrue(scanDock.waitForExistence(timeout: 3))
-        XCTAssertTrue(scanDock.isSelected)
+        // #1129: starting the next item raises the Scan drawer rather than
+        // selecting a second root.
+        XCTAssertTrue(
+            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 
