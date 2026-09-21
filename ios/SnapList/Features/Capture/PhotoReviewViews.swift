@@ -3376,6 +3376,7 @@ struct PhotoReviewView: View {
     @AccessibilityFocusState private var focusedStartListing: Bool
     @AccessibilityFocusState private var focusedSaveFailureHeading: Bool
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @State private var savedBeatFinished = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .headline)
     private var reviewTitleSize: CGFloat = 17
@@ -4772,17 +4773,18 @@ struct PhotoReviewView: View {
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
         contentWidth: CGFloat
     ) -> some View {
-        VStack(spacing: 10) {
-            // The icon is decoration; the sentence is the outcome. Requiring both
-            // meant a state that set only `visibleMessage` rendered nothing, and
-            // the seller watched a refused upload finish in silence (#803).
-            if let message = submissionPresentation.visibleMessage {
-                // #1074: `.top` left the icon's fixed 22pt frame out of step
-                // with the text's own line-height box, most visibly on the
-                // spinner. `.center` shares one vertical center regardless of
-                // Dynamic Type; the message still grows downward via
-                // `fixedSize(vertical: true)` below.
-                // #1116: a centered status row, not a line pinned top-left.
+        let phase = submissionPresentation.barPhase(
+            savedBeatFinished: savedBeatFinished
+        )
+        return VStack(spacing: 10) {
+            if phase == .standard,
+               let message = submissionPresentation.visibleMessage {
+                // The icon is decoration; the sentence is the outcome.
+                // Requiring both meant a state that set only `visibleMessage`
+                // rendered nothing, and the seller watched a refused upload
+                // finish in silence (#803).
+                // #1074: `.center` shares one vertical center regardless of
+                // Dynamic Type; the message grows downward via `fixedSize`.
                 HStack(alignment: .center, spacing: 10) {
                     if let statusKind = submissionPresentation.statusKind {
                         submissionStatusIcon(statusKind)
@@ -4800,9 +4802,19 @@ struct PhotoReviewView: View {
                 .accessibilityIdentifier("photo-review.submission-message")
             }
 
-            startListingControl(openBoundary)
+            startListingControl(openBoundary, phase: phase)
                 .frame(width: contentWidth)
                 .photoReviewLayoutLandmark(.startListing)
+
+            // #1126: the Cancel link's slot is reserved through saving, the saved
+            // beat and Done, so the bar never changes height between them.
+            if phase != .standard {
+                cancelLink(openBoundary, isVisible: phase == .saving)
+                    .frame(width: contentWidth)
+            }
+        }
+        .task(id: submissionPresentation.barPhase(savedBeatFinished: false)) {
+            await runSavedBeat()
         }
         .frame(maxWidth: .infinity)
         .padding(.top, PhotoReviewV5VisualContract.footerVerticalPadding)
@@ -4843,8 +4855,116 @@ struct PhotoReviewView: View {
         }
     }
 
+    /// The beat holds "Item saved" for `savedBeatSeconds`, then the button
+    /// becomes Done. Reduced Motion only drops the animation, not the beat.
+    private func runSavedBeat() async {
+        guard submissionPresentation.barPhase(savedBeatFinished: false)
+                == .savedBeat else {
+            savedBeatFinished = false
+            return
+        }
+        savedBeatFinished = false
+        try? await Task.sleep(
+            for: .seconds(PhotoReviewSubmissionPresentation.savedBeatSeconds)
+        )
+        guard !Task.isCancelled else { return }
+        withAnimation(systemReduceMotion ? nil : .default) {
+            savedBeatFinished = true
+        }
+    }
+
+    private func cancelLink(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
+        isVisible: Bool
+    ) -> some View {
+        Button {
+            if let event = submissionPresentation.cancelLinkEvent {
+                openBoundary(event)
+            }
+        } label: {
+            Text(submissionPresentation.cancelLinkLabel ?? "Cancel")
+                .font(.system(size: submissionMessageSize, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .opacity(isVisible ? 1 : 0)
+        .disabled(!isVisible)
+        .accessibilityHidden(!isVisible)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("photo-review.cancel-submission")
+    }
+
     @ViewBuilder
     private func startListingControl(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
+        phase: PhotoReviewSubmissionPresentation.BarPhase
+    ) -> some View {
+        switch phase {
+        case .saving, .savedBeat:
+            statusButton(phase: phase)
+        case .standard, .done:
+            actionButton(openBoundary)
+        }
+    }
+
+    /// #1126: the button itself carries status. It is not tappable and keeps
+    /// full-strength colors.
+    private func statusButton(
+        phase: PhotoReviewSubmissionPresentation.BarPhase
+    ) -> some View {
+        let isSaved = phase == .savedBeat
+        let foreground = isSaved
+            ? SnapListColorToken.canvas.color
+            : SnapListColorToken.actionDeep.color
+        return Button {} label: {
+            HStack(spacing: 9) {
+                if isSaved {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .accessibilityHidden(true)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(foreground)
+                        .accessibilityHidden(true)
+                }
+                Text(submissionPresentation.statusButtonLabel ?? "")
+                    .font(.system(size: primaryActionLabelSize, weight: .bold))
+            }
+            .foregroundStyle(foreground)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: PhotoReviewV5VisualContract.primaryActionHeight
+            )
+            .background(
+                isSaved
+                    ? SnapListColorToken.durableSuccess.color
+                    : SnapListColorToken.actionTint.color
+            )
+            .clipShape(
+                .rect(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.primaryActionRadius
+                )
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        // `.disabled` would dim the whole button; a status button only needs
+        // to ignore touches.
+        .allowsHitTesting(false)
+        .accessibilityLabel(submissionPresentation.statusButtonLabel ?? "")
+        // Saving and saved cannot be activated, so they must not announce as
+        // an activatable button; they are a live status instead.
+        .accessibilityRemoveTraits(.isButton)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityIdentifier("photo-review.start-listing")
+    }
+
+    @ViewBuilder
+    private func actionButton(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
         let button = Button {

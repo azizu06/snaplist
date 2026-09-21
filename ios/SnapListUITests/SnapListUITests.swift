@@ -1480,9 +1480,17 @@ final class SnapListUITests: XCTestCase {
         saving.launchAfterRetiringPriorInstance()
 
         let savingAction = saving.buttons["photo-review.start-listing"]
-        XCTAssertTrue(savingAction.waitForExistence(timeout: 3))
-        XCTAssertEqual(savingAction.label, "Cancel")
-        savingAction.tap()
+        // While saving it is a live status, not an activatable button (#1130).
+        let savingStatus = saving.descendants(matching: .any)[
+            "photo-review.start-listing"
+        ]
+        XCTAssertTrue(savingStatus.waitForExistence(timeout: 3))
+        XCTAssertEqual(savingStatus.label, "Saving your item")
+        XCTAssertFalse(savingAction.exists)
+        let cancelLink = saving.buttons["photo-review.cancel-submission"]
+        XCTAssertTrue(cancelLink.isHittable)
+        XCTAssertEqual(cancelLink.label, "Cancel")
+        cancelLink.tap()
 
         let cancelledMessage = saving.staticTexts[
             "photo-review.submission-message"
@@ -1497,9 +1505,9 @@ final class SnapListUITests: XCTestCase {
         savingAction.tap()
         let retrySaving = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                savingAction.label == "Cancel"
+                savingStatus.label == "Saving your item"
             },
-            object: savingAction
+            object: savingStatus
         )
         XCTAssertEqual(
             XCTWaiter.wait(for: [retrySaving], timeout: 2),
@@ -1517,7 +1525,14 @@ final class SnapListUITests: XCTestCase {
 
         let done = accepted.buttons["photo-review.start-listing"]
         XCTAssertTrue(done.waitForExistence(timeout: 3))
-        XCTAssertEqual(done.label, "Done")
+        // The "Item saved" beat lasts one second and launch overhead can outrun
+        // it, so the beat is pinned at the presentation seam; here the button
+        // must settle on Done.
+        let beatEnded = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in done.label == "Done" },
+            object: done
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [beatEnded], timeout: 3), .completed)
         done.tap()
         XCTAssertEqual(done.label, "Start listing")
     }
