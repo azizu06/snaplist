@@ -276,12 +276,29 @@ final class UserDefaultsActivationTourProgressStore:
     /// A new key space rather than a migration of the retired coach-mark
     /// record: the two carry different facts, and a half-decoded spine position
     /// would land a seller mid-tour on a step they never saw.
+    static let keyPrefix = "snaplist.activation-tour-progress-v1."
+
     init(
         defaults: UserDefaults = .standard,
-        prefix: String = "snaplist.activation-tour-progress-v1."
+        prefix: String = keyPrefix
     ) {
         self.defaults = defaults
         self.prefix = prefix
+    }
+
+    /// Takes back every principal's record. Sign-out and account erasure are
+    /// the points at which nobody on this device has a claim on a half-finished
+    /// tour of someone else's first listing. Retention row
+    /// `local-activation-tour-progress`; called from
+    /// `SettingsLocalCachedDataStore.removeAll()`, which is the one owner for
+    /// wiping local per-account state.
+    @discardableResult
+    static func removeAll(defaults: UserDefaults = .standard) -> Bool {
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(keyPrefix) {
+            defaults.removeObject(forKey: key)
+        }
+        return true
     }
 
     func load(for identity: String) -> ActivationTourProgress {

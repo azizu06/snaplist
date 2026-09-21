@@ -267,6 +267,10 @@ struct SettingsLocalCachedDataStore {
         var removedEveryRoot = AssistedExportUserDefaultsProgress.removeAll(
             defaults: defaults
         )
+        // #1133: so does the activation tour's own record.
+        removedEveryRoot = UserDefaultsActivationTourProgressStore.removeAll(
+            defaults: defaults
+        ) && removedEveryRoot
         for root in ownedRoots where fileManager.fileExists(atPath: root.path) {
             do { try fileManager.removeItem(at: root) }
             catch { removedEveryRoot = false }

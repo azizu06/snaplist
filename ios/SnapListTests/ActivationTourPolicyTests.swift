@@ -489,3 +489,43 @@ extension ActivationTourPolicyTests {
         XCTAssertTrue(progress.completedSteps.isEmpty)
     }
 }
+
+// MARK: - Retention
+
+extension ActivationTourPolicyTests {
+    /// The tour's record is per-principal local state, so it leaves with the
+    /// principal. Sign-out and account erasure both run
+    /// `SettingsLocalCachedDataStore.removeAll()`, and that one path has to
+    /// take every account's record, not only the departing one.
+    /// Retention row: `local-activation-tour-progress`.
+    func testSignOutAndErasureTakeEveryAccountsTourProgress() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defer { defaults.removePersistentDomain(forName: #function) }
+
+        let store = UserDefaultsActivationTourProgressStore(defaults: defaults)
+        var mine = ActivationTourProgress()
+        mine.complete(.openScan)
+        store.save(mine, for: "user_1133")
+        store.save(mine, for: "guest")
+        defaults.set("keep me", forKey: "unrelated.key")
+
+        XCTAssertEqual(store.load(for: "user_1133"), mine, "control")
+
+        XCTAssertTrue(
+            SettingsLocalCachedDataStore(
+                applicationSupportDirectory: URL(
+                    fileURLWithPath: NSTemporaryDirectory()
+                ).appendingPathComponent(UUID().uuidString),
+                defaults: defaults
+            ).removeAll()
+        )
+
+        XCTAssertEqual(store.load(for: "user_1133"), ActivationTourProgress())
+        XCTAssertEqual(store.load(for: "guest"), ActivationTourProgress())
+        XCTAssertEqual(
+            defaults.string(forKey: "unrelated.key"),
+            "keep me",
+            "the sweep is scoped to the tour's own key prefix"
+        )
+    }
+}
