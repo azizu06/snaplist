@@ -87,10 +87,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Hackathon-speed policy: PRs skip ui-2/ui-3/ui-4. The complete suite
+        # Hackathon-speed policy: PRs skip every long UI shard (ui-1..ui-4). The complete suite
         # still runs on main pushes (`serial`). Focused simulator evidence stays
         # required locally. See AGENTS.md.
-        shard: [unit, ui-1]
+        shard: [unit]
     steps:
       - uses: actions/checkout@v4
         with:

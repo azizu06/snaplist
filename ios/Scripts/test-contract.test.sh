@@ -259,15 +259,16 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
     abort "all shard failures must remain visible" unless
       shard_job.fetch("strategy").fetch("fail-fast") == false
     # Hackathon-speed policy (captain-authorized): pull requests run only the
-    # unit and ui-1 shards. ui-2..ui-4 stay declared in the manifest and are
+    # unit shard. ui-1..ui-4 stay declared in the manifest and are
     # covered by the complete serial suite on main pushes.
-    abort "pull requests must run exactly the unit and ui-1 shards" unless
+    abort "pull requests must run exactly the unit shard" unless
       shard_job.fetch("strategy").fetch("matrix").fetch("shard") ==
-        ["unit", "ui-1"]
+        ["unit"]
     skipped_on_pull_request = expected_shards -
       shard_job.fetch("strategy").fetch("matrix").fetch("shard")
-    abort "pull requests must skip exactly ui-2, ui-3, and ui-4" unless
-      skipped_on_pull_request == ["ui-2", "ui-3", "ui-4"]
+    abort "pull requests must skip every long UI shard" unless
+      skipped_on_pull_request == expected_shards - ["unit"] &&
+      skipped_on_pull_request.all? { |name| name.start_with?("ui-") }
 
     checkout_step = shard_job.fetch("steps").find do |step|
       step["uses"] == "actions/checkout@v4"
