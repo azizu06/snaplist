@@ -457,7 +457,17 @@ describe("durable pipeline queue consumer provider usage", () => {
         ],
         transcriptions: [],
         soldComps: [
-          { strategy: "apify", attempts: 1, results: 7, chargedUsd: 0.02 },
+          {
+            strategy: "apify",
+            attempts: 1,
+            results: 7,
+            // This worker test drives a stubbed pricing tier that reports a
+            // retrieval but never runs the matcher, so the accepted count stays
+            // zero and no reason is claimed (#1138).
+            accepted: 0,
+            reason: null,
+            chargedUsd: 0.02,
+          },
         ],
       },
     });

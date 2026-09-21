@@ -63,6 +63,47 @@ export interface SoldCompEvidence<T extends SoldCompCandidate = SoldCompCandidat
 
 export const MAX_VERIFIED_SOLD_MATCHES = 5;
 
+/**
+ * The machine reason a sold-comp strategy contributed no anchors, or null when it
+ * did (#1138).
+ *
+ * Lives beside the matcher rather than in either adapter because both strategies
+ * feed the SAME matcher, and a reason that meant different things for `apify` and
+ * `ebay-sold` would be worse than no reason at all. The value is drawn from the
+ * matcher's own closed `SoldCompMatchReason` union, so it can never carry the
+ * seller's item text into the cost record.
+ *
+ * `no-candidates` here means the matcher was handed nothing. Retrieval-side
+ * reasons (`provider-error`, `blocked`) are the adapters' to report, because only
+ * they can see the failure.
+ */
+export function soldCompRetrievalReason(
+  evidence: SoldCompEvidence<SoldCompCandidate>,
+): string | null {
+  if (evidence.anchors.length > 0) return null;
+  const rejected = evidence.rejected;
+  const considered = rejected.length + evidence.corroboration.length;
+  if (considered === 0) return "no-candidates";
+
+  // The modal reject reason, with the vocabulary's own declaration order as the
+  // tie-break so the same candidate set always yields the same recorded reason.
+  const tally = new Map<SoldCompMatchReason, number>();
+  for (const match of rejected) {
+    for (const reason of match.reasons) {
+      tally.set(reason, (tally.get(reason) ?? 0) + 1);
+    }
+  }
+  let top: SoldCompMatchReason | undefined;
+  let topCount = 0;
+  for (const [reason, count] of tally) {
+    if (count > topCount) {
+      top = reason;
+      topCount = count;
+    }
+  }
+  return top ? `all-rejected:${top}` : "all-rejected:identity-unverified";
+}
+
 function stableSoldCompKey(comp: SoldCompCandidate): string {
   return (
     comp.url ??
@@ -163,6 +204,7 @@ const ACCESSORY_WORDS = [
   "dock",
   "ear pad",
   "ear pads",
+  "ear tip",
   "empty box",
   "grip",
   "holder",
@@ -456,8 +498,60 @@ function compareSpecs(title: string, signal: ItemSignal): "equivalent" | "unveri
   return relations.includes("equivalent") ? "equivalent" : "unverified";
 }
 
-function hasMaterialSpecs(signal: ItemSignal): boolean {
-  return (signal.specs ?? []).some((spec) => normalizeComparableText(spec).length > 0);
+/**
+ * Whether one vision spec names a VARIANT the matcher can actually enforce
+ * (#1138), and may therefore narrow a sold-comp query.
+ *
+ * `ItemSignal.specs` is documented as price-determining configuration, but the
+ * vision step returns whatever attributes it can read off the photos. The
+ * production values that starved the sold tier were "White", "charging case",
+ * "Silicone ear tips" and "Device-switch button with positions 1, 2, and 3".
+ *
+ * The test is deliberately the matcher's OWN vocabulary rather than a new list of
+ * good and bad words: a spec earns a place in the query exactly when it produces
+ * a token one of the extractors below compares titles on. That keeps retrieval
+ * and acceptance in agreement — we narrow on what we can later verify, and
+ * nothing else — and it cannot drift, because adding a variant dimension to the
+ * matcher extends the query rule in the same commit.
+ *
+ * Descriptive prose ("Body Only", "Sealed", a colour) is dropped. Some of it is
+ * occasionally price-defining, but the matcher cannot enforce it either, and the
+ * failure modes are not symmetric: eBay AND-matches keywords, so one unmatched
+ * adjective costs the entire tier its candidates, while a missing adjective costs
+ * some clustering that condition, accessory, and parts rules still recover.
+ */
+export function isVariantDefiningSpec(spec: string): boolean {
+  const value = spec.trim();
+  if (!value) return false;
+  return [
+    capacityTokens,
+    numericSizeTokens,
+    namedSizeTokens,
+    dimensionTokens,
+    volumeTokens,
+    gpuTokens,
+  ].some((extract) => extract(value).size > 0);
+}
+
+/**
+ * Whether the signal carries a spec whose absence from a title actually means
+ * something (#1138).
+ *
+ * An unconfirmed spec withholds identity verification, because a seller who says
+ * "1TB SSD" against a title that never says so may be looking at the 512GB
+ * variant. That reasoning only holds for specs a title could confirm. Vision also
+ * emits prose — "White", "charging case", "Silicone ear tips" — which a listing
+ * title has no obligation to mention, so treating its absence as doubt demoted
+ * EVERY genuine comp for the owner's AirPods Pro to corroboration, and
+ * `selectVerifiedSoldMatches` keeps anchors only. The tier reported no verified
+ * matches while holding five good ones.
+ *
+ * Prose still participates everywhere it can be decided: gender, audience, and
+ * composition conflicts are evaluated before this, and a spec of any shape that
+ * DOES appear in the title still makes the comparison equivalent.
+ */
+function hasVerifiableSpecs(signal: ItemSignal): boolean {
+  return (signal.specs ?? []).some(isVariantDefiningSpec);
 }
 
 function exactIdentifierMatches(title: string, signal: ItemSignal): boolean {
@@ -505,7 +599,42 @@ function accessoryIsIncluded(text: string, accessory: string): boolean {
   return found;
 }
 
+/**
+ * A "<accessory> FOR <product>" listing is an accessory, whatever it costs
+ * (#1138).
+ *
+ * `accessoryMismatch` clears a comp when the seller's OWN identity text mentions
+ * the same accessory — reasonable, since an item sold with its case should match
+ * listings that mention a case. But `identityText` includes `signal.specs`, and
+ * vision emits prose like "Silicone ear tips" and "charging case", so the
+ * accessory list was being unlocked by the seller's own description. A $8.99
+ * "Silicone Ear Tips for Apple AirPods Pro" anchored at 0.95 against a $148 item.
+ *
+ * On eBay, "for X" means COMPATIBLE WITH X. So when the identity appears only
+ * after "for", and the words before it name no part of the identity, the listing
+ * is about something that fits the product rather than the product itself. The
+ * before-check is what keeps "Apple AirPods Pro for Parts" out of this rule: its
+ * identity is stated up front, and the parts rule handles it.
+ */
+function compatibilityListing(title: string, signal: ItemSignal): boolean {
+  const separator = " for ";
+  const at = (` ${title} `).indexOf(separator);
+  if (at < 0) return false;
+  const padded = ` ${title} `;
+  const before = padded.slice(0, at);
+  const after = padded.slice(at + separator.length);
+  const identities = [signal.brand, signal.model, signal.resolvedName]
+    .map((value) => normalizeComparableText(value ?? ""))
+    .filter(Boolean);
+  if (identities.length === 0) return false;
+  return (
+    identities.some((identity) => containsPhrase(after, identity)) &&
+    !identities.some((identity) => containsPhrase(before, identity))
+  );
+}
+
 function accessoryMismatch(title: string, signal: ItemSignal): boolean {
+  if (compatibilityListing(title, signal)) return true;
   const identity = identityText(signal);
   for (const accessory of ACCESSORY_WORDS) {
     if (accessoryQuantity(title, accessory) === 0) continue;
@@ -617,7 +746,7 @@ export function classifySoldComp<T extends SoldCompCandidate>(
     return reject(comp, sellerCondition, compCondition, "spec-conflict", reasons);
   }
   reasons.push(specs === "equivalent" ? "spec-equivalent" : "spec-unverified");
-  if (specs === "unverified" && hasMaterialSpecs(signal)) identityVerified = false;
+  if (specs === "unverified" && hasVerifiableSpecs(signal)) identityVerified = false;
 
   if (MULTI_UNIT_RE.test(title)) {
     return reject(comp, sellerCondition, compCondition, "quantity-mismatch", reasons);

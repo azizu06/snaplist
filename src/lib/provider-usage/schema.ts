@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LLM_PROVIDERS, LLM_ROLES } from "../llm";
+import { isSoldCompUsageReason } from "./record";
 
 /**
  * The persisted contract for a run's provider-usage record (issue #716).
@@ -59,6 +60,23 @@ export const providerUsageRecordSchema = z
           strategy: z.string().min(1).max(64),
           attempts: countSchema,
           results: countSchema,
+          /**
+           * Added by #1138. Optional on the way IN so a payload built before the
+           * deploy — a queued run replayed across the boundary — still validates
+           * rather than losing its whole cost record over telemetry; it defaults
+           * to the honest zero. The SQL mirror in
+           * `20260921000000_sold_comp_usage_reasons.sql` accepts the same two shapes.
+           */
+          accepted: countSchema.default(0),
+          /** Bounded vocabulary only — never free text. See `isSoldCompUsageReason`. */
+          reason: z
+            .string()
+            .max(64)
+            .refine(isSoldCompUsageReason, {
+              message: "unrecognised sold-comp usage reason",
+            })
+            .nullable()
+            .default(null),
           chargedUsd: z.number().finite().min(0).nullable(),
         })
         .strict(),

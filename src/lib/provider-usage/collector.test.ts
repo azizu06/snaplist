@@ -4,6 +4,8 @@ import {
   currentTranscriptionUsage,
   providerUsageRunActive,
   recordModelUsage,
+  recordSoldCompOutcome,
+  recordSoldCompUsage,
   recordTranscriptionUsage,
   withProviderUsageRun,
 } from "./collector";
@@ -197,5 +199,90 @@ describe("nested provider-usage runs", () => {
     expect(outer.usage.modelCalls).toBe(2);
     expect(outer.usage.inputTokens).toBe(30);
     expect(outer.usage.models.every((m) => m.role !== "judge")).toBe(true);
+  });
+});
+
+/**
+ * Issue #1138: a sold-comp row that only counts candidates cannot tell a broken
+ * provider from an honest miss.
+ *
+ * Production recorded `apify: attempts 2, results 0` for an item eBay trades every
+ * day. That row is consistent with three completely different worlds — the Actor
+ * was broken, the Actor returned candidates the matcher rejected, or the item
+ * genuinely has no comps — and choosing between them needed the provider's own
+ * console. So the row now carries what was FETCHED, what the provider-neutral
+ * matcher ACCEPTED, and a short bounded reason when nothing survived.
+ */
+describe("sold-comp usage reasons (#1138)", () => {
+  it("separates candidates fetched from anchors accepted, and names why zero survived", async () => {
+    const { usage } = await withProviderUsageRun(async () => {
+      recordSoldCompUsage({ strategy: "apify", results: 10, chargedUsd: 0.04 });
+      recordSoldCompOutcome({
+        strategy: "apify",
+        accepted: 0,
+        reason: "all-rejected:identity-mismatch",
+      });
+    });
+
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "apify",
+        attempts: 1,
+        results: 10,
+        accepted: 0,
+        reason: "all-rejected:identity-mismatch",
+        chargedUsd: 0.04,
+      },
+    ]);
+  });
+
+  it("records a provider error distinctly from an honest empty result", async () => {
+    const { usage } = await withProviderUsageRun(async () => {
+      recordSoldCompUsage({
+        strategy: "apify",
+        results: 0,
+        chargedUsd: 0.0001,
+        reason: "provider-error",
+      });
+      recordSoldCompUsage({ strategy: "ebay-sold", results: 0, reason: "blocked" });
+    });
+
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "apify",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "provider-error",
+        chargedUsd: 0.0001,
+      },
+      {
+        strategy: "ebay-sold",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "blocked",
+        chargedUsd: null,
+      },
+    ]);
+  });
+
+  it("clears the reason once the strategy accepts an anchor, so a reason always means zero", async () => {
+    const { usage } = await withProviderUsageRun(async () => {
+      recordSoldCompUsage({ strategy: "apify", results: 0, reason: "no-candidates" });
+      recordSoldCompUsage({ strategy: "apify", results: 8 });
+      recordSoldCompOutcome({ strategy: "apify", accepted: 4 });
+    });
+
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "apify",
+        attempts: 2,
+        results: 8,
+        accepted: 4,
+        reason: null,
+        chargedUsd: null,
+      },
+    ]);
   });
 });

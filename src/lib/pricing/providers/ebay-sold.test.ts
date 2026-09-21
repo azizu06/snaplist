@@ -3055,6 +3055,73 @@ describe("ebay-sold provider usage recording (#716)", () => {
         strategy: "ebay-sold",
         attempts: 1,
         results: 10,
+        // Anchors the matcher ACCEPTED, not the five the seller is shown:
+        // best-five retention happens later, in `selectVerifiedSoldMatches`, and
+        // a row that recorded the display cap would hide how much evidence the
+        // strategy actually produced (#1138).
+        accepted: 10,
+        reason: null,
+        chargedUsd: null,
+      },
+    ]);
+  });
+});
+
+/**
+ * Issue #1138: the public-page strategy's zero has to name itself too.
+ *
+ * eBay now answers the sold/completed search page with an Akamai 403 to plain
+ * HTTP clients — reproduced from a residential IP, direct and through the
+ * operator proxy template, with a clean `Apple AirPods Pro` query. That is a
+ * BLOCKED retrieval, not an item without comps, and the row has to say so or the
+ * tier reads as "no comps exist" forever.
+ */
+describe("ebay-sold usage reasons (#1138)", () => {
+  it("records a blocked page fetch as blocked, using exactly one request", async () => {
+    let requests = 0;
+    const blocked: FetchPage = async () => {
+      requests += 1;
+      throw new Error("eBay sold fetch failed: 403 Forbidden");
+    };
+
+    const { usage, value } = await withProviderUsageRun(() =>
+      createEbaySoldPricingProvider({
+        fetchPage: blocked,
+        emitDiagnostic: () => undefined,
+      }).price(BRANDED_SIGNAL),
+    );
+
+    expect(value).toBeNull();
+    // No fallback egress is wired in production, so a blocked run costs exactly
+    // one request and never retries the path that just refused it.
+    expect(requests).toBe(1);
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "ebay-sold",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "blocked",
+        chargedUsd: null,
+      },
+    ]);
+  });
+
+  it("separates a page that parsed nothing from a page that was refused", async () => {
+    const { usage } = await withProviderUsageRun(() =>
+      createEbaySoldPricingProvider({
+        fetchPage: fakeFetch("<html><body>no sold cards here</body></html>"),
+        emitDiagnostic: () => undefined,
+      }).price(BRANDED_SIGNAL),
+    );
+
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "ebay-sold",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "no-candidates",
         chargedUsd: null,
       },
     ]);
@@ -3094,5 +3161,60 @@ describe("buildSoldSearchQuery — a title is not an identity (#1120)", () => {
       condition: "very-good",
     });
     expect(buildSoldSearchQuery(signal)).toBe("Apple AirPods Pro");
+  });
+});
+
+/**
+ * Issue #1138: the sold tier sent eBay a keyword-stuffed query.
+ *
+ * `specs` is DOCUMENTED as price-determining configuration ("RTX 3060", "256GB
+ * SSD"), but the vision step returns whatever attribute prose it can read off the
+ * photos, and this builder appended the first three of them verbatim. The two
+ * strings below are the exact keywords the Caffein Actor received in production
+ * (runs of 2026-09-21 and 2026-08-16). eBay AND-matches keywords, so a colour, an
+ * accessory and a material starve the search of the item itself — and unlike the
+ * web-search tier, the sold tier issues ONE query with no broad fallback behind
+ * it, so a stuffed query is terminal for the whole tier.
+ *
+ * A spec may still narrow the query, but only when it names the SKU: a measured
+ * capacity/size, a component family, or a generation. Descriptive attributes are
+ * dropped and the tier falls back to the identity it can actually search on.
+ */
+describe("buildSoldSearchQuery — descriptive specs must not starve the sold query (#1138)", () => {
+  it("drops the colour/accessory/material prose that produced the zero-result AirPods run", () => {
+    const signal = attributesToSignal({
+      brand: "Apple",
+      model: "AirPods Pro",
+      category: "electronics",
+      condition: "very-good",
+      specs: ["White", "charging case", "Silicone ear tips"],
+    });
+    expect(buildSoldSearchQuery(signal)).toBe("Apple AirPods Pro");
+  });
+
+  it("drops free-text attribute prose that produced the zero-result Logitech run", () => {
+    const signal = attributesToSignal({
+      brand: "Logitech",
+      model: "MX Master 3S",
+      category: "electronics",
+      condition: "good",
+      specs: [
+        "Model M-R0077",
+        "5.0V 500mA input rating",
+        "Device-switch button with positions 1, 2, and 3",
+      ],
+    });
+    expect(buildSoldSearchQuery(signal)).toBe("Logitech MX Master 3S");
+  });
+
+  it("still narrows on SKU-defining configuration so multi-config comps stay clustered", () => {
+    const signal = attributesToSignal({
+      brand: "Dell",
+      model: "XPS 15",
+      category: "electronics",
+      condition: "good",
+      specs: ["Silver", "RTX 4070", "backlit keyboard", "32GB", "1TB SSD"],
+    });
+    expect(buildSoldSearchQuery(signal)).toBe("Dell XPS 15 RTX 4070 32GB 1TB SSD");
   });
 });

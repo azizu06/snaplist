@@ -3,6 +3,7 @@ import {
   ProviderUsageTally,
   type ModelUsageReport,
   type ProviderUsageRecord,
+  type SoldCompOutcomeReport,
   type SoldCompUsageReport,
   type TranscriptionUsageReport,
 } from "./record";
@@ -90,6 +91,15 @@ export function recordModelUsage(report: ModelUsageReport): void {
  */
 export function recordSoldCompUsage(report: SoldCompUsageReport): void {
   runStorage.getStore()?.addSoldCompRetrieval(report);
+}
+
+/**
+ * Report what the provider-neutral matcher accepted from one sold-comp strategy's
+ * candidates, and why nothing survived when nothing did (#1138). Called once per
+ * strategy pass, after the matcher — never per retrieval attempt.
+ */
+export function recordSoldCompOutcome(report: SoldCompOutcomeReport): void {
+  runStorage.getStore()?.addSoldCompOutcome(report);
 }
 
 /** Report one completed transcription call without retaining media or transcript content. */

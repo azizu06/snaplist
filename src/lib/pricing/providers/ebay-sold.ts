@@ -17,14 +17,16 @@ import {
 } from "../freshness";
 import type { TtlCache } from "../comp-cache";
 import { logEvent, type LogFields } from "../../observability";
-import { recordSoldCompUsage } from "../../provider-usage";
+import { recordSoldCompOutcome, recordSoldCompUsage } from "../../provider-usage";
 import {
   buildEbaySoldProxyRequestUrl,
   resolveEbaySoldEgressConfig,
 } from "../ebay-sold-egress";
 import {
+  isVariantDefiningSpec,
   selectSoldCompEvidence,
   selectVerifiedSoldMatches,
+  soldCompRetrievalReason,
   type SoldCompEvidence,
 } from "../sold-comp-matcher";
 
@@ -641,9 +643,13 @@ export function buildSoldSearchQuery(signal: ItemSignal): string | null {
     // match. If the narrowed query then returns < MIN comps the provider declines to
     // the web-search tier (which itself narrows-then-broadens), so coverage is never
     // lost — only the wrong-config sold comps are.
+    // Keep only specs that name a variant the matcher can enforce, and filter
+    // BEFORE the cap (#1138). The cap used to apply to the raw list, so three
+    // pieces of prose evicted the real configuration behind them: a Dell XPS
+    // signal kept "Silver RTX 4070 backlit keyboard" and dropped "32GB"/"1TB SSD".
     const specsHint = (signal.specs ?? [])
       .map((s) => s.trim())
-      .filter(Boolean)
+      .filter(isVariantDefiningSpec)
       .slice(0, 3)
       .join(" ");
     return specsHint ? `${brand} ${model} ${specsHint}` : `${brand} ${model}`;
@@ -1458,6 +1464,10 @@ function createEbaySoldPricingProviderInternal(
     initialUrl: string,
     coordinationDeadline: number,
   ): Promise<EbaySoldComp[]> {
+    // #1138: a retrieval that was REFUSED is not a retrieval that found nothing.
+    // eBay now answers the public sold page with an Akamai 403, so without this
+    // distinction the tier reports "no comps exist" for every item forever.
+    let blocked = false;
     const initial = await fetchComps(
       initialUrl,
       fetchPrimary,
@@ -1468,6 +1478,10 @@ function createEbaySoldPricingProviderInternal(
     let combined = normalizeBoundedCandidates(initial.comps);
 
     if (initial.failed) {
+      blocked = true;
+      // The fallback is a DIFFERENT operator-configured egress path, never a
+      // retry of the one that just refused us, and nothing wires it in
+      // production — so a blocked run costs exactly one request.
       if (fetchFallback) {
         const fallback = await fetchComps(
           initialUrl,
@@ -1476,7 +1490,10 @@ function createEbaySoldPricingProviderInternal(
           "pricing.ebay_sold.fallback_blocked",
           coordinationDeadline,
         );
-        if (!fallback.failed) combined = normalizeBoundedCandidates(fallback.comps);
+        if (!fallback.failed) {
+          blocked = false;
+          combined = normalizeBoundedCandidates(fallback.comps);
+        }
       }
     } else {
       const evidence = selectSoldCompEvidence(combined, signal);
@@ -1513,7 +1530,15 @@ function createEbaySoldPricingProviderInternal(
     // Guarded (#716 AC5): recording failure never fails a run, and the comps are
     // already resolved by this point — a throwing counter must not strand them.
     try {
-      recordSoldCompUsage({ strategy: "ebay-sold", results: combined.length });
+      recordSoldCompUsage({
+        strategy: "ebay-sold",
+        results: combined.length,
+        reason: blocked
+          ? "blocked"
+          : combined.length === 0
+            ? "no-candidates"
+            : null,
+      });
     } catch (usageError) {
       emitDiagnostic("pricing.ebay_sold.usage_recording_failed", {
         reason:
@@ -1691,6 +1716,14 @@ function createEbaySoldPricingProviderInternal(
         normalizeBoundedCandidates(comps),
         signal,
       );
+      // #1138: what the shared matcher KEPT, reported once per strategy pass.
+      // A retrieval-side reason already recorded (`blocked`, `no-candidates`)
+      // outranks anything inferred here, so this can only ever add detail.
+      recordSoldCompOutcome({
+        strategy: "ebay-sold",
+        accepted: evidence.anchors.length,
+        reason: soldCompRetrievalReason(evidence),
+      });
       // Everything downstream of canonical matching — staleness (#59),
       // best-five retention, the minimum-evidence gate, match weighting, and
       // synthesis — belongs to the one shared seam, so this adapter and the

@@ -36,7 +36,16 @@ const usage: ProviderUsageRecord = {
     },
   ],
   transcriptions: [],
-  soldComps: [{ strategy: "apify", attempts: 1, results: 9, chargedUsd: 0.0247 }],
+  soldComps: [
+    {
+      strategy: "apify",
+      attempts: 1,
+      results: 9,
+      accepted: 4,
+      reason: null,
+      chargedUsd: 0.0247,
+    },
+  ],
 };
 
 const TOKEN = "a".repeat(43);

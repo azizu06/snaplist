@@ -550,3 +550,126 @@ describe("sold-comp matcher — an identity-less signal can never anchor (#1120)
     expect(selectVerifiedSoldMatches([match])).toHaveLength(0);
   });
 });
+
+/**
+ * Issue #1138, the third seam the same root cause reached.
+ *
+ * Treating vision attribute prose as configuration starved the eBay query and
+ * evicted real specs from it — but it also reached the matcher. An unverifiable
+ * spec withholds identity verification (a seller who says "32GB" and a title that
+ * never says so might be the 64GB variant), and prose like "White" or "charging
+ * case" can essentially never be confirmed from a title. So every genuine sale of
+ * the owner's AirPods Pro was demoted from anchor to corroboration, and
+ * `selectVerifiedSoldMatches` keeps anchors only — the tier reported "no verified
+ * sold matches" while holding five perfectly good comps.
+ *
+ * Only a spec the matcher could actually verify may withhold verification.
+ */
+describe("descriptive specs must not suppress anchors (#1138)", () => {
+  const AIRPODS_COMPS = [
+    { url: "https://www.ebay.com/itm/1", title: "Apple AirPods Pro with MagSafe Charging Case", price: 148, condition: "Pre-Owned" },
+    { url: "https://www.ebay.com/itm/2", title: "Apple AirPods Pro Wireless Earbuds with Charging Case", price: 139.99, condition: "Pre-Owned" },
+    { url: "https://www.ebay.com/itm/3", title: "Apple AirPods Pro - White - Very Good Condition", price: 152.5, condition: "Pre-Owned" },
+  ];
+  const signal = (specs: string[]): ItemSignal => ({
+    brand: "Apple",
+    model: "AirPods Pro",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    specs,
+  });
+
+  it("anchors genuine comps even when the vision step supplied prose specs", () => {
+    const evidence = selectSoldCompEvidence(AIRPODS_COMPS, signal([
+      "White",
+      "charging case",
+      "Silicone ear tips",
+    ]));
+
+    expect(evidence.anchors).toHaveLength(3);
+    // Identical to the same comps with no specs at all: prose adds no
+    // information, so it must subtract none either.
+    expect(evidence.anchors).toHaveLength(
+      selectSoldCompEvidence(AIRPODS_COMPS, signal([])).anchors.length,
+    );
+  });
+
+  it("still withholds verification when a REAL configuration spec is unconfirmed", () => {
+    // A seller-stated capacity the title never confirms may be the other variant,
+    // which is exactly the demotion this gate exists for.
+    const laptops = [
+      { url: "https://www.ebay.com/itm/4", title: "Dell XPS 15 Laptop Core i7", price: 900, condition: "Pre-Owned" },
+    ];
+    const evidence = selectSoldCompEvidence(laptops, {
+      brand: "Dell",
+      model: "XPS 15",
+      category: "electronics",
+      condition: "very-good",
+      conditionKnown: true,
+      specs: ["1TB SSD"],
+    });
+
+    expect(evidence.anchors).toHaveLength(0);
+    expect(evidence.corroboration).toHaveLength(1);
+  });
+});
+
+/**
+ * Issue #1138: "<accessory> for <product>" is an accessory listing.
+ *
+ * `accessoryMismatch` clears a comp whose accessory the seller's own identity
+ * text also names — but `identityText` includes `signal.specs`, so vision prose
+ * ("Silicone ear tips", "charging case") was unlocking the accessory list on the
+ * seller's behalf. An $8.99 ear-tips listing anchored at full score against a
+ * $148 pair of AirPods Pro.
+ */
+describe("compatibility listings are accessories (#1138)", () => {
+  const signal: ItemSignal = {
+    brand: "Apple",
+    model: "AirPods Pro",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    // The seller's own prose must not license an accessory comp.
+    specs: ["White", "charging case", "Silicone ear tips"],
+  };
+
+  it("rejects a listing whose identity appears only after 'for'", () => {
+    const evidence = selectSoldCompEvidence(
+      [
+        { url: "https://www.ebay.com/itm/tips", title: "Silicone Ear Tips for Apple AirPods Pro - 3 Pairs S/M/L", price: 8.99, condition: "New" },
+        { url: "https://www.ebay.com/itm/skin", title: "Protective Case Cover for Apple AirPods Pro Skin", price: 6.5, condition: "New" },
+      ],
+      signal,
+    );
+
+    expect(evidence.anchors).toHaveLength(0);
+    expect(evidence.rejected.map((match) => match.reasons)).toEqual([
+      expect.arrayContaining(["accessory-mismatch"]),
+      expect.arrayContaining(["accessory-mismatch"]),
+    ]);
+  });
+
+  it("does not catch a real item that merely says 'for parts'", () => {
+    // The identity is stated UP FRONT, so this is the product; the parts rule —
+    // not the accessory rule — is what should decide it.
+    const evidence = selectSoldCompEvidence(
+      [{ url: "https://www.ebay.com/itm/parts", title: "Apple AirPods Pro for Parts Not Working", price: 29.99, condition: "For parts or not working" }],
+      signal,
+    );
+
+    expect(evidence.rejected).toHaveLength(1);
+    expect(evidence.rejected[0]!.reasons).toContain("parts-mismatch");
+    expect(evidence.rejected[0]!.reasons).not.toContain("accessory-mismatch");
+  });
+
+  it("keeps a genuine sale that bundles the accessory the seller also has", () => {
+    const evidence = selectSoldCompEvidence(
+      [{ url: "https://www.ebay.com/itm/real", title: "Apple AirPods Pro with MagSafe Charging Case", price: 148, condition: "Pre-Owned" }],
+      signal,
+    );
+
+    expect(evidence.anchors).toHaveLength(1);
+  });
+});

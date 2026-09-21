@@ -7,6 +7,14 @@ const used = (extra: BenchmarkTag[] = []): BenchmarkTag[] => ["used", ...extra];
  * tenant, listing, or customer data. Queries are stored exactly as the existing
  * production `buildSoldSearchUrl` normalizes them, so both providers receive the
  * same strings.
+ *
+ * That makes `query` a DERIVED field, not a record of what a past paid run sent:
+ * when the builder changes, these follow, and `benchmark.test.ts` fails until they
+ * do. #1138 stopped descriptive specs from entering a sold query, which shortened
+ * nine entries here — "Body Only", "Complete", "Sealed", a colour, a printing.
+ * Every size, capacity, and dimension spec still narrows its query, because those
+ * are the ones the canonical matcher can enforce. The historical #188 run's own
+ * inputs and results remain in `docs/benchmarks/sold-comps/`.
  */
 export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   {
@@ -46,7 +54,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q06",
-    query: "Canon EOS 80D Body Only",
+    query: "Canon EOS 80D",
     signal: { brand: "Canon", model: "EOS 80D", specs: ["Body Only"], category: "electronics", condition: "good", conditionKnown: true },
     tags: used(["electronics", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["80d"]], forbiddenPhrases: ["lens only", "battery grip", "for parts", "90d"], targetCondition: "used" },
@@ -74,7 +82,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q10",
-    query: "Apple AirPods Pro 2nd Generation USB-C",
+    query: "Apple AirPods Pro 2nd Generation",
     signal: { brand: "Apple", model: "AirPods Pro 2nd Generation", specs: ["USB-C"], category: "electronics", condition: "good", conditionKnown: true },
     tags: used(["electronics", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["airpods pro"], ["2nd", "2nd generation", "usb-c", "usb c"]], forbiddenPhrases: ["case only", "left earbud", "right earbud", "1st generation"], targetCondition: "used" },
@@ -95,7 +103,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q13",
-    query: "Nintendo Switch OLED Model White",
+    query: "Nintendo Switch OLED Model",
     signal: { brand: "Nintendo", model: "Switch OLED Model", specs: ["White"], category: "video-games", condition: "good", conditionKnown: true },
     tags: used(["video-games", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["switch oled"], ["white"]], forbiddenPhrases: ["lite", "tablet only", "dock only", "box only"], targetCondition: "used" },
@@ -130,7 +138,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q18",
-    query: "Nintendo Joy-Con Pair Neon Red Blue",
+    query: "Nintendo Joy-Con Pair",
     signal: { brand: "Nintendo", model: "Joy-Con Pair", specs: ["Neon Red Blue"], category: "video-games", condition: "good", conditionKnown: true },
     tags: used(["video-games", "accessory-as-product", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["joy-con", "joy con"], ["pair", "left right"]], forbiddenPhrases: ["single", "left only", "right only", "strap only"], targetCondition: "used" },
@@ -151,7 +159,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q21",
-    query: "Stonemaier Games Wingspan 2nd Printing",
+    query: "Stonemaier Games Wingspan",
     signal: { brand: "Stonemaier Games", model: "Wingspan", specs: ["2nd Printing"], category: "board-games", condition: "good", conditionKnown: true },
     tags: used(["board-games", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["wingspan"]], forbiddenPhrases: ["european expansion", "oceania expansion", "nesting box", "replacement"], targetCondition: "used" },
@@ -172,28 +180,28 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q24",
-    query: "LEGO 75192 Millennium Falcon Complete",
+    query: "LEGO 75192 Millennium Falcon",
     signal: { brand: "LEGO", model: "75192 Millennium Falcon", specs: ["Complete"], category: "lego", condition: "good", conditionKnown: true },
     tags: used(["lego", "ambiguous-variant", "product-research-subset"]),
     humanRule: { requiredPhraseGroups: [["75192"]], forbiddenPhrases: ["box only", "instructions only", "minifigures only", "75105"], targetCondition: "used" },
   },
   {
     id: "Q25",
-    query: "LEGO 10307 Eiffel Tower Complete",
+    query: "LEGO 10307 Eiffel Tower",
     signal: { brand: "LEGO", model: "10307 Eiffel Tower", specs: ["Complete"], category: "lego", condition: "good", conditionKnown: true },
     tags: used(["lego"]),
     humanRule: { requiredPhraseGroups: [["10307"]], forbiddenPhrases: ["box only", "instructions only", "21044"], targetCondition: "used" },
   },
   {
     id: "Q26",
-    query: "LEGO Ideas 21330 Home Alone Complete",
+    query: "LEGO Ideas 21330 Home Alone",
     signal: { brand: "LEGO Ideas", model: "21330 Home Alone", specs: ["Complete"], category: "lego", condition: "good", conditionKnown: true },
     tags: used(["lego"]),
     humanRule: { requiredPhraseGroups: [["21330"]], forbiddenPhrases: ["box only", "minifigures only", "instructions only"], targetCondition: "used" },
   },
   {
     id: "Q27",
-    query: "LEGO 40516 Everyone Is Awesome Sealed",
+    query: "LEGO 40516 Everyone Is Awesome",
     signal: { brand: "LEGO", model: "40516 Everyone Is Awesome", specs: ["Sealed"], category: "lego", condition: "new", conditionKnown: true },
     tags: ["lego", "new"],
     humanRule: { requiredPhraseGroups: [["40516"]], forbiddenPhrases: ["used", "open box", "incomplete"], targetCondition: "new" },
