@@ -1615,8 +1615,7 @@ final class SnapListUITests: XCTestCase {
     /// nothing under it moves between idle, saving, saved and done.
     func testSubmissionBarIsOneConstantHeightButtonAcrossEveryPhase() {
         typealias BarMetrics = (height: CGFloat, maxY: CGFloat)
-        // Samples the bar once per label, in order, within one launch, so
-        // SUB-05 measures both its one-second saved beat and the Done after.
+        // Samples the bar once per label, in order, within one launch.
         func barMetrics(
             _ arguments: [String],
             labels: [String] = []
@@ -1633,9 +1632,6 @@ final class SnapListUITests: XCTestCase {
                 samples.append((bar.frame.height, bar.frame.maxY))
             }
             for label in labels {
-                // waitForExistence polls fast enough to catch the one-second
-                // saved beat; a predicate expectation samples about once a
-                // second and can miss it.
                 let settled = app.descendants(matching: .any)
                     .matching(identifier: "photo-review.start-listing")
                     .matching(NSPredicate(format: "label == %@", label))
@@ -1661,19 +1657,29 @@ final class SnapListUITests: XCTestCase {
             ],
             labels: ["Saving your item"]
         )[0]
-        let accepted = barMetrics(
+        // The beat lasts one second, so its launch holds it rather than
+        // racing it; the Done launch lets the beat run out.
+        let savedBeat = barMetrics(
+            [
+                "--photo-review-state=REV-02",
+                "--submission-visual-state=SUB-05",
+                "--photo-review-hold-saved-beat",
+                "--zero-network-fixtures",
+            ],
+            labels: ["Item saved"]
+        )[0]
+        let done = barMetrics(
             [
                 "--photo-review-state=REV-02",
                 "--submission-visual-state=SUB-05",
                 "--zero-network-fixtures",
             ],
-            labels: ["Item saved", "Done"]
-        )
-        XCTAssertEqual(accepted.count, 2)
+            labels: ["Done"]
+        )[0]
         let phases: [(String, BarMetrics)] = [
             ("saving", saving),
-            ("saved beat", accepted[0]),
-            ("done", accepted[1]),
+            ("saved beat", savedBeat),
+            ("done", done),
         ]
         for (name, metrics) in phases {
             XCTAssertEqual(

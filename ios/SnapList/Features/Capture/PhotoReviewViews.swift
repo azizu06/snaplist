@@ -2270,6 +2270,7 @@ struct PhotoReviewFixtureView: View {
     private let onLayoutObservation: ((PhotoReviewLayoutObservation) -> Void)?
     private let projectsFixtureOrder: Bool
     private let projectsLayoutProbe: Bool
+    private let holdsSavedBeat: Bool
 
     init(
         state: PhotoReviewVisualStateID,
@@ -2302,6 +2303,9 @@ struct PhotoReviewFixtureView: View {
         projectsLayoutProbe = ProcessInfo.processInfo.arguments.contains(
             "--photo-review-layout-probe"
         )
+        holdsSavedBeat = ProcessInfo.processInfo.arguments.contains(
+            "--photo-review-hold-saved-beat"
+        )
     }
 
     var body: some View {
@@ -2309,6 +2313,7 @@ struct PhotoReviewFixtureView: View {
         PhotoReviewView(
             store: store,
             forceReducedMotion: forceReducedMotion,
+            holdsSavedBeat: holdsSavedBeat,
             submissionPresentation: submissionPresentation,
             backToCamera: {},
             delete: { nil },
@@ -3319,6 +3324,9 @@ struct PhotoReviewView: View {
     var isCommitting: Bool = false
     /// Fixture-only override. Live Photo Review always follows the system setting.
     var forceReducedMotion = false
+    /// Fixture-only: keeps "Item saved" on screen so a UI test can measure
+    /// the beat without racing its one second. Live review never sets it.
+    var holdsSavedBeat = false
     var submissionPresentation: PhotoReviewSubmissionPresentation = .idle
     var focusStartListingRequest: UUID?
     var postSubmissionAnnouncement: (String) -> Void = {
@@ -4944,6 +4952,7 @@ struct PhotoReviewView: View {
             return
         }
         savedBeatFinished = false
+        guard !holdsSavedBeat else { return }
         try? await Task.sleep(
             for: .seconds(PhotoReviewSubmissionPresentation.savedBeatSeconds)
         )
