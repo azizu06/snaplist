@@ -244,6 +244,9 @@
     "SnapListUITests/SnapListUITests/testIssue1045LibraryAndReviewSitAtAMatchingReducedOffsetFromTheShutter": 15.0,
     "SnapListUITests/SnapListUITests/testIssue1045ShutterStaysHorizontallyCenteredEmptyAndStaged": 15.0,
     "SnapListUITests/SnapListUITests/testIssue954StagedScanControlsFitThreeRowsAtEveryDynamicTypeSize": 15.0,
-    "SnapListUITests/SnapListUITests/testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive": 15.0
+    "SnapListUITests/SnapListUITests/testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive": 15.0,
+    "SnapListUITests/SnapListUITests/testSubmissionBarIsOneConstantHeightButtonAcrossEveryPhase": 21.593,
+    "SnapListUITests/SnapListUITests/testVoiceNoteStopKeepsThePanelOpenOnReviewUntilSaveRecording": 10.948,
+    "SnapListUITests/SnapListUITests/testVoiceNoteReviewDeleteFallsBackToTheEmptyRecorderWithThePanelOpen": 10.391
   }
 }

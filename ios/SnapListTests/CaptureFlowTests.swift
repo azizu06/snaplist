@@ -10,15 +10,15 @@ import XCTest
 @MainActor
 final class CaptureFlowTests: XCTestCase {
     /// #1126 (owner pick B): status lives inside the button. While saving the
-    /// primary reads "Saving your item" and Cancel is a separate small link;
+    /// primary reads "Saving your item" and Cancel replaces the header back control (#1136);
     /// accepted shows "Item saved" for one beat and then the filled Done.
     func testSubmissionBarStatusLivesInsideTheButton() {
         let saving = PhotoReviewSubmissionPresentation.visualState(.saving)
         XCTAssertEqual(saving.barPhase(savedBeatFinished: false), .saving)
         XCTAssertEqual(saving.barPhase(savedBeatFinished: true), .saving)
         XCTAssertEqual(saving.statusButtonLabel, "Saving your item")
-        XCTAssertEqual(saving.cancelLinkLabel, "Cancel")
-        XCTAssertEqual(saving.cancelLinkEvent, .cancelSubmission)
+        XCTAssertEqual(saving.headerCancelLabel, "Cancel")
+        XCTAssertEqual(saving.headerCancelEvent, .cancelSubmission)
 
         let accepted = PhotoReviewSubmissionPresentation.visualState(.accepted)
         XCTAssertEqual(accepted.barPhase(savedBeatFinished: false), .savedBeat)
@@ -26,12 +26,12 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(accepted.barPhase(savedBeatFinished: true), .done)
         XCTAssertEqual(accepted.primaryActionLabel, "Done")
         XCTAssertEqual(accepted.actionStyle, .filled)
-        XCTAssertNil(accepted.cancelLinkLabel)
+        XCTAssertNil(accepted.headerCancelLabel)
         XCTAssertEqual(PhotoReviewSubmissionPresentation.savedBeatSeconds, 1.0)
     }
 
     /// Offline, unknown, conflict, cancelled and photos-too-large keep their
-    /// copy and actions in the standard status-row layout, with no Cancel link.
+    /// copy and actions in the standard status-row layout, with no header Cancel.
     func testSubmissionBarRejectionStatesKeepStandardLayout() {
         let states: [PhotoReviewSubmissionVisualStateID] = [
             .cancelled, .offline, .unknown, .conflict, .photosTooLarge,
@@ -43,7 +43,7 @@ final class CaptureFlowTests: XCTestCase {
                 .standard,
                 "\(state)"
             )
-            XCTAssertNil(presentation.cancelLinkLabel, "\(state)")
+            XCTAssertNil(presentation.headerCancelLabel, "\(state)")
             XCTAssertNotNil(presentation.visibleMessage, "\(state)")
         }
         XCTAssertEqual(

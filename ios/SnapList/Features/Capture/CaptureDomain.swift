@@ -2073,6 +2073,39 @@ final class CaptureFlowModel {
         )?.voice
     }
 
+    /// #1136. Writes a take under review ahead to the intake so relaunch can
+    /// restore it. The take stays out of the intake's voice until it is saved.
+    func holdVoiceTake(
+        provisionalURL: URL,
+        duration: TimeInterval,
+        expectedActivationID: UUID,
+        while requestIsActive: @escaping @MainActor @Sendable () -> Bool = {
+            true
+        }
+    ) async {
+        guard let intake, requestIsActive() else { return }
+        let input = NativeIntake.VoiceInput(
+            duration: duration,
+            isActive: requestIsActive,
+            loadData: {
+                try Data(contentsOf: provisionalURL)
+            }
+        )
+        _ = await intake.performReturningSnapshot(
+            .holdVoiceTake(input),
+            expectedActivationID: expectedActivationID,
+            while: requestIsActive
+        )
+    }
+
+    func releaseVoiceTake(expectedActivationID: UUID) async {
+        guard let intake else { return }
+        _ = await intake.performReturningSnapshot(
+            .releaseVoiceTake,
+            expectedActivationID: expectedActivationID
+        )
+    }
+
     func deleteVoiceNote(
         expectedActivationID: UUID,
         while requestIsActive: @escaping @MainActor @Sendable () -> Bool = {

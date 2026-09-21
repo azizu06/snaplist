@@ -36,6 +36,23 @@ enum VoiceNoteWaveformGeometry {
         return updated
     }
 
+    /// The part of the recorded trail a stopped take drew, so review can
+    /// spread the take's own shape across the whole track instead of leaving
+    /// the unrecorded remainder empty.
+    static func reviewSamples(
+        trail: [Double],
+        duration: TimeInterval
+    ) -> [Double] {
+        guard !trail.isEmpty else {
+            return []
+        }
+        let recorded = filledBarCount(
+            elapsed: duration,
+            barCount: trail.count
+        )
+        return Array(trail.prefix(max(recorded, 1)))
+    }
+
     /// How many of the track's bars recording has reached, `0...barCount`.
     static func filledBarCount(elapsed: TimeInterval, barCount: Int) -> Int {
         VoiceWaveformPlayhead.playedBarCount(
@@ -45,6 +62,23 @@ enum VoiceNoteWaveformGeometry {
             ),
             barCount: barCount
         )
+    }
+}
+
+/// #1136: stopping lands on review. The announcement is the only thing that
+/// tells a VoiceOver seller the take ended; it never moves focus.
+enum VoiceNoteReviewPolicy {
+    static let stopAnnouncement =
+        "Recording stopped. Review your voice note."
+
+    static func announcesStop(
+        from previous: VoiceNotePhase,
+        to current: VoiceNotePhase
+    ) -> Bool {
+        guard case .recording = previous, case .takeReady = current else {
+            return false
+        }
+        return true
     }
 }
 
@@ -128,13 +162,26 @@ struct VoiceNoteSheet: View {
             switch phase {
             case .active:
                 store.refreshPermissionTruth()
-            case .inactive, .background:
+            case .inactive:
+                store.handleSceneInactive()
+            case .background:
+                // A take under review is already held by the intake, so
+                // leaving the app keeps it without saving it (#1136).
                 store.handleSceneInactive()
             @unknown default:
                 store.handleSceneInactive()
             }
         }
-        .onChange(of: store.phase) { _, _ in
+        .onChange(of: store.phase) { previous, current in
+            if VoiceNoteReviewPolicy.announcesStop(
+                from: previous,
+                to: current
+            ) {
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: VoiceNoteReviewPolicy.stopAnnouncement
+                )
+            }
             switch store.consumeFocusRequest() {
             case .savedNoteSummary:
                 focusedControl = .savedSummary
@@ -164,11 +211,11 @@ struct VoiceNoteSheet: View {
         }
         // The playhead is progress, not decoration, so Reduced Motion keeps
         // the same cadence instead of slowing it down.
-        .task(id: isPlayingSavedNote) {
-            guard isPlayingSavedNote, !usesStaticVoiceNoteFixture else {
+        .task(id: isPlayingAnything) {
+            guard isPlayingAnything, !usesStaticVoiceNoteFixture else {
                 return
             }
-            while !Task.isCancelled, isPlayingSavedNote {
+            while !Task.isCancelled, isPlayingAnything {
                 store.refreshPlayback()
                 try? await Task.sleep(for: .milliseconds(60))
             }
@@ -181,7 +228,7 @@ struct VoiceNoteSheet: View {
         case .recording(let elapsed, _):
             recordingControls(elapsed: elapsed, canSave: elapsed > 0)
         case .takeReady(let duration):
-            recordingControls(elapsed: duration, canSave: true)
+            takeReview(duration: duration)
         case .ready:
             VStack(spacing: 0) {
                 standardHeader
@@ -315,7 +362,7 @@ struct VoiceNoteSheet: View {
                 .frame(maxWidth: .infinity, minHeight: 52)
 
                 Button {
-                    saveAndDismissWhenCommitted()
+                    store.stopRecording()
                 } label: {
                     Image(systemName: "checkmark")
                         .font(.system(size: 18, weight: .bold))
@@ -329,7 +376,7 @@ struct VoiceNoteSheet: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSave)
-                .accessibilityLabel("Save voice note")
+                .accessibilityLabel("Stop recording")
                 .accessibilityIdentifier("voice-note.save")
                 .accessibilitySortPriority(
                     VoiceNoteRecordingAccessibilityElement
@@ -354,6 +401,127 @@ struct VoiceNoteSheet: View {
                 )
         }
         .padding(.top, 71)
+    }
+
+    /// A stopped take waiting on the seller. The check mark lands here; only
+    /// Save recording (or the chevron, which keeps the take) closes the panel.
+    private func takeReview(duration: TimeInterval) -> some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Voice note")
+                    .snapListTypography(.sectionHeader)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityIdentifier("voice-note.title")
+                Spacer()
+                Button {
+                    saveAndDismissWhenCommitted()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(
+                            SnapListColorToken.textSecondary.color
+                        )
+                        .frame(
+                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
+                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Collapse and keep voice note")
+                .accessibilityIdentifier("voice-note.collapse")
+            }
+            .padding(.trailing, -8)
+
+            HStack(spacing: 14) {
+                Button {
+                    toggleTakePlayback()
+                } label: {
+                    Image(
+                        systemName: store.isPlayingTake
+                            ? "pause.fill"
+                            : "play.fill"
+                    )
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                    .frame(
+                        width: VoiceNotePresentation.compactSheetControlLayoutTarget,
+                        height: VoiceNotePresentation.compactSheetControlLayoutTarget
+                    )
+                    .background(SnapListColorToken.inkPrimary.color)
+                    .clipShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    VoiceNotePresentation.playbackAccessibilityLabel(
+                        isPlaying: store.isPlayingTake
+                    )
+                )
+                .accessibilityIdentifier("voice-note.playback")
+
+                VoiceNoteWaveform(
+                    isLive: false,
+                    reduceMotion: true,
+                    samples: VoiceNoteWaveformGeometry.reviewSamples(
+                        trail: usesStaticLiveFixtureSamples
+                            ? Self.staticLiveFixtureSamples
+                            : store.liveMeterSamples,
+                        duration: duration
+                    ),
+                    playbackProgress: store.playbackProgress
+                )
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityHidden(true)
+                .padding(.trailing, 4)
+
+                Text(VoiceNotePresentation.elapsedText(duration))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityIdentifier("voice-note.elapsed")
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    Task {
+                        await store.rerecord()
+                    }
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .frame(
+                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
+                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Re-record")
+                .accessibilityIdentifier("voice-note.rerecord")
+
+                Button(role: .destructive) {
+                    discardReviewedTake()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(SnapListColorToken.deleteIconTint.color)
+                        .frame(
+                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
+                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete")
+                .accessibilityIdentifier("voice-note.delete")
+
+                SnapListPrimaryButton(title: "Save recording") {
+                    saveAndDismissWhenCommitted()
+                }
+                .accessibilityIdentifier("voice-note.save-recording")
+            }
+        }
+        .padding(.top, 18)
     }
 
     private func savedPlayback(isPlaying: Bool) -> some View {
@@ -559,6 +727,10 @@ struct VoiceNoteSheet: View {
         store.phase == .saved(isPlaying: true)
     }
 
+    private var isPlayingAnything: Bool {
+        isPlayingSavedNote || store.isPlayingTake
+    }
+
     private var usesStaticRecordingFixture: Bool {
 #if DEBUG
         ProcessInfo.processInfo.arguments.contains(
@@ -584,6 +756,27 @@ struct VoiceNoteSheet: View {
     /// same static shape instead.
     private var usesStaticLiveFixtureSamples: Bool {
         usesStaticRecordingFixture || usesStaticTakeReadyFixture
+    }
+
+    private func toggleTakePlayback() {
+#if DEBUG
+        if usesStaticVoiceNoteFixture {
+            store.toggleFixtureTakePlayback()
+            return
+        }
+#endif
+        store.toggleTakePlayback()
+    }
+
+    /// Delete on review keeps the panel open, on the state it fell back to:
+    /// the empty recorder, or the prior saved note.
+    private func discardReviewedTake() {
+#if DEBUG
+        if usesStaticVoiceNoteFixture, store.discardFixtureTake() {
+            return
+        }
+#endif
+        store.discardTake()
     }
 
     private func saveAndDismissWhenCommitted() {

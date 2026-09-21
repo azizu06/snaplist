@@ -265,6 +265,37 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
+    /// #1136. A take the seller left under review before the app was
+    /// terminated reopens Photo Review, where the take is, not the camera.
+    @MainActor
+    func testRestoredCaptureWithAHeldVoiceTakeReopensPhotoReview() {
+        let router = AppRouter(initialTab: .trophyWall)
+        let photos = [
+            StagedCapturePhoto(
+                id: UUID(),
+                photoURL: URL(fileURLWithPath: "/tmp/held-photo.jpg"),
+                thumbnailURL: URL(fileURLWithPath: "/tmp/held-thumb.jpg"),
+                createdAt: Date(timeIntervalSince1970: 1)
+            )
+        ]
+
+        router.handleCaptureRestoration(
+            .stagedPhoto,
+            resumingVoiceReviewOf: photos
+        )
+
+        XCTAssertTrue(router.isScanPresented)
+        XCTAssertNil(router.presentedFullScreen)
+        XCTAssertEqual(
+            router.captureBoundaryRequest,
+            CaptureBoundaryRequest(
+                destination: .photoReview,
+                photos: photos,
+                opener: .reviewButton
+            )
+        )
+    }
+
     @MainActor
     func testReviewBoundaryCarriesTheExactOrderedPhotoSetAndOpenerContext() {
         let photos = (0..<3).map { index in

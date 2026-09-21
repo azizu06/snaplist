@@ -2271,6 +2271,7 @@ struct PhotoReviewFixtureView: View {
     private let completeSavedSubmission: (() -> Void)?
     private let projectsFixtureOrder: Bool
     private let projectsLayoutProbe: Bool
+    private let holdsSavedBeat: Bool
 
     /// `completeSavedSubmission` is Done's exit. The shell passes the same
     /// drop-to-Trophy-Wall it runs for a live submission, so a Done fixture
@@ -2308,6 +2309,9 @@ struct PhotoReviewFixtureView: View {
         projectsLayoutProbe = ProcessInfo.processInfo.arguments.contains(
             "--photo-review-layout-probe"
         )
+        holdsSavedBeat = ProcessInfo.processInfo.arguments.contains(
+            "--photo-review-hold-saved-beat"
+        )
     }
 
     var body: some View {
@@ -2315,6 +2319,7 @@ struct PhotoReviewFixtureView: View {
         PhotoReviewView(
             store: store,
             forceReducedMotion: forceReducedMotion,
+            holdsSavedBeat: holdsSavedBeat,
             submissionPresentation: submissionPresentation,
             backToCamera: {},
             delete: { nil },
@@ -2717,14 +2722,35 @@ final class PhotoReviewLiveSession {
                         expectedActivationID: intakeActivationID,
                         while: isActive
                     ) ?? false
+                },
+                hold: { [weak captureFlow] url, duration, isActive in
+                    await captureFlow?.holdVoiceTake(
+                        provisionalURL: url,
+                        duration: duration,
+                        expectedActivationID: intakeActivationID,
+                        while: isActive
+                    )
+                },
+                release: { [weak captureFlow] in
+                    await captureFlow?.releaseVoiceTake(
+                        expectedActivationID: intakeActivationID
+                    )
                 }
             )
         }
+        // #1136. A take held before the app was terminated reopens on review.
+        // Only a session that can release it through the intake restores it.
+        let heldTake = authority == nil
+            ? nil
+            : captureFlow?.intakeSnapshot?.heldVoiceTake.map {
+                VoiceNoteAsset(url: $0.mediaURL, duration: $0.duration)
+            }
         let voiceNoteStore = VoiceNoteStore(
             savedNote: savedNote,
             audio: AVFoundationVoiceNoteAudioClient(),
             files: VoiceNoteLocalFileStore(rootDirectory: provisionalRoot),
-            authority: authority
+            authority: authority,
+            heldTake: heldTake
         )
 #if DEBUG
         if launchArguments.contains(
@@ -3327,6 +3353,9 @@ struct PhotoReviewView: View {
     var isCommitting: Bool = false
     /// Fixture-only override. Live Photo Review always follows the system setting.
     var forceReducedMotion = false
+    /// Fixture-only: keeps "Item saved" on screen so a UI test can measure
+    /// the beat without racing its one second. Live review never sets it.
+    var holdsSavedBeat = false
     var submissionPresentation: PhotoReviewSubmissionPresentation = .idle
     var focusStartListingRequest: UUID?
     var postSubmissionAnnouncement: (String) -> Void = {
@@ -3372,6 +3401,7 @@ struct PhotoReviewView: View {
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
     @State private var isVoiceNotePresented = false
+    @State private var isKeepingVoiceNoteForStart = false
     @State private var submissionEffectConsumer =
         PhotoReviewSubmissionEffectConsumer()
     @State private var saveFailureAnnouncementConsumer =
@@ -3399,6 +3429,8 @@ struct PhotoReviewView: View {
     private var primaryActionLabelSize: CGFloat = 16
     @ScaledMetric(relativeTo: .subheadline)
     private var submissionMessageSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .body)
+    private var headerCancelSize: CGFloat = 17
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -3575,6 +3607,10 @@ struct PhotoReviewView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
+                // The scrim blocks touch; this keeps VoiceOver inside the
+                // panel too, so nothing behind it (Start listing) is reachable.
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(.isModal)
                 .zIndex(10)
             }
         }
@@ -3583,7 +3619,10 @@ struct PhotoReviewView: View {
             value: isVoiceNotePresented
         )
         .onAppear {
-            if presentsVoiceNoteOnAppear, voiceNoteStore != nil {
+            // A take restored after relaunch lands back on review with the
+            // panel open, where the seller left it (#1136).
+            if let voiceNoteStore,
+               presentsVoiceNoteOnAppear || voiceNoteStore.hasUnsavedTake {
                 isVoiceNotePresented = true
             }
         }
@@ -3603,6 +3642,7 @@ struct PhotoReviewView: View {
                     .allowsHitTesting(
                         !(isCommitting
                             || submissionPresentation.mutationControlsLocked)
+                            || showsHeaderCancel
                     )
 
                 GeometryReader { viewport in
@@ -3946,9 +3986,39 @@ struct PhotoReviewView: View {
         }
     }
 
+    /// Saving locks the header except for this Cancel; with no boundary to
+    /// fire, nothing in the header unlocks.
+    private var showsHeaderCancel: Bool {
+        submissionPresentation.headerCancelEvent != nil && openBoundary != nil
+    }
+
+    /// #1136: while saving, Cancel lives where Back does, so the bar under
+    /// the photos stays one button. Outside saving this is the normal chevron.
     @ViewBuilder
     private var backControl: some View {
-        if let backToCamera {
+        if showsHeaderCancel,
+           let event = submissionPresentation.headerCancelEvent,
+           let openBoundary {
+            Button {
+                openBoundary(event)
+            } label: {
+                Text(submissionPresentation.headerCancelLabel ?? "Cancel")
+                    .font(.system(size: headerCancelSize, weight: .semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .padding(.horizontal, 10)
+                    .frame(
+                        minWidth:
+                            PhotoReviewV5VisualContract.backTargetSize,
+                        minHeight:
+                            PhotoReviewV5VisualContract.backTargetSize
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel saving")
+            .accessibilityIdentifier("photo-review.cancel-submission")
+            .photoReviewLayoutLandmark(.back)
+        } else if let backToCamera {
             Button(action: backToCamera) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 22, weight: .semibold))
@@ -4685,6 +4755,46 @@ struct PhotoReviewView: View {
     private func voiceRow(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
+        ZStack(alignment: .trailing) {
+            voiceRowOpener(openBoundary)
+            if let voiceNoteStore, voiceNoteStore.savedNote != nil {
+                voiceRowPlayControl(voiceNoteStore)
+            }
+        }
+    }
+
+    /// The collapsed card's play control (#1136): a saved note can be heard
+    /// without reopening the panel.
+    private func voiceRowPlayControl(_ store: VoiceNoteStore) -> some View {
+        let isPlaying = store.phase == .saved(isPlaying: true)
+        return Button {
+            store.togglePlayback()
+        } label: {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 34, height: 34)
+                .background(SnapListColorToken.inkPrimary.color)
+                .clipShape(.circle)
+                .frame(
+                    width: VoiceNotePresentation.minimumTarget,
+                    height: VoiceNotePresentation.minimumTarget
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 6)
+        .accessibilityLabel(
+            VoiceNotePresentation.playbackAccessibilityLabel(
+                isPlaying: isPlaying
+            )
+        )
+        .accessibilityIdentifier("photo-review.voice-play")
+    }
+
+    private func voiceRowOpener(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
+    ) -> some View {
         Button {
             openBoundary(.openVoiceNote)
             if voiceNoteStore != nil {
@@ -4714,10 +4824,19 @@ struct PhotoReviewView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                    .accessibilityHidden(true)
+                if voiceNoteStore?.savedNote != nil {
+                    Color.clear
+                        .frame(
+                            width: VoiceNotePresentation.minimumTarget,
+                            height: 1
+                        )
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(SnapListColorToken.textTertiary.color)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 14)
             .frame(
@@ -4813,13 +4932,6 @@ struct PhotoReviewView: View {
             startListingControl(openBoundary, phase: phase)
                 .frame(width: contentWidth)
                 .photoReviewLayoutLandmark(.startListing)
-
-            // #1126: the Cancel link's slot is reserved through saving, the saved
-            // beat and Done, so the bar never changes height between them.
-            if phase != .standard {
-                cancelLink(openBoundary, isVisible: phase == .saving)
-                    .frame(width: contentWidth)
-            }
         }
         .task(id: submissionPresentation.barPhase(savedBeatFinished: false)) {
             await runSavedBeat()
@@ -4872,6 +4984,7 @@ struct PhotoReviewView: View {
             return
         }
         savedBeatFinished = false
+        guard !holdsSavedBeat else { return }
         try? await Task.sleep(
             for: .seconds(PhotoReviewSubmissionPresentation.savedBeatSeconds)
         )
@@ -4879,29 +4992,6 @@ struct PhotoReviewView: View {
         withAnimation(systemReduceMotion ? nil : .default) {
             savedBeatFinished = true
         }
-    }
-
-    private func cancelLink(
-        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
-        isVisible: Bool
-    ) -> some View {
-        Button {
-            if let event = submissionPresentation.cancelLinkEvent {
-                openBoundary(event)
-            }
-        } label: {
-            Text(submissionPresentation.cancelLinkLabel ?? "Cancel")
-                .font(.system(size: submissionMessageSize, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .opacity(isVisible ? 1 : 0)
-        .disabled(!isVisible)
-        .accessibilityHidden(!isVisible)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("photo-review.cancel-submission")
     }
 
     @ViewBuilder
@@ -4946,9 +5036,10 @@ struct PhotoReviewView: View {
                 maxWidth: .infinity,
                 minHeight: PhotoReviewV5VisualContract.primaryActionHeight
             )
+            // Saved is the Done fill (brand blue); green is not in the palette.
             .background(
                 isSaved
-                    ? SnapListColorToken.durableSuccess.color
+                    ? SnapListColorToken.action.color
                     : SnapListColorToken.actionTint.color
             )
             .clipShape(
@@ -4976,7 +5067,27 @@ struct PhotoReviewView: View {
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
         let button = Button {
-            openBoundary(submissionPresentation.primaryActionEvent)
+            let event = submissionPresentation.primaryActionEvent
+            // #1136: Start listing is the implicit Save recording, so a take
+            // still under review lands in the intake before submission reads it.
+            if event == .startListing,
+               let voiceNoteStore,
+               voiceNoteStore.hasUnsavedTake {
+                isKeepingVoiceNoteForStart = true
+                Task {
+                    let kept = await voiceNoteStore.commitUnsavedTake()
+                    isKeepingVoiceNoteForStart = false
+                    // A failed save reopens the panel on its failure state
+                    // rather than submitting photos-only behind the seller.
+                    if kept {
+                        openBoundary(event)
+                    } else {
+                        presentVoiceNotePresentation()
+                    }
+                }
+                return
+            }
+            openBoundary(event)
         } label: {
             Text(submissionPresentation.primaryActionLabel)
                 .font(.system(size: primaryActionLabelSize, weight: .bold))
@@ -5001,6 +5112,7 @@ struct PhotoReviewView: View {
                 isPickerActive: store.activePickerRequest != nil
             )
                 || (isCommitting && !allowsPrimaryActionDuringCommit)
+                || isKeepingVoiceNoteForStart
         )
         .accessibilityIdentifier("photo-review.start-listing")
         .accessibilityFocused($focusedStartListing)

@@ -73,12 +73,18 @@ actor NativeIntake {
         /// departing seller's photo would be written into the arriving seller's
         /// directory.
         let principalScopeComponent: String?
+        /// #1136. A stopped take the seller is still reviewing, held as a
+        /// write-ahead record so app-switcher termination cannot lose it. It
+        /// is never the saved voice: only `setVoice` makes a take part of the
+        /// intake a submission reads.
+        let heldVoiceTake: Voice?
 
         init(
             version: Version,
             photos: [Photo],
             voice: Voice?,
             recovery: Recovery,
+            heldVoiceTake: Voice? = nil,
             // Defaults to the value every snapshot carried implicitly before
             // this field existed, so fixtures keep describing a bound intake
             // unless they say otherwise. The one production construction site
@@ -92,6 +98,7 @@ actor NativeIntake {
             self.recovery = recovery
             self.isPrincipalBound = isPrincipalBound
             self.principalScopeComponent = principalScopeComponent
+            self.heldVoiceTake = heldVoiceTake
         }
     }
 
@@ -134,6 +141,8 @@ actor NativeIntake {
         case reorderPhotos([Photo.ID])
         case setVoice(VoiceInput)
         case deleteVoice
+        case holdVoiceTake(VoiceInput)
+        case releaseVoiceTake
         case discard(expected: Version)
         case retireAcceptedPhotos(
             expected: Version,
@@ -204,6 +213,8 @@ actor NativeIntake {
         let expiresAt: Date
         let photos: [Photo]
         let voice: Voice?
+        /// Absent from manifests written before #1136, which decode as no take.
+        let heldVoiceTake: Voice?
     }
 
     /// A server-accepted photo run whose optional voice was not accepted leaves only
@@ -247,11 +258,13 @@ actor NativeIntake {
         let photos: [Photo]
         let voice: Voice?
         let recovery: Recovery
+        var heldVoiceTake: Voice? = nil
 
         var version: Version { Version(activationID: activationID, revision: revision) }
         var snapshot: Snapshot {
             Snapshot(
                 version: version, photos: photos, voice: voice, recovery: recovery,
+                heldVoiceTake: heldVoiceTake,
                 // A nil scope is the ephemeral root, which no principal owns.
                 isPrincipalBound: scope?.isPrincipalBound ?? false,
                 principalScopeComponent: scope.flatMap {
@@ -261,12 +274,14 @@ actor NativeIntake {
         }
         var assetsRoot: URL { root.appendingPathComponent("Current/Assets", isDirectory: true) }
 
-        func next(photos: [Photo], voice: Voice?, now: Date) -> ActiveBundle {
+        func next(photos: [Photo], voice: Voice?, heldVoiceTake: Voice?,
+                  now: Date) -> ActiveBundle {
             ActiveBundle(
                 scope: scope, root: root, activationID: activationID,
                 revision: revision + 1,
                 expiresAt: expiresAt ?? now.addingTimeInterval(NativeIntake.recoveryWindow),
-                photos: photos, voice: voice, recovery: .ready
+                photos: photos, voice: voice, recovery: .ready,
+                heldVoiceTake: heldVoiceTake
             )
         }
     }
@@ -502,39 +517,51 @@ actor NativeIntake {
                 return (ids.compactMap { byID[$0] }, current.voice)
             }
         case .setVoice(let input):
-            guard input.duration > 0,
-                  input.duration <= VoiceNotePresentation.maximumDuration else {
-                return .rejected(.invalidVoice)
-            }
-            guard await input.isActive() else {
-                return .superseded
-            }
-            let data: Data
-            do {
-                data = try await input.loadData()
-            } catch {
-                return .rejected(.sourceUnavailable)
-            }
-            guard await input.isActive() else {
-                return .superseded
-            }
             let staged: Voice
             let stagingRoot: URL
-            do {
-                (staged, stagingRoot) = try await stageVoiceData(data, duration: input.duration, for: active)
-            } catch {
-                return stagingFailure(expected: expected)
+            switch await stageVoiceInput(input, expected: expected, for: active) {
+            case .success(let value):
+                (staged, stagingRoot) = value
+            case .failure(let refusal):
+                return refusal.outcome
             }
-            guard await input.isActive() else {
-                removeStagingRoot(stagingRoot)
-                return .superseded
+            // Saving is what ends review, so the held take goes with it.
+            return commitMutation(
+                expected: expected,
+                stagingRoot: stagingRoot,
+                snapshotKey: snapshotKey,
+                heldVoiceTake: { _ in nil }
+            ) {
+                ($0.photos, staged)
+            }
+        case .holdVoiceTake(let input):
+            let staged: Voice
+            let stagingRoot: URL
+            switch await stageVoiceInput(input, expected: expected, for: active) {
+            case .success(let value):
+                (staged, stagingRoot) = value
+            case .failure(let refusal):
+                return refusal.outcome
             }
             return commitMutation(
                 expected: expected,
                 stagingRoot: stagingRoot,
-                snapshotKey: snapshotKey
+                snapshotKey: snapshotKey,
+                heldVoiceTake: { _ in staged }
             ) {
-                ($0.photos, staged)
+                ($0.photos, $0.voice)
+            }
+        case .releaseVoiceTake:
+            guard active.heldVoiceTake != nil else {
+                recordSnapshot(active.snapshot, for: snapshotKey)
+                return .unchanged
+            }
+            return commitMutation(
+                expected: expected,
+                snapshotKey: snapshotKey,
+                heldVoiceTake: { _ in nil }
+            ) {
+                ($0.photos, $0.voice)
             }
         case .deleteVoice:
             guard active.voice != nil else {
@@ -1009,6 +1036,7 @@ actor NativeIntake {
         expected: Version,
         stagingRoot: URL? = nil,
         snapshotKey: UUID? = nil,
+        heldVoiceTake: (ActiveBundle) -> Voice? = { $0.heldVoiceTake },
         change: (ActiveBundle) -> ([Photo], Voice?)?
     ) -> Outcome {
         guard let current = active, current.version == expected else {
@@ -1020,7 +1048,10 @@ actor NativeIntake {
             return .rejected(.invalidOperation)
         }
         do {
-            let next = current.next(photos: photos, voice: voice, now: now())
+            let next = current.next(
+                photos: photos, voice: voice,
+                heldVoiceTake: heldVoiceTake(current), now: now()
+            )
             try commit(next, stagingRoot: stagingRoot)
             active = next
             recordSnapshot(next.snapshot, for: snapshotKey)
@@ -1134,6 +1165,46 @@ actor NativeIntake {
         return (photos, locations.root)
     }
 
+    private struct VoiceStagingRefusal: Error {
+        let outcome: Outcome
+    }
+
+    /// The load-and-stage half shared by saving a voice and holding a take, so
+    /// both apply the same duration bound and the same supersession checks.
+    private func stageVoiceInput(
+        _ input: VoiceInput,
+        expected: Version,
+        for bundle: ActiveBundle
+    ) async -> Result<(Voice, URL), VoiceStagingRefusal> {
+        guard input.duration > 0,
+              input.duration <= VoiceNotePresentation.maximumDuration else {
+            return .failure(.init(outcome: .rejected(.invalidVoice)))
+        }
+        guard await input.isActive() else {
+            return .failure(.init(outcome: .superseded))
+        }
+        let data: Data
+        do {
+            data = try await input.loadData()
+        } catch {
+            return .failure(.init(outcome: .rejected(.sourceUnavailable)))
+        }
+        guard await input.isActive() else {
+            return .failure(.init(outcome: .superseded))
+        }
+        let staged: (Voice, URL)
+        do {
+            staged = try await stageVoiceData(data, duration: input.duration, for: bundle)
+        } catch {
+            return .failure(.init(outcome: stagingFailure(expected: expected)))
+        }
+        guard await input.isActive() else {
+            removeStagingRoot(staged.1)
+            return .failure(.init(outcome: .superseded))
+        }
+        return .success(staged)
+    }
+
     private func stageVoiceData(_ data: Data, duration: TimeInterval,
                                 for bundle: ActiveBundle) async throws -> (Voice, URL) {
         let locations = try stagingLocations(for: bundle)
@@ -1232,7 +1303,8 @@ actor NativeIntake {
         try copyRetainedAssets(for: bundle, to: stagingAssetsRoot, under: anchor)
         let stored = StoredBundle(
             schemaVersion: 1, revision: bundle.revision, expiresAt: bundle.expiresAt!,
-            photos: bundle.photos, voice: bundle.voice
+            photos: bundle.photos, voice: bundle.voice,
+            heldVoiceTake: bundle.heldVoiceTake
         )
         let data = try JSONEncoder().encode(stored)
         let manifestURL = stagingRoot.appendingPathComponent("bundle.json")
@@ -1247,7 +1319,7 @@ actor NativeIntake {
         under anchor: URL
     ) throws {
         let retained = Self.assetURLs(for: bundle.photos)
-            + [bundle.voice?.mediaURL].compactMap { $0 }
+            + [bundle.voice?.mediaURL, bundle.heldVoiceTake?.mediaURL].compactMap { $0 }
         for source in retained {
             let destination = stagingAssetsRoot.appendingPathComponent(source.lastPathComponent)
             try Self.validateContainedPath(destination, under: anchor, fileManager: fileManager)
@@ -2016,6 +2088,14 @@ actor NativeIntake {
         case .absent, .malformed:
             return unavailableBundle(scope: scope, root: root, activationID: activationID)
         }
+        // A held take is only a convenience for the seller, so one that cannot
+        // be read is dropped rather than costing the photos it rode with.
+        let heldVoiceTake: Voice?
+        if case .value(let value) = loadVoice(stored.heldVoiceTake, assetsRoot: assetsRoot) {
+            heldVoiceTake = value
+        } else {
+            heldVoiceTake = nil
+        }
         return ActiveBundle(
             scope: scope,
             root: root,
@@ -2024,7 +2104,8 @@ actor NativeIntake {
             expiresAt: stored.expiresAt,
             photos: photos,
             voice: voice,
-            recovery: .ready
+            recovery: .ready,
+            heldVoiceTake: heldVoiceTake
         )
     }
 

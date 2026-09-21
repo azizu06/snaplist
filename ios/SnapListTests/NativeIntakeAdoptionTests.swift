@@ -75,6 +75,89 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         )
     }
 
+    /// #1136. A take the seller stopped but never saved is held by the
+    /// intake, so after an app-switcher termination Photo Review reopens on
+    /// review with it rather than on an empty recorder. Saving it then makes
+    /// it the intake's voice and retires the held record.
+    func testAHeldTakeReopensPhotoReviewOnReviewAfterRelaunch()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            let firstDependencies = AppDependencies.make(
+                configuration: .preview,
+                nativeIntakeIdentitySource: productionAnonymousIdentitySource(),
+                nativeIntakeApplicationSupportDirectory: root
+            )
+            let firstCapture = CaptureFlowModel(
+                camera: firstDependencies.captureCamera,
+                evaluator: firstDependencies.framingEvaluator,
+                intake: firstDependencies.nativeIntake
+            )
+            _ = await firstCapture.restore()
+            let added = await firstCapture.stageLibraryPhotos([
+                NativeIntakeAdoptionPhoto(data: try makeJPEG(seed: 11))
+            ])
+            XCTAssertEqual(added, 1)
+            let activationID = try XCTUnwrap(
+                firstCapture.intakeSnapshot?.version.activationID
+            )
+            let takeURL = root.appendingPathComponent("held-take.wav")
+            try Data("held relaunch take".utf8).write(to: takeURL)
+            await firstCapture.holdVoiceTake(
+                provisionalURL: takeURL,
+                duration: 6,
+                expectedActivationID: activationID
+            )
+            await waitUntil {
+                firstCapture.intakeSnapshot?.heldVoiceTake != nil
+            }
+            XCTAssertNil(firstCapture.intakeSnapshot?.voice)
+        }
+
+        let relaunchedDependencies = AppDependencies.make(
+            configuration: .preview,
+            nativeIntakeIdentitySource: productionAnonymousIdentitySource(),
+            nativeIntakeApplicationSupportDirectory: root
+        )
+        let relaunched = CaptureFlowModel(
+            camera: relaunchedDependencies.captureCamera,
+            evaluator: relaunchedDependencies.framingEvaluator,
+            intake: relaunchedDependencies.nativeIntake
+        )
+        let restored = await relaunched.restore()
+        XCTAssertEqual(restored, .stagedPhoto)
+        let photos = try XCTUnwrap(relaunched.intakeSnapshot?.photos)
+        let session = try XCTUnwrap(
+            PhotoReviewLiveSession.start(
+                from: CaptureBoundaryRequest(
+                    destination: .photoReview,
+                    photos: photos,
+                    opener: .reviewButton
+                ),
+                captureFlow: relaunched
+            )
+        )
+
+        XCTAssertEqual(session.voiceNoteStore.phase, .takeReady(duration: 6))
+        XCTAssertNil(session.voiceNoteStore.savedNote)
+
+        let kept = await session.voiceNoteStore.commitUnsavedTake()
+        XCTAssertTrue(kept)
+        await waitUntil {
+            relaunched.intakeSnapshot?.voice != nil
+        }
+        XCTAssertEqual(relaunched.intakeSnapshot?.voice?.duration, 6)
+        XCTAssertNil(relaunched.intakeSnapshot?.heldVoiceTake)
+        let savedURL = try XCTUnwrap(relaunched.intakeSnapshot?.voice?.mediaURL)
+        XCTAssertEqual(
+            try Data(contentsOf: savedURL),
+            Data("held relaunch take".utf8)
+        )
+    }
+
     func testProductionScanAndPhotoReviewPublishOnlyCommittedNativeIntakeSnapshots()
         async throws {
         let root = FileManager.default.temporaryDirectory

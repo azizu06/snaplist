@@ -279,9 +279,22 @@ final class AppRouter {
     /// session immediately afterwards, because `restore()` lands a staged photo
     /// on `.captured` rather than a live session (#864). Starting it from here
     /// as well would race that call.
-    func handleCaptureRestoration(_ restoration: CaptureRestoration) {
+    func handleCaptureRestoration(
+        _ restoration: CaptureRestoration,
+        resumingVoiceReviewOf heldTakePhotos: [StagedCapturePhoto]? = nil
+    ) {
         guard restoration == .stagedPhoto else { return }
         applyScanDrawer(.scanSurfaceRestored)
+        // #1136. A voice take held under review reopens Photo Review, where
+        // the seller left it, instead of the camera.
+        if let heldTakePhotos, (1...5).contains(heldTakePhotos.count) {
+            openCaptureBoundary(
+                destination: .photoReview,
+                photos: heldTakePhotos,
+                opener: .reviewButton
+            )
+            return
+        }
         presentedFullScreen = .guidedCamera
     }
 

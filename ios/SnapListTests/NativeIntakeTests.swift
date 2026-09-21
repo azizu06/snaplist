@@ -1801,6 +1801,98 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(outcome, .committed)
     }
 
+    /// #1136. A stopped take under review is held in the intake as a write-ahead
+    /// record, so relaunch after app-switcher termination finds it again. It is
+    /// never the saved voice: submission reads `voice`, and the held take stays
+    /// out of it until the seller saves.
+    func testAHeldVoiceTakeSurvivesRelaunchWithoutBecomingTheSavedVoice() async throws {
+        let (harness, first) = try await makeSession(.clerk("user_native_intake_held_take"))
+        _ = try await first.commit(.addPhotos([harness.photoInput(seed: 1)]))
+        let held = try await first.commit(.holdVoiceTake(voice("held take", duration: 6)))
+        XCTAssertNil(held.voice)
+        let take = try XCTUnwrap(held.heldVoiceTake)
+        XCTAssertEqual(take.duration, 6)
+        XCTAssertEqual(try Data(contentsOf: take.mediaURL), Data("held take".utf8))
+
+        let relaunched = try await harness.makeSession()
+        XCTAssertNil(relaunched.snapshot.voice)
+        XCTAssertEqual(relaunched.snapshot.heldVoiceTake, take)
+        XCTAssertEqual(relaunched.snapshot.photos, held.photos)
+        withExtendedLifetime(first) {}
+    }
+    func testSavingOrReleasingTheHeldTakeRemovesItsRecord() async throws {
+        let (harness, session) = try await makeSession(.clerk("user_native_intake_held_cleanup"))
+        _ = try await session.commit(.addPhotos([harness.photoInput(seed: 1)]))
+        let held = try await session.commit(.holdVoiceTake(voice("first take", duration: 4)))
+        let firstTake = try XCTUnwrap(held.heldVoiceTake)
+        let saved = try await session.commit(.setVoice(voice("first take", duration: 4)))
+        XCTAssertNil(saved.heldVoiceTake)
+        XCTAssertNotNil(saved.voice)
+        XCTAssertFalse(files.fileExists(atPath: firstTake.mediaURL.path))
+
+        let rerecorded = try await session.commit(.holdVoiceTake(voice("second take", duration: 5)))
+        let secondTake = try XCTUnwrap(rerecorded.heldVoiceTake)
+        XCTAssertEqual(rerecorded.voice, saved.voice)
+        let released = try await session.commit(.releaseVoiceTake)
+        XCTAssertNil(released.heldVoiceTake)
+        XCTAssertEqual(released.voice, saved.voice)
+        XCTAssertFalse(files.fileExists(atPath: secondTake.mediaURL.path))
+        let relaunched = try await harness.makeSession()
+        XCTAssertNil(relaunched.snapshot.heldVoiceTake)
+        XCTAssertEqual(relaunched.snapshot.voice, saved.voice)
+        let secondRelease = await session.perform(.releaseVoiceTake)
+        XCTAssertEqual(secondRelease, .unchanged)
+    }
+    func testDiscardRemovesTheHeldTakeWithTheIntake() async throws {
+        let (harness, session) = try await makeSession(.clerk("user_native_intake_held_discard"))
+        _ = try await session.commit(.addPhotos([harness.photoInput(seed: 1)]))
+        let held = try await session.commit(.holdVoiceTake(voice("discarded take", duration: 3)))
+        let take = try XCTUnwrap(held.heldVoiceTake)
+        let discarded = await session.perform(.discard(expected: held.version))
+        XCTAssertEqual(discarded, .committed)
+        assertEmpty(try await session.nextSnapshot())
+        XCTAssertNil(session.snapshot.heldVoiceTake)
+        XCTAssertFalse(files.fileExists(atPath: take.mediaURL.path))
+    }
+    /// A held take whose bytes vanished, or whose record names an impossible
+    /// duration, is dropped on relaunch. The photos it rode with stay.
+    func testAnUnreadableHeldTakeIsDroppedOnRelaunchWithoutLosingThePhotos() async throws {
+        let (harness, first) = try await makeSession(.clerk("user_native_intake_held_corrupt"))
+        _ = try await first.commit(.addPhotos([harness.photoInput(seed: 1)]))
+        let held = try await first.commit(.holdVoiceTake(voice("lost take", duration: 3)))
+        let take = try XCTUnwrap(held.heldVoiceTake)
+        try files.removeItem(at: take.mediaURL)
+        let missing = try await harness.makeSession()
+        XCTAssertNil(missing.snapshot.heldVoiceTake)
+        XCTAssertEqual(missing.snapshot.photos, held.photos)
+
+        let reheld = try await missing.commit(.holdVoiceTake(voice("bad duration", duration: 3)))
+        XCTAssertNotNil(reheld.heldVoiceTake)
+        let manifestURL = intakeRoot(containing: try XCTUnwrap(reheld.heldVoiceTake).mediaURL)
+            .appendingPathComponent("Current/bundle.json")
+        var manifest = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
+        var record = try XCTUnwrap(manifest["heldVoiceTake"] as? [String: Any])
+        record["duration"] = VoiceNotePresentation.maximumDuration + 1
+        manifest["heldVoiceTake"] = record
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestURL, options: .atomic)
+        let corrupt = try await harness.makeSession()
+        XCTAssertNil(corrupt.snapshot.heldVoiceTake)
+        XCTAssertEqual(corrupt.snapshot.photos, held.photos)
+        withExtendedLifetime((first, missing)) {}
+    }
+    func testAHeldTakeNeverCrossesToAnotherPrincipal() async throws {
+        let (harness, session) = try await makeSession(.clerk("user_native_intake_held_a"))
+        _ = try await session.commit(.addPhotos([harness.photoInput(seed: 1)]))
+        let held = try await session.commit(.holdVoiceTake(voice("seller a take", duration: 3)))
+        await harness.identity.set(.clerk("user_native_intake_held_b"))
+        let other = try await session.nextSnapshot()
+        assertEmpty(other)
+        XCTAssertNil(other.heldVoiceTake)
+        await harness.identity.set(.clerk("user_native_intake_held_a"))
+        let returned = try await session.nextSnapshot()
+        XCTAssertEqual(returned.heldVoiceTake, held.heldVoiceTake)
+    }
     private func voice(_ text: String, duration: TimeInterval) -> NativeIntake.VoiceInput {
         .init(duration: duration, loadData: { Data(text.utf8) })
     }

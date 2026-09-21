@@ -967,13 +967,14 @@ struct PhotoReviewSubmissionPresentation: Equatable {
     /// Text the button shows while it carries status instead of an action.
     var statusButtonLabel: String? { visibleMessage }
 
-    /// Cancel is a small link under the button only while saving.
-    var cancelLinkLabel: String? {
+    /// Cancel replaces the header's back control only while saving (#1136),
+    /// so the bar under the photos is a single button in every phase.
+    var headerCancelLabel: String? {
         barPhase(savedBeatFinished: false) == .saving ? primaryActionLabel : nil
     }
 
-    var cancelLinkEvent: PhotoReviewBoundaryEvent? {
-        cancelLinkLabel == nil ? nil : primaryActionEvent
+    var headerCancelEvent: PhotoReviewBoundaryEvent? {
+        headerCancelLabel == nil ? nil : primaryActionEvent
     }
 
     let primaryActionLabel: String
