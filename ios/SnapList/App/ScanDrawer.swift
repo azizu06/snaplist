@@ -238,6 +238,7 @@ struct ScanDrawerSurface<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     @State private var dragTranslation: CGFloat = 0
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         // Mounted whether or not the drawer is up, so neither reader is ever
@@ -349,10 +350,18 @@ struct ScanDrawerSurface<Content: View>: View {
             .overlay {
                 // A material rather than a fixed tint: the drawer holds the
                 // black camera and the light Photo Review, and an ink-coloured
-                // grabber disappears against the first.
-                Capsule()
-                    .fill(.regularMaterial)
-                    .frame(width: 36, height: 5)
+                // grabber disappears against the first. With Reduce
+                // Transparency on it falls back to the opaque drag-handle
+                // grey, which still reads against both — the canvas token the
+                // dock falls back to is the card itself under Photo Review.
+                Group {
+                    if reduceTransparency {
+                        Capsule().fill(SnapListColorToken.dragHandle.color)
+                    } else {
+                        Capsule().fill(.regularMaterial)
+                    }
+                }
+                .frame(width: 36, height: 5)
             }
             .gesture(dragGesture(drawerHeight: drawerHeight))
             .accessibilityHidden(true)
