@@ -63,6 +63,25 @@
       ]
     },
     {
+      "id": "local-activation-tour-progress",
+      "releaseDatum": true,
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-local-client",
+          "deletionTriggers": [
+            "account-erasure",
+            "sign-out",
+            "seller-replays-the-tour"
+          ],
+          "maximumRetention": "until sign-out, account erasure, or the seller replaying the tour from Settings; otherwise for as long as the app stays installed for that principal",
+          "executor": "UserDefaultsActivationTourProgressStore.removeAll through settings local cached-data removal for sign-out and account erasure; the store's own clear for a replay",
+          "completionProof": "after sign-out or account erasure no UserDefaults key under snaplist.activation-tour-progress-v1. remains for any principal, and a fresh load for that principal answers an empty tour",
+          "ownerDecision": "Which of the six activation steps the seller has already performed, whether they collapsed or skipped the Scout strip, and whether they have seen its closing line. It is device-only guidance state filed under the Clerk user id or the literal guest, never seller text, photos, titles, or prices, and it exists only so the tour cannot restart or repeat itself across a relaunch. It leaves with the principal because a device handed to someone else must not carry a half-finished tour of someone else's first listing."
+        }
+      ]
+    },
+    {
       "id": "private-storage-photos",
       "releaseDatum": true,
       "dispositions": [{

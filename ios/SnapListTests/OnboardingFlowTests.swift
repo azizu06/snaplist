@@ -190,103 +190,6 @@ final class OnboardingFlowTests: XCTestCase {
         ))
     }
 
-    /// Eight approved spine states plus #1056's two contextual marks, which
-    /// are states so one persisted record covers both kinds but never occupy
-    /// `ActivationGuidanceProgress.state`.
-    func testActivationGuidanceDeclaresTheFullApprovedStateSet() {
-        XCTAssertEqual(
-            ActivationGuidanceState.allCases.map(\.rawValue),
-            [
-                "ACT-01",
-                "ACT-02",
-                "ACT-02B",
-                "ACT-03",
-                "ACT-04",
-                "ACT-05",
-                "ACT-06",
-                "ACT-07",
-                "ACT-08",
-                "ACT-09",
-            ]
-        )
-    }
-
-    func testActivationGuidanceAdvancesOnlyAtItsMatchingSurface() {
-        var progress = ActivationGuidanceProgress()
-
-        XCTAssertEqual(
-            ActivationCoachMark(
-                state: progress.state,
-                surface: .scan
-            ),
-            .act01
-        )
-        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
-        XCTAssertNil(
-            ActivationCoachMark(
-                state: progress.state,
-                surface: .scan
-            )
-        )
-        XCTAssertEqual(
-            ActivationCoachMark(
-                state: progress.state,
-                surface: .photoReview
-            ),
-            .act02
-        )
-    }
-
-    func testActivationGuidanceTraversesEveryApprovedStateAndRecordsCompletion() {
-        var progress = ActivationGuidanceProgress()
-
-        XCTAssertEqual(progress.state, .act01)
-        XCTAssertEqual(progress.recordInterruption(), .advanced)
-        XCTAssertEqual(progress.state, .act06)
-        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
-        XCTAssertEqual(progress.state, .act02)
-        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
-        XCTAssertEqual(progress.state, .act02B)
-        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
-        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-        XCTAssertEqual(progress.advance(for: .acceptedRunHandoff), .advanced)
-        XCTAssertEqual(progress.state, .act03)
-        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
-        XCTAssertEqual(progress.state, .act04)
-        XCTAssertEqual(progress.advance(for: .gotIt), .completionRequested)
-        XCTAssertEqual(progress.state, .act04)
-        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-        XCTAssertTrue(progress.isCompletionPending)
-        XCTAssertEqual(progress.advance(for: .completionRecorded), .completionRecorded)
-        XCTAssertEqual(progress.state, .act05)
-        XCTAssertEqual(progress.advance(for: .recordedInstallLoaded), .completionRecorded)
-        XCTAssertEqual(progress.state, .act07)
-    }
-
-    func testActivationGuidanceAdvancesForUnderlyingActionsWithoutBlocking() {
-        var progress = ActivationGuidanceProgress()
-
-        XCTAssertEqual(progress.advance(for: .capturedFirstPhoto), .advanced)
-        XCTAssertEqual(progress.state, .act02)
-
-        XCTAssertEqual(progress.advance(for: .reorderedPhotos), .advanced)
-        XCTAssertEqual(progress.state, .act02B)
-
-        XCTAssertEqual(progress.advance(for: .openedVoiceNote), .advanced)
-        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-
-        XCTAssertEqual(progress.advance(for: .acceptedRunHandoff), .advanced)
-        XCTAssertEqual(progress.state, .act03)
-
-        XCTAssertEqual(progress.advance(for: .openedProcessing), .advanced)
-        XCTAssertEqual(progress.state, .act04)
-
-        XCTAssertEqual(progress.advance(for: .editedListing), .completionRequested)
-        XCTAssertEqual(progress.state, .act04)
-        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-        XCTAssertTrue(progress.isCompletionPending)
-    }
-
     func testOnlyDurableAcceptedRunHandoffAdvancesProcessingGuidance() {
         let eventID = UUID()
         let handoff = AcceptedItemRunHandoff(
@@ -299,39 +202,26 @@ final class OnboardingFlowTests: XCTestCase {
             )
         )
 
-        XCTAssertNil(
-            ActivationGuidanceSubmissionEventPolicy.action(
-                for: .submissionRejected(eventID: eventID, retention: .rejected)
+        XCTAssertFalse(
+            ActivationGuidanceSubmissionEventPolicy.isItemAccepted(
+                .submissionRejected(eventID: eventID, retention: .rejected)
             )
         )
-        XCTAssertNil(
-            ActivationGuidanceSubmissionEventPolicy.action(
-                for: .destinationHandoff(eventID: eventID, handoff: .pay01)
+        XCTAssertFalse(
+            ActivationGuidanceSubmissionEventPolicy.isItemAccepted(
+                .destinationHandoff(eventID: eventID, handoff: .pay01)
             )
         )
-        XCTAssertNil(
-            ActivationGuidanceSubmissionEventPolicy.action(
-                for: .submissionRejected(eventID: eventID, retention: .ambiguous)
+        XCTAssertFalse(
+            ActivationGuidanceSubmissionEventPolicy.isItemAccepted(
+                .submissionRejected(eventID: eventID, retention: .ambiguous)
             )
         )
-        XCTAssertEqual(
-            ActivationGuidanceSubmissionEventPolicy.action(
-                for: .itemSaved(eventID: eventID, handoff: handoff)
-            ),
-            .acceptedRunHandoff
+        XCTAssertTrue(
+            ActivationGuidanceSubmissionEventPolicy.isItemAccepted(
+                .itemSaved(eventID: eventID, handoff: handoff)
+            )
         )
-    }
-
-    func testActivationGuidanceDoesNotDismissUntilTheSellerTapsGotItOrActsOnTheSurface() {
-        var progress = ActivationGuidanceProgress(state: .act01)
-
-        XCTAssertEqual(progress.advance(for: .openedProcessing), .unchanged)
-        XCTAssertEqual(progress.state, .act01)
-        XCTAssertFalse(progress.hasAcknowledgedCurrentState)
-        XCTAssertFalse(progress.isCompletionPending)
-
-        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
-        XCTAssertEqual(progress.state, .act02)
     }
 
     @MainActor
@@ -532,11 +422,13 @@ final class OnboardingFlowTests: XCTestCase {
 
     @MainActor
     func testActivationCompletionBootstrapResumesInterruptedTenantWriteOnRelaunch() async {
-        var pendingProgress = ActivationGuidanceProgress(state: .act04)
-        XCTAssertEqual(
-            pendingProgress.advance(for: .gotIt),
-            .completionRequested
+        // A tour the seller finished on the last launch, whose tenant
+        // completion write never landed.
+        var pendingProgress = ActivationTourProgress(
+            completedSteps: Set(ActivationTourStep.allCases),
+            hasSeenClosingLine: true
         )
+        XCTAssertTrue(pendingProgress.isCompletionPending)
         var tenantWrites = 0
 
         let result = await ActivationCompletionBootstrapCoordinator.resolve(
@@ -840,194 +732,6 @@ final class OnboardingFlowTests: XCTestCase {
 
         XCTAssertTrue(recorded)
         XCTAssertEqual(writes, 2)
-    }
-
-    func testReducedMotionSelectsAnExplicitStaticAssetForEveryACTState() {
-        let expected: [ActivationGuidanceState: ActivationGuidanceAssetSelection] = [
-            .act01: .staticImage(name: "ActivationScoutACT01"),
-            .act02: .staticImage(name: "ActivationScoutACT02"),
-            .act02B: .staticImage(name: "ActivationScoutACT02B"),
-            .act03: .staticImage(name: "ActivationScoutACT03"),
-            .act04: .staticImage(name: "ActivationScoutACT04"),
-            .act05: .none,
-            .act06: .staticImage(name: "ActivationScoutACT06"),
-            .act07: .none,
-            .act08: .staticImage(name: "ActivationScoutACT03"),
-            .act09: .staticImage(name: "ActivationScoutACT03"),
-        ]
-
-        XCTAssertEqual(Set(expected.keys), Set(ActivationGuidanceState.allCases))
-        for state in ActivationGuidanceState.allCases {
-            XCTAssertEqual(
-                ActivationGuidanceAssetPolicy.selection(
-                    for: state,
-                    reduceMotion: true
-                ),
-                expected[state]
-            )
-        }
-        XCTAssertNotEqual(expected[.act01], expected[.act03])
-        XCTAssertEqual(
-            expected[.act06],
-            .staticImage(name: "ActivationScoutACT06")
-        )
-    }
-
-    func testActivationScoutStaticRenderingSelectsApprovedFallbacks() {
-        let expected: [ActivationGuidanceState: ActivationGuidanceAssetSelection] = [
-            .act01: .staticImage(name: "ActivationScoutACT01"),
-            .act04: .staticImage(name: "ActivationScoutACT04"),
-        ]
-
-        for (state, selection) in expected {
-            XCTAssertEqual(
-                ActivationGuidanceAssetPolicy.selection(
-                    for: state,
-                    reduceMotion: false,
-                    usesStaticRendering: true
-                ),
-                selection
-            )
-            XCTAssertEqual(
-                ActivationGuidanceAssetPolicy.selection(
-                    for: state,
-                    reduceMotion: true,
-                    usesStaticRendering: false
-                ),
-                selection
-            )
-        }
-    }
-
-    func testActivationScoutNormalMotionResolvesApprovedWebMsInTheBundle() throws {
-        let expected: [ActivationGuidanceState: String] = [
-            .act01: "act-01",
-            .act04: "act-04",
-        ]
-
-        for (state, resourceName) in expected {
-            let rendering = ActivationGuidanceAssetPolicy.rendering(
-                for: state,
-                reduceMotion: false,
-                usesStaticRendering: false,
-                bundle: .main
-            )
-            guard case .acceptedWebM(let url) = rendering else {
-                return XCTFail("\(state.rawValue) did not resolve its approved WebM: \(rendering)")
-            }
-            XCTAssertEqual(url.deletingPathExtension().lastPathComponent, resourceName)
-            XCTAssertEqual(url.pathExtension, "webm")
-            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-        }
-    }
-
-    func testActivationScoutMissingWebMFallsBackToApprovedStaticAsset() {
-        let testBundle = Bundle(for: OnboardingFlowTests.self)
-
-        for (state, expectedAsset) in [
-            (ActivationGuidanceState.act01, "ActivationScoutACT01"),
-            (.act04, "ActivationScoutACT04"),
-        ] {
-            XCTAssertEqual(
-                ActivationGuidanceAssetPolicy.rendering(
-                    for: state,
-                    reduceMotion: false,
-                    usesStaticRendering: false,
-                    bundle: testBundle
-                ),
-                .staticFallbackPNG(asset: expectedAsset)
-            )
-        }
-    }
-
-    func testActivationScoutStaticFallbacksResolveAtThreeX() {
-        let traitCollection = UITraitCollection(displayScale: 3)
-
-        for state in [ActivationGuidanceState.act01, .act04] {
-            guard case .staticImage(let assetName) = ActivationGuidanceAssetPolicy.selection(
-                for: state,
-                reduceMotion: true,
-                usesStaticRendering: false
-            ) else {
-                return XCTFail("\(state.rawValue) did not select a static Scout fallback.")
-            }
-            let image = UIImage(
-                named: assetName,
-                in: .main,
-                compatibleWith: traitCollection
-            )
-            XCTAssertNotNil(image, "\(state.rawValue) needs a delivered 3x Scout fallback.")
-            XCTAssertEqual(image?.scale, 3, "\(state.rawValue) must resolve its 3x Scout fallback.")
-        }
-    }
-
-    // Every approved coach mark docks against the one control its line names.
-    // ACT-02B is the only state whose anchor sits above it, so it is the only
-    // state with a top tail; its inset is round 1's 96 plus the 12 points the
-    // downward tail used to occupy, which keeps the bubble body where the
-    // approved composition put it.
-    func testActivationCoachMarkAnchorsEveryApprovedState() {
-        let expected: [ActivationCoachMark: ActivationCoachMarkAnchor] = [
-            .act01: .init(tailEdge: .bottom, bottomInset: 112, tailHorizontalOffset: 0),
-            .act02: .init(tailEdge: .bottom, bottomInset: 24, tailHorizontalOffset: 0),
-            .act02B: .init(tailEdge: .top, bottomInset: 108, tailHorizontalOffset: 0),
-            .act03: .init(tailEdge: .bottom, bottomInset: 24, tailHorizontalOffset: 0),
-            .act04: .init(tailEdge: .bottom, bottomInset: 84, tailHorizontalOffset: 91),
-            .act06: .init(tailEdge: .bottom, bottomInset: 112, tailHorizontalOffset: 0),
-        ]
-
-        for (coachMark, anchor) in expected {
-            XCTAssertEqual(
-                ActivationCoachMarkAnchorPolicy.anchor(
-                    for: coachMark,
-                    reduceMotion: false
-                ),
-                anchor
-            )
-        }
-    }
-
-    // Activation v1.1 draws the Reduced Motion variant as its own composition,
-    // but "the tail carries the anchoring on its own": the still replaces the
-    // Scout clip and nothing about the anchor moves. Both renderings therefore
-    // point ACT-02B up at the Voice note row from the same band.
-    func testActivationCoachMarkAnchorSurvivesReducedMotion() {
-        for coachMark in [
-            ActivationCoachMark.act01,
-            .act02,
-            .act02B,
-            .act03,
-            .act04,
-            .act06,
-        ] {
-            XCTAssertEqual(
-                ActivationCoachMarkAnchorPolicy.anchor(
-                    for: coachMark,
-                    reduceMotion: true
-                ),
-                ActivationCoachMarkAnchorPolicy.anchor(
-                    for: coachMark,
-                    reduceMotion: false
-                ),
-                "\(coachMark) must anchor identically under Reduced Motion"
-            )
-            XCTAssertNotEqual(
-                ActivationGuidanceAssetPolicy.selection(
-                    for: coachMark.state,
-                    reduceMotion: true
-                ),
-                .none,
-                "\(coachMark) must still render a Reduced Motion Scout"
-            )
-        }
-
-        XCTAssertEqual(
-            ActivationCoachMarkAnchorPolicy.anchor(
-                for: .act02B,
-                reduceMotion: true
-            ).tailEdge,
-            .top
-        )
     }
 
     func testFirstValueOnboardingPresentsOnlyForAnIncompleteFirstLaunch() {

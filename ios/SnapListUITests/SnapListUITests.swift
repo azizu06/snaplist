@@ -896,127 +896,6 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
-    /// #963 removed the run-status screen's dedicated "Open review" button, so
-    /// this now reaches Listing Review the way a seller does: tapping the
-    /// ready row's review action in Processing.
-    func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {
-        let reviewAction = "trophy.processing.action.review.37500000-0000-4000-8000-000000000003"
-        let app = launch(extraArguments: [
-            "--fixture=trophy-processing",
-            "--activation-onboarded-fixture",
-            "--reset-activation-guidance",
-            "--run-detail-fixture=reviewable",
-            "--activation-guidance-step=listingReview",
-            "--listing-review-fixture=loaded"
-        ])
-
-        XCTAssertTrue(app.buttons[reviewAction].waitForExistence(timeout: 3))
-        app.buttons[reviewAction].tap()
-        XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
-        app.buttons["activation-guidance.got-it"].tap()
-        XCTAssertFalse(activationGuidance(in: app).exists)
-
-        app.terminate()
-        app.launchArguments = [
-            "--zero-network-fixtures",
-            "--fixture=trophy-processing",
-            "--activation-onboarded-fixture",
-            "--run-detail-fixture=reviewable",
-            "--listing-review-fixture=loaded"
-        ]
-        app.launch()
-
-        XCTAssertTrue(app.buttons[reviewAction].waitForExistence(timeout: 3))
-        app.buttons[reviewAction].tap()
-        XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
-    }
-
-    func testActivationOnlyPerStepGotItDismissesTheCoachMark() {
-        let fixtures: [(name: String, arguments: [String], opensReview: Bool)] = [
-            (
-                name: "ACT-01-normal",
-                arguments: [
-                    "--activation-onboarded-fixture",
-                    "--reset-activation-guidance"
-                ],
-                opensReview: false
-            ),
-            (
-                name: "ACT-01-reduced-motion",
-                arguments: [
-                    "--activation-onboarded-fixture",
-                    "--reset-activation-guidance",
-                    "--reduced-motion"
-                ],
-                opensReview: false
-            ),
-            (
-                name: "ACT-04-normal",
-                arguments: [
-                    "--fixture=trophy-processing",
-                    "--activation-onboarded-fixture",
-                    "--reset-activation-guidance",
-                    "--run-detail-fixture=reviewable",
-                    "--activation-guidance-step=listingReview",
-                    "--listing-review-fixture=loaded"
-                ],
-                opensReview: true
-            ),
-            (
-                name: "ACT-04-reduced-motion",
-                arguments: [
-                    "--fixture=trophy-processing",
-                    "--activation-onboarded-fixture",
-                    "--reset-activation-guidance",
-                    "--run-detail-fixture=reviewable",
-                    "--activation-guidance-step=listingReview",
-                    "--listing-review-fixture=loaded",
-                    "--reduced-motion"
-                ],
-                opensReview: true
-            )
-        ]
-
-        // #963 removed the run-status screen's dedicated "Open review" button;
-        // the ACT-04 cases now reach Listing Review through the ready row's
-        // Processing review action, the way a seller does.
-        let reviewAction = "trophy.processing.action.review.37500000-0000-4000-8000-000000000003"
-        for fixture in fixtures {
-            let app = launch(extraArguments: fixture.arguments)
-            if fixture.opensReview {
-                XCTAssertTrue(app.buttons[reviewAction].waitForExistence(timeout: 3))
-                app.buttons[reviewAction].tap()
-            }
-
-            let guidance = activationGuidance(in: app)
-            XCTAssertTrue(guidance.waitForExistence(timeout: 3))
-            XCTAssertEqual(
-                guidance.label,
-                fixture.opensReview
-                    ? "Guidance. Every field here is yours to change."
-                    : "Guidance. One item, up to five photos."
-            )
-            XCTAssertEqual(guidance.buttons.count, 1)
-
-            let gotIt = app.buttons["activation-guidance.got-it"]
-            XCTAssertTrue(gotIt.exists)
-            XCTAssertEqual(gotIt.label, "Got it")
-            XCTAssertGreaterThanOrEqual(gotIt.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(gotIt.frame.height, 44)
-
-            addScreenshot(named: "activation-\(fixture.name).png")
-
-            guidance.swipeDown()
-            XCTAssertTrue(guidance.waitForExistence(timeout: 1))
-
-            gotIt.tap()
-            if !fixture.opensReview {
-                XCTAssertFalse(guidance.waitForExistence(timeout: 2))
-            }
-            app.terminate()
-        }
-    }
-
     /// Scan opens directly into the camera preview (#864): there is no more
     /// launcher sheet standing between the tab and `ScanCameraView`, so its own
     /// camera-unavailable recovery state is reached by launching straight into
@@ -2385,16 +2264,15 @@ final class SnapListUITests: XCTestCase {
     /// selected, but that is the state its user left it in, and defaulting to
     /// the ultra wide would silently rewiden every seller's framing.
     func testIssue885ZoomControlSwitchesToTheUltraWideWhenTheHardwareHasOne() {
-        // Park activation guidance on another surface. Left to whatever the
-        // preceding tests persisted, the ACT-01 coach mark docks over this band
-        // and takes the chip's taps, which is a real collision this issue found
-        // and did not fix. Pinning the state keeps this test measuring the zoom
-        // control rather than that overlap.
+        // Silence activation guidance. Left to whatever the preceding tests
+        // persisted, its strip docks over this band, which is a real collision
+        // this issue found and did not fix. Pinning the state keeps this test
+        // measuring the zoom control rather than that overlap.
         let app = launch(
             extraArguments: [
                 "--visual-state=CAM-01",
                 "--scan-zoom=dual-wide",
-                "--activation-guidance-step=listingReview",
+                "--activation-guidance-step=skipped",
             ]
         )
         let zoom = app.otherElements["scan.zoom"]
@@ -2470,19 +2348,19 @@ final class SnapListUITests: XCTestCase {
     }
 
     /// #914. #885 added a zoom row above the shutter row on hardware with an
-    /// ultra wide, and the ACT-01 coach mark's approved 112pt inset never
+    /// ultra wide, and the tour strip's 112pt Scan inset never
     /// accounted for it, so the bubble docked over the row and took its taps.
     /// `isHittable` has lied on this codebase before, so this asserts the two
     /// frames directly: a bubble that merely abuts the chips without covering
     /// them is fine, one that overlaps them by even a point is the defect.
     ///
-    /// `--activation-onboarded-fixture` is what actually makes ACT-01
+    /// `--activation-onboarded-fixture` is what actually makes the tour
     /// eligible to bootstrap under a `--visual-state` launch: it plants
     /// onboarding on `.captureBoundary`, the one screen
     /// `FirstValueActivationEligibilityPolicy` treats as already onboarded
     /// regardless of shell routing. Without it the coach mark never
     /// bootstraps on CAM-01, so this cannot reduce to `isHittable` alone.
-    func testIssue914ActivationGuidanceBubbleDoesNotCoverTheZoomChips() {
+    func testIssue914ActivationGuidanceStripDoesNotCoverTheZoomChips() {
         let app = launch(extraArguments: [
             "--visual-state=CAM-01",
             "--scan-zoom=dual-wide",
@@ -2490,7 +2368,7 @@ final class SnapListUITests: XCTestCase {
             "--reset-activation-guidance",
         ])
 
-        let guidance = activationGuidance(in: app)
+        let guidance = activationStrip(in: app)
         let ultraWide = app.buttons["scan.zoom.ultra-wide"]
         let wide = app.buttons["scan.zoom.wide"]
 
@@ -2510,7 +2388,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter().wait(for: [reachable], timeout: 5),
             .completed,
-            "The 0.5x chip must be hittable while ACT-01 is presented. \(receipt)"
+            "The 0.5x chip must be hittable while the tour is showing. \(receipt)"
         )
     }
 
@@ -2524,7 +2402,7 @@ final class SnapListUITests: XCTestCase {
     /// present and competing for the same vertical space.
     ///
     /// Activation guidance is parked on another surface on purpose. Left where
-    /// the preceding tests put it, the ACT-01 coach mark docks over this band
+    /// the preceding tests put it, the tour strip docks over this band
     /// and takes the zoom control's taps, which is a real defect this issue
     /// found and did not fix. Pinning it means this test measures reach at AX5,
     /// which #885 owns, rather than that overlap, which belongs to #914. So
@@ -2535,7 +2413,7 @@ final class SnapListUITests: XCTestCase {
             "--visual-state=CAM-04",
             "--scan-zoom=dual-wide",
             "--dynamic-type=accessibility5",
-            "--activation-guidance-step=listingReview"
+            "--activation-guidance-step=skipped"
         ])
         let window = app.windows.firstMatch
         let flash = app.buttons["scan.flash"]
@@ -2618,15 +2496,15 @@ final class SnapListUITests: XCTestCase {
     ///
     /// Activation guidance is parked on another surface for the same reason
     /// `testIssue885EveryMovedScanControlKeepsA44ptTargetAtAX5` parks it: the
-    /// ACT-01 coach mark docks over this band, and letting it fail here would
-    /// be failing for #914 rather than for this contract.
+    /// tour strip docks over this band, and letting it fail here would be
+    /// failing for #914 rather than for this contract.
     func testIssue954StagedScanControlsFitThreeRowsAtEveryDynamicTypeSize() {
         for typeSize in ["xSmall", "medium", "accessibility3", "accessibility5"] {
             let app = launch(extraArguments: [
                 "--visual-state=CAM-04",
                 "--scan-zoom=dual-wide",
                 "--dynamic-type=\(typeSize)",
-                "--activation-guidance-step=listingReview",
+                "--activation-guidance-step=skipped",
             ])
             let window = app.windows.firstMatch
             XCTAssertTrue(window.waitForExistence(timeout: 3), app.debugDescription)
@@ -4029,7 +3907,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["first-value-onboarding.start-scanning"].exists)
     }
 
-    func testActualOnboardingCaptureEntryPresentsACT01BeforeCameraOrLibrary() {
+    func testActualOnboardingCaptureEntryPresentsTheTourBeforeCameraOrLibrary() {
         let app = launchFirstValueOnboarding(
             resetProgress: true,
             extraArguments: ["--reset-activation-guidance"]
@@ -4043,8 +3921,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.otherElements["onboarding.state.ONB-07"].exists)
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
-        XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["One item, up to five photos."].exists)
+        XCTAssertTrue(activationStrip(in: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts["Snap up to five photos."].exists,
+            app.debugDescription
+        )
 
         let liveLibrary = app.buttons["scan.library"]
         let recoveryLibrary = app.buttons["scan.choose-library"]
@@ -4053,7 +3934,7 @@ final class SnapListUITests: XCTestCase {
                 || recoveryLibrary.waitForExistence(timeout: 2),
             app.debugDescription
         )
-        XCTAssertTrue(activationGuidance(in: app).exists)
+        XCTAssertTrue(activationStrip(in: app).exists)
     }
 
     func testFirstValueOnboardingPresentsOnceInOrder() {
@@ -4811,6 +4692,229 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(review.isEnabled, reason, file: file, line: line)
     }
 
+    // MARK: - Activation tour (#1133)
+
+    /// One screenshot per step, plus the collapsed bubble, the closing line,
+    /// Reduced Motion and AX3. Each case names the line the strip is supposed
+    /// to be showing, so a fixture that renders the wrong step fails here
+    /// rather than producing a quietly wrong screenshot.
+    func testActivationTourRendersEveryStepOnItsOwnSurface() {
+        struct Step {
+            let name: String
+            let arguments: [String]
+            let line: String
+            var opensReview = false
+            /// The publish row sits below the fold on Listing Review, so the
+            /// screenshot for step six has to bring it into view first.
+            var scrollsToPublish = false
+        }
+
+        let reviewAction =
+            "trophy.processing.action.review.37500000-0000-4000-8000-000000000003"
+        let listingReview = [
+            "--fixture=trophy-processing",
+            "--run-detail-fixture=reviewable",
+            "--listing-review-fixture=loaded"
+        ]
+        let steps: [Step] = [
+            Step(
+                name: "step-1-open-scan",
+                arguments: ["--fixture=trophy-wall"],
+                line: "Tap the camera to start a listing."
+            ),
+            Step(
+                // CAM-01 is the camera surface the simulator can actually
+                // render, so the shutter — and therefore its halo — is on
+                // screen rather than the camera-unavailable recovery state.
+                name: "step-2-take-photo",
+                arguments: ["--visual-state=CAM-01"],
+                line: "Snap up to five photos."
+            ),
+            Step(
+                name: "step-3-start-listing",
+                arguments: [
+                    "--photo-review-state=REV-02",
+                    "--activation-guidance-step=startListing"
+                ],
+                line: "Add a voice note, then start."
+            ),
+            Step(
+                name: "step-4-open-ready-item",
+                arguments: [
+                    "--fixture=trophy-wall",
+                    "--activation-guidance-step=openReadyItem"
+                ],
+                line: "Tap Review when it's ready."
+            ),
+            Step(
+                name: "step-5-review-price",
+                arguments: listingReview + [
+                    "--activation-guidance-step=reviewPriceAndDetails"
+                ],
+                line: "Check the price and details.",
+                opensReview: true
+            ),
+            Step(
+                name: "step-6-publish-or-share",
+                arguments: listingReview + [
+                    "--activation-guidance-step=publishOrShare"
+                ],
+                line: "Publish to eBay, or share it.",
+                opensReview: true,
+                scrollsToPublish: true
+            ),
+            Step(
+                name: "step-2-reduced-motion",
+                arguments: ["--visual-state=CAM-01", "--reduced-motion"],
+                line: "Snap up to five photos."
+            ),
+            Step(
+                name: "step-2-dynamic-type-ax3",
+                arguments: [
+                    "--visual-state=CAM-01",
+                    "--dynamic-type=accessibility3"
+                ],
+                line: "Snap up to five photos."
+            )
+        ]
+
+        var heights: [String: CGFloat] = [:]
+        for step in steps {
+            let app = launch(extraArguments: [
+                "--activation-onboarded-fixture",
+                "--reset-activation-guidance"
+            ] + step.arguments)
+
+            if step.opensReview {
+                XCTAssertTrue(
+                    app.buttons[reviewAction].waitForExistence(timeout: 5),
+                    "\(step.name): \(app.debugDescription)"
+                )
+                app.buttons[reviewAction].tap()
+            }
+            if step.scrollsToPublish {
+                let publish = app.descendants(matching: .any)[
+                    "listing-review.ebay-publish"
+                ]
+                XCTAssertTrue(
+                    publish.waitForExistence(timeout: 5),
+                    "\(step.name): \(app.debugDescription)"
+                )
+                while !publish.isHittable {
+                    app.descendants(matching: .any)["listing-review"]
+                        .swipeUp(velocity: .slow)
+                }
+            }
+
+            let strip = activationStrip(in: app)
+            XCTAssertTrue(
+                strip.waitForExistence(timeout: 5),
+                "\(step.name): \(app.debugDescription)"
+            )
+            XCTAssertTrue(
+                app.staticTexts[step.line].waitForExistence(timeout: 3),
+                "\(step.name) should be showing \(step.line)"
+            )
+            // Nothing is dimmed and nothing is blocked: the tour offers one
+            // control of its own at most, never a Got it that gates the step.
+            XCTAssertFalse(
+                app.buttons["activation-guidance.got-it"].exists,
+                "\(step.name) must not offer a Next-shaped dismissal"
+            )
+
+            // The strip is the height option E specifies, with Scout hanging
+            // off its leading edge rather than being clipped into it.
+            XCTAssertGreaterThanOrEqual(strip.frame.height, 64, step.name)
+            XCTAssertLessThanOrEqual(strip.frame.height, 200, step.name)
+            heights[step.name] = strip.frame.height
+
+            addScreenshot(named: "activation-tour-\(step.name).png")
+            app.terminate()
+        }
+
+        // The strip's copy is Dynamic Type, not a fixed point size: at AX3 the
+        // same step has to be taller than it is at the default size, or the
+        // line is being drawn at 13pt to an accessibility reader.
+        XCTAssertGreaterThan(
+            heights["step-2-dynamic-type-ax3"] ?? 0,
+            (heights["step-2-take-photo"] ?? 0) + 8,
+            "AX3 must grow the strip: \(heights)"
+        )
+    }
+
+    /// Skip is offered on step one only; from step two the chevron folds the
+    /// strip down to Scout, and that choice survives a relaunch.
+    func testActivationTourOffersSkipOnStepOneAndCollapsesAfterwards() {
+        let first = launch(extraArguments: [
+            "--fixture=trophy-wall",
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance"
+        ])
+        XCTAssertTrue(
+            activationStrip(in: first).waitForExistence(timeout: 5),
+            first.debugDescription
+        )
+        XCTAssertTrue(first.buttons["activation-tour.skip"].exists)
+        XCTAssertFalse(first.buttons["activation-tour.collapse"].exists)
+        first.terminate()
+
+        let second = launch(extraArguments: [
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance"
+        ])
+        let collapse = second.buttons["activation-tour.collapse"]
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5), second.debugDescription)
+        XCTAssertFalse(second.buttons["activation-tour.skip"].exists)
+
+        collapse.tap()
+        let bubble = second.buttons["activation-tour.collapsed"]
+        XCTAssertTrue(bubble.waitForExistence(timeout: 3), second.debugDescription)
+        XCTAssertFalse(activationStrip(in: second).exists)
+        addScreenshot(named: "activation-tour-collapsed-bubble.png")
+
+        // The seller's choice is persisted, not per-launch state.
+        second.terminate()
+        second.launchArguments = [
+            "--fixture=scan",
+            "--zero-network-fixtures",
+            "--activation-onboarded-fixture"
+        ]
+        second.launch()
+        XCTAssertTrue(
+            second.buttons["activation-tour.collapsed"].waitForExistence(timeout: 5),
+            second.debugDescription
+        )
+        XCTAssertFalse(activationStrip(in: second).exists)
+    }
+
+    /// The tour ends itself: one closing line after every step has been done,
+    /// and then nothing, on this launch or any later one.
+    func testActivationTourEndsWithOneLineAndNeverComesBack() {
+        let app = launch(extraArguments: [
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance",
+            "--activation-guidance-step=finished"
+        ])
+
+        let closing = app.descendants(matching: .any)["activation-tour.closing-line"]
+        XCTAssertTrue(closing.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(activationStrip(in: app).exists)
+        addScreenshot(named: "activation-tour-closing-line.png")
+
+        app.terminate()
+        app.launchArguments = [
+            "--fixture=scan",
+            "--zero-network-fixtures",
+            "--activation-onboarded-fixture"
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 5))
+        XCTAssertFalse(activationStrip(in: app).waitForExistence(timeout: 2))
+        XCTAssertFalse(
+            app.descendants(matching: .any)["activation-tour.closing-line"].exists
+        )
+    }
+
     private func launch(
         extraArguments: [String] = [],
         orientation: UIDeviceOrientation = .portrait
@@ -4839,8 +4943,10 @@ final class SnapListUITests: XCTestCase {
         return app
     }
 
-    private func activationGuidance(in app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any)["activation-guidance"]
+    /// The activation tour's strip. #1133 replaced the `activation-guidance`
+    /// coach mark with it; the identifier changed with the composition.
+    private func activationStrip(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)["activation-tour.strip"]
     }
 
     private func assertPhotoReviewThumbnailCatalog(

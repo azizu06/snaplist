@@ -19,6 +19,9 @@ struct SettingsView: View {
     private let analyticsClient: any AnalyticsClient
     private let ebayPublishService: any EbayPublishFeatureServing
     private let navigate: (AppRoute) -> Void
+    /// #1133. Puts the activation tour back at step one. Owned by the shell,
+    /// which knows whose record it is.
+    private let replayActivationTour: () -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -43,6 +46,7 @@ struct SettingsView: View {
         analyticsClient: any AnalyticsClient,
         ebayPublishService: any EbayPublishFeatureServing,
         navigate: @escaping (AppRoute) -> Void,
+        replayActivationTour: @escaping () -> Void = {},
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false,
@@ -61,6 +65,7 @@ struct SettingsView: View {
         self.analyticsClient = analyticsClient
         self.ebayPublishService = ebayPublishService
         self.navigate = navigate
+        self.replayActivationTour = replayActivationTour
         _hasLocalData = State(initialValue: hasLocalData)
         _analyticsConsentState = State(
             initialValue: SettingsAnalyticsConsentState(
@@ -156,14 +161,12 @@ struct SettingsView: View {
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("settings.selling.marketplaces")
                             .accessibilityHint("Opens your connected eBay account")
-                            .activationSpotlightTarget(.settingsMarketplaces)
                         } else {
                             valueRow(
                                 "Connected marketplaces",
                                 sellingPresentation.marketplaceValue
                             )
                             .accessibilityIdentifier("settings.selling.marketplaces")
-                            .activationSpotlightTarget(.settingsMarketplaces)
                         }
                     }
                     settingsCardDivider
@@ -189,6 +192,41 @@ struct SettingsView: View {
                     deletionOutstanding: deletionOutstanding
                 ).isVisible {
                     subscriptionSection
+                }
+
+                settingsSectionHeader("GUIDE")
+                settingsCard {
+                    settingsCardRow {
+                        Button {
+                            replayActivationTour()
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 0) {
+                                Text("Replay the tour")
+                                    .snapListTypography(.rowTitle)
+                                    .foregroundStyle(
+                                        SnapListColorToken.inkPrimary.color
+                                    )
+                                Spacer(minLength: 12)
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(
+                                        SnapListColorToken.textTertiary.color
+                                    )
+                            }
+                            .frame(
+                                maxWidth: .infinity,
+                                maxHeight: .infinity,
+                                alignment: .leading
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.guide.replay-tour")
+                        .accessibilityHint(
+                            "Starts Scout's six-step guide again from the beginning."
+                        )
+                    }
                 }
 
                 settingsSectionHeader("PRIVACY")

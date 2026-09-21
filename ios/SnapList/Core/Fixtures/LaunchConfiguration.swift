@@ -347,7 +347,10 @@ struct LaunchConfiguration: Equatable {
     var resetOnboardingProgress: Bool
     var activationOnboardedFixture: Bool
     var resetActivationGuidance: Bool
-    var activationGuidanceFixtureState: ActivationGuidanceState?
+    /// `--activation-guidance-step=<name>` renders one step of the activation
+    /// tour, plus its collapsed, skipped, and finished shapes, so every state
+    /// can be screenshotted without walking the flow.
+    var activationTourFixture: ActivationTourProgress?
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
     /// Clears any real staged capture draft (`LocalCaptureDraftStore`'s
@@ -398,7 +401,7 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         activationOnboardedFixture: false,
         resetActivationGuidance: false,
-        activationGuidanceFixtureState: nil,
+        activationTourFixture: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         resetCaptureDraft: false,
@@ -433,7 +436,7 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         activationOnboardedFixture: false,
         resetActivationGuidance: false,
-        activationGuidanceFixtureState: nil,
+        activationTourFixture: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         resetCaptureDraft: false,
@@ -479,8 +482,8 @@ struct LaunchConfiguration: Equatable {
                 let value = String(
                     argument.dropFirst("--activation-guidance-step=".count)
                 )
-                configuration.activationGuidanceFixtureState =
-                    ActivationGuidanceState(fixtureValue: value)
+                configuration.activationTourFixture =
+                    ActivationTourProgress(fixtureValue: value)
                 configuration.usesZeroNetworkFixtures = true
             } else if argument.hasPrefix("--fixture-staged-library-photos=") {
                 let value = String(

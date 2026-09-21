@@ -3639,9 +3639,6 @@ struct PhotoReviewView: View {
                                         voiceRow(openBoundary)
                                             .frame(width: contentWidth)
                                             .photoReviewLayoutLandmark(.voiceNote)
-                                            .activationSpotlightTarget(
-                                                .photoReviewVoiceNote
-                                            )
                                         Spacer(minLength: 0)
                                     }
                                     .padding(
@@ -4305,7 +4302,6 @@ struct PhotoReviewView: View {
                 thumbnailStripViewportWidth = width
             }
             .photoReviewLayoutLandmark(.thumbnailStrip)
-            .activationSpotlightTarget(.photoReviewThumbnailStrip)
         }
     }
 
@@ -4805,6 +4801,7 @@ struct PhotoReviewView: View {
             startListingControl(openBoundary, phase: phase)
                 .frame(width: contentWidth)
                 .photoReviewLayoutLandmark(.startListing)
+                .activationSpotlightTarget(.photoReviewStartListing)
 
             // #1126: the Cancel link's slot is reserved through saving, the saved
             // beat and Done, so the bar never changes height between them.

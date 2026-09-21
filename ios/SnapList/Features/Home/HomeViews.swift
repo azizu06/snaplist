@@ -72,10 +72,6 @@ struct TrophyWallView: View {
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .accessibilityLabel("Processing")
                 .accessibilityIdentifier("trophy.wall.processing")
-                .activationSpotlightTarget(
-                    .trophyWallProcessing,
-                    action: openProcessing
-                )
 
                 Button(action: openAccount) {
                     Text(accountInitials)
@@ -234,6 +230,13 @@ struct TrophyWallView: View {
                                 tile: tile,
                                 openListing: openListing,
                                 namespace: namespace
+                            )
+                            // #1133: "open a ready item" points at the first
+                            // one on the wall, not at every tile.
+                            .activationSpotlightTarget(
+                                tile.id == store.settledTiles.first?.id
+                                    ? .trophyWallReadyItem
+                                    : nil
                             )
                         }
                     }

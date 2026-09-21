@@ -99,6 +99,7 @@ describe("lean-MVP release retention contract", () => {
       "local-intake-voice",
       "local-trophy-wall-cover-photos",
       "local-assisted-export-guide-progress",
+      "local-activation-tour-progress",
       "private-storage-photos",
       "ebay-photo-access-tokens",
       "private-storage-raw-voice",

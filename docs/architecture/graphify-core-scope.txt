@@ -62,9 +62,10 @@ ios/SnapList/Core/Subscriptions/SubscriptionStore.swift
 ios/SnapList/DesignSystem/FoundationPrimitives.swift
 ios/SnapList/DesignSystem/SnapListPageDots.swift
 ios/SnapList/DesignSystem/SnapListTokens.swift
-ios/SnapList/Features/ActivationGuidance/ActivationGuidanceCoachMark.swift
 ios/SnapList/Features/ActivationGuidance/ActivationGuidanceDomain.swift
 ios/SnapList/Features/ActivationGuidance/ActivationGuidanceSpotlight.swift
+ios/SnapList/Features/ActivationGuidance/ActivationGuidanceStrip.swift
+ios/SnapList/Features/ActivationGuidance/ActivationTourDomain.swift
 ios/SnapList/Features/AssistedExport/AssistedExportClient.swift
 ios/SnapList/Features/AssistedExport/AssistedExportDeviceActions.swift
 ios/SnapList/Features/AssistedExport/AssistedExportDomain.swift

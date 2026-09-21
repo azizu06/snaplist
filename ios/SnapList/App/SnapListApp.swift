@@ -157,6 +157,9 @@ struct SnapListApp: App {
             for key in UserDefaults.standard.dictionaryRepresentation().keys
             where key.hasPrefix("snaplist.activation-guidance-completed-v1.")
                 || key.hasPrefix("snaplist.activation-guidance-progress-v1.")
+                || key.hasPrefix(
+                    UserDefaultsActivationTourProgressStore.keyPrefix
+                )
                 || key == "snaplist.fixture-activation-guidance-completed" {
                 UserDefaults.standard.removeObject(forKey: key)
             }

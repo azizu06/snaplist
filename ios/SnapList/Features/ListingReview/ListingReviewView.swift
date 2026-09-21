@@ -34,6 +34,11 @@ struct ListingReviewView: View {
     let goToTrophyWall: () -> Void
     let startNewItem: () -> Void
     var activationInteraction: () -> Void = {}
+    /// #1133. The seller reached a delivery path — the eBay publish journey or
+    /// the share pack — which is the last thing the activation tour can observe
+    /// from this screen. It says the seller got there, never that anything was
+    /// published.
+    var activationReachedDelivery: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -186,6 +191,14 @@ struct ListingReviewView: View {
             guard previous != nil, current == nil else { return }
             focusedElement = returnFocus
         }
+        .onChange(of: destination) { _, current in
+            // #1133: the seller opened a delivery path. Reported here rather
+            // than at each button so both routes say the same thing.
+            switch current {
+            case .ebayPublish, .assistedExport: activationReachedDelivery()
+            case .specifics, .sold, .correction, nil: break
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding is a form of leaving the screen too: whatever is
             // sitting in a field must reach the server before iOS can
@@ -269,10 +282,6 @@ struct ListingReviewView: View {
             }
             .padding(.top, 9)
         }
-        // #1056. ACT-04's line names every field rather than one control, so
-        // the editable body is the spotlight's hole: the back button and the
-        // dock stay behind the scrim, the fields stay usable.
-        .activationSpotlightTarget(.listingReviewForm)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
                 .background(SnapListColorToken.canvas.color)
@@ -438,6 +447,7 @@ struct ListingReviewView: View {
                 )
                 .accessibilityIdentifier("listing-review.price")
         }
+        .activationSpotlightTarget(.listingReviewPrice)
         .overlay {
             if priceInvalid {
                 RoundedRectangle(cornerRadius: 12)
@@ -768,6 +778,7 @@ struct ListingReviewView: View {
         )
         .accessibilityFocused($focusedElement, equals: .ebayPublish)
         .accessibilityIdentifier("listing-review.ebay-publish")
+        .activationSpotlightTarget(.listingReviewPublish)
     }
 
     private var footer: some View {
