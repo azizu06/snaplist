@@ -1421,6 +1421,12 @@ final class CaptureFlowModel {
     private var activeIntakeID: UUID?
     private var activeIntakeActivationID: UUID?
     private var resumeAfterBackground = false
+    /// The start that owns the camera. Each `startCamera()` claims it and
+    /// `cancelCamera()` clears it. A start still waiting on camera permission
+    /// or on the session checks it on the way back, so a cancel that lands
+    /// mid-start (the Scan drawer pulled down, #1129) leaves the camera off
+    /// rather than being overwritten when the start finishes.
+    private var currentCameraStart: UUID?
     private var pendingPhotoLimitAnnouncement: String?
     private var intakeEventTask: Task<Void, Never>?
     private var snapshotWaiters: [SnapshotWaiter] = []
@@ -1640,10 +1646,13 @@ final class CaptureFlowModel {
             return
         }
 
+        let cameraStart = UUID()
+        currentCameraStart = cameraStart
         phase = .requestingPermission
         var authorization = camera.authorizationStatus()
         if authorization == .notDetermined {
             authorization = await camera.requestAuthorization()
+            guard currentCameraStart == cameraStart else { return }
         }
 
         switch authorization {
@@ -1668,10 +1677,22 @@ final class CaptureFlowModel {
                     await self?.process(frame: frame)
                 }
             }
+            guard currentCameraStart == cameraStart else {
+                // The camera's `start` leaves the main actor before it reaches
+                // the session, so a cancel in that gap stops the session before
+                // this start turns it on. This start is done now, so a stop
+                // issued here lands after it. A newer start owns the camera if
+                // there is one, and is left alone.
+                if currentCameraStart == nil {
+                    camera.stop()
+                }
+                return
+            }
             phase = .camera
             resumeAfterBackground = true
             recordScanStartedIfNeeded()
         } catch {
+            guard currentCameraStart == cameraStart else { return }
             phase = .unavailable
         }
     }
@@ -2144,6 +2165,7 @@ final class CaptureFlowModel {
     }
 
     func cancelCamera() {
+        currentCameraStart = nil
         activeIntakeID = nil
         activeCaptureID = nil
         activeIntakeActivationID = nil

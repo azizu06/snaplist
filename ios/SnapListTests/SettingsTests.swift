@@ -56,9 +56,9 @@ final class SettingsTests: XCTestCase {
 
         router.navigate(to: .settings)
 
-        XCTAssertEqual(router.selectedTab, .trophyWall)
+        XCTAssertFalse(router.isScanPresented)
         XCTAssertEqual(
-            router.pathBinding(for: .trophyWall).wrappedValue,
+            router.pathBinding.wrappedValue,
             [.settings]
         )
         XCTAssertEqual(FoundationFixture.account.initialTab, .trophyWall)

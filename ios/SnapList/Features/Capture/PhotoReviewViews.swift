@@ -2268,15 +2268,20 @@ struct PhotoReviewFixtureView: View {
     private let forceReducedMotion: Bool
     private let saveFailure: PhotoReviewSaveFailure?
     private let onLayoutObservation: ((PhotoReviewLayoutObservation) -> Void)?
+    private let completeSavedSubmission: (() -> Void)?
     private let projectsFixtureOrder: Bool
     private let projectsLayoutProbe: Bool
 
+    /// `completeSavedSubmission` is Done's exit. The shell passes the same
+    /// drop-to-Trophy-Wall it runs for a live submission, so a Done fixture
+    /// ends where a real Done does; without one, Done resets in place.
     init(
         state: PhotoReviewVisualStateID,
         forceReducedMotion: Bool = false,
         submissionPresentation: PhotoReviewSubmissionPresentation = .idle,
         onLayoutObservation:
-            ((PhotoReviewLayoutObservation) -> Void)? = nil
+            ((PhotoReviewLayoutObservation) -> Void)? = nil,
+        completeSavedSubmission: (() -> Void)? = nil
     ) {
         let photos = Self.photos(for: state)
         let store = PhotoReviewStore(photos: photos)
@@ -2296,6 +2301,7 @@ struct PhotoReviewFixtureView: View {
         saveFailure = state.saveFailure
         _submissionPresentation = State(initialValue: submissionPresentation)
         self.onLayoutObservation = onLayoutObservation
+        self.completeSavedSubmission = completeSavedSubmission
         projectsFixtureOrder = ProcessInfo.processInfo.arguments.contains(
             "--photo-review-fixture-order-probe"
         )
@@ -2350,6 +2356,7 @@ struct PhotoReviewFixtureView: View {
             submissionPresentation = .visualState(.cancelled)
         case .completeSavedSubmission:
             submissionPresentation = .idle
+            completeSavedSubmission?()
         case .startListing, .retryAmbiguousSubmission,
              .retryReceiptMismatch:
             submissionPresentation = .visualState(.saving)
@@ -3226,7 +3233,8 @@ enum PhotoReviewBackCoordinator {
     static func perform(
         session: PhotoReviewLiveSession,
         captureFlow: CaptureFlowModel,
-        host: PhotoReviewLiveHost
+        host: PhotoReviewLiveHost,
+        router: AppRouter
     ) async -> PhotoReviewBackOutcome {
         let request = session.scanReturn()
         guard let focus = await captureFlow.applyPhotoReviewScanReturn(
@@ -3236,7 +3244,7 @@ enum PhotoReviewBackCoordinator {
             return .persistenceRejected
         }
 
-        await captureFlow.startCamera()
+        await captureFlow.startCameraIfDrawerIsUp(in: router)
         guard host.completeReturnToScan(from: session) else {
             return .sessionChanged
         }

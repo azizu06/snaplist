@@ -43,6 +43,13 @@ struct TrophyWallView: View {
     /// zoom transition source matches the namespace the pushed screen zooms
     /// into. Owned by the shell, threaded through unchanged.
     let namespace: Namespace.ID
+    /// #1129: incremented by the shell when a completed submission puts the
+    /// seller back on the wall, so the grid returns to the top where the
+    /// newest work is instead of wherever they had scrolled to before.
+    var scrollToTopToken: Int = 0
+
+    /// The zero-height marker the scroll-to-top request targets.
+    private static let topAnchorID = "trophy.wall.top"
 
     @ScaledMetric(relativeTo: .title) private var titleSize = 28
     @Environment(\.dockScrollScale) private var dockScrollScale
@@ -206,46 +213,62 @@ struct TrophyWallView: View {
         }
 
         if presentation.showsGrid {
-            ScrollView {
-                ZStack(alignment: .top) {
-                    if #unavailable(iOS 18) {
-                        // iOS 17 fallback for `onScrollGeometryChange`: a
-                        // zero-height marker anchored to the content's top
-                        // reports its own drift, in the ScrollView's own
-                        // (non-scrolling) coordinate space, as the seller
-                        // scrolls the content past it.
-                        GeometryReader { geometry in
-                            Color.clear.preference(
-                                key: TrophyWallDockScrollOffsetKey.self,
-                                value: geometry.frame(
-                                    in: .named(TrophyWallDockScrollCoordinateSpace.name)
-                                ).minY
-                            )
+            ScrollViewReader { proxy in
+                ScrollView {
+                    ZStack(alignment: .top) {
+                        // The scroll-to-top target. Zero height, so it costs the
+                        // layout nothing and cannot be mistaken for content.
+                        Color.clear
+                            .frame(height: 0)
+                            .id(Self.topAnchorID)
+                        if #unavailable(iOS 18) {
+                            // iOS 17 fallback for `onScrollGeometryChange`: a
+                            // zero-height marker anchored to the content's top
+                            // reports its own drift, in the ScrollView's own
+                            // (non-scrolling) coordinate space, as the seller
+                            // scrolls the content past it.
+                            GeometryReader { geometry in
+                                Color.clear.preference(
+                                    key: TrophyWallDockScrollOffsetKey.self,
+                                    value: geometry.frame(
+                                        in: .named(TrophyWallDockScrollCoordinateSpace.name)
+                                    ).minY
+                                )
+                            }
+                            .frame(height: 0)
                         }
-                        .frame(height: 0)
-                    }
 
-                    LazyVGrid(
-                        columns: Self.gridColumns,
-                        spacing: TrophyWallGridMetrics.gutterPoints
-                    ) {
-                        ForEach(store.settledTiles) { tile in
-                            TrophyWallSettledTileView(
-                                tile: tile,
-                                openListing: openListing,
-                                namespace: namespace
-                            )
+                        LazyVGrid(
+                            columns: Self.gridColumns,
+                            spacing: TrophyWallGridMetrics.gutterPoints
+                        ) {
+                            ForEach(store.settledTiles) { tile in
+                                TrophyWallSettledTileView(
+                                    tile: tile,
+                                    openListing: openListing,
+                                    namespace: namespace
+                                )
+                            }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, TrophyWallGridMetrics.bottomPaddingPoints)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, TrophyWallGridMetrics.bottomPaddingPoints)
+                }
+                .scrollIndicators(.hidden)
+                .snapListScrollEdgeEffect(ScrollEdgeEffectPolicy.trophyWallBottomStyle, for: .bottom)
+                .accessibilityIdentifier("trophy.wall.grid")
+                .reportingDockScrollOffset(to: dockScrollScale, reduceMotion: reduceMotion)
+                .onChange(of: scrollToTopToken) { _, _ in
+                    guard !reduceMotion else {
+                        proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                        return
+                    }
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    }
                 }
             }
-            .scrollIndicators(.hidden)
-            .snapListScrollEdgeEffect(ScrollEdgeEffectPolicy.trophyWallBottomStyle, for: .bottom)
-            .accessibilityIdentifier("trophy.wall.grid")
-            .reportingDockScrollOffset(to: dockScrollScale, reduceMotion: reduceMotion)
         }
     }
 }

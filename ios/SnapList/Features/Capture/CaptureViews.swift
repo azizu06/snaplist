@@ -145,7 +145,8 @@ struct ScanCameraView: View {
                 }
                 openURL(settingsURL)
             },
-            removePhoto: { id in Task { await flow.removeStagedPhoto(id: id) } }
+            removePhoto: { id in Task { await flow.removeStagedPhoto(id: id) } },
+            close: closeLiveCameraPreview
         )
     }
 
@@ -904,23 +905,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     }
 
     private var closeButton: some View {
-        Button(action: close) {
-            Image(systemName: "xmark")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                .frame(width: 44, height: 44)
-                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
-                .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
-                .clipShape(.circle)
-                .accessibilityHidden(true)
-        }
-        .buttonStyle(.plain)
-        .frame(width: 48, height: 48)
-        .contentShape(.circle)
-        .accessibilityLabel("Close camera")
-        .accessibilityHint("Leaves capture and returns to Home")
-        .accessibilityIdentifier("scan.close")
-        .accessibilitySortPriority(80)
+        ScanCloseCameraButton(close: close)
     }
 
     private var flashButton: some View {
@@ -1098,6 +1083,11 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
     let review: () -> Void
     let openSettings: () -> Void
     let removePhoto: (StagedCapturePhoto.ID) -> Void
+    /// #1129: these surfaces are inside the Scan drawer now. They used to lean
+    /// on the dock underneath them to get the seller out; a drawer has no dock,
+    /// so the same close control the live preview carries belongs here too —
+    /// the grabber's downward swipe cannot be the only way out.
+    let close: () -> Void
 
     var body: some View {
         ZStack {
@@ -1167,10 +1157,49 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
             }
             .safeAreaPadding(.vertical, 2)
         }
+        // An overlay rather than a ZStack sibling, so it cannot pull the
+        // message column off-centre, and at the live preview's own offset so
+        // the control does not move when the camera becomes unavailable.
+        .overlay(alignment: .topLeading) {
+            ScanCloseCameraButton(close: close)
+                .padding(.leading, 18)
+                .padding(.top, 10)
+        }
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.18),
             value: thumbnailURLs.count
         )
+    }
+}
+
+/// The one close control inside the Scan drawer, shared by the live preview and
+/// the recovery surfaces so both carry the same target, label and identifier.
+private struct ScanCloseCameraButton: View {
+    let close: () -> Void
+
+    var body: some View {
+        Button(action: close) {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 44, height: 44)
+                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
+                .overlay {
+                    Circle().stroke(
+                        SnapListColorToken.onDarkSurface.color.opacity(0.12),
+                        lineWidth: 1
+                    )
+                }
+                .clipShape(.circle)
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 48, height: 48)
+        .contentShape(.circle)
+        .accessibilityLabel("Close camera")
+        .accessibilityHint("Closes the Scan drawer and returns to Trophy Wall")
+        .accessibilityIdentifier("scan.close")
+        .accessibilitySortPriority(80)
     }
 }
 
@@ -1343,6 +1372,7 @@ struct ScanCameraVisualStateView: View {
                 review: {},
                 openSettings: {},
                 removePhoto: { _ in },
+                close: {},
             )
         case .scanCameraDenied:
             RecoveryScanCameraSurface(
@@ -1358,6 +1388,7 @@ struct ScanCameraVisualStateView: View {
                 review: {},
                 openSettings: {},
                 removePhoto: { _ in },
+                close: {},
             )
         default:
             LiveScanCameraSurface(

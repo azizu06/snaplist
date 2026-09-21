@@ -114,8 +114,14 @@ enum FoundationFixture: String, CaseIterable {
 
     var initialTab: PrimaryTab {
         switch self {
-        case .onboarding, .scan: .scan
-        case .trophyProcessing, .trophyWall, .account: .trophyWall
+        // #1129: launch lands on Trophy Wall. Only a fixture that names the
+        // Scan surface outright starts with the drawer up — the default
+        // build no longer does, because a returning seller's home is the
+        // wall. First-run onboarding still hands off to Scan when it
+        // finishes, but it does that by asking for a new item, not by the
+        // app having launched there.
+        case .scan: .scan
+        case .onboarding, .trophyProcessing, .trophyWall, .account: .trophyWall
         }
     }
 
@@ -176,6 +182,11 @@ enum AssistedExportFixture: String, Equatable {
 
 enum SubmissionFixture: String, Equatable {
     case delayed
+    /// Stays in flight for ten minutes, past the end of any test, unless the
+    /// app cancels it. `delayed` resolves after eight seconds, which a slow
+    /// runner can spend on a proof that steps away and comes back
+    /// mid-submission (#1129).
+    case held
     case acceptedPresentationGated = "accepted-presentation-gated"
     case rateLimited = "rate-limited"
     /// A `401` against a seller who is signed in — the credential existed and the
@@ -700,6 +711,10 @@ struct LaunchConfiguration: Equatable {
     var initialTab: PrimaryTab {
         if visualState?.ownerIssue == 729 || visualState == .runDetail {
             return .trophyWall
+        }
+        // Photo Review is drawn inside the Scan drawer.
+        if photoReviewState != nil {
+            return .scan
         }
         return fixture.initialTab
     }

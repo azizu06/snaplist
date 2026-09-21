@@ -3,6 +3,8 @@ import CoreFoundation
 import Foundation
 
 private struct DelayedItemRunSubmitter: ItemRunSubmitting {
+    let delay: Duration
+
     func submit(
         _ payload: ItemRunSubmissionPayload,
         bearerToken: String
@@ -10,7 +12,7 @@ private struct DelayedItemRunSubmitter: ItemRunSubmitting {
         _ = payload
         _ = bearerToken
         do {
-            try await Task.sleep(for: .seconds(8))
+            try await Task.sleep(for: delay)
         } catch is CancellationError {
             return .cancelled
         } catch {
@@ -199,10 +201,13 @@ enum ItemRunSubmissionDebugFixtureFactory {
                 ),
                 acknowledgmentNotification: acknowledgmentNotification
             )
-        case .delayed:
+        case .delayed, .held:
+            let delay: Duration = configuration.submissionFixture == .held
+                ? .seconds(600)
+                : .seconds(8)
             return ItemRunSubmissionHost(
                 coordinator: ItemRunSubmissionCoordinator(
-                    submitter: DelayedItemRunSubmitter(),
+                    submitter: DelayedItemRunSubmitter(delay: delay),
                     attemptStore: LocalItemRunSubmissionAttemptStore(),
                     draftStore: draftStore,
                     tokenProvider:

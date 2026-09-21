@@ -480,12 +480,15 @@ final class CaptureFlowTests: XCTestCase {
             photos: store.photos,
             focus: .reviewButton
         )
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.returnFromPhotoReview(returned)
 
         XCTAssertEqual(store.photos.map(\.id), [third.id, replacement.id])
         XCTAssertEqual(store.selectedPhotoID, third.id)
         XCTAssertEqual(router.photoReviewScanReturn, returned)
-        XCTAssertEqual(router.selectedTab, .scan)
+        // #1129: Photo Review lives inside the Scan drawer, so leaving it moves
+        // the surface within the drawer and leaves the drawer itself up.
+        XCTAssertTrue(router.isScanPresented)
     }
 
     func testAcceptedSubmissionEventConsumerAnnouncesAndAcknowledgesBeforeExactClearAndReturnsToReadyScan() async throws {
@@ -518,6 +521,7 @@ final class CaptureFlowTests: XCTestCase {
         let restoration = await captureFlow.restore()
         XCTAssertEqual(restoration, .stagedPhoto)
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.openCaptureBoundary(
             destination: .photoReview,
             photos: captureFlow.stagedPhotos,
@@ -725,8 +729,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertNil(router.captureBoundaryRequest)
-        XCTAssertEqual(router.selectedTab, .scan)
-        XCTAssertTrue(router.pathBinding(for: .scan).wrappedValue.isEmpty)
+        XCTAssertTrue(router.pathBinding.wrappedValue.isEmpty)
         XCTAssertEqual(pendingScanFocus, .addPhotoButton)
         XCTAssertNil(submissionHost.pendingPresentationEvent)
         XCTAssertFalse(photoReviewHost.isCommitting)
@@ -878,6 +881,7 @@ final class CaptureFlowTests: XCTestCase {
             let restoration = await captureFlow.restore()
             XCTAssertEqual(restoration, .stagedPhoto)
             let router = AppRouter(initialFullScreen: .guidedCamera)
+            router.applyScanDrawer(.scanEntryControlTapped)
             router.openCaptureBoundary(
                 destination: .photoReview,
                 photos: captureFlow.stagedPhotos,
@@ -1082,11 +1086,8 @@ final class CaptureFlowTests: XCTestCase {
         let routeBeforeSubmission = router.captureBoundaryRequest
         let fullScreenBeforeSubmission = router.presentedFullScreen
         let scanReturnBeforeSubmission = router.photoReviewScanReturn
-        let selectedTabBeforeSubmission = router.selectedTab
-        let scanPathBeforeSubmission =
-            router.pathBinding(for: .scan).wrappedValue
-        let trophyWallPathBeforeSubmission =
-            router.pathBinding(for: .trophyWall).wrappedValue
+        let scanPresentedBeforeSubmission = router.isScanPresented
+        let wallPathBeforeSubmission = router.pathBinding.wrappedValue
 
         let photoReviewHost = PhotoReviewLiveHost()
         XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
@@ -1283,14 +1284,10 @@ final class CaptureFlowTests: XCTestCase {
             router.photoReviewScanReturn,
             scanReturnBeforeSubmission
         )
-        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
+        XCTAssertEqual(router.isScanPresented, scanPresentedBeforeSubmission)
         XCTAssertEqual(
-            router.pathBinding(for: .scan).wrappedValue,
-            scanPathBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.pathBinding(for: .trophyWall).wrappedValue,
-            trophyWallPathBeforeSubmission
+            router.pathBinding.wrappedValue,
+            wallPathBeforeSubmission
         )
         XCTAssertEqual(
             router.captureBoundaryRequest?.destination,
@@ -1853,9 +1850,14 @@ final class CaptureFlowTests: XCTestCase {
             )
 
             XCTAssertEqual(
-                scenario.router.pathBinding(for: .scan).wrappedValue,
+                scenario.router.pathBinding.wrappedValue,
                 [.settings],
                 "\(testCase.name): the denial's own button must reach Settings."
+            )
+            XCTAssertFalse(
+                scenario.router.isScanPresented,
+                "\(testCase.name): Settings is pushed onto the wall, so the Scan "
+                    + "drawer has to come down or it covers Settings."
             )
             XCTAssertNil(
                 scenario.host.session,
@@ -1876,6 +1878,168 @@ final class CaptureFlowTests: XCTestCase {
                 "\(testCase.name): a refused commit must never be silent."
             )
         }
+    }
+
+    /// #1129: Settings is pushed onto the wall, and the wall sits behind the Scan
+    /// drawer. Leaving Photo Review for Settings brings the drawer down, and the
+    /// camera the Back step restarted stops with it. The staged photos stay.
+    func testSettingsFromPhotoReviewBringsTheDrawerDownAndStopsTheCamera() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "snaplist-1129-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            intake: NativeIntake(
+                applicationSupportDirectory: root,
+                identitySource: .processPrivate
+            )
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .noDraft)
+        let staged = await captureFlow.stageLibraryPhotos(
+            (1...2).map { makeIntakeJPEG(seed: $0) }
+        )
+        XCTAssertEqual(staged, 2)
+        let router = AppRouter()
+        XCTAssertEqual(
+            router.applyScanDrawer(.scanEntryControlTapped).cameraCommand,
+            .start
+        )
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest, captureFlow: captureFlow)
+        )
+        let session = try XCTUnwrap(host.session)
+
+        let reachedSettings = await AppShellSettingsEntryPointTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertTrue(reachedSettings)
+        XCTAssertEqual(router.pathBinding.wrappedValue, [.settings])
+        XCTAssertFalse(
+            router.isScanPresented,
+            "The Scan drawer would cover the Settings screen just pushed onto the wall."
+        )
+        XCTAssertFalse(
+            camera.isSessionActive,
+            "Back restarted the camera; it must not keep running behind a closed drawer."
+        )
+        XCTAssertEqual(captureFlow.stagedPhotos.count, 2)
+    }
+
+    /// #1129: dismissing the drawer stops the camera, but a start still waiting on
+    /// the session used to finish afterwards and report a live camera. The flow
+    /// then believed one sat behind Trophy Wall, and restarted it on the next
+    /// return to the foreground.
+    func testCancellingWhileTheCameraIsStartingLeavesItOff() async {
+        let camera = GatedStartCaptureCamera(authorization: .authorized, firstStartHold: .report)
+        let flow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+
+        let start = Task { await flow.startCamera() }
+        let startIsPending = await waitUntilTrue(timeout: 2) { camera.isStartPending }
+        XCTAssertTrue(startIsPending)
+        flow.cancelCamera()
+        camera.finishStart()
+        await start.value
+
+        XCTAssertEqual(flow.phase, .idle)
+        XCTAssertFalse(camera.isSessionActive)
+        await flow.handleSceneBecameActive()
+        XCTAssertEqual(
+            camera.startCount,
+            1,
+            "Coming back to the foreground must not restart a cancelled camera."
+        )
+    }
+
+    /// #1129: the same race one step earlier. A first-run start waits on camera
+    /// permission; if the drawer comes down before the answer, the answer must
+    /// not start a session behind Trophy Wall.
+    func testCancellingWhileCameraPermissionIsPendingNeverStartsTheCamera() async {
+        let camera = GatedStartCaptureCamera(authorization: .notDetermined, firstStartHold: .none)
+        let flow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+
+        let start = Task { await flow.startCamera() }
+        let permissionIsPending = await waitUntilTrue(timeout: 2) { camera.isAuthorizationPending }
+        XCTAssertTrue(permissionIsPending)
+        flow.cancelCamera()
+        camera.grantAuthorization()
+        await start.value
+
+        XCTAssertEqual(camera.startCount, 0)
+        XCTAssertFalse(camera.isSessionActive)
+        XCTAssertEqual(flow.phase, .idle)
+    }
+
+    /// #1129: the real camera's `start` leaves the main actor before it reaches
+    /// the session, so a dismissal in that gap stops the camera before the start
+    /// turns it on. Once the start reports back, the camera must be off again.
+    func testACancelThatOvertakesTheCameraStartStillLeavesItOff() async {
+        let camera = GatedStartCaptureCamera(authorization: .authorized, firstStartHold: .session)
+        let flow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+
+        let start = Task { await flow.startCamera() }
+        let startIsPending = await waitUntilTrue(timeout: 2) { camera.isStartPending }
+        XCTAssertTrue(startIsPending)
+        flow.cancelCamera()
+        camera.finishStart()
+        await start.value
+
+        XCTAssertFalse(
+            camera.isSessionActive,
+            "A start that reached the session after the cancel left the camera running behind Trophy Wall."
+        )
+        XCTAssertEqual(flow.phase, .idle)
+    }
+
+    /// The other half of the same rule: a stale start that reports back after
+    /// the drawer was raised again must not stop the newer start that now owns
+    /// the camera.
+    func testAStaleCameraStartLeavesANewerStartRunning() async {
+        let camera = GatedStartCaptureCamera(authorization: .authorized, firstStartHold: .session)
+        let flow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+
+        let staleStart = Task { await flow.startCamera() }
+        let startIsPending = await waitUntilTrue(timeout: 2) { camera.isStartPending }
+        XCTAssertTrue(startIsPending)
+        flow.cancelCamera()
+        await flow.startCamera()
+        camera.finishStart()
+        await staleStart.value
+
+        XCTAssertTrue(camera.isSessionActive, "The stale start stopped the camera the drawer just raised.")
+        XCTAssertEqual(flow.phase, .camera)
     }
 
     func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
@@ -3027,6 +3191,103 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(pendingScanFocus, .addPhotoButton)
     }
 
+    /// #1129: Done drops the drawer onto Trophy Wall, and the exact clear it
+    /// releases finishes after the drawer is already down. The camera must
+    /// stay off behind the wall; raising the drawer again is what brings it
+    /// back.
+    func testDoneThatDropsTheDrawerLeavesTheCameraOffAfterTheExactClear() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-submission-done-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        let staged = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemRed,
+                rightColor: .systemOrange
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: store
+        )
+        _ = await captureFlow.restore()
+
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try XCTUnwrap(host.session)
+
+        let intake = SubmissionIntakeFixture(stagedPhotos: [staged])
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.created(intake.receipt)]
+                ),
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: store,
+                tokenProvider: CaptureFlowBearerTokenProvider(),
+                readData: intake.read,
+                newIdempotencyKey: { UUID() }
+            )
+        )
+
+        let savedStateObserved = expectation(
+            description: "Accepted submission presents its saved state"
+        )
+        withObservationTracking {
+            _ = submissionHost.pendingPresentationEvent
+        } onChange: {
+            savedStateObserved.fulfill()
+        }
+
+        let transaction = Task {
+            await AppShellPhotoReviewSubmissionTransaction.perform(
+                session: session,
+                captureFlow: captureFlow,
+                host: host,
+                router: router,
+                submissionHost: submissionHost,
+                setReturnFocus: { _ in }
+            )
+        }
+        defer { transaction.cancel() }
+
+        await fulfillment(of: [savedStateObserved], timeout: 3)
+        guard case .completeSavedSubmission(let savedEventID) =
+                PhotoReviewSubmissionPresentation(host: submissionHost)
+                    .primaryActionEvent else {
+            return XCTFail("Expected the accepted presentation to expose Done.")
+        }
+        let startsBeforeDone = camera.startCount
+
+        // Done, as the shell runs it: acknowledge, then drop the drawer.
+        submissionHost.acknowledgePresentation(eventID: savedEventID)
+        router.applyScanDrawer(.submissionCompleted)
+        await transaction.value
+
+        XCTAssertTrue(submissionHost.clearedIntake)
+        XCTAssertNil(host.session)
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(
+            camera.startCount,
+            startsBeforeDone,
+            "Done must not start a capture session behind Trophy Wall."
+        )
+    }
+
     func testVerifiedProRestoreReplaysTheBlockedLiveSubmissionExactlyOnce() async throws {
         let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
             name: "snaplist-pro-gate-live-replay",
@@ -3496,6 +3757,8 @@ final class CaptureFlowTests: XCTestCase {
             store: dependencies.captureDraftStore
         )
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the raised Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         let host = PhotoReviewLiveHost()
 
         let restoration = await captureFlow.restore()
@@ -3517,7 +3780,8 @@ final class CaptureFlowTests: XCTestCase {
         let outcome = await PhotoReviewBackCoordinator.perform(
             session: session,
             captureFlow: captureFlow,
-            host: host
+            host: host,
+            router: router
         )
         let expectedReturn = PhotoReviewScanReturn(
             photos: restoredPhotos,
@@ -3547,6 +3811,8 @@ final class CaptureFlowTests: XCTestCase {
             store: dependencies.captureDraftStore
         )
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the raised Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         let host = PhotoReviewLiveHost()
 
         let restoration = await captureFlow.restore()
@@ -3878,6 +4144,7 @@ final class CaptureFlowTests: XCTestCase {
             store: TestCaptureStore()
         )
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.openCaptureBoundary(
             destination: .photoReview,
             photos: [photo],
@@ -3901,6 +4168,187 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(router.captureBoundaryRequest)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(receivedFocuses, [.addPhotoButton])
+    }
+
+    /// #1129: the seller can swipe the drawer away from Photo Review and the
+    /// intake can depart while it is down — a principal change, say. Photo
+    /// Review still has to go, but the camera must not start behind Trophy
+    /// Wall; raising the drawer again is what brings it back.
+    func testDepartedPhotoReviewBehindADismissedDrawerLeavesTheCameraOff() async {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000054")
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized
+        )
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [photo],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        router.applyScanDrawer(.dismissed)
+
+        let didReturn = await AppShellDepartedPhotoReviewTransaction.perform(
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertTrue(didReturn)
+        XCTAssertNil(host.session)
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(camera.startCount, 0)
+    }
+
+    /// #1129: the seller can pull the drawer down while Back is still committing.
+    /// Back then lands on a Scan nobody is looking at, so it must not start the
+    /// camera; raising the drawer again does that.
+    func testPhotoReviewBackBehindADismissedDrawerLeavesTheCameraOff() async throws {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000055")
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore(staged: photo)
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try XCTUnwrap(host.session)
+        router.applyScanDrawer(.dismissed)
+
+        let outcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        guard case .completed = outcome else {
+            return XCTFail("Back must still complete behind a dismissed drawer.")
+        }
+        XCTAssertNil(host.session)
+        XCTAssertEqual(captureFlow.stagedPhotos, [photo])
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(camera.startCount, 0)
+    }
+
+    /// #1129: the same window for deleting the final photo, which leaves Photo
+    /// Review for an empty Scan without a Back.
+    func testFinalPhotoDeleteBehindADismissedDrawerLeavesTheCameraOff() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            intake: NativeIntake(
+                applicationSupportDirectory: root,
+                identitySource: .processPrivate
+            )
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .noDraft)
+        let staged = await captureFlow.stageLibraryPhotos([makeIntakeJPEG(seed: 1)])
+        XCTAssertEqual(staged, 1)
+        let onlyPhoto = try XCTUnwrap(captureFlow.stagedPhotos.first)
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest, captureFlow: captureFlow)
+        )
+        let session = try XCTUnwrap(host.session)
+        session.store.selectPhotoForActions(id: onlyPhoto.id)
+        router.applyScanDrawer(.dismissed)
+
+        let application = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertNotNil(application)
+        XCTAssertNil(host.session)
+        XCTAssertTrue(captureFlow.stagedPhotos.isEmpty)
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(camera.startCount, 0)
+    }
+
+    /// #1129: the same window for the durable discard a refused save offers.
+    func testFailureDiscardBehindADismissedDrawerLeavesTheCameraOff() async throws {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000056")
+        let draftStore = TestCaptureStore(
+            staged: photo,
+            replacePhotosError: CaptureDraftStoreError.invalidManifest
+        )
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: draftStore
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try XCTUnwrap(host.session)
+        let backOutcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+        XCTAssertEqual(backOutcome, .persistenceRejected)
+        router.applyScanDrawer(.dismissed)
+
+        let discarded = await AppShellPhotoReviewFailureDiscardTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertTrue(discarded)
+        XCTAssertEqual(draftStore.discardCount, 1)
+        XCTAssertNil(host.session)
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(camera.startCount, 0)
     }
 
     func testPhotoReviewConditionalShellRemountPresentsPrepopulatedGuidedCamera() async {
@@ -4495,6 +4943,8 @@ final class CaptureFlowTests: XCTestCase {
         }
 
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the raised Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.openCaptureBoundary(
             destination: .photoReview,
             photos: restoredPhotos,
@@ -7476,6 +7926,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(photos.count, 2, name)
 
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.openCaptureBoundary(
             destination: .photoReview,
             photos: photos,
@@ -8406,7 +8858,7 @@ final class CaptureFlowTests: XCTestCase {
 
         let router = AppRouter()
         router.handleCaptureRestoration(restoration)
-        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertTrue(router.isScanPresented)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
@@ -8430,13 +8882,15 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(restoration, .noDraft)
         let router = AppRouter(initialTab: .trophyWall)
 
+        var didPresentScanDrawer = false
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: { didPresentScanDrawer = true }
         )
 
-        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertTrue(didPresentScanDrawer)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(store.stageCount, 1)
         XCTAssertEqual(store.lastStagedImageData, firstPhoto)
@@ -8477,7 +8931,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(capture.phase, .failed)
@@ -8524,7 +8979,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(captureStore.stageCount, 1)
@@ -8541,7 +8997,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(captureStore.stageCount, 2)
@@ -8592,7 +9049,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(capture.phase, .failed)
@@ -8620,7 +9078,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: relaunchedCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         let durablyStaged = try XCTUnwrap(relaunchedCapture.stagedPhoto)
@@ -8653,7 +9112,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: expiredOnboarding,
             captureFlow: expiredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         XCTAssertNil(expiredCapture.stagedPhoto)
@@ -8793,7 +9253,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(capture.phase, .captured)
@@ -8827,7 +9288,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: relaunchedCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertEqual(relaunchedCapture.stagedPhoto?.libraryTransferReceipt, originalReceipt)
 
@@ -8852,7 +9314,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: stillBlockedOnboarding,
             captureFlow: expiredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertNil(expiredCapture.stagedPhoto)
         XCTAssertEqual(stillBlockedOnboarding.state, initialState)
@@ -8886,7 +9349,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: recoveredOnboarding,
             captureFlow: recoveredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertEqual(
             recoveredCapture.stagedPhoto?.libraryTransferReceipt?.transferredDigest,
@@ -8955,7 +9419,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         let durablyStaged = try XCTUnwrap(capture.stagedPhoto)
@@ -8983,7 +9448,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: relaunchedCapture,
-            router: relaunchedRouter
+            router: relaunchedRouter,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
@@ -8996,7 +9462,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: relaunchedCapture,
-            router: relaunchedRouter
+            router: relaunchedRouter,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
@@ -9024,7 +9491,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: restoredOnboarding,
             captureFlow: expiredCapture,
-            router: expiredRouter
+            router: expiredRouter,
+            presentScanDrawer: {}
         )
 
         let nextStagedPhoto = try XCTUnwrap(expiredCapture.stagedPhoto)
@@ -9083,7 +9551,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: initialCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         let initialStagedPhoto = try XCTUnwrap(initialCapture.stagedPhoto)
@@ -9119,7 +9588,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: restoredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertEqual(restoredCapture.stagedPhoto, initialStagedPhoto)
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst()))
@@ -9140,7 +9610,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: expiredCapture,
-            router: relaunchedRouter
+            router: relaunchedRouter,
+            presentScanDrawer: {}
         )
 
         let nextStagedPhoto = try XCTUnwrap(expiredCapture.stagedPhoto)
@@ -9228,7 +9699,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
@@ -10487,9 +10959,8 @@ private final class RetainedSubmissionPhotoReviewScenario {
     private let routeBeforeSubmission: CaptureBoundaryRequest?
     private let fullScreenBeforeSubmission: AppFullScreen?
     private let scanReturnBeforeSubmission: PhotoReviewScanReturn?
-    private let selectedTabBeforeSubmission: PrimaryTab
-    private let scanPathBeforeSubmission: [AppRoute]
-    private let trophyWallPathBeforeSubmission: [AppRoute]
+    private let scanPresentedBeforeSubmission: Bool
+    private let wallPathBeforeSubmission: [AppRoute]
     private let sessionPhotosBeforeSubmission: [StagedCapturePhoto]
     private let selectedPhotoBeforeSubmission: StagedCapturePhoto.ID?
     private let actionsPhotoBeforeSubmission: StagedCapturePhoto.ID?
@@ -10571,11 +11042,8 @@ private final class RetainedSubmissionPhotoReviewScenario {
         routeBeforeSubmission = router.captureBoundaryRequest
         fullScreenBeforeSubmission = router.presentedFullScreen
         scanReturnBeforeSubmission = router.photoReviewScanReturn
-        selectedTabBeforeSubmission = router.selectedTab
-        scanPathBeforeSubmission =
-            router.pathBinding(for: .scan).wrappedValue
-        trophyWallPathBeforeSubmission =
-            router.pathBinding(for: .trophyWall).wrappedValue
+        scanPresentedBeforeSubmission = router.isScanPresented
+        wallPathBeforeSubmission = router.pathBinding.wrappedValue
 
         let photoReviewHost = PhotoReviewLiveHost()
         self.photoReviewHost = photoReviewHost
@@ -10651,14 +11119,10 @@ private final class RetainedSubmissionPhotoReviewScenario {
             router.photoReviewScanReturn,
             scanReturnBeforeSubmission
         )
-        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
+        XCTAssertEqual(router.isScanPresented, scanPresentedBeforeSubmission)
         XCTAssertEqual(
-            router.pathBinding(for: .scan).wrappedValue,
-            scanPathBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.pathBinding(for: .trophyWall).wrappedValue,
-            trophyWallPathBeforeSubmission
+            router.pathBinding.wrappedValue,
+            wallPathBeforeSubmission
         )
         XCTAssertNil(pendingScanFocus)
         XCTAssertEqual(camera.startCount, 0)
@@ -11477,6 +11941,94 @@ private final class TestCaptureCamera: CaptureCamera {
     }
 
     private static let photoData = Data([0xFF, 0xD8, 0xFF, 0xD9])
+}
+
+/// Holds camera permission, and optionally the first session start, open until
+/// the test lets them finish, so a test can cancel the camera while a start is
+/// still in flight (#1129). Only the first start is held: a regression that
+/// restarts the camera must fail its assertion, not hang the run.
+private final class GatedStartCaptureCamera: CaptureCamera {
+    enum StartHold {
+        case none
+        /// The session is asked to run the moment `start` is called, and a
+        /// later `stop()` still wins; only the report back is held.
+        case report
+        /// Nothing reaches the session until the test lets it, as when the
+        /// real camera's `start` hops off the main actor before it queues its
+        /// work: a `stop()` issued in that gap runs first.
+        case session
+    }
+
+    let session = AVCaptureSession()
+    let isAvailable = true
+    private var firstStartHold: StartHold
+    private let lock = NSLock()
+    private var authorization: CaptureCameraAuthorization
+    private var pendingAuthorization: CheckedContinuation<CaptureCameraAuthorization, Never>?
+    private var pendingStart: CheckedContinuation<Void, Never>?
+    private var starts = 0
+    private var sessionActive = false
+
+    init(authorization: CaptureCameraAuthorization, firstStartHold: StartHold) {
+        self.authorization = authorization
+        self.firstStartHold = firstStartHold
+    }
+
+    var startCount: Int { lock.withLock { starts } }
+    var isSessionActive: Bool { lock.withLock { sessionActive } }
+    var isAuthorizationPending: Bool { lock.withLock { pendingAuthorization != nil } }
+    var isStartPending: Bool { lock.withLock { pendingStart != nil } }
+
+    func authorizationStatus() -> CaptureCameraAuthorization {
+        lock.withLock { authorization }
+    }
+
+    func requestAuthorization() async -> CaptureCameraAuthorization {
+        await withCheckedContinuation { continuation in
+            lock.withLock { pendingAuthorization = continuation }
+        }
+    }
+
+    func start(frameHandler: @escaping (CaptureFrame) -> Void) async throws {
+        let hold = lock.withLock {
+            starts += 1
+            defer { firstStartHold = .none }
+            if firstStartHold != .session {
+                sessionActive = true
+            }
+            return firstStartHold
+        }
+        guard hold != .none else { return }
+        await withCheckedContinuation { continuation in
+            lock.withLock { pendingStart = continuation }
+        }
+        if hold == .session {
+            lock.withLock { sessionActive = true }
+        }
+    }
+
+    func stop() {
+        lock.withLock { sessionActive = false }
+    }
+
+    func capturePhoto() async throws -> Data { Data() }
+
+    func grantAuthorization() {
+        let continuation = lock.withLock {
+            authorization = .authorized
+            defer { pendingAuthorization = nil }
+            return pendingAuthorization
+        }
+        continuation?.resume(returning: .authorized)
+    }
+
+    func finishStart() {
+        let continuation = lock.withLock {
+            defer { pendingStart = nil }
+            return pendingStart
+        }
+        continuation?.resume()
+    }
 }
 
 private enum TestCaptureError: Error {

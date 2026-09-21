@@ -9,26 +9,29 @@ import XCTest
 final class ActivationGuidanceSpotlightTests: XCTestCase {
     // MARK: - Surface resolution
 
-    /// The reported defect. Settings pushes onto the selected tab's stack, so a
-    /// resolver that reads only the tab and the full-screen presentation keeps
-    /// answering `.trophyWall` (or `.scan`) and the shell draws that tab's coach
-    /// mark on top of Settings, anchored to chrome that is not on screen.
-    func testAPushedRouteNeverInheritsItsTabsActivationSurface() {
+    /// The reported defect. Settings pushes onto the wall's stack, so a
+    /// resolver that reads only the presentation state keeps answering
+    /// `.trophyWall` (or `.scan`) and the shell draws that screen's coach mark
+    /// on top of Settings, anchored to chrome that is not on screen.
+    ///
+    /// #1129 replaced the selected tab with the drawer's presentation; the
+    /// contract this proves is unchanged.
+    func testAPushedRouteNeverInheritsTheSurfaceUnderneathIt() {
         XCTAssertEqual(
             ActivationSurfaceResolutionPolicy.surface(
                 hasPhotoReviewSession: false,
-                selectedTab: .trophyWall,
+                isScanPresented: false,
                 pushedPath: [],
                 presentedFullScreen: nil
             ),
             .trophyWall,
-            "control: an empty stack still resolves to its tab"
+            "control: an empty stack with no drawer resolves to the wall"
         )
 
         XCTAssertEqual(
             ActivationSurfaceResolutionPolicy.surface(
                 hasPhotoReviewSession: false,
-                selectedTab: .trophyWall,
+                isScanPresented: false,
                 pushedPath: [.settings],
                 presentedFullScreen: nil
             ),
@@ -36,22 +39,11 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
             "Settings pushed over Trophy Wall is the Settings surface, not Trophy Wall"
         )
 
-        XCTAssertEqual(
-            ActivationSurfaceResolutionPolicy.surface(
-                hasPhotoReviewSession: false,
-                selectedTab: .scan,
-                pushedPath: [.settings],
-                presentedFullScreen: nil
-            ),
-            .settings,
-            "and the same holds when Settings is pushed over Scan"
-        )
-
         for pushed in [AppRoute.home(.processing), .future(.draft)] {
             XCTAssertNil(
                 ActivationSurfaceResolutionPolicy.surface(
                     hasPhotoReviewSession: false,
-                    selectedTab: .trophyWall,
+                    isScanPresented: false,
                     pushedPath: [pushed],
                     presentedFullScreen: nil
                 ),
@@ -62,20 +54,20 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
         XCTAssertEqual(
             ActivationSurfaceResolutionPolicy.surface(
                 hasPhotoReviewSession: true,
-                selectedTab: .trophyWall,
+                isScanPresented: false,
                 pushedPath: [.settings],
                 presentedFullScreen: nil
             ),
             .photoReview,
-            "Photo Review hosts above the tab stacks, so it still wins"
+            "Photo Review is the drawer's own surface, so it still wins"
         )
     }
 
-    func testScanResolvesOnlyOnItsOwnTabAndPresentations() {
+    func testScanResolvesOnlyWhileItsDrawerIsPresented() {
         XCTAssertEqual(
             ActivationSurfaceResolutionPolicy.surface(
                 hasPhotoReviewSession: false,
-                selectedTab: .scan,
+                isScanPresented: true,
                 pushedPath: [],
                 presentedFullScreen: nil
             ),
@@ -84,7 +76,7 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
         XCTAssertEqual(
             ActivationSurfaceResolutionPolicy.surface(
                 hasPhotoReviewSession: false,
-                selectedTab: .scan,
+                isScanPresented: true,
                 pushedPath: [],
                 presentedFullScreen: .guidedCamera
             ),
@@ -93,11 +85,45 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
         XCTAssertNil(
             ActivationSurfaceResolutionPolicy.surface(
                 hasPhotoReviewSession: false,
-                selectedTab: .trophyWall,
+                isScanPresented: false,
                 pushedPath: [],
                 presentedFullScreen: .guidedCamera
             )
         )
+    }
+
+    /// #1129: Settings is pushed onto the wall's stack and the drawer rises over
+    /// that whole stack, so while the drawer is up it is what the seller sees.
+    /// Answering `.settings` there drew the Settings mark on top of the camera,
+    /// anchored to a screen the drawer covers. Any other pushed route is covered
+    /// the same way. Photo Review is still the drawer's own top surface, so it
+    /// keeps answering first.
+    func testAnOpenDrawerCoversWhateverIsPushedOntoTheWall() {
+        for pushedPath: [AppRoute] in [[.settings], [.home(.processing)]] {
+            for fullScreen in [nil, AppFullScreen.guidedCamera] {
+                let context = "pushed \(pushedPath), full screen \(String(describing: fullScreen))"
+                XCTAssertEqual(
+                    ActivationSurfaceResolutionPolicy.surface(
+                        hasPhotoReviewSession: false,
+                        isScanPresented: true,
+                        pushedPath: pushedPath,
+                        presentedFullScreen: fullScreen
+                    ),
+                    .scan,
+                    context
+                )
+                XCTAssertEqual(
+                    ActivationSurfaceResolutionPolicy.surface(
+                        hasPhotoReviewSession: true,
+                        isScanPresented: true,
+                        pushedPath: pushedPath,
+                        presentedFullScreen: fullScreen
+                    ),
+                    .photoReview,
+                    context
+                )
+            }
+        }
     }
 
     // MARK: - Spotlight mode and presentation
