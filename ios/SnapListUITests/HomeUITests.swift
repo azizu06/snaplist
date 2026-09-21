@@ -136,26 +136,42 @@ final class HomeUITests: XCTestCase {
     }
 
     /// #1129. Scan stopped being a second root and became a drawer over the
-    /// wall. The discriminator is what happens to Trophy Wall while Scan is
-    /// up: the retired two-root shell mounted exactly one tab's stack, so the
-    /// wall was torn down on the way to Scan. A drawer leaves it underneath.
+    /// wall.
+    ///
+    /// The discriminator is geometry. The retired shell mounted exactly one
+    /// destination's stack, so Scan filled the screen from the very top; a
+    /// drawer starts partway down with the wall showing above it. The wall is
+    /// deliberately *not* asserted through the accessibility tree here — the
+    /// drawer is a modal container, so the surface under it leaves the tree,
+    /// which is the behaviour the issue asks for.
     func testScanOpensAsADrawerOverTrophyWallInsteadOfReplacingIt() {
         let app = launch("HOME-02")
         let wall = app.otherElements["trophy.wall"]
         XCTAssertTrue(wall.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(app.otherElements["scan.drawer"].exists)
 
-        // The entry control is whatever chrome currently hosts it. While the
-        // dock is still on screen that is `dock.scan`; it stops selecting a
-        // second root and raises the drawer instead.
         app.buttons["dock.scan"].tap()
 
         let drawer = app.otherElements["scan.drawer"]
         XCTAssertTrue(drawer.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(
-            wall.exists,
-            "Trophy Wall must stay mounted under the drawer. \(app.debugDescription)"
+
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(
+            drawer.frame.minY,
+            window.minY + 60,
+            "A drawer starts below the wall's header; a second root would "
+                + "start at the top of the screen. drawer=\(drawer.frame) "
+                + "window=\(window)"
         )
+        XCTAssertLessThan(
+            drawer.frame.minY,
+            window.minY + window.height * 0.25,
+            "It is a drawer, not a small card. drawer=\(drawer.frame) "
+                + "window=\(window)"
+        )
+        // The modal contract: while the drawer is up, the surface underneath
+        // is not something VoiceOver or a tap can reach.
+        XCTAssertFalse(wall.exists, app.debugDescription)
 
         app.buttons["scan.close"].tap()
 
