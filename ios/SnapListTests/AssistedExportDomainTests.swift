@@ -93,9 +93,10 @@ final class AssistedExportDomainTests: XCTestCase {
         )
         for destination in domain.destinations {
             XCTAssertEqual(domain.handoff(for: destination), .prepared)
-            XCTAssertNil(
-                domain.statusText(for: destination),
-                "A row nobody has touched says nothing, not Not shared."
+            XCTAssertEqual(
+                domain.rowStateText(for: destination),
+                "Not started",
+                "A row nobody has touched says it has not started."
             )
         }
         XCTAssertNil(domain.confirmSheet)
@@ -307,7 +308,7 @@ final class AssistedExportDomainTests: XCTestCase {
             .prepared,
             "Copying the text is a device action. It says nothing about Depop."
         )
-        XCTAssertEqual(domain.statusText(for: .depop), "Not shared")
+        XCTAssertEqual(domain.rowStateText(for: .depop), "Prepared")
     }
 
     func testNoHandoffActionEverWritesTheSharedClaim() {
@@ -368,7 +369,7 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertNil(domain.confirmSheet)
         XCTAssertEqual(domain.state, .shared(.mercari))
         XCTAssertEqual(domain.handoff(for: .mercari), .shared(at: Self.julyTwentyFifth))
-        XCTAssertEqual(domain.statusText(for: .mercari), "Shared Jul 25")
+        XCTAssertEqual(domain.rowStateText(for: .mercari), "Shared Jul 25")
     }
 
     func testDismissingTheConfirmSheetIsAFullCancel() {
@@ -439,11 +440,11 @@ final class AssistedExportDomainTests: XCTestCase {
 
         for destination in AssistedExportDestination.allCases {
             var domain = AssistedExportDomain(pack: .fixture())
-            strings.append(domain.statusText(for: destination) ?? "")
+            strings.append(domain.rowStateText(for: destination))
 
             domain.toggle(destination)
             strings.append(domain.primaryActionLabel(for: destination))
-            strings.append(domain.leadText(for: destination))
+            strings.append(domain.guide(for: destination).positionText)
             strings.append(domain.confirmQuestion(for: destination))
             strings.append(domain.accessibilityLabel(for: destination))
 
@@ -454,11 +455,11 @@ final class AssistedExportDomainTests: XCTestCase {
 
             domain.presentConfirmSheet(for: destination)
             domain.confirmShared(at: Self.julyTwentyFifth)
-            strings.append(domain.statusText(for: destination) ?? "")
+            strings.append(domain.rowStateText(for: destination))
             strings.append(domain.accessibilityLabel(for: destination))
 
             domain.listingRevisionChanged(to: Self.editedReviewRevision)
-            strings.append(domain.statusText(for: destination) ?? "")
+            strings.append(domain.rowStateText(for: destination))
         }
 
         for string in strings {
@@ -547,8 +548,8 @@ final class AssistedExportDomainTests: XCTestCase {
             "SnapList can't see whether this posted. Only you can confirm it here."
         )
         XCTAssertEqual(
-            domain.leadText(for: .mercari),
-            "You finish this in Mercari."
+            AssistedExportCopy.guideInstruction(.openDestination, for: .mercari),
+            "Open Mercari and paste in the text and photos."
         )
     }
 
@@ -592,9 +593,10 @@ final class AssistedExportDomainTests: XCTestCase {
             "There is no pre-flight. Before an attempt SnapList knows nothing "
                 + "about what is installed, and says nothing."
         )
-        XCTAssertNil(
-            domain.statusText(for: .facebookMarketplace),
-            "A row nobody has handed off to says nothing at all, not Not shared."
+        XCTAssertEqual(
+            domain.rowStateText(for: .facebookMarketplace),
+            "Not started",
+            "A row nobody has handed off to has not started."
         )
     }
 
@@ -621,7 +623,7 @@ final class AssistedExportDomainTests: XCTestCase {
         domain.undoShared()
 
         XCTAssertEqual(domain.handoff(for: .depop), .prepared)
-        XCTAssertEqual(domain.statusText(for: .depop), "Not shared")
+        XCTAssertEqual(domain.rowStateText(for: .depop), "Prepared")
         XCTAssertTrue(
             domain.hasHandedOff(to: .depop),
             "Taking back the claim does not take back the handoff. The seller "
@@ -742,7 +744,7 @@ final class AssistedExportDomainTests: XCTestCase {
             "The record belongs to the seller. Editing the listing does not "
                 + "unsay what they said."
         )
-        XCTAssertEqual(domain.statusText(for: .mercari), "Shared Jul 25")
+        XCTAssertEqual(domain.rowStateText(for: .mercari), "Shared Jul 25")
     }
 
     // A pack update that carries the same text is the case where the seller's
@@ -943,10 +945,11 @@ final class AssistedExportDomainTests: XCTestCase {
             "The seller said they posted the old text. The new text is not "
                 + "something they have said anything about."
         )
-        XCTAssertNil(
-            domain.statusText(for: .mercari),
+        XCTAssertEqual(
+            domain.rowStateText(for: .mercari),
+            "Not started",
             "A new pack text retires the old handoff along with the claim, so "
-                + "the row goes back to saying nothing."
+                + "the row goes back to the start."
         )
         XCTAssertEqual(
             domain.state,

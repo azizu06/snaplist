@@ -324,12 +324,6 @@ struct AssistedExportDomain: Equatable, Sendable {
         return AssistedExportCopy.didNotOpen(destination)
     }
 
-    /// The one line that opens a workspace. It states the division of labour:
-    /// SnapList prepared something, the seller does the posting.
-    func leadText(for destination: AssistedExportDestination) -> String {
-        AssistedExportCopy.lead(destination)
-    }
-
     func confirmQuestion(for destination: AssistedExportDestination) -> String {
         AssistedExportCopy.confirmQuestion(destination)
     }
@@ -465,27 +459,12 @@ struct AssistedExportDomain: Equatable, Sendable {
         self.pack = pack
         currentReviewRevision = pack.reviewRevision
     }
-
-    /// The collapsed row's status line, or nil to say nothing. A destination
-    /// the seller has not touched at all is not yet "not shared" in any sense
-    /// worth reporting — that reads as a status when there is none. The line
-    /// appears once the seller has handed the pack over on this device, or
-    /// once they have made the explicit Shared claim.
-    func statusText(for destination: AssistedExportDestination) -> String? {
-        switch handoff(for: destination) {
-        case .prepared:
-            return hasHandedOff(to: destination) ? AssistedExportCopy.notShared : nil
-        case let .shared(at: date):
-            return AssistedExportCopy.sharedStatus(on: date)
-        }
-    }
 }
 
 /// Seller-facing strings, taken from the approved package rather than written
 /// here. Nothing in this namespace may claim a destination received, listed,
 /// published, synced, verified, or sold anything.
 enum AssistedExportCopy {
-    static let notShared = "Not shared"
     static let notStarted = "Not started"
     static let rowHint = "Opens a step-by-step guide"
     static let closeGuide = "Close"
@@ -603,10 +582,6 @@ enum AssistedExportCopy {
         count == 1 ? "1 photo" : "\(count) photos"
     }
 
-    static func lead(_ destination: AssistedExportDestination) -> String {
-        "You finish this in \(destination.displayName)."
-    }
-
     static func confirmQuestion(_ destination: AssistedExportDestination) -> String {
         "Did you post this on \(destination.displayName)?"
     }
@@ -616,7 +591,6 @@ enum AssistedExportCopy {
     /// moment it is added here. Views take their copy from this namespace and
     /// hold no seller-facing literals of their own.
     static let allSellerFacingStrings: [String] = [
-        notShared,
         notStarted,
         rowHint,
         closeGuide,

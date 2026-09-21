@@ -286,6 +286,8 @@ struct AssistedExportView: View {
                     stateLine(destination)
                 }
                 Spacer(minLength: 0)
+                // Intentionally static and decorative: it points at where the
+                // sheet rises from and never animates or changes with state.
                 Image(systemName: "chevron.up")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SnapListColorToken.textSecondary.color)

@@ -152,7 +152,7 @@ final class AssistedExportClientTests: XCTestCase {
     /// belonged to text the seller can no longer see, and the load that follows
     /// the replacement must not hand it back. The server cannot: reads filter on
     /// `source_review_revision`, so a rebuilt pack matches no row. A double that
-    /// answered every pack with the same rows put `Not shared` back on the row
+    /// answered every pack with the same rows put `Prepared` back on the row
     /// and `Mark as shared` back under it, for text nobody was ever given.
     func testARebuiltPackReadsBackNoReceiptFromTheTextItReplaced() async {
         let rebuiltContentRevision = UUID(
@@ -170,7 +170,7 @@ final class AssistedExportClientTests: XCTestCase {
             "The handoff has to be recorded first or the retirement below "
                 + "cannot be observed."
         )
-        XCTAssertEqual(store.domain.statusText(for: .mercari), "Not shared")
+        XCTAssertEqual(store.domain.rowStateText(for: .mercari), "Prepared")
 
         await store.updatePack(
             to: .fixture(contentRevision: rebuiltContentRevision)
@@ -181,10 +181,10 @@ final class AssistedExportClientTests: XCTestCase {
             "The replacement carries new pack text, so the handoff that "
                 + "belonged to the old text does not come back with the load."
         )
-        XCTAssertNil(
-            store.domain.statusText(for: .mercari),
-            "A row with nothing recorded against this pack says nothing, not "
-                + "Not shared."
+        XCTAssertEqual(
+            store.domain.rowStateText(for: .mercari),
+            "Not started",
+            "A row with nothing recorded against this pack has not started."
         )
         XCTAssertFalse(
             store.domain.offersMarkAsShared(for: .mercari),
