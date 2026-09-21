@@ -266,10 +266,10 @@ final class AppRouter {
     /// drawer, on their own staged photos.
     ///
     /// This is the one place a drawer event's camera command is deliberately
-    /// discarded: the app root owns this
-    /// sequence and already starts the session immediately afterwards, because
-    /// `restore()` lands a staged photo on `.captured` rather than a live
-    /// session (#864). Starting it from here as well would race that call.
+    /// discarded: the app root owns this sequence and already starts the
+    /// session immediately afterwards, because `restore()` lands a staged photo
+    /// on `.captured` rather than a live session (#864). Starting it from here
+    /// as well would race that call.
     func handleCaptureRestoration(_ restoration: CaptureRestoration) {
         guard restoration == .stagedPhoto else { return }
         applyScanDrawer(.scanSurfaceRestored)

@@ -820,9 +820,10 @@ struct AppShellView: View {
     }
 
     /// Applies a drawer event and carries out the camera session work it
-    /// names. Every path that opens or closes the drawer comes through here,
-    /// so the drawer's own transitions start and stop the capture session in
-    /// this one place. Capture's close and boundary controls also stop the
+    /// names. Every path the shell view drives comes through here, so the
+    /// drawer's own transitions start and stop the capture session in this one
+    /// place; the Settings entry point, a static transaction, carries out the
+    /// same command itself. Capture's close and boundary controls also stop the
     /// session before they leave; a second stop is harmless.
     private func applyScanDrawer(_ event: ScanDrawerEvent) {
         let reduction = router.applyScanDrawer(
