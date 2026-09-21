@@ -114,6 +114,22 @@ final class HomeUITests: XCTestCase {
         }
     }
 
+    func testNotificationTappedWhileAppIsOpenOpensTheItem() {
+        let app = launch(
+            "HOME-01",
+            extraArguments: [
+                "--run-detail-fixture=reviewable",
+                "--push-tap-fixture=listingReady:37500000-0000-4000-8000-000000000021",
+                "--push-tap-fixture-delay=4",
+            ]
+        )
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 3))
+        // Delivered after launch, as a banner tapped while the app is open is.
+        XCTAssertTrue(
+            app.otherElements["listing-review"].waitForExistence(timeout: 8)
+        )
+    }
+
     func testTappedNotificationWithNoUsableIdentityLandsOnTheWall() {
         let app = launch(
             "HOME-01",

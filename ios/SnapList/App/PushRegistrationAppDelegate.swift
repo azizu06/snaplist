@@ -44,11 +44,22 @@ final class PushRegistrationAppDelegate: NSObject, UIApplicationDelegate {
         guard let moment = parts.first else { return }
         var userInfo: [AnyHashable: Any] = ["moment": String(moment)]
         if parts.count > 1 { userInfo["runId"] = String(parts[1]) }
-        MainActor.assumeIsolated {
-            PushRegistrationComposition.tapRouter.receive(
-                userInfo: userInfo,
-                actionIdentifier: UNNotificationDefaultActionIdentifier
-            )
+        let deliver = {
+            MainActor.assumeIsolated {
+                PushRegistrationComposition.tapRouter.receive(
+                    userInfo: userInfo,
+                    actionIdentifier: UNNotificationDefaultActionIdentifier
+                )
+            }
+        }
+        // `--push-tap-fixture-delay=<seconds>` delivers after launch, the way a
+        // banner tapped while the app is open arrives.
+        let delayPrefix = "--push-tap-fixture-delay="
+        if let delayArgument = arguments.first(where: { $0.hasPrefix(delayPrefix) }),
+           let delay = Double(delayArgument.dropFirst(delayPrefix.count)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { _ = deliver() }
+        } else {
+            _ = deliver()
         }
     }
 #endif

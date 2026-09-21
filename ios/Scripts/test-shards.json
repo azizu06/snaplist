@@ -15,6 +15,7 @@
       "SnapListUITests/AssistedExportUITests/testFailedDestinationOpenShowsAdviceWithoutRecordingAHandoff",
       "SnapListUITests/EbayPublishUITests/testItemSpecificsAndDescriptionReadAsTwoDistinctBlocksWhenExpanded",
       "SnapListUITests/HomeUITests/testFinalWallTileClearsTheFloatingDockWhenScrolled",
+      "SnapListUITests/HomeUITests/testNotificationTappedWhileAppIsOpenOpensTheItem",
       "SnapListUITests/HomeUITests/testProcessingRefreshControlRunsAndReportsWhileItWorks",
       "SnapListUITests/HomeUITests/testSettledTileOpensListingReviewDirectlyAndReturnsToTrophyWall",
       "SnapListUITests/HomeUITests/testTappedNotificationForAnItemTheServerWillNotOpenLandsOnTheWall",

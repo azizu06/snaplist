@@ -2435,6 +2435,12 @@ struct TrophyWallFeatureView: View {
             guard pending != nil, router.selectedTab == .trophyWall else { return }
             Task { await openPushTap() }
         }
+        // A tap that arrives while another tab is showing switches to the wall
+        // first; the wall may already be mounted, so the switch is the cue.
+        .onChange(of: router.selectedTab) { _, tab in
+            guard tab == .trophyWall, pushTaps.pending != nil else { return }
+            Task { await openPushTap() }
+        }
         .navigationDestination(
             isPresented: Binding(
                 get: { guestClaimPresentation.isPresented },
@@ -2516,6 +2522,9 @@ struct TrophyWallFeatureView: View {
     /// tile cannot disagree about what opens or who may see it. An item already
     /// on screen is dismissed first: the tap is the newer request.
     private func openPushTap() async {
+        // The shell resets the wall's stack in its own `onChange` for this same
+        // tap; yielding first lets that reset land before anything is presented.
+        await Task.yield()
         if listingReviewPresentation.isPresented {
             listingReviewPresentation.dismiss()
             await Task.yield()
