@@ -1345,7 +1345,7 @@ final class SnapListUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
-            "--voice-note-take-ready-fixture"
+            "--voice-note-recording-fixture"
         ]
         app.launchAfterRetiringPriorInstance()
 
@@ -1462,12 +1462,83 @@ final class SnapListUITests: XCTestCase {
             "--voice-note-recording-fixture",
             expectedControl: "voice-note.cancel"
         )
-        let save = saved.buttons["voice-note.save"]
-        XCTAssertTrue(save.waitForExistence(timeout: 2))
-        save.tap()
+        let stop = saved.buttons["voice-note.save"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 2))
+        XCTAssertEqual(stop.label, "Stop recording")
+        stop.tap()
+        // #1136: stop lands on review; only Save recording closes the panel.
+        XCTAssertTrue(
+            saved.buttons["voice-note.save-recording"]
+                .waitForExistence(timeout: 2)
+        )
+        saved.buttons["voice-note.save-recording"].tap()
         let savedRow = saved.buttons["photo-review.voice"]
         XCTAssertTrue(savedRow.waitForExistence(timeout: 2))
         XCTAssertEqual(savedRow.label, "Voice note, 0:07, collapsed")
+    }
+
+    /// #1136: the check mark ends the take but the panel stays open on a
+    /// review state (Play, Re-record, Delete, Save recording); the collapsed
+    /// card after Save shows the note with a play control.
+    func testVoiceNoteStopKeepsThePanelOpenOnReviewUntilSaveRecording() {
+        let app = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        app.buttons["voice-note.save"].tap()
+
+        let save = app.buttons["voice-note.save-recording"]
+        let playback = app.buttons["voice-note.playback"]
+        let rerecord = app.buttons["voice-note.rerecord"]
+        let delete = app.buttons["voice-note.delete"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2))
+        for control in [save, playback, rerecord, delete] {
+            XCTAssertTrue(control.exists, control.identifier)
+            XCTAssertGreaterThanOrEqual(
+                control.frame.width, 44, control.identifier
+            )
+            XCTAssertGreaterThanOrEqual(
+                control.frame.height, 44, control.identifier
+            )
+        }
+        XCTAssertEqual(playback.label, "Play voice note")
+        XCTAssertEqual(
+            app.staticTexts["voice-note.elapsed"].label,
+            "0:07"
+        )
+        // Stopping did not collapse the panel or commit the note.
+        XCTAssertTrue(app.staticTexts["voice-note.title"].exists)
+
+        playback.tap()
+        XCTAssertEqual(playback.label, "Pause voice note")
+        playback.tap()
+        XCTAssertEqual(playback.label, "Play voice note")
+        XCTAssertTrue(save.exists)
+
+        save.tap()
+        let savedRow = app.buttons["photo-review.voice"]
+        XCTAssertTrue(savedRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(savedRow.label, "Voice note, 0:07, collapsed")
+        let rowPlay = app.buttons["photo-review.voice-play"]
+        XCTAssertTrue(rowPlay.exists)
+        XCTAssertEqual(rowPlay.label, "Play voice note")
+        XCTAssertFalse(app.buttons["voice-note.save-recording"].exists)
+    }
+
+    func testVoiceNoteReviewDeleteFallsBackToEmptyAndRerecordKeepsPanelOpen() {
+        let app = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        app.buttons["voice-note.save"].tap()
+        XCTAssertTrue(
+            app.buttons["voice-note.delete"].waitForExistence(timeout: 2)
+        )
+        app.buttons["voice-note.delete"].tap()
+        XCTAssertTrue(
+            app.buttons["voice-note.record"].waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(app.buttons["voice-note.save-recording"].exists)
     }
 
     func testSubmissionVisualFixturesExposeWorkingCancelRetryAndDoneActions() {
@@ -1487,10 +1558,15 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(savingStatus.waitForExistence(timeout: 3))
         XCTAssertEqual(savingStatus.label, "Saving your item")
         XCTAssertFalse(savingAction.exists)
+        // #1136: Cancel lives in the header where Back is, not under the bar.
         let cancelLink = saving.buttons["photo-review.cancel-submission"]
         XCTAssertTrue(cancelLink.isHittable)
-        XCTAssertEqual(cancelLink.label, "Cancel")
+        XCTAssertEqual(cancelLink.label, "Cancel saving")
+        XCTAssertGreaterThanOrEqual(cancelLink.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(cancelLink.frame.height, 44)
+        XCTAssertFalse(saving.buttons["photo-review.back"].exists)
         cancelLink.tap()
+        XCTAssertFalse(cancelLink.exists)
 
         let cancelledMessage = saving.staticTexts[
             "photo-review.submission-message"
@@ -1535,6 +1611,65 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [beatEnded], timeout: 3), .completed)
         done.tap()
         XCTAssertEqual(done.label, "Start listing")
+    }
+
+    /// #1136: the bottom bar is one button at one height in every phase, so
+    /// nothing under it moves between idle, saving, saved and done.
+    func testSubmissionBarIsOneConstantHeightButtonAcrossEveryPhase() {
+        func barMetrics(
+            _ arguments: [String],
+            label: String? = nil
+        ) -> (height: CGFloat, maxY: CGFloat) {
+            let app = XCUIApplication()
+            app.launchArguments = arguments
+            app.launchAfterRetiringPriorInstance()
+            let bar = app.descendants(matching: .any)[
+                "photo-review.start-listing"
+            ]
+            XCTAssertTrue(bar.waitForExistence(timeout: 3))
+            if let label {
+                let settled = XCTNSPredicateExpectation(
+                    predicate: NSPredicate { _, _ in bar.label == label },
+                    object: bar
+                )
+                XCTAssertEqual(
+                    XCTWaiter.wait(for: [settled], timeout: 3),
+                    .completed,
+                    "\(arguments)"
+                )
+            }
+            let metrics = (bar.frame.height, bar.frame.maxY)
+            app.terminate()
+            return metrics
+        }
+
+        let idle = barMetrics(
+            ["--photo-review-state=REV-02", "--zero-network-fixtures"]
+        )
+        let saving = barMetrics(
+            [
+                "--photo-review-state=REV-02",
+                "--submission-visual-state=SUB-01",
+                "--zero-network-fixtures",
+            ],
+            label: "Saving your item"
+        )
+        let done = barMetrics(
+            [
+                "--photo-review-state=REV-02",
+                "--submission-visual-state=SUB-05",
+                "--zero-network-fixtures",
+            ],
+            label: "Done"
+        )
+        for (name, metrics) in [("saving", saving), ("done", done)] {
+            XCTAssertEqual(
+                metrics.height - idle.height, 0, accuracy: 0.5, name
+            )
+            XCTAssertEqual(
+                metrics.maxY - idle.maxY, 0, accuracy: 0.5, name
+            )
+        }
     }
 
     /// Every other rejection state has a launch route, which is what makes a
@@ -1590,13 +1725,14 @@ final class SnapListUITests: XCTestCase {
 
         startListing.tap()
 
+        let headerCancel = app.buttons["photo-review.cancel-submission"]
         let saving = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                startListing.label == "Cancel"
-                    && startListing.isEnabled
+                headerCancel.exists
+                    && headerCancel.label == "Cancel saving"
                     && !addPhoto.isEnabled
             },
-            object: startListing
+            object: headerCancel
         )
         XCTAssertEqual(
             XCTWaiter.wait(for: [saving], timeout: 8),
@@ -1604,7 +1740,7 @@ final class SnapListUITests: XCTestCase {
             "The real Photo Review must expose the bounded saving label and mutation lock."
         )
 
-        startListing.tap()
+        headerCancel.tap()
 
         let completed = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in

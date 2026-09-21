@@ -322,6 +322,9 @@ final class VoiceNoteStore {
     /// How far playback has reached, `0...1`. Progress, not decoration: it
     /// keeps moving under Reduced Motion.
     private(set) var playbackProgress: Double = 0
+    /// Whether the unsaved take under review is playing. Separate from
+    /// `phase` so review keeps one state whether or not it is audible.
+    private(set) var isPlayingTake = false
 
     private let audio: VoiceNoteAudioClient
     private let files: VoiceNoteFileStoring
@@ -367,6 +370,7 @@ final class VoiceNoteStore {
         authorityMutationID = nil
         liveMeterSamples = VoiceNoteWaveformGeometry.emptyLiveMeterSamples
         playbackProgress = 0
+        isPlayingTake = false
         guard discardPendingProvisionalBeforeRecording() else {
             return
         }
@@ -441,13 +445,15 @@ final class VoiceNoteStore {
     /// Advances the playback head. The caller polls this while a saved note is
     /// playing; every other phase leaves the head where it is.
     func refreshPlayback() {
-        guard phase == .saved(isPlaying: true) else {
+        guard phase == .saved(isPlaying: true) || isPlayingTake else {
             return
         }
         let snapshot = audio.playbackSnapshot
         let duration = snapshot.duration > 0
             ? snapshot.duration
-            : (savedNote?.duration ?? 0)
+            : (isPlayingTake
+                ? (provisionalDuration ?? 0)
+                : (savedNote?.duration ?? 0))
         playbackProgress = VoiceWaveformPlayhead.progress(
             currentTime: snapshot.currentTime,
             duration: duration
@@ -466,6 +472,25 @@ final class VoiceNoteStore {
         case .failed:
             handleInterruption()
         }
+    }
+
+    /// The check mark. Ends the take and lands on review; only `save()`
+    /// commits, so the seller can listen before anything is kept (#1136).
+    func stopRecording() {
+        guard case .recording = phase else {
+            return
+        }
+#if DEBUG
+        if launchFixturePhaseApplied, case .recording(let elapsed, _) = phase {
+            phase = .takeReady(duration: elapsed)
+            return
+        }
+#endif
+        let snapshot = audio.drainRecordingSnapshot()
+        audio.stopRecording()
+        let duration = min(max(snapshot.elapsed, 0), Self.maximumDuration)
+        provisionalDuration = duration
+        phase = .takeReady(duration: duration)
     }
 
     func save() {
@@ -516,6 +541,8 @@ final class VoiceNoteStore {
                 }
                 authorityMutationID = nil
                 if let committed {
+                    audio.stopPlaying()
+                    isPlayingTake = false
                     setSavedNote(committed)
                     self.provisionalURL = nil
                     self.provisionalDuration = nil
@@ -535,6 +562,8 @@ final class VoiceNoteStore {
                 duration: provisionalDuration,
                 replacing: savedNote
             )
+            audio.stopPlaying()
+            isPlayingTake = false
             setSavedNote(savedNote)
             self.provisionalURL = nil
             self.provisionalDuration = nil
@@ -548,7 +577,63 @@ final class VoiceNoteStore {
     func rerecord() async {
         audio.stopPlaying()
         playbackProgress = 0
+        isPlayingTake = false
         await startRecording()
+    }
+
+    /// True while a stopped take is waiting on review and has not been kept.
+    var hasUnsavedTake: Bool {
+        if case .takeReady = phase {
+            return true
+        }
+        return false
+    }
+
+    /// Starting a listing with a take still under review keeps it rather
+    /// than losing it silently; the review's Save recording is the explicit
+    /// path, this is the implicit one (#1136).
+    func commitUnsavedTake() {
+        guard hasUnsavedTake else {
+            return
+        }
+        save()
+    }
+
+    func toggleTakePlayback() {
+        guard hasUnsavedTake, let provisionalURL else {
+            return
+        }
+        if isPlayingTake {
+            audio.pausePlaying()
+            isPlayingTake = false
+            return
+        }
+        do {
+            try audio.startPlaying(provisionalURL)
+            isPlayingTake = true
+        } catch {
+            playbackProgress = 0
+            isPlayingTake = false
+        }
+    }
+
+    /// Delete on review: drops the take and returns to whatever was
+    /// authoritative before it, the prior saved note or the empty state.
+    @discardableResult
+    func discardTake() -> Bool {
+        guard provisionalURL != nil else {
+            return true
+        }
+        audio.stopPlaying()
+        playbackProgress = 0
+        isPlayingTake = false
+        authorityMutationID = nil
+        prepareProvisionalForCleanup()
+        guard discardPendingProvisional() else {
+            return false
+        }
+        phase = authoritativePhase
+        return true
     }
 
     @discardableResult
@@ -572,6 +657,12 @@ final class VoiceNoteStore {
     }
 
     func handleInterruption() {
+        if isPlayingTake {
+            audio.stopPlaying()
+            playbackProgress = 0
+            isPlayingTake = false
+            return
+        }
         if phase == .saved(isPlaying: true) {
             audio.stopPlaying()
             playbackProgress = 0
@@ -626,6 +717,11 @@ final class VoiceNoteStore {
     }
 
     func handlePlaybackFinished() {
+        if isPlayingTake {
+            playbackProgress = 0
+            isPlayingTake = false
+            return
+        }
         guard savedNote != nil else {
             return
         }
@@ -678,6 +774,7 @@ final class VoiceNoteStore {
     func dismiss() -> Bool {
         audio.stopPlaying()
         playbackProgress = 0
+        isPlayingTake = false
         authorityMutationID = nil
         if provisionalURL != nil {
             prepareProvisionalForCleanup()
@@ -722,6 +819,28 @@ final class VoiceNoteStore {
         if case .saved(isPlaying: true) = phase {
             playbackProgress = 0.4
         }
+    }
+
+    /// Fixtures have no player or file, so review's play and delete flip the
+    /// same observable state a real take would.
+    func toggleFixtureTakePlayback() {
+        guard hasUnsavedTake else {
+            return
+        }
+        isPlayingTake.toggle()
+        playbackProgress = isPlayingTake ? 0.4 : 0
+    }
+
+    @discardableResult
+    func discardFixtureTake() -> Bool {
+        guard launchFixturePhaseApplied, hasUnsavedTake else {
+            return false
+        }
+        launchFixturePhaseApplied = false
+        isPlayingTake = false
+        playbackProgress = 0
+        phase = authoritativePhase
+        return true
     }
 
     @discardableResult
@@ -787,6 +906,10 @@ final class VoiceNoteStore {
 
     private func prepareProvisionalForCleanup() {
         audio.stopRecording()
+        if isPlayingTake {
+            audio.stopPlaying()
+            isPlayingTake = false
+        }
     }
 
     private var authoritativePhase: VoiceNotePhase {

@@ -3595,6 +3595,7 @@ struct PhotoReviewView: View {
                     .allowsHitTesting(
                         !(isCommitting
                             || submissionPresentation.mutationControlsLocked)
+                            || submissionPresentation.headerCancelEvent != nil
                     )
 
                 GeometryReader { viewport in
@@ -3938,9 +3939,32 @@ struct PhotoReviewView: View {
         }
     }
 
+    /// #1136: while saving, Cancel lives where Back does, so the bar under
+    /// the photos stays one button. Outside saving this is the normal chevron.
     @ViewBuilder
     private var backControl: some View {
-        if let backToCamera {
+        if let event = submissionPresentation.headerCancelEvent,
+           let openBoundary {
+            Button {
+                openBoundary(event)
+            } label: {
+                Text(submissionPresentation.headerCancelLabel ?? "Cancel")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .padding(.horizontal, 10)
+                    .frame(
+                        minWidth:
+                            PhotoReviewV5VisualContract.backTargetSize,
+                        minHeight:
+                            PhotoReviewV5VisualContract.backTargetSize
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel saving")
+            .accessibilityIdentifier("photo-review.cancel-submission")
+            .photoReviewLayoutLandmark(.back)
+        } else if let backToCamera {
             Button(action: backToCamera) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 22, weight: .semibold))
@@ -4677,6 +4701,46 @@ struct PhotoReviewView: View {
     private func voiceRow(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
+        ZStack(alignment: .trailing) {
+            voiceRowOpener(openBoundary)
+            if let voiceNoteStore, voiceNoteStore.savedNote != nil {
+                voiceRowPlayControl(voiceNoteStore)
+            }
+        }
+    }
+
+    /// The collapsed card's play control (#1136): a saved note can be heard
+    /// without reopening the panel.
+    private func voiceRowPlayControl(_ store: VoiceNoteStore) -> some View {
+        let isPlaying = store.phase == .saved(isPlaying: true)
+        return Button {
+            store.togglePlayback()
+        } label: {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 34, height: 34)
+                .background(SnapListColorToken.inkPrimary.color)
+                .clipShape(.circle)
+                .frame(
+                    width: VoiceNotePresentation.minimumTarget,
+                    height: VoiceNotePresentation.minimumTarget
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 6)
+        .accessibilityLabel(
+            VoiceNotePresentation.playbackAccessibilityLabel(
+                isPlaying: isPlaying
+            )
+        )
+        .accessibilityIdentifier("photo-review.voice-play")
+    }
+
+    private func voiceRowOpener(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
+    ) -> some View {
         Button {
             openBoundary(.openVoiceNote)
             if voiceNoteStore != nil {
@@ -4706,10 +4770,19 @@ struct PhotoReviewView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                    .accessibilityHidden(true)
+                if voiceNoteStore?.savedNote != nil {
+                    Color.clear
+                        .frame(
+                            width: VoiceNotePresentation.minimumTarget,
+                            height: 1
+                        )
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(SnapListColorToken.textTertiary.color)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 14)
             .frame(
@@ -4805,13 +4878,6 @@ struct PhotoReviewView: View {
             startListingControl(openBoundary, phase: phase)
                 .frame(width: contentWidth)
                 .photoReviewLayoutLandmark(.startListing)
-
-            // #1126: the Cancel link's slot is reserved through saving, the saved
-            // beat and Done, so the bar never changes height between them.
-            if phase != .standard {
-                cancelLink(openBoundary, isVisible: phase == .saving)
-                    .frame(width: contentWidth)
-            }
         }
         .task(id: submissionPresentation.barPhase(savedBeatFinished: false)) {
             await runSavedBeat()
@@ -4873,29 +4939,6 @@ struct PhotoReviewView: View {
         }
     }
 
-    private func cancelLink(
-        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
-        isVisible: Bool
-    ) -> some View {
-        Button {
-            if let event = submissionPresentation.cancelLinkEvent {
-                openBoundary(event)
-            }
-        } label: {
-            Text(submissionPresentation.cancelLinkLabel ?? "Cancel")
-                .font(.system(size: submissionMessageSize, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .opacity(isVisible ? 1 : 0)
-        .disabled(!isVisible)
-        .accessibilityHidden(!isVisible)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("photo-review.cancel-submission")
-    }
-
     @ViewBuilder
     private func startListingControl(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
@@ -4938,9 +4981,10 @@ struct PhotoReviewView: View {
                 maxWidth: .infinity,
                 minHeight: PhotoReviewV5VisualContract.primaryActionHeight
             )
+            // Saved is the Done fill (brand blue); green is not in the palette.
             .background(
                 isSaved
-                    ? SnapListColorToken.durableSuccess.color
+                    ? SnapListColorToken.action.color
                     : SnapListColorToken.actionTint.color
             )
             .clipShape(
