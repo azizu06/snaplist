@@ -323,6 +323,37 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(persisted)
     }
 
+    /// #1132 round 3. Guided-share progress is locally persisted, so sign-out and
+    /// account erasure (both run this removal) must take it, for every account.
+    func testLocalCachedDataRemovalAlsoForgetsAssistedExportProgress() throws {
+        let suite = "settings-progress-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let item = UUID()
+        let revision = UUID()
+        for user in ["user_a", "user_b"] {
+            AssistedExportUserDefaultsProgress(userID: user, defaults: defaults)
+                .save([.mercari: [.copiedListingText]], itemID: item, contentRevision: revision)
+        }
+
+        let removed = SettingsLocalCachedDataStore(
+            applicationSupportDirectory: root,
+            defaults: defaults
+        ).removeAll()
+
+        XCTAssertTrue(removed)
+        for user in ["user_a", "user_b"] {
+            XCTAssertEqual(
+                AssistedExportUserDefaultsProgress(userID: user, defaults: defaults)
+                    .load(itemID: item, contentRevision: revision),
+                [:]
+            )
+        }
+    }
+
     func testLocalRemovalStopsBeforeCachesWhenVersionFencedIntakeRejects() async {
         var cachedRemovalCalled = false
 

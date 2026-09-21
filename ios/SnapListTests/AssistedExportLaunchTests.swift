@@ -42,4 +42,21 @@ final class AssistedExportLaunchTests: XCTestCase {
         XCTAssertNil(configuration.assistedExportFixture)
         XCTAssertTrue(configuration.usesOnboarding)
     }
+
+    func testTheGuideFixturesNameTheStepTheSheetOpensOn() {
+        for (name, expected) in [
+            ("guide-step-1", AssistedExportFixture.guideStep1),
+            ("guide-step-2", .guideStep2),
+            ("guide-step-3", .guideStep3),
+            ("guide-step-4", .guideStep4),
+            ("guide-shared", .guideShared),
+        ] {
+            let configuration = LaunchConfiguration.parse(arguments: [
+                "--assisted-export-fixture=\(name)"
+            ])
+
+            XCTAssertEqual(configuration.assistedExportFixture, expected)
+            XCTAssertFalse(configuration.usesOnboarding)
+        }
+    }
 }

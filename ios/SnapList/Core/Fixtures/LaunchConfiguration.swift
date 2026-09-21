@@ -165,6 +165,13 @@ enum AssistedExportFixture: String, Equatable {
     case honestWording = "honest-wording"
     case destinationOpenFailure = "destination-open-failure"
     case saveDeduplication = "save-deduplication"
+    /// Opens Facebook Marketplace's guide sheet at a chosen step (#1128), for
+    /// simulator captures and the step-advance UI test.
+    case guideStep1 = "guide-step-1"
+    case guideStep2 = "guide-step-2"
+    case guideStep3 = "guide-step-3"
+    case guideStep4 = "guide-step-4"
+    case guideShared = "guide-shared"
 }
 
 enum SubmissionFixture: String, Equatable {

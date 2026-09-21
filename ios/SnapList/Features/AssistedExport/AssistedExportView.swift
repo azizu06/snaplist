@@ -37,7 +37,12 @@ struct AssistedExportHostView: View {
             initialValue: AssistedExportStore(
                 pack: pack,
                 service: service,
-                funnelAnalytics: funnelAnalytics
+                funnelAnalytics: funnelAnalytics,
+                // Only the product persists progress. Tests and fixtures take
+                // the in-memory default so nothing leaks between launches.
+                progress: AssistedExportUserDefaultsProgress(
+                    userID: ClerkAuthenticationComposition.currentUserID()
+                )
             )
         )
     }
@@ -166,19 +171,8 @@ struct AssistedExportView: View {
         .background(SnapListColorToken.canvas.color)
         .navigationTitle(AssistedExportCopy.screenTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: confirmSheetBinding) {
-            confirmSheet
-        }
-        .sheet(item: $sharePayload) { payload in
-            AssistedExportActivitySheet(items: payload.items) {
-                Task {
-                    await store.recordHandoff(
-                        .sharedAnotherWay,
-                        for: payload.destination,
-                        pack: payload.pack
-                    )
-                }
-            }
+        .sheet(item: guideBinding) { destination in
+            guideSheet(destination)
         }
         .task {
             store.listingRevisionChanged(to: listingRevision)
@@ -278,13 +272,12 @@ struct AssistedExportView: View {
             Divider().overlay(SnapListColorToken.hairline.color)
             ForEach(domain.destinations) { destination in
                 destinationRow(destination)
-                if domain.isWorkspaceOpen(destination) {
-                    workspace(destination)
-                }
             }
         }
     }
 
+    /// A row opens that destination's guide sheet. The trailing chevron points
+    /// up because that is where the sheet rises from; nothing expands inline.
     private func destinationRow(_ destination: AssistedExportDestination) -> some View {
         Button {
             withMotion { store.toggle(destination) }
@@ -295,10 +288,12 @@ struct AssistedExportView: View {
                     // row's accessibility label; printing it beside its own
                     // logo said everything twice (Facebook Marketplace worst).
                     destinationMark(destination)
-                    statusLine(destination)
+                    stateLine(destination)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: domain.isWorkspaceOpen(destination) ? "chevron.up" : "chevron.down")
+                // Intentionally static and decorative: it points at where the
+                // sheet rises from and never animates or changes with state.
+                Image(systemName: "chevron.up")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .accessibilityHidden(true)
@@ -314,6 +309,7 @@ struct AssistedExportView: View {
             Divider().overlay(SnapListColorToken.hairline.color)
         }
         .accessibilityLabel(domain.accessibilityLabel(for: destination))
+        .accessibilityHint(AssistedExportCopy.rowHint)
         .accessibilityIdentifier("assisted-export.row.\(destination.rawValue)")
     }
 
@@ -353,94 +349,286 @@ struct AssistedExportView: View {
         }
     }
 
-    /// A confirmed destination is set apart by a checkmark, the wording, and
+    /// One line: Not started, Prepared, or the seller's own Shared claim. A
+    /// confirmed destination is set apart by a checkmark, the wording, and
     /// text weight. The approved package is explicit that this difference
     /// carries no colour, badge, or banner: the seller's own note about their
-    /// own listing is not an achievement SnapList celebrates. A destination
-    /// nothing has been done to renders nothing here at all.
+    /// own listing is not an achievement SnapList celebrates.
     @ViewBuilder
-    private func statusLine(_ destination: AssistedExportDestination) -> some View {
-        if let status = domain.statusText(for: destination) {
-            switch domain.handoff(for: destination) {
-            case .prepared:
-                Text(status)
+    private func stateLine(_ destination: AssistedExportDestination) -> some View {
+        let text = domain.rowStateText(for: destination)
+        switch domain.handoff(for: destination) {
+        case .prepared:
+            Text(text)
+                .snapListTypography(.status)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+        case .shared:
+            HStack(spacing: 5) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityHidden(true)
+                Text(text)
                     .snapListTypography(.status)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-            case .shared:
-                HStack(spacing: 5) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .accessibilityHidden(true)
-                    Text(status)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    // MARK: - Guide sheet
+
+    /// The sheet is presented exactly while the store says one destination's
+    /// workspace is on screen. A stale pack takes it down without forgetting
+    /// the destination, so the setter only closes a sheet that was showing.
+    private var guideBinding: Binding<AssistedExportDestination?> {
+        Binding(
+            get: {
+                domain.destinations.first { domain.isWorkspaceOpen($0) }
+            },
+            set: { presented in
+                guard presented == nil,
+                      let open = domain.destinations.first(where: {
+                          domain.isWorkspaceOpen($0)
+                      }) else { return }
+                withMotion { store.toggle(open) }
+            }
+        )
+    }
+
+    private func guideSheet(_ destination: AssistedExportDestination) -> some View {
+        let progress = domain.guide(for: destination)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                guideHeader(destination)
+
+                if progress.current != nil {
+                    Text(progress.positionText)
                         .snapListTypography(.status)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .monospacedDigit()
+                        .accessibilityIdentifier("assisted-export.guide.position")
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(AssistedExportGuideStep.allCases, id: \.self) { step in
+                        guideStepRow(
+                            step,
+                            progress: progress,
+                            destination: destination
+                        )
+                    }
+                }
+                .animation(
+                    reduceMotion ? nil : .easeOut(duration: 0.2),
+                    value: progress
+                )
+
+                if progress.current == nil {
+                    sharedNote(destination)
+                }
+
+                if let advisory = domain.advisory(for: destination) {
+                    advisoryRow(advisory)
+                }
+
+                if progress.current != nil {
+                    shareAnotherWay(destination)
+                }
+
+                if let message = store.actionMessage {
+                    Text(message)
+                        .snapListTypography(.status)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        .accessibilityIdentifier("assisted-export.action-message")
+                }
+            }
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(SnapListColorToken.canvas.color)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(store.isWriting)
+        .sheet(item: $sharePayload) { payload in
+            AssistedExportActivitySheet(items: payload.items) {
+                Task {
+                    await store.recordHandoff(
+                        .sharedAnotherWay,
+                        for: payload.destination,
+                        pack: payload.pack
+                    )
                 }
             }
         }
     }
 
-    // MARK: - Workspace
-
-    private func workspace(_ destination: AssistedExportDestination) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // The identifier sits on this line rather than on the enclosing
-            // stack. An identifier applied to a container that is not itself an
-            // accessibility element propagates down and replaces the identifier
-            // of every control inside it, which left `Open`, `Copy listing
-            // text`, `Save photos`, `Share another way` and `Mark as shared`
-            // all reporting one name. This line exists exactly when the
-            // workspace does, so it anchors the same fact without erasing them.
-            Text(domain.leadText(for: destination))
-                .snapListTypography(.body)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+    private func guideHeader(_ destination: AssistedExportDestination) -> some View {
+        HStack {
+            destinationMark(destination)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(destination.displayName)
+                .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier(
                     "assisted-export.workspace.\(destination.rawValue)"
                 )
-
-            if let advisory = domain.advisory(for: destination) {
-                advisoryRow(advisory)
+            Spacer(minLength: 0)
+            Button {
+                withMotion { store.toggle(destination) }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .frame(
+                        width: SnapListMetrics.minimumTouchTarget,
+                        height: SnapListMetrics.minimumTouchTarget
+                    )
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .disabled(store.isWriting)
+            .accessibilityLabel(AssistedExportCopy.closeGuide)
+            .accessibilityIdentifier("assisted-export.guide.close")
+        }
+        .padding(.top, 8)
+    }
 
-            // `SnapListPrimaryButton` derives its own accessibility identifier
-            // from its title, and an outer one would not reach the button. It
-            // is addressed as `button.primary.open-<destination>`.
-            SnapListPrimaryButton(title: domain.primaryActionLabel(for: destination)) {
-                // Attempt first, then report. A pre-flight availability check
-                // would state something about the seller's device that this
-                // screen has no business asserting.
-                Task { await openDestination(destination) }
+    @ViewBuilder
+    private func guideStepRow(
+        _ step: AssistedExportGuideStep,
+        progress: AssistedExportGuideProgress,
+        destination: AssistedExportDestination
+    ) -> some View {
+        if progress.completed.contains(step) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .accessibilityHidden(true)
+                Text(AssistedExportCopy.completedStepSummary(step))
+                    .snapListTypography(.status)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                AssistedExportCopy.completedStepSummary(step)
+            )
+            .accessibilityValue(AssistedExportCopy.stepDone)
+        } else if step == progress.current {
+            currentStep(step, progress: progress, destination: destination)
+                .transition(
+                    reduceMotion
+                        ? .identity
+                        : .asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .opacity
+                        )
+                )
+        } else {
+            Text(AssistedExportCopy.upcomingStepTitle(step, for: destination))
+                .snapListTypography(.status)
+                .foregroundStyle(SnapListColorToken.textSecondary.color.opacity(0.7))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(
+                    AssistedExportCopy.upcomingStepTitle(step, for: destination)
+                )
+                .accessibilityValue(AssistedExportCopy.stepUpcoming)
+        }
+    }
+
+    private func currentStep(
+        _ step: AssistedExportGuideStep,
+        progress: AssistedExportGuideProgress,
+        destination: AssistedExportDestination
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(AssistedExportCopy.guideInstruction(step, for: destination))
+                .snapListTypography(step == .confirmPosted ? .sectionHeader : .body)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                // On the instruction rather than the step stack, so the
+                // controls below keep their own identifiers. The confirm
+                // step's question doubles as the marker that the confirm
+                // question is on screen.
+                .accessibilityIdentifier(
+                    step == .confirmPosted
+                        ? "assisted-export.confirm-sheet"
+                        : "assisted-export.guide.instruction"
+                )
+                .accessibilityLabel(
+                    "\(progress.positionText). "
+                        + AssistedExportCopy.guideInstruction(step, for: destination)
+                )
+            switch step {
+            case .copyText:
+                SnapListPrimaryButton(title: AssistedExportCopy.copyListingText) {
+                    copyListingText(for: destination)
+                }
+                .disabled(store.isWriting)
+            case .savePhotos:
+                SnapListPrimaryButton(
+                    title: AssistedExportCopy.savePhotos(count: domain.pack.photoCount)
+                ) {
+                    Task { await savePhotos(for: destination) }
+                }
+                .disabled(store.isWriting)
+            case .openDestination:
+                // `SnapListPrimaryButton` derives its own accessibility
+                // identifier from its title. It is addressed as
+                // `button.primary.open-<destination>`.
+                SnapListPrimaryButton(
+                    title: domain.primaryActionLabel(for: destination)
+                ) {
+                    // Attempt first, then report. A pre-flight availability
+                    // check would state something about the seller's device
+                    // that this screen has no business asserting.
+                    Task { await openDestination(destination) }
+                }
+                .disabled(store.isWriting)
+            case .confirmPosted:
+                confirmControls(destination)
+            }
+        }
+    }
+
+    /// The only writer of `Shared` on this screen. The question being on screen
+    /// is what the domain calls the confirm sheet, so it is asked for when the
+    /// step appears and withdrawn when it goes, which keeps a swipe, `Not yet`,
+    /// and a pack update the same full cancel they were before the guide.
+    private func confirmControls(
+        _ destination: AssistedExportDestination
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SnapListPrimaryButton(title: AssistedExportCopy.confirmShared) {
+                Task { await store.confirmShared(for: destination) }
             }
             .disabled(store.isWriting)
-
-            deviceActions(destination)
-
-            shareAnotherWay(destination)
-
-            if domain.offersMarkAsShared(for: destination) {
-                markAsShared(destination)
+            SnapListSecondaryButton(title: AssistedExportCopy.confirmNotYet) {
+                withMotion { store.toggle(destination) }
             }
+            .disabled(store.isWriting)
+            Text(AssistedExportCopy.markAsSharedSupport)
+                .snapListTypography(.metadata)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+        }
+        .onAppear {
+            store.presentConfirmSheet(for: destination)
+            onConfirmSheetPresented?()
+        }
+        .onDisappear { store.dismissConfirmSheet() }
+    }
 
+    private func sharedNote(_ destination: AssistedExportDestination) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(domain.rowStateText(for: destination))
+                .snapListTypography(.rowTitle)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .monospacedDigit()
+                .accessibilityIdentifier("assisted-export.guide.shared")
             if domain.undoWindow == destination {
                 undoRow()
             }
-
-            if let message = store.actionMessage {
-                Text(message)
-                    .snapListTypography(.status)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .accessibilityIdentifier("assisted-export.action-message")
-            }
-        }
-        .padding(.horizontal, SnapListMetrics.screenGutter)
-        .padding(.top, 16)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SnapListColorToken.canvas.color)
-        .overlay(alignment: .bottom) {
-            Divider().overlay(SnapListColorToken.hairline.color)
         }
     }
 
@@ -460,94 +648,20 @@ struct AssistedExportView: View {
         .background(SnapListColorToken.quietFill.color)
     }
 
-    /// Copy and Save report a device action and nothing more. Neither reveals
-    /// anything about the destination, and both are equal-weight secondary
-    /// controls so neither reads as the way to finish.
-    private func deviceActions(_ destination: AssistedExportDestination) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                copyAction(destination)
-                saveAction(destination)
-            }
-            VStack(spacing: 10) {
-                copyAction(destination)
-                saveAction(destination)
-            }
-        }
-    }
-
-    private func copyAction(_ destination: AssistedExportDestination) -> some View {
+    private func copyListingText(for destination: AssistedExportDestination) {
         let requestedPack = domain.pack
-        let completed = store.completedAction == AssistedExportCompletedAction(
-            action: .copiedListingText,
-            destination: destination
-        )
-        return quietAction(
-            title: completed
-                ? AssistedExportCopy.copyListingTextDone
-                : AssistedExportCopy.copyListingText,
-            systemImage: completed ? "checkmark" : "doc.on.doc",
-            identifier: "assisted-export.copy.\(destination.rawValue)"
-        ) {
-            Task {
-                // The copy itself happens inside `deliver`, on the pack the
-                // server resolved there and then. Copying first and reconciling
-                // afterwards would put a replaced price in the pasteboard.
-                await store.deliver(
-                    .copiedListingText,
-                    for: destination,
-                    pack: requestedPack
-                ) { currentPack in
-                    deviceActions.copy(currentPack.listingText(for: destination))
-                }
+        Task {
+            // The copy itself happens inside `deliver`, on the pack the server
+            // resolved there and then. Copying first and reconciling
+            // afterwards would put a replaced price in the pasteboard.
+            await store.deliver(
+                .copiedListingText,
+                for: destination,
+                pack: requestedPack
+            ) { currentPack in
+                deviceActions.copy(currentPack.listingText(for: destination))
             }
         }
-    }
-
-    private func saveAction(_ destination: AssistedExportDestination) -> some View {
-        let completed = store.completedAction == AssistedExportCompletedAction(
-            action: .savedPhotos,
-            destination: destination
-        )
-        return quietAction(
-            title: completed
-                ? AssistedExportCopy.savedPhotosDone
-                : AssistedExportCopy.savePhotos(count: domain.pack.photoCount),
-            systemImage: completed ? "checkmark" : "square.and.arrow.down",
-            identifier: "assisted-export.save.\(destination.rawValue)"
-        ) {
-            Task { await savePhotos(for: destination) }
-        }
-    }
-
-    private func quietAction(
-        title: String,
-        systemImage: String,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .snapListTypography(.rowTitle)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .background(SnapListColorToken.canvas.color)
-        .clipShape(.rect(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
-        }
-        .accessibilityIdentifier(identifier)
-        .disabled(store.isWriting)
     }
 
     private func shareAnotherWay(_ destination: AssistedExportDestination) -> some View {
@@ -569,37 +683,6 @@ struct AssistedExportView: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("assisted-export.share-another-way.\(destination.rawValue)")
         .disabled(store.isWriting)
-    }
-
-    /// Withheld until the seller has actually handed the pack over, and never a
-    /// primary control. The support line under it says whose claim this is.
-    private func markAsShared(_ destination: AssistedExportDestination) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withMotion { store.presentConfirmSheet(for: destination) }
-            } label: {
-                Text(AssistedExportCopy.markAsShared)
-                    .snapListTypography(.rowTitle)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .background(SnapListColorToken.canvas.color)
-            .clipShape(.rect(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
-            }
-            .accessibilityIdentifier("assisted-export.mark-as-shared.\(destination.rawValue)")
-            .disabled(store.isWriting)
-
-            Text(AssistedExportCopy.markAsSharedSupport)
-                .snapListTypography(.metadata)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-        }
-        .padding(.top, 2)
     }
 
     private func undoRow() -> some View {
@@ -626,59 +709,6 @@ struct AssistedExportView: View {
             Spacer(minLength: 0)
         }
         .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-    }
-
-    // MARK: - Confirm sheet
-
-    /// The only writer of `Shared` on this screen.
-    ///
-    /// The binding's setter is what makes a swipe-down, a scrim tap, and `Not
-    /// yet` all the same full cancel, and it is also how the sheet comes down
-    /// when the listing moves underneath it — SwiftUI re-evaluates the binding,
-    /// finds `confirmSheet` cleared, and dismisses. The server would refuse the
-    /// write anyway, but a sheet left mounted still asks the seller to confirm a
-    /// pack they were never shown.
-    private var confirmSheetBinding: Binding<Bool> {
-        Binding(
-            get: { domain.confirmSheet != nil },
-            set: { presented in
-                if !presented { store.dismissConfirmSheet() }
-            }
-        )
-    }
-
-    @ViewBuilder
-    private var confirmSheet: some View {
-        if let destination = domain.confirmSheet {
-            VStack(alignment: .leading, spacing: 16) {
-                // On the question rather than the sheet, so the two confirm
-                // controls keep their own identifiers. The question is on
-                // screen exactly while the sheet is, so it still marks the
-                // sheet's presence. See the note in `workspace`.
-                Text(domain.confirmQuestion(for: destination))
-                    .snapListTypography(.sectionHeader)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .padding(.top, 4)
-                    .accessibilityIdentifier("assisted-export.confirm-sheet")
-                // Addressed as `button.primary.yes,-mark-as-shared`; see the
-                // note on the open action about the component's own identifier.
-                SnapListPrimaryButton(title: AssistedExportCopy.confirmShared) {
-                    Task { await store.confirmShared() }
-                }
-                .disabled(store.isWriting)
-                SnapListSecondaryButton(title: AssistedExportCopy.confirmNotYet) {
-                    withMotion { store.dismissConfirmSheet() }
-                }
-                .disabled(store.isWriting)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.bottom, 30)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled(store.isWriting)
-            .onAppear { onConfirmSheetPresented?() }
-        }
     }
 
     // MARK: - Device handoff

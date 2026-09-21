@@ -12,6 +12,122 @@ struct AssistedExportCompletedAction: Equatable, Sendable {
     let destination: AssistedExportDestination
 }
 
+/// Which handoff actions the seller performed on this device, kept so the
+/// guided sheet resumes on the right step after a relaunch. The server receipt
+/// only says that some handoff happened. One entry per item, tagged with the
+/// pack text revision it was made against, so a rebuilt pack reads back empty.
+protocol AssistedExportProgressStoring: AnyObject {
+    func load(
+        itemID: UUID,
+        contentRevision: UUID
+    ) -> [AssistedExportDestination: Set<AssistedExportHandoffAction>]
+
+    func save(
+        _ performed: [AssistedExportDestination: Set<AssistedExportHandoffAction>],
+        itemID: UUID,
+        contentRevision: UUID
+    )
+}
+
+/// Action flags only, never seller text. Keyed by the signed-in Clerk user (a
+/// guest files under `guest`), the item, and holding one pack content revision,
+/// so saving for a newer revision replaces the older one. Sign-out and account
+/// erasure remove every account's entries through
+/// `SettingsLocalCachedDataStore.removeAll()` (see the retention contract row
+/// `local-assisted-export-guide-progress`).
+final class AssistedExportUserDefaultsProgress: AssistedExportProgressStoring {
+    static let keyPrefix = "dev.snaplist.ios.assisted-export-progress."
+
+    private struct Entry: Codable {
+        let contentRevision: UUID
+        let actions: [String: [String]]
+    }
+
+    private let defaults: UserDefaults
+    private let scope: String
+
+    init(userID: String?, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        scope = userID.flatMap { $0.isEmpty ? nil : $0 } ?? "guest"
+    }
+
+    /// Takes back every account's entries. Sign-out and erasure are the points
+    /// at which no account on this device has a claim left on them.
+    @discardableResult
+    static func removeAll(defaults: UserDefaults = .standard) -> Bool {
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(keyPrefix) {
+            defaults.removeObject(forKey: key)
+        }
+        return true
+    }
+
+    private func key(_ itemID: UUID) -> String {
+        "\(Self.keyPrefix)\(scope).\(itemID.uuidString.lowercased())"
+    }
+
+    func load(
+        itemID: UUID,
+        contentRevision: UUID
+    ) -> [AssistedExportDestination: Set<AssistedExportHandoffAction>] {
+        guard let data = defaults.data(forKey: key(itemID)),
+              let entry = try? JSONDecoder().decode(Entry.self, from: data),
+              entry.contentRevision == contentRevision else { return [:] }
+        var restored: [AssistedExportDestination: Set<AssistedExportHandoffAction>] = [:]
+        for (destination, actions) in entry.actions {
+            guard let destination = AssistedExportDestination(rawValue: destination) else {
+                continue
+            }
+            restored[destination] = Set(
+                actions.compactMap(AssistedExportHandoffAction.init(rawValue:))
+            )
+        }
+        return restored
+    }
+
+    func save(
+        _ performed: [AssistedExportDestination: Set<AssistedExportHandoffAction>],
+        itemID: UUID,
+        contentRevision: UUID
+    ) {
+        let entry = Entry(
+            contentRevision: contentRevision,
+            actions: Dictionary(
+                uniqueKeysWithValues: performed.map { destination, actions in
+                    (destination.rawValue, actions.map(\.rawValue).sorted())
+                }
+            )
+        )
+        defaults.set(try? JSONEncoder().encode(entry), forKey: key(itemID))
+    }
+}
+
+/// For fixtures and tests: nothing outlives the process.
+final class AssistedExportInMemoryProgress: AssistedExportProgressStoring {
+    private var saved: (
+        itemID: UUID,
+        contentRevision: UUID,
+        performed: [AssistedExportDestination: Set<AssistedExportHandoffAction>]
+    )?
+
+    func load(
+        itemID: UUID,
+        contentRevision: UUID
+    ) -> [AssistedExportDestination: Set<AssistedExportHandoffAction>] {
+        guard let saved, saved.itemID == itemID,
+              saved.contentRevision == contentRevision else { return [:] }
+        return saved.performed
+    }
+
+    func save(
+        _ performed: [AssistedExportDestination: Set<AssistedExportHandoffAction>],
+        itemID: UUID,
+        contentRevision: UUID
+    ) {
+        saved = (itemID, contentRevision, performed)
+    }
+}
+
 @MainActor
 @Observable
 final class AssistedExportStore {
@@ -23,16 +139,34 @@ final class AssistedExportStore {
 
     private let service: any AssistedExportServing
     private let funnelAnalytics: any FunnelAnalyticsEventSinking
+    @ObservationIgnored private let progress: any AssistedExportProgressStoring
     private var photosSavedForContentRevision: UUID?
 
     init(
         pack: AssistedExportPack,
         service: any AssistedExportServing,
-        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink(),
+        progress: any AssistedExportProgressStoring = AssistedExportInMemoryProgress()
     ) {
         domain = AssistedExportDomain(pack: pack)
         self.service = service
         self.funnelAnalytics = funnelAnalytics
+        self.progress = progress
+        domain.restorePerformed(
+            progress.load(itemID: pack.itemID, contentRevision: pack.contentRevision)
+        )
+    }
+
+    private func recordPerformed(
+        _ action: AssistedExportHandoffAction,
+        for destination: AssistedExportDestination
+    ) {
+        domain.recordHandoff(action, for: destination)
+        progress.save(
+            domain.performedActions,
+            itemID: domain.pack.itemID,
+            contentRevision: domain.pack.contentRevision
+        )
     }
 
     func load() async {
@@ -60,6 +194,9 @@ final class AssistedExportStore {
         // message left over from a previous row or a previous attempt on this
         // one is not a fact about the row the seller is looking at now.
         actionMessage = nil
+        // A durable write in flight owns the guide: closing it would hide a
+        // failure, or a success's Undo, from the seller who asked for it.
+        guard !isWriting else { return }
         domain.toggle(destination)
     }
 
@@ -92,6 +229,12 @@ final class AssistedExportStore {
         // This runs before any network read. It is what makes a mounted sheet
         // visibly dismiss as soon as its revision is replaced.
         domain.updatePack(to: replacement)
+        domain.restorePerformed(
+            progress.load(
+                itemID: replacement.itemID,
+                contentRevision: replacement.contentRevision
+            )
+        )
         await load()
     }
 
@@ -117,6 +260,7 @@ final class AssistedExportStore {
             guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
                 return
             }
+            recordPerformed(action, for: destination)
             switch action {
             case .copiedListingText:
                 showCompletion(action, for: destination)
@@ -204,6 +348,7 @@ final class AssistedExportStore {
             )
             guard synchronize(response, for: currentPack),
                   !domain.isPackOutOfDate else { return }
+            recordPerformed(receipt.action, for: receipt.destination)
             switch receipt.action {
             case .copiedListingText, .savedPhotos:
                 showCompletion(receipt.action, for: receipt.destination)
@@ -249,6 +394,7 @@ final class AssistedExportStore {
                     return
                 }
             }
+            recordPerformed(.savedPhotos, for: destination)
             showCompletion(.savedPhotos, for: destination)
         } catch {
             actionMessage = AssistedExportCopy.actionFailed
@@ -269,6 +415,13 @@ final class AssistedExportStore {
             guard self?.completedAction == completion else { return }
             self?.completedAction = nil
         }
+    }
+
+    /// Asks the question again first: a conflict clears it in the domain while
+    /// the guide still shows it, so a later tap has to re-arm it itself.
+    func confirmShared(for destination: AssistedExportDestination) async {
+        domain.presentConfirmSheet(for: destination)
+        await confirmShared()
     }
 
     func confirmShared() async {

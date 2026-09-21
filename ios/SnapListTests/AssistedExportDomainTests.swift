@@ -93,9 +93,10 @@ final class AssistedExportDomainTests: XCTestCase {
         )
         for destination in domain.destinations {
             XCTAssertEqual(domain.handoff(for: destination), .prepared)
-            XCTAssertNil(
-                domain.statusText(for: destination),
-                "A row nobody has touched says nothing, not Not shared."
+            XCTAssertEqual(
+                domain.rowStateText(for: destination),
+                "Not started",
+                "A row nobody has touched says it has not started."
             )
         }
         XCTAssertNil(domain.confirmSheet)
@@ -138,6 +139,157 @@ final class AssistedExportDomainTests: XCTestCase {
         }
     }
 
+    // MARK: - Guided steps (issue #1128)
+
+    func testAnUntouchedDestinationStartsTheGuideAtStepOneOfFour() {
+        let guide = AssistedExportGuide.progress(
+            performed: [],
+            isShared: false
+        )
+
+        XCTAssertEqual(guide.current, .copyText)
+        XCTAssertEqual(guide.position, 1)
+        XCTAssertEqual(guide.total, 4)
+        XCTAssertEqual(guide.completed, [])
+        XCTAssertEqual(guide.positionText, "Step 1 of 4")
+    }
+
+    func testTheGuideAdvancesOneStepPerPerformedAction() {
+        func guide(_ performed: Set<AssistedExportHandoffAction>) -> AssistedExportGuideProgress {
+            AssistedExportGuide.progress(
+                performed: performed,
+                isShared: false
+            )
+        }
+
+        XCTAssertEqual(guide([.copiedListingText]).current, .savePhotos)
+        XCTAssertEqual(guide([.copiedListingText]).completed, [.copyText])
+        XCTAssertEqual(guide([.copiedListingText]).positionText, "Step 2 of 4")
+
+        let saved = guide([.copiedListingText, .savedPhotos])
+        XCTAssertEqual(saved.current, .openDestination)
+        XCTAssertEqual(saved.completed, [.copyText, .savePhotos])
+
+        let opened = guide([.copiedListingText, .savedPhotos, .openedDestination])
+        XCTAssertEqual(opened.current, .confirmPosted)
+        XCTAssertEqual(opened.completed, [.copyText, .savePhotos, .openDestination])
+        XCTAssertEqual(opened.positionText, "Step 4 of 4")
+    }
+
+    func testAnOutOfOrderActionDoesNotSkipAnUndoneStep() {
+        let guide = AssistedExportGuide.progress(
+            performed: [.savedPhotos],
+            isShared: false
+        )
+
+        XCTAssertEqual(guide.current, .copyText)
+        XCTAssertEqual(guide.completed, [.savePhotos])
+    }
+
+    /// The server receipt only says some handoff happened. Copy, save, open and
+    /// the share sheet all write the same one, so with no local record of which
+    /// action it was, nothing may be shown as done.
+    func testAHandoffRestoredWithoutActionDetailResumesAtTheFirstDeviceStep() {
+        let guide = AssistedExportGuide.progress(
+            performed: [],
+            isShared: false
+        )
+
+        XCTAssertEqual(guide.current, .copyText)
+        XCTAssertEqual(guide.completed, [])
+    }
+
+    func testSharingAnotherWayHandsEverythingOverSoTheGuideAsksTheQuestion() {
+        let guide = AssistedExportGuide.progress(
+            performed: [.sharedAnotherWay],
+            isShared: false
+        )
+
+        XCTAssertEqual(guide.current, .confirmPosted)
+    }
+
+    func testASharedClaimFinishesTheGuide() {
+        let guide = AssistedExportGuide.progress(
+            performed: [.copiedListingText],
+            isShared: true
+        )
+
+        XCTAssertNil(guide.current)
+        XCTAssertEqual(guide.completed, AssistedExportGuideStep.allCases)
+    }
+
+    func testClosingAndReopeningTheSheetResumesOnTheRightStep() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.mercari)
+        domain.recordHandoff(.copiedListingText, for: .mercari)
+        domain.recordHandoff(.savedPhotos, for: .mercari)
+
+        domain.toggle(.mercari)
+        domain.toggle(.mercari)
+
+        XCTAssertEqual(domain.guide(for: .mercari).current, .openDestination)
+        XCTAssertEqual(
+            domain.guide(for: .depop).current,
+            .copyText,
+            "Progress belongs to the destination it was made on."
+        )
+    }
+
+    func testTheSharedClaimFinishesTheGuideAndUndoReturnsToTheQuestion() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.depop)
+        domain.recordHandoff(.sharedAnotherWay, for: .depop)
+        domain.presentConfirmSheet(for: .depop)
+        domain.confirmShared(at: Self.julyTwentyFifth)
+
+        XCTAssertNil(domain.guide(for: .depop).current)
+
+        domain.undoShared()
+
+        XCTAssertEqual(domain.guide(for: .depop).current, .confirmPosted)
+    }
+
+    func testARebuiltPackRestartsTheGuideBecauseTheTextIsNew() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.recordHandoff(.copiedListingText, for: .mercari)
+
+        domain.updatePack(
+            to: .fixture(
+                contentRevision: UUID(uuidString: "58100000-0000-4000-8000-0000000000c9")!
+            )
+        )
+
+        XCTAssertEqual(domain.guide(for: .mercari).current, .copyText)
+    }
+
+    func testEveryRowSaysNotStartedPreparedOrSharedInOneLine() {
+        var domain = AssistedExportDomain(pack: .fixture())
+
+        XCTAssertEqual(domain.rowStateText(for: .mercari), "Not started")
+
+        domain.recordHandoff(.copiedListingText, for: .mercari)
+        XCTAssertEqual(domain.rowStateText(for: .mercari), "Prepared")
+        XCTAssertEqual(domain.rowStateText(for: .depop), "Not started")
+
+        domain.presentConfirmSheet(for: .mercari)
+        domain.confirmShared(at: Self.julyTwentyFifth)
+        XCTAssertEqual(domain.rowStateText(for: .mercari), "Shared Jul 25")
+    }
+
+    func testARowIsAnnouncedByNameAndStateAsOneElement() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        XCTAssertEqual(
+            domain.accessibilityLabel(for: .facebookMarketplace),
+            "Facebook Marketplace, not started"
+        )
+
+        domain.recordHandoff(.openedDestination, for: .facebookMarketplace)
+        XCTAssertEqual(
+            domain.accessibilityLabel(for: .facebookMarketplace),
+            "Facebook Marketplace, prepared"
+        )
+    }
+
     // MARK: - XPORT-03, the seller handed the pack over
 
     func testAHandoffActionRevealsTheClaimControlWithoutMakingTheClaim() {
@@ -153,7 +305,7 @@ final class AssistedExportDomainTests: XCTestCase {
             .prepared,
             "Copying the text is a device action. It says nothing about Depop."
         )
-        XCTAssertEqual(domain.statusText(for: .depop), "Not shared")
+        XCTAssertEqual(domain.rowStateText(for: .depop), "Prepared")
     }
 
     func testNoHandoffActionEverWritesTheSharedClaim() {
@@ -214,7 +366,7 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertNil(domain.confirmSheet)
         XCTAssertEqual(domain.state, .shared(.mercari))
         XCTAssertEqual(domain.handoff(for: .mercari), .shared(at: Self.julyTwentyFifth))
-        XCTAssertEqual(domain.statusText(for: .mercari), "Shared Jul 25")
+        XCTAssertEqual(domain.rowStateText(for: .mercari), "Shared Jul 25")
     }
 
     func testDismissingTheConfirmSheetIsAFullCancel() {
@@ -285,11 +437,11 @@ final class AssistedExportDomainTests: XCTestCase {
 
         for destination in AssistedExportDestination.allCases {
             var domain = AssistedExportDomain(pack: .fixture())
-            strings.append(domain.statusText(for: destination) ?? "")
+            strings.append(domain.rowStateText(for: destination))
 
             domain.toggle(destination)
             strings.append(domain.primaryActionLabel(for: destination))
-            strings.append(domain.leadText(for: destination))
+            strings.append(domain.guide(for: destination).positionText)
             strings.append(domain.confirmQuestion(for: destination))
             strings.append(domain.accessibilityLabel(for: destination))
 
@@ -300,11 +452,11 @@ final class AssistedExportDomainTests: XCTestCase {
 
             domain.presentConfirmSheet(for: destination)
             domain.confirmShared(at: Self.julyTwentyFifth)
-            strings.append(domain.statusText(for: destination) ?? "")
+            strings.append(domain.rowStateText(for: destination))
             strings.append(domain.accessibilityLabel(for: destination))
 
             domain.listingRevisionChanged(to: Self.editedReviewRevision)
-            strings.append(domain.statusText(for: destination) ?? "")
+            strings.append(domain.rowStateText(for: destination))
         }
 
         for string in strings {
@@ -337,10 +489,10 @@ final class AssistedExportDomainTests: XCTestCase {
             domain.isWorkspaceOpen(.facebookMarketplace),
             "A stale pack hides the workspace, so nothing is open."
         )
-        XCTAssertTrue(
-            domain.accessibilityLabel(for: .facebookMarketplace)
-                .hasSuffix("closed"),
-            "The row announces what is actually on screen."
+        XCTAssertEqual(
+            domain.accessibilityLabel(for: .facebookMarketplace),
+            "Facebook Marketplace, not started",
+            "The row announces its state, not a disclosure that is gone."
         )
     }
 
@@ -393,8 +545,8 @@ final class AssistedExportDomainTests: XCTestCase {
             "SnapList can't see whether this posted. Only you can confirm it here."
         )
         XCTAssertEqual(
-            domain.leadText(for: .mercari),
-            "You finish this in Mercari."
+            AssistedExportCopy.guideInstruction(.openDestination, for: .mercari),
+            "Open Mercari and paste in the text and photos."
         )
     }
 
@@ -438,9 +590,10 @@ final class AssistedExportDomainTests: XCTestCase {
             "There is no pre-flight. Before an attempt SnapList knows nothing "
                 + "about what is installed, and says nothing."
         )
-        XCTAssertNil(
-            domain.statusText(for: .facebookMarketplace),
-            "A row nobody has handed off to says nothing at all, not Not shared."
+        XCTAssertEqual(
+            domain.rowStateText(for: .facebookMarketplace),
+            "Not started",
+            "A row nobody has handed off to has not started."
         )
     }
 
@@ -467,7 +620,7 @@ final class AssistedExportDomainTests: XCTestCase {
         domain.undoShared()
 
         XCTAssertEqual(domain.handoff(for: .depop), .prepared)
-        XCTAssertEqual(domain.statusText(for: .depop), "Not shared")
+        XCTAssertEqual(domain.rowStateText(for: .depop), "Prepared")
         XCTAssertTrue(
             domain.hasHandedOff(to: .depop),
             "Taking back the claim does not take back the handoff. The seller "
@@ -588,7 +741,7 @@ final class AssistedExportDomainTests: XCTestCase {
             "The record belongs to the seller. Editing the listing does not "
                 + "unsay what they said."
         )
-        XCTAssertEqual(domain.statusText(for: .mercari), "Shared Jul 25")
+        XCTAssertEqual(domain.rowStateText(for: .mercari), "Shared Jul 25")
     }
 
     // A pack update that carries the same text is the case where the seller's
@@ -789,10 +942,11 @@ final class AssistedExportDomainTests: XCTestCase {
             "The seller said they posted the old text. The new text is not "
                 + "something they have said anything about."
         )
-        XCTAssertNil(
-            domain.statusText(for: .mercari),
+        XCTAssertEqual(
+            domain.rowStateText(for: .mercari),
+            "Not started",
             "A new pack text retires the old handoff along with the claim, so "
-                + "the row goes back to saying nothing."
+                + "the row goes back to the start."
         )
         XCTAssertEqual(
             domain.state,
@@ -802,9 +956,9 @@ final class AssistedExportDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             domain.accessibilityLabel(for: .mercari),
-            "Mercari, open",
+            "Mercari, not started",
             "The new pack text retired the handoff too, so a sighted seller "
-                + "and a VoiceOver seller must agree the row says nothing yet."
+                + "and a VoiceOver seller must agree the row is back to the start."
         )
     }
 

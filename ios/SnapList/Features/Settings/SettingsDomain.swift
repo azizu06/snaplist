@@ -241,12 +241,15 @@ struct SettingsFlow: Equatable {
 struct SettingsLocalCachedDataStore {
     private let applicationSupportDirectory: URL
     private let fileManager: FileManager
+    private let defaults: UserDefaults
 
     init(
         applicationSupportDirectory: URL? = nil,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        defaults: UserDefaults = .standard
     ) {
         self.fileManager = fileManager
+        self.defaults = defaults
         self.applicationSupportDirectory = applicationSupportDirectory
             ?? fileManager.urls(
                 for: .applicationSupportDirectory,
@@ -259,7 +262,11 @@ struct SettingsLocalCachedDataStore {
     }
 
     func removeAll() -> Bool {
-        var removedEveryRoot = true
+        // Guided-share progress lives in `UserDefaults`, not under a root, so
+        // sign-out and account erasure would otherwise both miss it.
+        var removedEveryRoot = AssistedExportUserDefaultsProgress.removeAll(
+            defaults: defaults
+        )
         for root in ownedRoots where fileManager.fileExists(atPath: root.path) {
             do { try fileManager.removeItem(at: root) }
             catch { removedEveryRoot = false }

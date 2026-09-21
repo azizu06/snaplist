@@ -111,6 +111,186 @@ final class AssistedExportClientTests: XCTestCase {
         XCTAssertEqual(store.actionMessage, AssistedExportCopy.actionFailed)
     }
 
+    /// Devin #1132 (1): a relaunch loses the in-memory record of which action
+    /// the one coarse receipt stands for, so the guide would show copy, save and
+    /// open all done after a copy alone.
+    func testTheGuideResumesOnTheRightStepAfterARelaunch() async {
+        let progress = AssistedExportInMemoryProgress()
+        let first = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService(),
+            progress: progress
+        )
+        await first.load()
+        first.toggle(.mercari)
+        await first.deliver(
+            .copiedListingText,
+            for: .mercari,
+            pack: first.domain.pack
+        ) { _ in }
+        await first.savePhotos(for: .mercari) {}
+
+        let relaunched = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService(
+                receipts: [
+                    AssistedExportReceipt(
+                        destination: .mercari,
+                        handedOffAt: Date(timeIntervalSince1970: 1_753_464_600),
+                        sharedAt: nil
+                    ),
+                ]
+            ),
+            progress: progress
+        )
+        await relaunched.load()
+
+        XCTAssertEqual(relaunched.domain.guide(for: .mercari).current, .openDestination)
+        XCTAssertEqual(
+            relaunched.domain.guide(for: .mercari).completed,
+            [.copyText, .savePhotos]
+        )
+
+        let rebuilt = AssistedExportStore(
+            pack: .fixture(
+                contentRevision: UUID(uuidString: "58100000-0000-4000-8000-0000000000c8")!
+            ),
+            service: AssistedExportFixtureService(),
+            progress: progress
+        )
+        await rebuilt.load()
+        XCTAssertEqual(
+            rebuilt.domain.guide(for: .mercari).current,
+            .copyText,
+            "Progress belongs to the pack text it was made against."
+        )
+    }
+
+    // MARK: - Persisted guide progress (#1132 round 3)
+
+    private func progressDefaults() -> UserDefaults {
+        let suite = "assisted-export-progress-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return defaults
+    }
+
+    private static let progressKeyPrefix = "dev.snaplist.ios.assisted-export-progress."
+
+    func testPersistedProgressBelongsToTheSignedInAccount() {
+        let defaults = progressDefaults()
+        let item = AssistedExportPack.fixtureItemID
+        let revision = AssistedExportPack.fixtureContentRevision
+        AssistedExportUserDefaultsProgress(userID: "user_a", defaults: defaults)
+            .save([.mercari: [.copiedListingText]], itemID: item, contentRevision: revision)
+
+        XCTAssertEqual(
+            AssistedExportUserDefaultsProgress(userID: "user_a", defaults: defaults)
+                .load(itemID: item, contentRevision: revision),
+            [.mercari: [.copiedListingText]]
+        )
+        XCTAssertEqual(
+            AssistedExportUserDefaultsProgress(userID: "user_b", defaults: defaults)
+                .load(itemID: item, contentRevision: revision),
+            [:],
+            "Another account on this device must not read the first one's progress."
+        )
+        XCTAssertEqual(
+            AssistedExportUserDefaultsProgress(userID: nil, defaults: defaults)
+                .load(itemID: item, contentRevision: revision),
+            [:],
+            "A guest is not a signed-in account."
+        )
+    }
+
+    func testSavingForANewRevisionDropsTheOlderRevisionsEntry() {
+        let defaults = progressDefaults()
+        let progress = AssistedExportUserDefaultsProgress(userID: "user_a", defaults: defaults)
+        let item = AssistedExportPack.fixtureItemID
+        let older = AssistedExportPack.fixtureContentRevision
+        let newer = UUID(uuidString: "58100000-0000-4000-8000-0000000000c7")!
+
+        progress.save([.depop: [.savedPhotos]], itemID: item, contentRevision: older)
+        progress.save([.depop: [.copiedListingText]], itemID: item, contentRevision: newer)
+
+        XCTAssertEqual(progress.load(itemID: item, contentRevision: older), [:])
+        XCTAssertEqual(
+            progress.load(itemID: item, contentRevision: newer),
+            [.depop: [.copiedListingText]]
+        )
+        XCTAssertEqual(
+            defaults.dictionaryRepresentation().keys
+                .filter { $0.hasPrefix(Self.progressKeyPrefix) }.count,
+            1,
+            "One entry per item, so blobs do not accumulate across revisions."
+        )
+    }
+
+    func testRemovingAllProgressForgetsEveryAccountsEntries() {
+        let defaults = progressDefaults()
+        let item = AssistedExportPack.fixtureItemID
+        let revision = AssistedExportPack.fixtureContentRevision
+        for user in ["user_a", "user_b", nil] as [String?] {
+            AssistedExportUserDefaultsProgress(userID: user, defaults: defaults)
+                .save([.mercari: [.openedDestination]], itemID: item, contentRevision: revision)
+        }
+
+        XCTAssertTrue(AssistedExportUserDefaultsProgress.removeAll(defaults: defaults))
+
+        XCTAssertTrue(
+            defaults.dictionaryRepresentation().keys
+                .filter { $0.hasPrefix(Self.progressKeyPrefix) }.isEmpty
+        )
+    }
+
+    /// Devin #1132 (2): a conflict clears the confirm question in the domain
+    /// while the guide still shows it, so a later tap must ask again itself.
+    func testConfirmingAgainAfterAConflictStillWorks() async {
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportConflictOnceService()
+        )
+        await store.load()
+        store.toggle(.mercari)
+        await store.recordHandoff(.copiedListingText, for: .mercari)
+
+        await store.confirmShared(for: .mercari)
+        XCTAssertEqual(store.actionMessage, AssistedExportCopy.actionFailed)
+        XCTAssertEqual(store.domain.handoff(for: .mercari), .prepared)
+
+        await store.confirmShared(for: .mercari)
+
+        XCTAssertEqual(
+            store.domain.handoff(for: .mercari),
+            .shared(at: AssistedExportConflictOnceService.sharedAt)
+        )
+    }
+
+    /// Devin #1132 (3): closing the guide while the durable write is pending
+    /// would hide a failure or drop the Undo of a success.
+    func testTheGuideCannotBeClosedWhileTheSharedReceiptIsInFlight() async {
+        let service = AssistedExportSuspendedSharedService()
+        let store = AssistedExportStore(pack: .fixture(), service: service)
+        await store.load()
+        store.toggle(.mercari)
+        await store.recordHandoff(.copiedListingText, for: .mercari)
+        store.presentConfirmSheet(for: .mercari)
+        let confirmation = Task { @MainActor in await store.confirmShared() }
+        await service.waitUntilSharedStarts()
+
+        store.toggle(.mercari)
+
+        XCTAssertEqual(
+            store.domain.openDestination,
+            .mercari,
+            "The guide stays open until the write resolves."
+        )
+
+        await service.releaseShared()
+        await confirmation.value
+        XCTAssertEqual(store.domain.undoWindow, .mercari)
+    }
+
     func testConfirmSheetCannotDismissWhileSharedReceiptIsInFlight() async {
         let service = AssistedExportSuspendedSharedService()
         let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
@@ -152,7 +332,7 @@ final class AssistedExportClientTests: XCTestCase {
     /// belonged to text the seller can no longer see, and the load that follows
     /// the replacement must not hand it back. The server cannot: reads filter on
     /// `source_review_revision`, so a rebuilt pack matches no row. A double that
-    /// answered every pack with the same rows put `Not shared` back on the row
+    /// answered every pack with the same rows put `Prepared` back on the row
     /// and `Mark as shared` back under it, for text nobody was ever given.
     func testARebuiltPackReadsBackNoReceiptFromTheTextItReplaced() async {
         let rebuiltContentRevision = UUID(
@@ -170,7 +350,7 @@ final class AssistedExportClientTests: XCTestCase {
             "The handoff has to be recorded first or the retirement below "
                 + "cannot be observed."
         )
-        XCTAssertEqual(store.domain.statusText(for: .mercari), "Not shared")
+        XCTAssertEqual(store.domain.rowStateText(for: .mercari), "Prepared")
 
         await store.updatePack(
             to: .fixture(contentRevision: rebuiltContentRevision)
@@ -181,10 +361,10 @@ final class AssistedExportClientTests: XCTestCase {
             "The replacement carries new pack text, so the handoff that "
                 + "belonged to the old text does not come back with the load."
         )
-        XCTAssertNil(
-            store.domain.statusText(for: .mercari),
-            "A row with nothing recorded against this pack says nothing, not "
-                + "Not shared."
+        XCTAssertEqual(
+            store.domain.rowStateText(for: .mercari),
+            "Not started",
+            "A row with nothing recorded against this pack has not started."
         )
         XCTAssertFalse(
             store.domain.offersMarkAsShared(for: .mercari),
@@ -346,6 +526,29 @@ final class AssistedExportClientTests: XCTestCase {
     // override advances `review_revision` and is therefore refused as XPORT-05,
     // never repriced; that path is covered by
     // `testNothingIsDeliveredOnceTheListingItselfHasMovedOn`.
+
+    func testEachSuccessfulDeviceActionAdvancesTheGuideByOneStep() async {
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService()
+        )
+        await store.load()
+        store.toggle(.mercari)
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .copyText)
+
+        await store.deliver(
+            .copiedListingText,
+            for: .mercari,
+            pack: store.domain.pack
+        ) { _ in }
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .savePhotos)
+
+        await store.savePhotos(for: .mercari) {}
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .openDestination)
+
+        await store.recordHandoff(.openedDestination, for: .mercari)
+        XCTAssertEqual(store.domain.guide(for: .mercari).current, .confirmPosted)
+    }
 
     func testDeliveryHandsOverTheServerPriceWhenTheClientProjectionIsStale() async {
         let service = AssistedExportDeliveryService(price: 145)
@@ -712,6 +915,52 @@ private actor AssistedExportFailingSharedService: AssistedExportServing {
     private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
         AssistedExportServerPack(
             receipts: receipts,
+            effectivePrice: pack.effectivePrice,
+            reviewRevision: pack.reviewRevision
+        )
+    }
+}
+
+private actor AssistedExportConflictOnceService: AssistedExportServing {
+    static let sharedAt = Date(timeIntervalSince1970: 1_753_464_600)
+
+    private var handedOff = false
+    private var shared = false
+    private var conflicted = false
+
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
+        response(for: pack)
+    }
+
+    func perform(
+        _ action: AssistedExportServerAction,
+        destination: AssistedExportDestination,
+        pack: AssistedExportPack
+    ) async throws -> AssistedExportServerPack {
+        switch action {
+        case .handoff:
+            handedOff = true
+        case .shared:
+            if !conflicted {
+                conflicted = true
+                throw AssistedExportClientError.conflict
+            }
+            shared = true
+        case .undo:
+            shared = false
+        }
+        return response(for: pack)
+    }
+
+    private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
+        AssistedExportServerPack(
+            receipts: AssistedExportDestination.allCases.map {
+                AssistedExportReceipt(
+                    destination: $0,
+                    handedOffAt: $0 == .mercari && handedOff ? Self.sharedAt : nil,
+                    sharedAt: $0 == .mercari && shared ? Self.sharedAt : nil
+                )
+            },
             effectivePrice: pack.effectivePrice,
             reviewRevision: pack.reviewRevision
         )
