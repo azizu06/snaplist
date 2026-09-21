@@ -180,6 +180,8 @@ struct FloatingDock: View {
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("dock.\(tab.rawValue)")
+        // #1133: the activation tour points at whatever opens Scan.
+        .activationSpotlightTarget(tab == .scan ? .scanEntry : nil)
     }
 }
 

@@ -3067,7 +3067,8 @@ private struct TrophyWallFeatureTestRoot: View {
             activationListingReviewOpened: {},
             activationListingReviewDismissed: {},
             activationGuestClaimPresentationChanged: { _ in },
-            activationListingReviewInteraction: {}
+            activationListingReviewInteraction: {},
+            activationListingReviewDelivery: {}
         )
     }
 

@@ -82,17 +82,13 @@ struct AppShellView: View {
     @State private var hasCompletedActivation = false
     @State private var activationAuthentication = ActivationAuthenticationState.unknown
     @State private var isCompletingActivation = false
-    @State private var activationProgress = ActivationGuidanceProgress()
+    @State private var activationTour = ActivationTourProgress()
     @State private var activationListingReviewPresented = false
     @State private var activationGuestClaimPresented = false
-    /// #1056. The spotlight's own state: the bubble's frame, so the touch gate
-    /// can let its Got it button through, and the registry a spotlit control
-    /// publishes its action to for the accessibility stand-in.
-    @State private var activationBubbleFrame: CGRect?
+    /// The registry a spotlit control publishes its action to, so VoiceOver
+    /// can run it from the guidance element.
     @State private var activationSpotlightActions = ActivationSpotlightActionRegistry()
-    @State private var activationSpotlightAnchoredTargets:
-        Set<ActivationSpotlightTarget> = []
-    private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
+    private let activationTourStore = UserDefaultsActivationTourProgressStore()
     private let activationGuestCompletionStore =
         UserDefaultsActivationGuidanceGuestCompletionStore()
 
@@ -207,18 +203,12 @@ struct AppShellView: View {
                             destinationIndex: destinationIndex,
                             captureFlow: captureFlow
                         )
-                        if reordered != nil {
-                            advanceActivationGuidance(for: .reorderedPhotos)
-                        }
                         return reordered
                     },
                     // Photo Review consumes #469's Voice note event locally. Start
                     // listing submits the committed NativeIntake snapshot: displayed
                     // photo order plus #541's optional recovered WAV under one key.
                     openBoundary: { event in
-                        if event == .openVoiceNote {
-                            advanceActivationGuidance(for: .openedVoiceNote)
-                        }
                         if PhotoReviewSubmissionPrimaryActionConsumer.consume(
                             event,
                             submissionHost: submissionHost
@@ -271,25 +261,27 @@ struct AppShellView: View {
         }
         .fixtureAccessibilityOverrides(configuration)
         .environment(\.activationSpotlightActions, activationSpotlightActions)
-        .onPreferenceChange(ActivationSpotlightAnchoredTargetsKey.self) { targets in
-            activationSpotlightAnchoredTargets = targets
-        }
-        // While a blocking mark is up the surface behind it is out of the
-        // accessibility tree; the mark's own elements — its line, the spotlit
-        // control's stand-in, and Got it — are the way forward. A mark whose
-        // control never reported a frame blocks nothing, and Listing Review's
-        // form has no honest stand-in, so both leave the surface reachable.
-        .accessibilityHidden(
-            ActivationSpotlightAccessibilityPolicy.hidesSurface(
-                for: activationCoachMark,
-                anchoredTargets: activationSpotlightAnchoredTargets
-            )
+        .environment(
+            \.activationSpotlightActiveTarget,
+            activationTourPresentation.spotlightTarget
         )
+        // #1133: nothing leaves the accessibility tree any more. The tour dims
+        // nothing and blocks nothing, so every control the seller could reach
+        // before a step is still reachable during it.
+        // Arriving on Scan is step one's real action: the seller tapped the
+        // camera entry, whichever control the shell puts it on. Eligibility is
+        // part of the key because it resolves after the first layout — reading
+        // the surface alone would miss a launch that lands straight on Scan.
+        .onChange(of: activationScanArrival, initial: true) { _, arrival in
+            guard arrival.isEligible, arrival.surface == .scan else { return }
+            recordActivationTourSignal(.arrivedOnScan)
+        }
         .overlayPreferenceValue(ActivationSpotlightTargetPreferenceKey.self) { anchors in
             GeometryReader { geometry in
                 activationGuidanceOverlay(anchors: anchors, geometry: geometry)
             }
             .ignoresSafeArea()
+            .allowsHitTesting(activationTourPresentation.isInteractive)
         }
         // Issue #891. Attached here rather than inside the shell so a push that
         // lands during onboarding still has somewhere to draw; the bottom is
@@ -362,7 +354,7 @@ struct AppShellView: View {
                     activationID: activationID
                 )
             }
-            advanceActivationGuidance(for: .capturedFirstPhoto)
+            recordActivationTourSignal(.capturedPhoto)
         }
         .onChange(of: scenePhase) { _, phase in
             Task {
@@ -376,10 +368,8 @@ struct AppShellView: View {
             of: submissionHost.pendingPresentationEvent,
             initial: true
         ) { _, event in
-            if let action = ActivationGuidanceSubmissionEventPolicy.action(
-                for: event
-            ) {
-                advanceActivationGuidance(for: action)
+            if ActivationGuidanceSubmissionEventPolicy.isItemAccepted(event) {
+                recordActivationTourSignal(.submittedItem)
             }
             switch event {
             case .destinationHandoff(
@@ -783,7 +773,7 @@ struct AppShellView: View {
                 forceReducedMotion: configuration.forceReducedMotion,
                 activationListingReviewOpened: {
                     activationListingReviewPresented = true
-                    advanceActivationGuidance(for: .openedProcessing)
+                    recordActivationTourSignal(.openedListingReview)
                 },
                 activationListingReviewDismissed: {
                     activationListingReviewPresented = false
@@ -792,7 +782,10 @@ struct AppShellView: View {
                     activationGuestClaimPresented = $0
                 },
                 activationListingReviewInteraction: {
-                    advanceActivationGuidance(for: .editedListing)
+                    recordActivationTourSignal(.editedListingDetails)
+                },
+                activationListingReviewDelivery: {
+                    recordActivationTourSignal(.reachedPublishOrShare)
                 }
             )
         } else {
@@ -819,7 +812,7 @@ struct AppShellView: View {
             forceReducedMotion: configuration.forceReducedMotion,
             activationListingReviewOpened: {
                 activationListingReviewPresented = true
-                advanceActivationGuidance(for: .openedProcessing)
+                recordActivationTourSignal(.openedListingReview)
             },
             activationListingReviewDismissed: {
                 activationListingReviewPresented = false
@@ -828,7 +821,10 @@ struct AppShellView: View {
                 activationGuestClaimPresented = $0
             },
             activationListingReviewInteraction: {
-                advanceActivationGuidance(for: .editedListing)
+                recordActivationTourSignal(.editedListingDetails)
+            },
+            activationListingReviewDelivery: {
+                recordActivationTourSignal(.reachedPublishOrShare)
             }
         )
     }
@@ -879,6 +875,7 @@ struct AppShellView: View {
                 analyticsClient: dependencies.analyticsClient,
                 ebayPublishService: dependencies.ebayPublishService,
                 navigate: { router.navigate(to: $0) },
+                replayActivationTour: replayActivationTour,
                 hasLocalData: (captureFlow.intakeSnapshot.map {
                     !$0.photos.isEmpty || $0.voice != nil
                 } ?? false) || settingsCachedData.hasData,
@@ -918,7 +915,7 @@ struct AppShellView: View {
                     forceReducedMotion: configuration.forceReducedMotion,
                     activationListingReviewOpened: {
                         activationListingReviewPresented = true
-                        advanceActivationGuidance(for: .openedProcessing)
+                        recordActivationTourSignal(.openedListingReview)
                     },
                     activationListingReviewDismissed: {
                         activationListingReviewPresented = false
@@ -927,7 +924,10 @@ struct AppShellView: View {
                         activationGuestClaimPresented = $0
                     },
                     activationListingReviewInteraction: {
-                        advanceActivationGuidance(for: .editedListing)
+                        recordActivationTourSignal(.editedListingDetails)
+                    },
+                    activationListingReviewDelivery: {
+                        recordActivationTourSignal(.reachedPublishOrShare)
                     },
                     openRoute: { destination in
                         if case .localRecovery(let logicalIdentity) = destination {
@@ -1022,7 +1022,13 @@ struct AppShellView: View {
     }
 
     private var hasOnboardedForActivation: Bool {
-        FirstValueActivationEligibilityPolicy.shouldBootstrapActivation(
+        // A seller standing in Photo Review has photographed something, so they
+        // are unambiguously past onboarding. The shared eligibility policy
+        // answers no there because it also gates the retired legacy intro,
+        // which is why #1133's step three — Start listing, on Photo Review —
+        // is answered here rather than by changing what onboarding means.
+        if isPhotoReviewOnScreen { return true }
+        return FirstValueActivationEligibilityPolicy.shouldBootstrapActivation(
             activeScreen: onboardingModel.state.screen,
             hasConsumedMountedDirectScanCommand:
                 hasConsumedMountedFirstValueDirectScanCommand,
@@ -1068,19 +1074,48 @@ struct AppShellView: View {
         // #1056: the pushed stack is an input. Reading only the tab is what let
         // the Trophy Wall mark draw on top of pushed Settings.
         ActivationSurfaceResolutionPolicy.surface(
-            hasPhotoReviewSession: photoReviewHost.session != nil,
+            hasPhotoReviewSession: isPhotoReviewOnScreen,
             selectedTab: router.selectedTab,
             pushedPath: router.selectedPath,
             presentedFullScreen: router.presentedFullScreen
         )
     }
 
-    private var activationCoachMark: ActivationCoachMark? {
-        guard shouldPresentActivation else { return nil }
-        return ActivationCoachMarkResolutionPolicy.coachMark(
-            progress: activationProgress,
-            surface: activationSurface
+    /// Photo Review is on screen either as a real session or as the
+    /// `--photo-review-state=` fixture, which stands in for one. Both are the
+    /// Photo Review surface as far as guidance is concerned; a fixture that
+    /// reported the tab underneath would place the strip on the wrong screen.
+    private var isPhotoReviewOnScreen: Bool {
+        if photoReviewHost.session != nil { return true }
+#if DEBUG
+        return configuration.photoReviewState != nil
+#else
+        return false
+#endif
+    }
+
+    private var activationScanArrival: ActivationScanArrival {
+        .init(
+            surface: activationSurface,
+            isEligible: shouldPresentActivation
         )
+    }
+
+    /// What the tour draws right now: the strip on its own step's surface, the
+    /// collapsed Scout bubble, the closing line, or nothing.
+    private var activationTourPresentation: ActivationTourPresentation {
+        ActivationTourPresentationPolicy.presentation(
+            progress: activationTour,
+            surface: activationSurface,
+            isEligible: shouldPresentActivation && !isActivationTourObscured
+        )
+    }
+
+    /// A modal covers the bottom of the screen and is presented above every
+    /// overlay this view owns, so the strip hides rather than sitting behind
+    /// one. It comes back with the surface.
+    private var isActivationTourObscured: Bool {
+        activationGuestClaimPresented || isDeleteAccountFlowPresented
     }
 
     @ViewBuilder
@@ -1088,131 +1123,130 @@ struct AppShellView: View {
         anchors: [ActivationSpotlightTarget: Anchor<CGRect>],
         geometry: GeometryProxy
     ) -> some View {
-        if let coachMark = activationCoachMark {
-            let bounds = CGRect(origin: .zero, size: geometry.size)
-            let presentation = ActivationSpotlightPolicy.presentation(
-                for: coachMark,
-                targetFrame: ActivationSpotlightTargetPolicy
-                    .target(for: coachMark)
-                    .flatMap { anchors[$0] }
-                    .map { geometry[$0] },
+        let bounds = CGRect(origin: .zero, size: geometry.size)
+        let presentation = activationTourPresentation
+        let halo = presentation.spotlightTarget.flatMap { target in
+            ActivationSpotlightHaloPolicy.halo(
+                for: target,
+                targetFrame: anchors[target].map { geometry[$0] },
                 bounds: bounds
             )
-
-            ZStack(alignment: .topLeading) {
-                if presentation.isBlocking {
-                    ActivationSpotlightScrim(
-                        coachMark: coachMark,
-                        cutout: presentation.cutout,
-                        dismissFrame: activationBubbleFrame,
-                        reduceMotion: reduceMotion,
-                        targetTouched: {
-                            activationSpotlightTargetTouched(coachMark)
-                        }
-                    )
-                }
-
-                activationCoachMarkBubble(
-                    coachMark,
-                    presentation: presentation,
-                    bounds: bounds,
-                    safeAreaBottom: geometry.safeAreaInsets.bottom
-                )
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height)
-            .coordinateSpace(name: Self.activationSpotlightSpace)
-            .onPreferenceChange(ActivationBubbleFramePreferenceKey.self) { frame in
-                activationBubbleFrame = frame
-            }
         }
-    }
 
-    private static let activationSpotlightSpace = "activation-spotlight"
-
-    /// The bubble keeps its approved bottom-docked anchor for every mark the
-    /// design package placed there. A mark whose control is not docked to the
-    /// bottom — the Trophy Wall clock, the Settings row — is placed against its
-    /// own cutout instead.
-    @ViewBuilder
-    private func activationCoachMarkBubble(
-        _ coachMark: ActivationCoachMark,
-        presentation: ActivationSpotlightPresentation,
-        bounds: CGRect,
-        safeAreaBottom: CGFloat
-    ) -> some View {
-        let placement = coachMark.isContextual
-            ? presentation.cutout.map {
-                ActivationSpotlightBubblePlacementPolicy.placement(
-                    cutout: $0,
-                    bounds: bounds,
-                    horizontalPadding: Self.activationBubbleHorizontalPadding
-                )
+        ZStack(alignment: .bottomLeading) {
+            if let halo {
+                ActivationSpotlightHaloView(halo: halo)
             }
-            : nil
 
-        ActivationGuidanceCoachMark(
-            coachMark: coachMark,
-            dismiss: dismissActivationGuidance,
-            isCompleting: isCompletingActivation,
-            usesStaticScoutRendering: configuration.usesStaticScoutRendering,
-            placementOverride: placement,
-            showsTail: ActivationSpotlightTargetPolicy
-                .mode(for: coachMark)
-                .pointsAtAControl
-        )
-        .padding(.horizontal, Self.activationBubbleHorizontalPadding)
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: ActivationBubbleFramePreferenceKey.self,
-                    value: proxy.frame(
-                        in: .named(Self.activationSpotlightSpace)
+            switch presentation {
+            case .hidden:
+                EmptyView()
+            case .strip(let model):
+                ActivationTourStrip(
+                    model: model,
+                    skip: skipActivationTour,
+                    collapse: { setActivationTourCollapsed(true) }
+                )
+                .padding(
+                    .horizontal,
+                    ActivationTourStripMetrics.horizontalMargin
+                )
+                .padding(
+                    .bottom,
+                    activationTourBottomInset(
+                        halo: halo?.frame,
+                        bounds: bounds,
+                        safeAreaBottom: geometry.safeAreaInsets.bottom
                     )
                 )
+            case .collapsedBubble(let step):
+                ActivationTourCollapsedBubble(
+                    pose: step.scoutPose,
+                    prefersDark: activationTourPrefersDarkSurface,
+                    expand: { setActivationTourCollapsed(false) }
+                )
+                .padding(
+                    .leading,
+                    ActivationTourStripMetrics.horizontalMargin
+                )
+                .padding(
+                    .bottom,
+                    activationTourBottomInset(
+                        halo: halo?.frame,
+                        bounds: bounds,
+                        safeAreaBottom: geometry.safeAreaInsets.bottom
+                    )
+                )
+            case .closingLine(let line):
+                ActivationTourClosingLine(
+                    line: line,
+                    prefersDark: activationTourPrefersDarkSurface
+                )
+                .padding(
+                    .horizontal,
+                    ActivationTourStripMetrics.horizontalMargin
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(
+                    .bottom,
+                    activationTourRestingInset(
+                        safeAreaBottom: geometry.safeAreaInsets.bottom
+                    )
+                )
+                .task { retireActivationTour() }
             }
         }
         .frame(
             maxWidth: .infinity,
             maxHeight: .infinity,
-            alignment: placement?.topInset == nil ? .bottom : .top
+            alignment: .bottomLeading
         )
-        .padding(
-            .top,
-            placement?.topInset ?? 0
-        )
-        .padding(
-            .bottom,
-            placement.map { $0.bottomInset ?? 0 }
-                ?? (activationBottomInset + safeAreaBottom)
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.22),
+            value: presentation
         )
     }
 
-    private static let activationBubbleHorizontalPadding: CGFloat = 18
-
-    private var activationBottomInset: CGFloat {
-        guard let coachMark = activationCoachMark else { return 24 }
-        // One anchor contract, proved at the policy seam, so the shell and the
-        // coach mark can never disagree about where a state docks.
-        let anchor = ActivationCoachMarkAnchorPolicy.anchor(
-            for: coachMark,
-            reduceMotion: reduceMotion
-        )
-        return anchor.bottomInset + activationZoomRowClearance(for: coachMark)
+    /// The Scan camera is the one dark surface the tour speaks on, and the
+    /// closing line can land anywhere, so it asks the surface rather than a
+    /// step that may no longer exist.
+    private var activationTourPrefersDarkSurface: Bool {
+        activationSurface == .scan
     }
 
-    /// ACT-01 and ACT-06 are the two states that dock against the Scan camera
-    /// control stack, and the approved 112pt inset was measured against that
-    /// stack before #885 added a zoom row above it on hardware with an ultra
-    /// wide. That approved value never accounted for the row, so it stays
-    /// unchanged here; this adds exactly the band the row reserves, on top of
-    /// it, only when the row is actually on screen. `ScanZoomRowMetrics`
-    /// is the same metric `LiveScanCameraSurface`'s own layout reads, so
-    /// neither side can drift from what the row actually occupies.
-    private func activationZoomRowClearance(
-        for coachMark: ActivationCoachMark
+    private func activationTourBottomInset(
+        halo: CGRect?,
+        bounds: CGRect,
+        safeAreaBottom: CGFloat
     ) -> CGFloat {
-        guard coachMark == .act01 || coachMark == .act06,
-              isScanZoomRowOffered else { return 0 }
+        ActivationTourStripPlacementPolicy.bottomInset(
+            halo: halo,
+            bounds: bounds,
+            restingInset: activationTourRestingInset(
+                safeAreaBottom: safeAreaBottom
+            )
+        )
+    }
+
+    /// Where the strip rests before any control pushes it up: clear of the
+    /// safe area and of whatever the surface docks at the bottom.
+    private func activationTourRestingInset(safeAreaBottom: CGFloat) -> CGFloat {
+        let chrome: CGFloat = activationSurface == .scan
+            ? Self.activationScanControlClearance + activationZoomRowClearance
+            : Self.activationDockClearance
+        return safeAreaBottom + chrome + ActivationTourStripMetrics.bottomGap
+    }
+
+    /// The camera control stack, and the floating dock, measured as the bands
+    /// the strip has to stay above.
+    private static let activationScanControlClearance: CGFloat = 112
+    private static let activationDockClearance: CGFloat = 76
+
+    /// #885 added a zoom row above the Scan camera controls on hardware with an
+    /// ultra wide. `ScanZoomRowMetrics` is the same metric the row's own layout
+    /// reads, so the two cannot drift.
+    private var activationZoomRowClearance: CGFloat {
+        guard activationSurface == .scan, isScanZoomRowOffered else { return 0 }
         return ScanZoomRowMetrics.reservedHeight(
             isAccessibility: dynamicTypeSize.isAccessibilitySize
         )
@@ -1222,8 +1256,6 @@ struct AppShellView: View {
     /// backed by `captureFlow`, or (DEBUG only) a `--visual-state` fixture
     /// that stands in for hardware the simulator does not have and answers
     /// its own zoom question from `configuration.scanZoomFixture` instead.
-    /// Whichever is on screen is where this reads its offered state from, so
-    /// the fixture route can prove this fix without a real ultra wide.
     private var isScanZoomRowOffered: Bool {
         if let scanZoomFixture = configuration.scanZoomFixture {
             return scanZoomFixture.control.isOffered
@@ -1231,66 +1263,47 @@ struct AppShellView: View {
         return captureFlow.zoomControl.isOffered
     }
 
-    private func dismissActivationGuidance() {
-        guard let coachMark = activationCoachMark else { return }
-        guard !coachMark.isContextual else {
-            acknowledgeActivationContextualMark(coachMark)
-            return
-        }
-        advanceActivationGuidance(for: .gotIt)
-    }
+    // MARK: - Tour transitions
 
-    /// A touch inside the cutout reaches the real control, which runs its own
-    /// action and — for a spine mark — advances through the hook that action
-    /// already calls. A contextual mark has no such hook, so tapping its
-    /// control is what retires it.
-    private func activationSpotlightTargetTouched(
-        _ coachMark: ActivationCoachMark
-    ) {
-        guard coachMark.isContextual else { return }
-        acknowledgeActivationContextualMark(coachMark)
-    }
-
-    private func acknowledgeActivationContextualMark(
-        _ coachMark: ActivationCoachMark
-    ) {
+    /// The only way forward. Every call site is somewhere the app itself
+    /// moved — a photo taken, an item accepted, a review opened — so the tour
+    /// can never advance on its own.
+    private func recordActivationTourSignal(_ signal: ActivationTourSignal) {
         guard shouldPresentActivation,
-              activationProgress.acknowledgeContextualMark(coachMark) else {
-            return
-        }
-        saveActivationProgress()
-        retireActivationBubbleFrame()
+              activationTour.record(signal) else { return }
+        saveActivationTour()
     }
 
-    private func advanceActivationGuidance(for action: ActivationGuidanceAction) {
-        guard shouldPresentActivation else { return }
-        switch activationProgress.advance(for: action) {
-        case .completionRequested:
-            saveActivationProgress()
-            retireActivationBubbleFrame()
-            completeActivationGuidance()
-        case .advanced, .completionRecorded:
-            saveActivationProgress()
-            retireActivationBubbleFrame()
-        case .unchanged:
-            break
-        }
+    private func skipActivationTour() {
+        guard shouldPresentActivation, !activationTour.isSkipped else { return }
+        activationTour.isSkipped = true
+        saveActivationTour()
+        completeActivationGuidance()
     }
 
-    /// The retired mark's bubble frame is a hole in the next mark's scrim until
-    /// the new bubble reports its own. Clearing it at the moment a mark retires
-    /// closes that window; the preference itself resets a frame later.
-    private func retireActivationBubbleFrame() {
-        activationBubbleFrame = nil
+    private func setActivationTourCollapsed(_ isCollapsed: Bool) {
+        guard activationTour.isCollapsed != isCollapsed else { return }
+        activationTour.isCollapsed = isCollapsed
+        saveActivationTour()
+    }
+
+    /// The closing line has been on screen; the tour is over for good. Recording
+    /// it locally is what makes "never again" survive a relaunch, and the
+    /// completion write is what makes it survive a reinstall.
+    private func retireActivationTour() {
+        guard shouldPresentActivation,
+              !activationTour.hasSeenClosingLine else { return }
+        activationTour.hasSeenClosingLine = true
+        saveActivationTour()
+        completeActivationGuidance()
     }
 
     private func completeActivationGuidance() {
         switch activationAuthentication {
         case .guest:
             activationGuestCompletionStore.recordCompletion()
-            _ = activationProgress.advance(for: .completionRecorded)
             hasCompletedActivation = true
-            activationProgressStore.clear(for: "guest")
+            activationTourStore.clear(for: "guest")
         case .authenticated(let userID):
             guard !isCompletingActivation else { return }
             isCompletingActivation = true
@@ -1302,29 +1315,26 @@ struct AppShellView: View {
                             .completeActivationGuidance().data.completed
                     }
                 ) else { return }
-                _ = activationProgress.advance(for: .completionRecorded)
                 hasCompletedActivation = true
-                activationProgressStore.clear(for: userID)
+                activationTourStore.clear(for: userID)
             }
         case .unknown:
             break
         }
     }
 
-    /// Currently uncalled. Its only caller belonged to the retired seller-Home
-    /// fixture. Rewiring activation interruption is owned outside Pro Gate recovery.
-    private func recordActivationInterruptionIfNeeded() {
-        guard shouldPresentActivation,
-              activationProgress.recordInterruption() == .advanced else { return }
-        saveActivationProgress()
+    /// Settings → Replay the tour. A seller who asks for the guide again gets
+    /// a fresh one, even if they had finished or skipped it.
+    private func replayActivationTour() {
+        activationTour.replay()
+        hasCompletedActivation = false
+        activationCompletionChecked = true
+        saveActivationTour()
     }
 
-    private func saveActivationProgress() {
+    private func saveActivationTour() {
         guard let activationIdentity else { return }
-        activationProgressStore.save(
-            activationProgress,
-            for: activationIdentity
-        )
+        activationTourStore.save(activationTour, for: activationIdentity)
     }
 
     private func bootstrapActivationCompletion() async {
@@ -1340,9 +1350,8 @@ struct AppShellView: View {
             },
             guestCompleted: { activationGuestCompletionStore.isCompleted },
             loadProgress: { identity in
-                configuration.activationGuidanceFixtureState
-                    .map { ActivationGuidanceProgress(state: $0) }
-                    ?? activationProgressStore.load(for: identity)
+                configuration.activationTourFixture
+                    ?? activationTourStore.load(for: identity)
             },
             fetchSessionUserID: {
                 let session = try await dependencies.mobileAPIClient.getSession()
@@ -1362,13 +1371,13 @@ struct AppShellView: View {
         case .present(let authentication, _, let progress):
             activationAuthentication = authentication
             hasCompletedActivation = false
-            activationProgress = progress
+            activationTour = progress
             activationCompletionChecked = true
         case .completed(let authentication, let identity):
             activationAuthentication = authentication
             hasCompletedActivation = true
-            activationProgress = .recordedInstall
-            activationProgressStore.clear(for: identity)
+            activationTour = .init()
+            activationTourStore.clear(for: identity)
             activationCompletionChecked = true
         case .retry, .none:
             // The coordinator resolves retries inside its own bound, so a
@@ -1400,8 +1409,8 @@ struct AppShellView: View {
             )
         guard let promotedUserID else { return }
         activationAuthentication = .authenticated(userID: promotedUserID)
-        activationProgressStore.clear(for: "guest")
-        activationProgressStore.clear(for: promotedUserID)
+        activationTourStore.clear(for: "guest")
+        activationTourStore.clear(for: promotedUserID)
     }
 
     private var shouldShowFirstValueOnboarding: Bool {
@@ -2374,6 +2383,7 @@ struct TrophyWallFeatureView: View {
     let activationListingReviewDismissed: () -> Void
     let activationGuestClaimPresentationChanged: (Bool) -> Void
     let activationListingReviewInteraction: () -> Void
+    let activationListingReviewDelivery: () -> Void
 
     /// #963: a settled tile opens its own listing surface, not the Processing
     /// row's stack — so it carries its own presentation hosts rather than
@@ -2480,7 +2490,8 @@ struct TrophyWallFeatureView: View {
                 router.reset(tab: .scan)
                 router.selectedTab = .scan
             },
-            activationInteraction: activationListingReviewInteraction
+            activationInteraction: activationListingReviewInteraction,
+            activationReachedDelivery: activationListingReviewDelivery
         )
         if #available(iOS 18, *),
            TrophyWallZoomTransitionPolicy.shouldZoom(
@@ -2554,6 +2565,7 @@ private struct TrophyWallProcessingDestinationView: View {
     let activationListingReviewDismissed: () -> Void
     let activationGuestClaimPresentationChanged: (Bool) -> Void
     let activationListingReviewInteraction: () -> Void
+    let activationListingReviewDelivery: () -> Void
     let openRoute: (HomeRoute) -> Void
     let onScan: () -> Void
     let goToTrophyWall: () -> Void
@@ -2580,7 +2592,8 @@ private struct TrophyWallProcessingDestinationView: View {
             activationListingReviewDismissed: activationListingReviewDismissed,
             activationGuestClaimPresentationChanged:
                 activationGuestClaimPresentationChanged,
-            activationListingReviewInteraction: activationListingReviewInteraction
+            activationListingReviewInteraction: activationListingReviewInteraction,
+            activationListingReviewDelivery: activationListingReviewDelivery
         )
         .navigationBarBackButtonHidden(true)
     }
@@ -2605,6 +2618,7 @@ private struct ProcessingListingReviewSurface: View {
     let activationListingReviewDismissed: () -> Void
     let activationGuestClaimPresentationChanged: (Bool) -> Void
     let activationListingReviewInteraction: () -> Void
+    let activationListingReviewDelivery: () -> Void
     @State private var guestClaimPresentation =
         ProcessingGuestClaimPresentationHost()
     @State private var listingReviewPresentation =
@@ -2682,7 +2696,8 @@ private struct ProcessingListingReviewSurface: View {
                 dismissReview: { listingReviewPresentation.dismiss() },
                 goToTrophyWall: goToTrophyWall,
                 startNewItem: onScan,
-                activationInteraction: activationListingReviewInteraction
+                activationInteraction: activationListingReviewInteraction,
+                activationReachedDelivery: activationListingReviewDelivery
             )
         }
         .onChange(of: listingReviewPresentation.isPresented) { _, isPresented in

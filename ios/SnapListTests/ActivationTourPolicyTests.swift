@@ -81,7 +81,7 @@ extension ActivationTourPolicyTests {
             .openScan: (
                 "Tap the camera to start a listing.",
                 .trophyWall,
-                .scanEntryControl
+                .scanEntry
             ),
             .takePhoto: ("Snap up to five photos.", .scan, .scanShutter),
             .startListing: (
@@ -269,7 +269,7 @@ extension ActivationTourPolicyTests {
                 surface: .scan,
                 isEligible: true
             ),
-            .collapsedBubble(pose: .holdingPhoto)
+            .collapsedBubble(step: .takePhoto)
         )
 
         let store = UserDefaultsActivationTourProgressStore(
@@ -431,7 +431,7 @@ extension ActivationTourPolicyTests {
     /// The halo takes the control's own shape, so a round shutter never gets a
     /// rounded-rectangle glow.
     func testTheHaloTakesTheControlsOwnShape() {
-        for round in [ActivationSpotlightTarget.scanShutter, .scanEntryControl] {
+        for round in [ActivationSpotlightTarget.scanShutter, .scanEntry] {
             XCTAssertEqual(
                 ActivationSpotlightHaloPolicy.halo(
                     for: round,
@@ -463,7 +463,7 @@ extension ActivationTourPolicyTests {
             .submittedItem: .startListing,
             .openedListingReview: .openReadyItem,
             .editedListingDetails: .reviewPriceAndDetails,
-            .deliveredToAMarketplace: .publishOrShare
+            .reachedPublishOrShare: .publishOrShare
         ]
 
         var progress = ActivationTourProgress()
@@ -527,5 +527,74 @@ extension ActivationTourPolicyTests {
             "keep me",
             "the sweep is scoped to the tour's own key prefix"
         )
+    }
+}
+
+// MARK: - Where the strip sits
+
+extension ActivationTourPolicyTests {
+    private static let stripHeight = ActivationTourStripMetrics.height
+
+    /// The strip docks above the bottom chrome and stays there when the
+    /// control it points at is somewhere else on the screen.
+    func testTheStripKeepsItsRestingPlaceWhenTheTargetIsNotUnderIt() {
+        XCTAssertEqual(
+            ActivationTourStripPlacementPolicy.bottomInset(
+                halo: CGRect(x: 16, y: 180, width: 360, height: 120),
+                bounds: Self.screen,
+                restingInset: 96,
+                stripHeight: Self.stripHeight
+            ),
+            96
+        )
+        XCTAssertEqual(
+            ActivationTourStripPlacementPolicy.bottomInset(
+                halo: nil,
+                bounds: Self.screen,
+                restingInset: 96,
+                stripHeight: Self.stripHeight
+            ),
+            96,
+            "a control with no frame yet cannot push the strip anywhere"
+        )
+    }
+
+    /// The acceptance that matters: the strip never covers the control the
+    /// seller is being told to tap. Photo Review's Start listing button sits
+    /// exactly where the strip rests, so the strip moves above it.
+    func testTheStripMovesAboveTheControlItWouldOtherwiseCover() {
+        let startListing = CGRect(x: 16, y: 740, width: 360, height: 54)
+        let inset = ActivationTourStripPlacementPolicy.bottomInset(
+            halo: startListing,
+            bounds: Self.screen,
+            restingInset: 96,
+            stripHeight: Self.stripHeight
+        )
+
+        XCTAssertGreaterThan(inset, 96)
+        let stripBottom = Self.screen.maxY - inset
+        XCTAssertLessThanOrEqual(
+            stripBottom,
+            startListing.minY,
+            "the strip's lowest edge clears the control's highest edge"
+        )
+        XCTAssertGreaterThanOrEqual(
+            Self.screen.maxY - inset - Self.stripHeight,
+            0,
+            "and it is still on the screen"
+        )
+    }
+
+    /// A control taller than the room above it must not push the strip off the
+    /// top of the screen. The strip stops at the top instead.
+    func testTheStripNeverLeavesTheScreenToAvoidAControl() {
+        let enormous = CGRect(x: 0, y: 8, width: 393, height: 820)
+        let inset = ActivationTourStripPlacementPolicy.bottomInset(
+            halo: enormous,
+            bounds: Self.screen,
+            restingInset: 96,
+            stripHeight: Self.stripHeight
+        )
+        XCTAssertEqual(inset, Self.screen.height - Self.stripHeight)
     }
 }

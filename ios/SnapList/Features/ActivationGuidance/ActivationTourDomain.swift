@@ -24,7 +24,7 @@ enum ActivationTourSignal: String, CaseIterable, Equatable, Hashable, Sendable {
     case submittedItem
     case openedListingReview
     case editedListingDetails
-    case deliveredToAMarketplace
+    case reachedPublishOrShare
 }
 
 /// Scout's pose for a step. Five poses cover six steps, exactly as option E
@@ -78,7 +78,7 @@ extension ActivationTourStep {
     /// because that is the tap that moves the item on.
     var spotlightTarget: ActivationSpotlightTarget {
         switch self {
-        case .openScan: .scanEntryControl
+        case .openScan: .scanEntry
         case .takePhoto: .scanShutter
         case .startListing: .photoReviewStartListing
         case .openReadyItem: .trophyWallReadyItem
@@ -95,7 +95,7 @@ extension ActivationTourStep {
         case .startListing: .submittedItem
         case .openReadyItem: .openedListingReview
         case .reviewPriceAndDetails: .editedListingDetails
-        case .publishOrShare: .deliveredToAMarketplace
+        case .publishOrShare: .reachedPublishOrShare
         }
     }
 
@@ -141,6 +141,12 @@ struct ActivationTourProgress: Codable, Equatable {
     /// been done. Recording it is what makes "never again" true.
     var hasSeenClosingLine = false
 
+    /// Whether the tour is over locally but the tenant completion marker may
+    /// not have landed yet. The bootstrap coordinator writes it on the next
+    /// launch, which is how a seller who finished offline stops being shown the
+    /// tour on a reinstall.
+    var isCompletionPending: Bool { ActivationTourPolicy.isRetired(self) }
+
     /// Settings → Replay the tour. Back to step one with no remembered
     /// collapse or skip; a replay the seller asked for is a fresh tour.
     mutating func replay() {
@@ -164,6 +170,38 @@ struct ActivationTourProgress: Codable, Equatable {
                   $0.completingSignal == signal
               }) else { return false }
         return complete(step)
+    }
+}
+
+
+/// The fixture entry point lives in an extension on purpose: a failable
+/// initialiser in the type body would suppress the memberwise initialiser every
+/// other construction site uses.
+extension ActivationTourProgress {
+    /// The `--activation-guidance-step=` fixtures. A step name puts the tour
+    /// exactly at that step; the three shape names reach the states a step name
+    /// cannot: the collapsed bubble, a skipped tour, and the closing line.
+    init?(fixtureValue: String) {
+        let steps = ActivationTourStep.allCases
+        if let step = steps.first(where: { $0.rawValue == fixtureValue }) {
+            self.init(
+                completedSteps: Set(steps.prefix(while: { $0 != step }))
+            )
+            return
+        }
+        switch fixtureValue {
+        case "collapsed":
+            self.init(
+                completedSteps: [.openScan],
+                isCollapsed: true
+            )
+        case "skipped":
+            self.init(isSkipped: true)
+        case "finished", "closing":
+            self.init(completedSteps: Set(steps))
+        default:
+            return nil
+        }
     }
 }
 
@@ -222,8 +260,28 @@ struct ActivationTourStripModel: Equatable {
 enum ActivationTourPresentation: Equatable {
     case hidden
     case strip(ActivationTourStripModel)
-    case collapsedBubble(pose: ActivationTourScoutPose)
+    case collapsedBubble(step: ActivationTourStep)
     case closingLine(String)
+
+    /// The control the halo is drawn around, and the one the control itself
+    /// reads to know it should breathe. The collapsed bubble keeps it: folding
+    /// the words away does not stop pointing at the control.
+    var spotlightTarget: ActivationSpotlightTarget? {
+        switch self {
+        case .strip(let model): model.step.spotlightTarget
+        case .collapsedBubble(let step): step.spotlightTarget
+        case .hidden, .closingLine: nil
+        }
+    }
+
+    /// Whether anything the tour draws can take a touch. The halo and the
+    /// closing line never do.
+    var isInteractive: Bool {
+        switch self {
+        case .strip, .collapsedBubble: true
+        case .hidden, .closingLine: false
+        }
+    }
 }
 
 enum ActivationTourPresentationPolicy {
@@ -247,7 +305,7 @@ enum ActivationTourPresentationPolicy {
 
         guard surface == step.surface else { return .hidden }
         guard !progress.isCollapsed else {
-            return .collapsedBubble(pose: step.scoutPose)
+            return .collapsedBubble(step: step)
         }
         return .strip(
             .init(
@@ -371,5 +429,38 @@ enum ActivationSpotlightHaloPolicy {
         return .roundedRectangle(
             cornerRadius: min(cornerRadius, min(frame.width, frame.height) / 2)
         )
+    }
+}
+
+/// The two facts that together say "the seller has arrived on Scan and the
+/// tour is allowed to notice". Eligibility resolves asynchronously, so a
+/// launch that lands straight on Scan changes only the second one.
+struct ActivationScanArrival: Equatable {
+    let surface: ActivationGuidanceSurface?
+    let isEligible: Bool
+}
+
+/// Where the strip sits above the bottom of the screen.
+///
+/// It rests above whatever chrome the surface docks there, and moves up when
+/// the control it is pointing at would otherwise be underneath it — which is
+/// how the promise that it never covers the primary action, the camera entry,
+/// or the last Trophy Wall row is actually kept.
+enum ActivationTourStripPlacementPolicy {
+    /// The clear band left between the strip and the control below it.
+    static let clearance: CGFloat = 12
+
+    static func bottomInset(
+        halo: CGRect?,
+        bounds: CGRect,
+        restingInset: CGFloat,
+        stripHeight: CGFloat = ActivationTourStripMetrics.height
+    ) -> CGFloat {
+        let ceiling = max(0, bounds.height - stripHeight)
+        guard let halo else { return min(restingInset, ceiling) }
+
+        let restingTop = bounds.maxY - restingInset - stripHeight
+        guard halo.maxY > restingTop else { return min(restingInset, ceiling) }
+        return min(bounds.maxY - halo.minY + clearance, ceiling)
     }
 }
