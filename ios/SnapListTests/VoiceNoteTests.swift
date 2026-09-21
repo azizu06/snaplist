@@ -805,6 +805,31 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
     }
 
+    /// A save of a restored take that Re-record supersedes must still leave
+    /// the intake's file to the intake.
+    func testASupersededSaveOfARestoredTakeLeavesItsBytesToTheIntake() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let files = VoiceNoteFileStoreStub()
+        let recorder = HeldTakeAuthorityRecorder()
+        let held = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/intake-held-take.wav"),
+            duration: 7
+        )
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: files,
+            authority: recorder.authority,
+            heldTake: held
+        )
+
+        let save = store.save()
+        await store.rerecord()
+        await save?.value
+
+        XCTAssertFalse(files.discardAttempts.contains(held.url))
+        XCTAssertEqual(store.phase, .recording(elapsed: 0, level: 0))
+    }
+
     private func settle() async {
         for _ in 0..<20 {
             await Task.yield()

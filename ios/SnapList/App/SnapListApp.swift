@@ -313,7 +313,13 @@ struct SnapListApp: App {
                     if restoration == .stagedPhoto {
                         firstValueOnboardingModel.reconcileExistingProgress()
                     }
-                    router.handleCaptureRestoration(restoration)
+                    router.handleCaptureRestoration(
+                        restoration,
+                        resumingVoiceReviewOf:
+                            captureFlow.intakeSnapshot?.heldVoiceTake == nil
+                                ? nil
+                                : captureFlow.intakeSnapshot?.photos
+                    )
                     if restoration == .stagedPhoto {
                         // `restore()` lands a staged photo on `.captured`, not a
                         // live session (there is no more launcher sheet whose

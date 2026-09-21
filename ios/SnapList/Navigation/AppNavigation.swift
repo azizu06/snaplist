@@ -237,9 +237,22 @@ final class AppRouter {
         return true
     }
 
-    func handleCaptureRestoration(_ restoration: CaptureRestoration) {
+    func handleCaptureRestoration(
+        _ restoration: CaptureRestoration,
+        resumingVoiceReviewOf heldTakePhotos: [StagedCapturePhoto]? = nil
+    ) {
         guard restoration == .stagedPhoto else { return }
         selectedTab = .scan
+        // #1136. A voice take held under review reopens Photo Review, where
+        // the seller left it, instead of the camera.
+        if let heldTakePhotos, (1...5).contains(heldTakePhotos.count) {
+            openCaptureBoundary(
+                destination: .photoReview,
+                photos: heldTakePhotos,
+                opener: .reviewButton
+            )
+            return
+        }
         presentedFullScreen = .guidedCamera
     }
 

@@ -571,6 +571,9 @@ final class VoiceNoteStore {
             let mutationID = UUID()
             authorityMutationID = mutationID
             let pendingHold = heldTakeRecord
+            // Decided now: Re-record can clear the take before this lands,
+            // and a restored take's file stays the intake's either way.
+            let ownsFile = !provisionalIsIntakeOwned
             let task = Task {
                 defer {
                     if authoritySave?.mutationID == mutationID {
@@ -587,7 +590,7 @@ final class VoiceNoteStore {
                 )
                 guard authorityMutationID == mutationID,
                       self.provisionalURL == provisionalURL else {
-                    if !provisionalIsIntakeOwned {
+                    if ownsFile {
                         try? files.discardProvisional(at: provisionalURL)
                     }
                     return
@@ -598,7 +601,6 @@ final class VoiceNoteStore {
                     isPlayingTake = false
                     setSavedNote(committed)
                     // The intake cleared the held take with this save.
-                    let ownsFile = !provisionalIsIntakeOwned
                     clearProvisional()
                     if ownsFile {
                         try? files.discardProvisional(at: provisionalURL)
