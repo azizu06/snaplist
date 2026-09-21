@@ -4,6 +4,7 @@ import {
   classifySoldComp,
   normalizeSoldCompCondition,
   selectSoldCompEvidence,
+  soldCompRetrievalReason,
   selectVerifiedSoldMatches,
   type SoldCompCandidate,
 } from "./sold-comp-matcher";
@@ -671,5 +672,111 @@ describe("compatibility listings are accessories (#1138)", () => {
     );
 
     expect(evidence.anchors).toHaveLength(1);
+  });
+});
+
+/**
+ * Issue #1138 round 1 review: `compatibilityListing` was too broad, and because
+ * it rejects comps it changes prices.
+ *
+ * Requiring only "the identity appears after 'for' and not before it" catches
+ * every seller who leads with condition language — "Tested Working for Apple
+ * AirPods Pro", "Sold as-is for ..." — and those are the real item, often the
+ * cheap end of it. Dropping them biases the median upward.
+ *
+ * The signal that actually means "accessory" is an accessory NOUN at the head of
+ * the title, before the "for". That is what eBay sellers write, and it is the
+ * matcher's own vocabulary rather than a new list.
+ */
+describe("compatibility listings need an accessory head (#1138 review)", () => {
+  const signal: ItemSignal = {
+    brand: "Apple",
+    model: "AirPods Pro",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    specs: ["White", "charging case", "Silicone ear tips"],
+  };
+  const classify = (title: string) =>
+    selectSoldCompEvidence(
+      [{ url: `https://www.ebay.com/itm/${encodeURIComponent(title)}`, title, price: 145, condition: "Pre-Owned" }],
+      signal,
+    );
+
+  it.each([
+    "Tested Working for Apple AirPods Pro Wireless Earbuds",
+    "Excellent Condition for Apple AirPods Pro",
+    "Sold as-is for Apple AirPods Pro",
+    "New Sealed for Apple AirPods Pro 2nd Gen",
+  ])("never calls condition language an accessory: %s", (title) => {
+    expect(classify(title).rejected.flatMap((match) => match.reasons)).not.toContain(
+      "accessory-mismatch",
+    );
+  });
+
+  it.each([
+    "Tested Working for Apple AirPods Pro Wireless Earbuds",
+    "Excellent Condition for Apple AirPods Pro",
+    "New Sealed for Apple AirPods Pro 2nd Gen",
+  ])("anchors the real item behind that condition language: %s", (title) => {
+    expect(classify(title).anchors).toHaveLength(1);
+  });
+
+  it("leaves 'Sold as-is' to the parts rule, which is a different question", () => {
+    // "as is" matches PARTS_RE, so this comp is rejected as `parts-mismatch`
+    // against a very-good seller item. That is pre-existing, deliberate, and
+    // unrelated to the accessory rule — the point here is only that the
+    // accessory rule does not ALSO claim it.
+    const evidence = classify("Sold as-is for Apple AirPods Pro");
+    expect(evidence.rejected[0]!.reasons).toContain("parts-mismatch");
+    expect(evidence.rejected[0]!.reasons).not.toContain("accessory-mismatch");
+  });
+
+  it.each([
+    "Silicone Ear Tips for Apple AirPods Pro",
+    "Charging Case for AirPods Pro",
+    "Protective Case Cover for Apple AirPods Pro Skin",
+  ])("still rejects an accessory head: %s", (title) => {
+    const evidence = classify(title);
+    expect(evidence.anchors).toHaveLength(0);
+    expect(evidence.rejected[0]!.reasons).toContain("accessory-mismatch");
+  });
+});
+
+/**
+ * Issue #1138 round 1 review (P3): "every comp was demoted" is not
+ * "every comp was rejected", and reporting the first as
+ * `all-rejected:identity-unverified` names a reject reason no comp actually
+ * carried. Corroboration means the comps were real and merely too weak to
+ * anchor — a different operator response from a matcher that threw them out.
+ */
+describe("soldCompRetrievalReason distinguishes demotion from rejection (#1138 review)", () => {
+  const evidence = (over: Partial<Parameters<typeof soldCompRetrievalReason>[0]>) =>
+    soldCompRetrievalReason({ anchors: [], corroboration: [], rejected: [], ...over });
+  const match = (reasons: string[]) =>
+    ({ comp: { price: 1 }, classification: "reject", score: 0, sellerCondition: "unknown", compCondition: "unknown", reasons }) as never;
+
+  it("reports no-anchors when comps survived but none anchored", () => {
+    expect(evidence({ corroboration: [match(["spec-unverified"])] })).toBe("no-anchors");
+  });
+
+  it("reports the modal reject reason when comps were actually rejected", () => {
+    expect(
+      evidence({
+        rejected: [
+          match(["identity-mismatch"]),
+          match(["identity-mismatch"]),
+          match(["accessory-mismatch"]),
+        ],
+      }),
+    ).toBe("all-rejected:identity-mismatch");
+  });
+
+  it("reports no-candidates when the matcher was handed nothing", () => {
+    expect(evidence({})).toBe("no-candidates");
+  });
+
+  it("reports nothing at all once a comp anchors", () => {
+    expect(evidence({ anchors: [match([])], rejected: [match(["identity-mismatch"])] })).toBeNull();
   });
 });

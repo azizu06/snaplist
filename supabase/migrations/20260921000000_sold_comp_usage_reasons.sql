@@ -157,7 +157,9 @@ begin
           jsonb_typeof(entry->'reason') is distinct from 'string'
           -- The same closed vocabulary `isSoldCompUsageReason` enforces in TS.
           or (
-            entry->>'reason' not in ('no-candidates', 'provider-error', 'blocked')
+            entry->>'reason' not in (
+              'no-candidates', 'no-anchors', 'provider-error', 'blocked'
+            )
             and entry->>'reason' !~ '^all-rejected:[a-z][a-z-]{0,39}$'
           )
         )
@@ -187,6 +189,35 @@ $$;
 revoke all on function private.provider_usage_record_is_strict(jsonb)
   from public, anon, authenticated, service_role;
 
+-- ---------------------------------------------------------------------------
+-- How informative each reason is. The in-process tally ranks reasons so a later
+-- report cannot DOWNGRADE an earlier one (`record.ts`), and the merge has to
+-- agree: a correction, retry, or queue redelivery that reports `no-candidates`
+-- after a `provider-error` must not turn a broken provider back into an item
+-- with no comps. That is the exact confusion this field exists to end, so it
+-- cannot be reintroduced by the write path.
+-- ---------------------------------------------------------------------------
+create or replace function private.sold_comp_reason_rank(p_reason text)
+returns integer
+language sql
+immutable
+security definer
+set search_path = ''
+as $$
+  select case
+    when p_reason is null then 0
+    when p_reason = 'provider-error' then 4
+    when p_reason = 'blocked' then 3
+    when p_reason like 'all-rejected:%' then 2
+    when p_reason = 'no-anchors' then 2
+    when p_reason = 'no-candidates' then 1
+    else 0
+  end;
+$$;
+
+revoke all on function private.sold_comp_reason_rank(text)
+  from public, anon, authenticated, service_role;
+
 create or replace function private.provider_usage_merge_sold_comps(
   p_existing jsonb,
   p_incoming jsonb
@@ -208,10 +239,7 @@ as $$
         -- anchored anywhere in the merged history reports none. Same invariant
         -- the in-process tally holds, so a row means the same thing whether it
         -- was written in one pass or topped up by a correction.
-        'reason', case
-          when merged.accepted > 0 then null
-          else merged.reasons[cardinality(merged.reasons)]
-        end,
+        'reason', case when merged.accepted > 0 then null else merged.reason end,
         'chargedUsd', merged.charged_usd
       )
       order by merged.strategy
@@ -226,9 +254,13 @@ as $$
       -- A pre-#1138 entry carries no 'accepted'; ->> gives NULL, sum() skips it,
       -- and the strategy reads as zero accepted rather than failing the merge.
       coalesce(sum((entry->>'accepted')::numeric), 0) as accepted,
-      -- `||` appends the incoming array AFTER the stored one, so ordinality is
-      -- write order and the last non-null reason is the most recent one.
-      array_remove(array_agg(entry->>'reason' order by entry_index), null) as reasons,
+      -- Most informative reason wins, and write order (`||` appends the incoming
+      -- array after the stored one) breaks ties toward the most recent. Taking
+      -- the LAST non-null instead would let a redelivery downgrade a real
+      -- provider failure into "nothing arrived".
+      (array_agg(entry->>'reason' order by
+        private.sold_comp_reason_rank(entry->>'reason') desc, entry_index desc
+      ))[1] as reason,
       -- sum() ignores SQL NULLs and returns NULL when every input is one, which
       -- is exactly the null-preserving rule the table documents: a strategy that
       -- reported no charge stays unknown rather than becoming zero.

@@ -13,8 +13,19 @@ const used = (extra: BenchmarkTag[] = []): BenchmarkTag[] => ["used", ...extra];
  * do. #1138 stopped descriptive specs from entering a sold query, which shortened
  * nine entries here — "Body Only", "Complete", "Sealed", a colour, a printing.
  * Every size, capacity, and dimension spec still narrows its query, because those
- * are the ones the canonical matcher can enforce. The historical #188 run's own
- * inputs and results remain in `docs/benchmarks/sold-comps/`.
+ * are the ones the canonical matcher can enforce. Its round-1 review then reduced
+ * four more to the extracted TOKEN rather than the whole spec, dropping the medium
+ * noun ("1TB SSD" -> "1TB") and the audience word ("Mens Medium" -> "Medium"); the
+ * matcher's own capacity and audience rules still enforce both.
+ *
+ * EXPECTED RECALL CHANGE: these queries are broader than the ones the #188 run
+ * issued, so a re-run should retrieve MORE candidates per query and lean harder on
+ * the matcher to reject them. Q06 is the clearest case — it no longer narrows to
+ * "Body Only", so lens kits and bundles will now be retrieved, and its `humanRule`
+ * forbidden phrases ("lens only", "battery grip") are what must reject them. That
+ * moves work from retrieval to matching by design; it is not a regression, but a
+ * re-benchmark should expect different per-query precision. The historical #188
+ * run's own inputs and results remain in `docs/benchmarks/sold-comps/`.
  */
 export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   {
@@ -89,7 +100,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q11",
-    query: "Dell XPS 15 9530 RTX 4070 32GB 1TB SSD",
+    query: "Dell XPS 15 9530 RTX 4070 32GB 1TB",
     signal: { brand: "Dell", model: "XPS 15 9530", specs: ["RTX 4070", "32GB", "1TB SSD"], category: "electronics", condition: "good", conditionKnown: true },
     tags: used(["electronics", "ambiguous-variant", "product-research-subset"]),
     humanRule: { requiredPhraseGroups: [["xps 15", "9530"], ["4070"], ["32gb", "32 gb"]], forbiddenPhrases: ["rtx 4060", "16gb", "parts"], targetCondition: "used" },
@@ -215,7 +226,7 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q29",
-    query: "New Balance 990v5 Mens Size 10",
+    query: "New Balance 990v5 Size 10",
     signal: { brand: "New Balance", model: "990v5", specs: ["Mens Size 10"], category: "sneakers", condition: "good", conditionKnown: true },
     tags: used(["sneakers", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["990v5"], ["size 10", "sz 10"]], forbiddenPhrases: ["990v6", "women", "size 10.5"], targetCondition: "used" },
@@ -236,14 +247,14 @@ export const SOLD_COMPS_BENCHMARK_CORPUS: readonly BenchmarkCorpusEntry[] = [
   },
   {
     id: "Q32",
-    query: "Patagonia Better Sweater Full Zip Mens Medium",
+    query: "Patagonia Better Sweater Full Zip Medium",
     signal: { brand: "Patagonia", model: "Better Sweater Full Zip", specs: ["Mens Medium"], category: "clothing", condition: "good", conditionKnown: true },
     tags: used(["clothing"]),
     humanRule: { requiredPhraseGroups: [["better sweater"], ["medium", "size m"]], forbiddenPhrases: ["quarter zip", "women", "vest"], targetCondition: "used" },
   },
   {
     id: "Q33",
-    query: "The North Face 1996 Retro Nuptse Mens Medium",
+    query: "The North Face 1996 Retro Nuptse Medium",
     signal: { brand: "The North Face", model: "1996 Retro Nuptse", specs: ["Mens Medium"], category: "clothing", condition: "good", conditionKnown: true },
     tags: used(["clothing", "ambiguous-variant"]),
     humanRule: { requiredPhraseGroups: [["nuptse", "1996"], ["medium", "size m"]], forbiddenPhrases: ["women", "kids", "vest"], targetCondition: "used" },

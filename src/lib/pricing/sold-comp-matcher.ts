@@ -12,6 +12,35 @@ export type SoldCompCondition =
 
 export type SoldCompClassification = "anchor" | "corroboration" | "reject";
 
+/**
+ * The reason vocabulary in declaration order.
+ *
+ * An ARRAY, not just the union, because `soldCompRetrievalReason` breaks ties on
+ * this order and a `Map` iterates in insertion order — i.e. the order reasons
+ * happened to be first seen in one candidate set, which is retrieval order, not
+ * a property of the vocabulary. Two equally common reject reasons would then
+ * record differently depending on how the provider happened to sort its rows.
+ */
+export const SOLD_COMP_MATCH_REASONS = [
+  "identity-equivalent",
+  "identity-partial",
+  "identity-unverified",
+  "identity-mismatch",
+  "variant-conflict",
+  "spec-equivalent",
+  "spec-unverified",
+  "spec-conflict",
+  "condition-same",
+  "condition-adjacent",
+  "condition-distant",
+  "condition-unknown",
+  "accessory-mismatch",
+  "composition-mismatch",
+  "parts-mismatch",
+  "quantity-mismatch",
+  "accepted-price-unknown",
+] as const;
+
 export type SoldCompMatchReason =
   | "identity-equivalent"
   | "identity-partial"
@@ -82,11 +111,16 @@ export function soldCompRetrievalReason(
 ): string | null {
   if (evidence.anchors.length > 0) return null;
   const rejected = evidence.rejected;
-  const considered = rejected.length + evidence.corroboration.length;
-  if (considered === 0) return "no-candidates";
+  if (rejected.length + evidence.corroboration.length === 0) return "no-candidates";
+  // Comps survived and were merely too weak to anchor. Calling that
+  // "all-rejected" would name a reject reason no comp actually carried, and it
+  // is a different operator response: the retrieval worked and the evidence was
+  // real, it just never cleared the bar.
+  if (rejected.length === 0) return "no-anchors";
 
-  // The modal reject reason, with the vocabulary's own declaration order as the
-  // tie-break so the same candidate set always yields the same recorded reason.
+  // The modal reject reason, tie-broken by the vocabulary's declaration order so
+  // the same candidate set always records the same reason whatever order the
+  // provider returned its rows in.
   const tally = new Map<SoldCompMatchReason, number>();
   for (const match of rejected) {
     for (const reason of match.reasons) {
@@ -95,13 +129,14 @@ export function soldCompRetrievalReason(
   }
   let top: SoldCompMatchReason | undefined;
   let topCount = 0;
-  for (const [reason, count] of tally) {
+  for (const reason of SOLD_COMP_MATCH_REASONS) {
+    const count = tally.get(reason) ?? 0;
     if (count > topCount) {
       top = reason;
       topCount = count;
     }
   }
-  return top ? `all-rejected:${top}` : "all-rejected:identity-unverified";
+  return top ? `all-rejected:${top}` : "no-anchors";
 }
 
 function stableSoldCompKey(comp: SoldCompCandidate): string {
@@ -499,57 +534,74 @@ function compareSpecs(title: string, signal: ItemSignal): "equivalent" | "unveri
 }
 
 /**
- * Whether one vision spec names a VARIANT the matcher can actually enforce
- * (#1138), and may therefore narrow a sold-comp query.
+ * The raw-text patterns for a variant token, mirroring the normalized extractors
+ * above one for one (#1138).
+ *
+ * They run against the ORIGINAL spec text rather than normalized text so the
+ * token keeps the spelling a buyer would type: "256GB", not the normalizer's
+ * "256 gb". Each pattern is anchored on the same unit or family its extractor
+ * keys on, so the two cannot disagree about what counts as a variant.
+ */
+const VARIANT_TOKEN_PATTERNS: readonly RegExp[] = [
+  /\b\d+(?:\.\d+)?\s*(?:gb|tb|mb)\b/gi, // capacityTokens
+  /\b(?:size|sz)\s*\d+(?:\.\d+)?\b/gi, // numericSizeTokens
+  /\b(?:mens?|womens?)\s+\d+(?:\.\d+)?\b/gi, // numericSizeTokens, gendered
+  /\bsize\s+(?:s|m|l|xl)\b/gi, // namedSizeTokens, via the normalizer's size-letter map
+  /\b(?:extra\s+large|small|medium|large)\b/gi, // namedSizeTokens
+  /\b\d+\s*x\s*\d+\b/gi, // dimensionTokens
+  /\b\d+\s*oz\b/gi, // volumeTokens
+  /\b(?:rtx|gtx)\s*\d{3,4}\b/gi, // gpuTokens
+];
+
+/**
+ * The variant tokens inside one vision spec, in the order they appear (#1138).
  *
  * `ItemSignal.specs` is documented as price-determining configuration, but the
- * vision step returns whatever attributes it can read off the photos. The
- * production values that starved the sold tier were "White", "charging case",
- * "Silicone ear tips" and "Device-switch button with positions 1, 2, and 3".
+ * vision step returns whatever attributes it can read off the photos. The first
+ * fix here filtered specs and then appended the surviving ones VERBATIM, which
+ * left a second, quieter version of the same bug: a prose spec carrying one
+ * enforceable token dragged its prose along with it, so
+ * "Large silicone ear tips included" still reached eBay whole and
+ * "256GB storage capacity model" still starved an iPhone query.
  *
- * The test is deliberately the matcher's OWN vocabulary rather than a new list of
- * good and bad words: a spec earns a place in the query exactly when it produces
- * a token one of the extractors below compares titles on. That keeps retrieval
- * and acceptance in agreement — we narrow on what we can later verify, and
- * nothing else — and it cannot drift, because adding a variant dimension to the
- * matcher extends the query rule in the same commit.
- *
- * Descriptive prose ("Body Only", "Sealed", a colour) is dropped. Some of it is
- * occasionally price-defining, but the matcher cannot enforce it either, and the
- * failure modes are not symmetric: eBay AND-matches keywords, so one unmatched
- * adjective costs the entire tier its candidates, while a missing adjective costs
- * some clustering that condition, accessory, and parts rules still recover.
+ * eBay AND-matches keywords, so only the token itself may narrow a search — the
+ * words around it are the seller's description, not the SKU.
  */
-export function isVariantDefiningSpec(spec: string): boolean {
+export function variantQueryTokens(spec: string): string[] {
   const value = spec.trim();
-  if (!value) return false;
-  return [
-    capacityTokens,
-    numericSizeTokens,
-    namedSizeTokens,
-    dimensionTokens,
-    volumeTokens,
-    gpuTokens,
-  ].some((extract) => extract(value).size > 0);
+  if (!value) return [];
+  const found: { index: number; token: string }[] = [];
+  for (const pattern of VARIANT_TOKEN_PATTERNS) {
+    // `lastIndex` is shared state on a /g regex; reset so one spec cannot skip
+    // a match because a previous spec left the cursor mid-string.
+    pattern.lastIndex = 0;
+    for (const match of value.matchAll(pattern)) {
+      if (match.index != null) found.push({ index: match.index, token: match[0].trim() });
+    }
+  }
+  const seen = new Set<string>();
+  return found
+    .sort((left, right) => left.index - right.index)
+    .filter(({ token }) => {
+      const key = token.toLowerCase().replace(/\s+/g, " ");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map(({ token }) => token);
 }
 
 /**
- * Whether the signal carries a spec whose absence from a title actually means
- * something (#1138).
+ * Whether one vision spec names a VARIANT the matcher can actually enforce.
  *
- * An unconfirmed spec withholds identity verification, because a seller who says
- * "1TB SSD" against a title that never says so may be looking at the 512GB
- * variant. That reasoning only holds for specs a title could confirm. Vision also
- * emits prose — "White", "charging case", "Silicone ear tips" — which a listing
- * title has no obligation to mention, so treating its absence as doubt demoted
- * EVERY genuine comp for the owner's AirPods Pro to corroboration, and
- * `selectVerifiedSoldMatches` keeps anchors only. The tier reported no verified
- * matches while holding five good ones.
- *
- * Prose still participates everywhere it can be decided: gender, audience, and
- * composition conflicts are evaluated before this, and a spec of any shape that
- * DOES appear in the title still makes the comparison equivalent.
+ * Used for the matcher's own gate, where the question is only whether an
+ * enforceable spec EXISTS. The query path uses `variantQueryTokens`, because
+ * there the exact text matters.
  */
+export function isVariantDefiningSpec(spec: string): boolean {
+  return variantQueryTokens(spec).length > 0;
+}
+
 function hasVerifiableSpecs(signal: ItemSignal): boolean {
   return (signal.specs ?? []).some(isVariantDefiningSpec);
 }
@@ -610,27 +662,39 @@ function accessoryIsIncluded(text: string, accessory: string): boolean {
  * accessory list was being unlocked by the seller's own description. A $8.99
  * "Silicone Ear Tips for Apple AirPods Pro" anchored at 0.95 against a $148 item.
  *
- * On eBay, "for X" means COMPATIBLE WITH X. So when the identity appears only
- * after "for", and the words before it name no part of the identity, the listing
- * is about something that fits the product rather than the product itself. The
- * before-check is what keeps "Apple AirPods Pro for Parts" out of this rule: its
- * identity is stated up front, and the parts rule handles it.
+ * On eBay, "for X" means COMPATIBLE WITH X. But "the identity appears only after
+ * 'for'" is NOT enough on its own, and getting that wrong changes prices: a
+ * seller who leads with condition language — "Tested Working for Apple AirPods
+ * Pro", "Sold as-is for ...", "New Sealed for ..." — is describing the real item,
+ * often at the cheap end of the range, so rejecting those biases the median
+ * upward.
+ *
+ * What actually distinguishes an accessory is an accessory NOUN at the head of
+ * the title, ahead of the "for". That is how sellers write these listings, and it
+ * reuses the matcher's own vocabulary instead of adding a second list.
+ *
+ * Every clause earns its place: the identity must appear AFTER the "for"
+ * (otherwise it is not a compatibility claim), must NOT appear before it (which
+ * is what keeps "Apple AirPods Pro for Parts" out — its identity leads, and the
+ * parts rule decides it), and the head must name an accessory.
+ *
+ * Only the first " for " is inspected. A title with a later one has already been
+ * decided by the head, which is the part sellers put the accessory noun in.
  */
 function compatibilityListing(title: string, signal: ItemSignal): boolean {
   const separator = " for ";
-  const at = (` ${title} `).indexOf(separator);
-  if (at < 0) return false;
   const padded = ` ${title} `;
-  const before = padded.slice(0, at);
+  const at = padded.indexOf(separator);
+  if (at < 0) return false;
+  const before = padded.slice(0, at).trim();
   const after = padded.slice(at + separator.length);
   const identities = [signal.brand, signal.model, signal.resolvedName]
     .map((value) => normalizeComparableText(value ?? ""))
     .filter(Boolean);
   if (identities.length === 0) return false;
-  return (
-    identities.some((identity) => containsPhrase(after, identity)) &&
-    !identities.some((identity) => containsPhrase(before, identity))
-  );
+  if (!identities.some((identity) => containsPhrase(after, identity))) return false;
+  if (identities.some((identity) => containsPhrase(before, identity))) return false;
+  return ACCESSORY_WORDS.some((accessory) => accessoryQuantity(before, accessory) > 0);
 }
 
 function accessoryMismatch(title: string, signal: ItemSignal): boolean {

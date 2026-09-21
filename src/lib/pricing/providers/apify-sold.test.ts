@@ -1768,7 +1768,11 @@ describe("sold-comp usage reasons (#1138)", () => {
     const [entry] = usage.soldComps;
     expect(entry).toMatchObject({ strategy: "apify", accepted: 0 });
     expect(entry!.results).toBeGreaterThan(0);
-    expect(entry!.reason).toMatch(/^all-rejected:/);
+    // These comps survive as corroboration — real evidence that never cleared the
+    // anchor bar — which is a different operator answer from "the matcher threw
+    // them all out" (#1138 review). The `all-rejected:<cause>` form is asserted
+    // directly against the matcher in `sold-comp-matcher.test.ts`.
+    expect(entry!.reason).toBe("no-anchors");
   });
 
   it("records what the matcher accepted when the strategy does produce anchors", async () => {
@@ -1862,7 +1866,14 @@ describe("Apify sold response contract — AirPods Pro (schema-derived fixture, 
       providerFor("accessory-polluted").price(AIRPODS_SIGNAL),
     );
 
-    const titles = (value?.evidence ?? []).map((match) => match.title ?? "");
+    // Assert the result EXISTS before asserting what it excludes (#1138 review):
+    // a null result would satisfy every "does not contain" check below while
+    // proving nothing at all.
+    expect(value).not.toBeNull();
+    expect(value!.evidence!.length).toBeGreaterThanOrEqual(2);
+    const titles = value!.evidence!.map((match) => match.title ?? "");
+    // The two genuine sales survived; the assertions below are about what did not.
+    expect(titles.filter((title) => /AirPods Pro/i.test(title)).length).toBeGreaterThanOrEqual(2);
     for (const pollutant of [
       /ear tips/i,
       /charging case only/i,
@@ -1874,6 +1885,7 @@ describe("Apify sold response contract — AirPods Pro (schema-derived fixture, 
     }
     // The two genuine sales are around $140-$150; an accessory at $6.50 or a
     // parts unit at $29.99 leaking through would drag the recommendation down.
-    if (value) expect(value.suggested).toBeGreaterThan(100);
+    expect(value!.suggested).toBeGreaterThan(100);
+    expect(value!.evidence!.every((match) => match.price > 100)).toBe(true);
   });
 });

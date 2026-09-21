@@ -275,7 +275,9 @@ describe("buildSoldSearchUrl", () => {
       model: "XPS 15",
       specs: ["RTX 4070", " ", "32GB", "1TB SSD", "OLED"],
     });
-    expect(new URL(url!).searchParams.get("_nkw")).toBe("Dell XPS 15 RTX 4070 32GB 1TB SSD");
+    // Only the extracted TOKENS travel (#1138 review): "1TB SSD" contributes the
+    // capacity it is narrowing on, not the medium noun beside it.
+    expect(new URL(url!).searchParams.get("_nkw")).toBe("Dell XPS 15 RTX 4070 32GB 1TB");
   });
 
   it("does NOT append specs to a bare UPC/ISBN query (an exact code key, not a keyword search)", () => {
@@ -3107,6 +3109,28 @@ describe("ebay-sold usage reasons (#1138)", () => {
     ]);
   });
 
+  it.each([
+    ["a timeout", new DOMException("aborted", "AbortError"), "provider-error"],
+    ["a 5xx", new Error("eBay sold fetch failed: 503 Service Unavailable"), "provider-error"],
+    ["a parse throw", new TypeError("Cannot read properties of undefined"), "provider-error"],
+    ["a 403", new Error("eBay sold fetch failed: 403 Forbidden"), "blocked"],
+    ["a 429", new Error("eBay sold fetch failed: 429 Too Many Requests"), "blocked"],
+  ])(
+    "files %s as %s — a refusal and a failure are different operator problems",
+    async (_label, error, expected) => {
+      const { usage } = await withProviderUsageRun(() =>
+        createEbaySoldPricingProvider({
+          fetchPage: async () => {
+            throw error;
+          },
+          emitDiagnostic: () => undefined,
+        }).price(BRANDED_SIGNAL),
+      );
+
+      expect(usage.soldComps[0]!.reason).toBe(expected);
+    },
+  );
+
   it("separates a page that parsed nothing from a page that was refused", async () => {
     const { usage } = await withProviderUsageRun(() =>
       createEbaySoldPricingProvider({
@@ -3215,6 +3239,57 @@ describe("buildSoldSearchQuery — descriptive specs must not starve the sold qu
       condition: "good",
       specs: ["Silver", "RTX 4070", "backlit keyboard", "32GB", "1TB SSD"],
     });
-    expect(buildSoldSearchQuery(signal)).toBe("Dell XPS 15 RTX 4070 32GB 1TB SSD");
+    expect(buildSoldSearchQuery(signal)).toBe("Dell XPS 15 RTX 4070 32GB 1TB");
+  });
+});
+
+/**
+ * Issue #1138 round 1 review (Standards P2): the spec filter decided per WHOLE
+ * string but emitted that whole string, so one enforceable token dragged its
+ * prose into the query with it — the same starvation, one layer down.
+ * "Large silicone ear tips included" carries a named size, so it passed the
+ * filter and was appended verbatim.
+ *
+ * Only the tokens the extractors actually matched may reach the query.
+ */
+describe("buildSoldSearchQuery — only extracted tokens reach the query (#1138)", () => {
+  it("emits the size token from prose that merely contains one", () => {
+    expect(
+      buildSoldSearchQuery({
+        brand: "Apple",
+        model: "AirPods Pro",
+        specs: ["Large silicone ear tips included"],
+      }),
+    ).toBe("Apple AirPods Pro Large");
+  });
+
+  it("emits the capacity token from prose that merely contains one", () => {
+    expect(
+      buildSoldSearchQuery({
+        brand: "Apple",
+        model: "iPhone 13",
+        specs: ["256GB storage capacity model"],
+      }),
+    ).toBe("Apple iPhone 13 256GB");
+  });
+
+  it("emits nothing from prose carrying no enforceable token", () => {
+    expect(
+      buildSoldSearchQuery({
+        brand: "Apple",
+        model: "AirPods Pro",
+        specs: ["Silicone ear tips included", "White colourway", "charging case"],
+      }),
+    ).toBe("Apple AirPods Pro");
+  });
+
+  it("caps at three TOKENS, not three specs", () => {
+    expect(
+      buildSoldSearchQuery({
+        brand: "Dell",
+        model: "XPS 15",
+        specs: ["RTX 4070 graphics", "32GB RAM and 1TB SSD", "15.6 inch display"],
+      }),
+    ).toBe("Dell XPS 15 RTX 4070 32GB 1TB");
   });
 });

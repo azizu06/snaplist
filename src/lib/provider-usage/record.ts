@@ -34,6 +34,11 @@ export const SOLD_COMP_TERMINAL_REASONS = [
   "provider-error",
   /** The retrieval path was refused before any candidate existed (e.g. an edge 403). */
   "blocked",
+  /**
+   * Candidates survived the matcher as corroboration but none anchored. The
+   * retrieval worked and the evidence was real; it never cleared the bar.
+   */
+  "no-anchors",
 ] as const;
 
 export type SoldCompTerminalReason = (typeof SOLD_COMP_TERMINAL_REASONS)[number];
@@ -54,6 +59,10 @@ export const SOLD_COMP_ALL_REJECTED_PREFIX = "all-rejected:";
  */
 const SOLD_COMP_REASON_RANK = new Map<string, number>([
   ["no-candidates", 1],
+  // Candidates existed; the matcher kept none of them as anchors. More than
+  // silence, less than a failure — and the same weight as `all-rejected:*`,
+  // which says the same thing with a cause attached.
+  ["no-anchors", 2],
   ["blocked", 3],
   ["provider-error", 4],
 ]);

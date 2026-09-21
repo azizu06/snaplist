@@ -23,10 +23,10 @@ import {
   resolveEbaySoldEgressConfig,
 } from "../ebay-sold-egress";
 import {
-  isVariantDefiningSpec,
   selectSoldCompEvidence,
   selectVerifiedSoldMatches,
   soldCompRetrievalReason,
+  variantQueryTokens,
   type SoldCompEvidence,
 } from "../sold-comp-matcher";
 
@@ -643,13 +643,25 @@ export function buildSoldSearchQuery(signal: ItemSignal): string | null {
     // match. If the narrowed query then returns < MIN comps the provider declines to
     // the web-search tier (which itself narrows-then-broadens), so coverage is never
     // lost — only the wrong-config sold comps are.
-    // Keep only specs that name a variant the matcher can enforce, and filter
-    // BEFORE the cap (#1138). The cap used to apply to the raw list, so three
-    // pieces of prose evicted the real configuration behind them: a Dell XPS
-    // signal kept "Silver RTX 4070 backlit keyboard" and dropped "32GB"/"1TB SSD".
+    // Only the TOKENS the matcher's extractors found may narrow the query
+    // (#1138). Not the specs that contain them: filtering whole specs and then
+    // appending them verbatim left the same starvation one layer down, because
+    // "Large silicone ear tips included" carries a named size and
+    // "256GB storage capacity model" carries a capacity.
+    //
+    // The cap counts TOKENS, and applies after extraction — when it counted raw
+    // specs, three pieces of prose evicted the real configuration behind them: a
+    // Dell XPS signal kept "Silver RTX 4070 backlit keyboard" and dropped
+    // "32GB" / "1TB SSD" entirely.
+    const seenTokens = new Set<string>();
     const specsHint = (signal.specs ?? [])
-      .map((s) => s.trim())
-      .filter(isVariantDefiningSpec)
+      .flatMap((spec) => variantQueryTokens(spec))
+      .filter((token) => {
+        const key = token.toLowerCase().replace(/\s+/g, " ");
+        if (seenTokens.has(key)) return false;
+        seenTokens.add(key);
+        return true;
+      })
       .slice(0, 3)
       .join(" ");
     return specsHint ? `${brand} ${model} ${specsHint}` : `${brand} ${model}`;
@@ -1167,6 +1179,27 @@ export function finalizeVerifiedSoldResult<T extends EbaySoldComp>(
  * logs. Native/proxy errors can include the full request URL, and proxy URLs may
  * contain an operator credential; never forward arbitrary error text.
  */
+/**
+ * HTTP statuses that mean the request was REFUSED rather than that it failed
+ * (#1138 review). A 403 from eBay's edge, a 401, a 429 rate-limit, and a 451 are
+ * policy decisions — retrying differently will not help and the operator's
+ * question is "are we blocked?". A timeout, a 5xx, or a parse throw is the other
+ * question entirely: something broke and may well work on the next run.
+ */
+const EBAY_SOLD_REFUSAL_STATUSES = new Set(["401", "403", "429", "451"]);
+
+/**
+ * Whether a retrieval failure was a refusal (`blocked`) or a fault
+ * (`provider-error`). Derived from the same classifier the diagnostics use, so
+ * the usage row and the log can never disagree about what happened.
+ */
+export function soldFetchUsageReason(error: unknown): "blocked" | "provider-error" {
+  const status = soldFetchFailureReason(error).match(/^http-(\d{3})$/);
+  return status && EBAY_SOLD_REFUSAL_STATUSES.has(status[1]!)
+    ? "blocked"
+    : "provider-error";
+}
+
 export function soldFetchFailureReason(error: unknown): string {
   if (error instanceof DOMException && error.name === "AbortError") return "timeout";
   const message = error instanceof Error ? error.message : String(error);
@@ -1419,7 +1452,11 @@ function createEbaySoldPricingProviderInternal(
     parseLimit: number,
     blockedEvent: "pricing.ebay_sold.fetch_blocked" | "pricing.ebay_sold.fallback_blocked",
     coordinationDeadline: number,
-  ): Promise<{ comps: EbaySoldComp[]; failed: boolean }> {
+  ): Promise<{
+    comps: EbaySoldComp[];
+    failed: boolean;
+    usageReason?: "blocked" | "provider-error";
+  }> {
     // SSRF guard at the PROVIDER boundary so BOTH the default primary fetcher AND
     // an injected Playwright-style fallback are protected — a non-eBay/internal
     // EBAY_SOLD_BASE_URL must never reach EITHER seam (#56 review). Declines on a
@@ -1455,7 +1492,9 @@ function createEbaySoldPricingProviderInternal(
             }
           : {}),
       });
-      return { comps: [], failed: true };
+      // Carry WHY it failed, so the usage row can tell a refusal from a fault
+      // (#1138 review) instead of filing every failure as `blocked`.
+      return { comps: [], failed: true, usageReason: soldFetchUsageReason(err) };
     }
   }
 
@@ -1466,8 +1505,9 @@ function createEbaySoldPricingProviderInternal(
   ): Promise<EbaySoldComp[]> {
     // #1138: a retrieval that was REFUSED is not a retrieval that found nothing.
     // eBay now answers the public sold page with an Akamai 403, so without this
-    // distinction the tier reports "no comps exist" for every item forever.
-    let blocked = false;
+    // distinction the tier reports "no comps exist" for every item forever. A
+    // timeout or a 5xx is a third thing again — `provider-error`, not `blocked`.
+    let failureReason: "blocked" | "provider-error" | null = null;
     const initial = await fetchComps(
       initialUrl,
       fetchPrimary,
@@ -1478,7 +1518,7 @@ function createEbaySoldPricingProviderInternal(
     let combined = normalizeBoundedCandidates(initial.comps);
 
     if (initial.failed) {
-      blocked = true;
+      failureReason = initial.usageReason ?? "provider-error";
       // The fallback is a DIFFERENT operator-configured egress path, never a
       // retry of the one that just refused us, and nothing wires it in
       // production — so a blocked run costs exactly one request.
@@ -1490,8 +1530,11 @@ function createEbaySoldPricingProviderInternal(
           "pricing.ebay_sold.fallback_blocked",
           coordinationDeadline,
         );
-        if (!fallback.failed) {
-          blocked = false;
+        if (fallback.failed) {
+          // The fallback's own outcome is the more recent truth about egress.
+          failureReason = fallback.usageReason ?? failureReason;
+        } else {
+          failureReason = null;
           combined = normalizeBoundedCandidates(fallback.comps);
         }
       }
@@ -1533,11 +1576,8 @@ function createEbaySoldPricingProviderInternal(
       recordSoldCompUsage({
         strategy: "ebay-sold",
         results: combined.length,
-        reason: blocked
-          ? "blocked"
-          : combined.length === 0
-            ? "no-candidates"
-            : null,
+        reason:
+          failureReason ?? (combined.length === 0 ? "no-candidates" : null),
       });
     } catch (usageError) {
       emitDiagnostic("pricing.ebay_sold.usage_recording_failed", {
