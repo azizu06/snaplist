@@ -53,19 +53,18 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: ["--camera-status=unavailable"])
 
         XCTAssertTrue(app.staticTexts["scan.recovery-title"].waitForExistence(timeout: 2))
-        // #1129: Scan is a drawer over Trophy Wall rather than a second root.
-        // The drawer is a modal container, so the wall leaves the
-        // accessibility tree while it is up and comes back when it closes —
+        // #1129: Scan is a drawer over Trophy Wall rather than a second root,
+        // so the wall stays mounted underneath instead of being torn down.
         // `HomeUITests` pins the geometry that proves it is a drawer.
-        XCTAssertTrue(app.otherElements["scan.drawer"].exists, app.debugDescription)
-        XCTAssertFalse(app.otherElements["trophy.wall"].exists, app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["scan.drawer"].exists, app.debugDescription)
+        XCTAssertTrue(app.otherElements["trophy.wall"].exists, app.debugDescription)
         XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
 
         // The dock sits behind the drawer, so the way back to the wall is the
         // drawer's own close control.
         app.buttons["scan.close"].tap()
         XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.otherElements["scan.drawer"].exists, app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["scan.drawer"].exists, app.debugDescription)
         XCTAssertFalse(app.staticTexts["scan.recovery-title"].exists)
 
         XCTAssertFalse(app.buttons["dock.inbox"].exists)
@@ -1550,7 +1549,7 @@ final class SnapListUITests: XCTestCase {
         // the camera. The drawer's absence is the discriminator: the wall is
         // mounted under the drawer the whole time, so its presence alone would
         // hold either way.
-        let drawer = accepted.otherElements["scan.drawer"]
+        let drawer = accepted.descendants(matching: .any)["scan.drawer"]
         let drawerDropped = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in !drawer.exists },
             object: nil
@@ -3750,7 +3749,7 @@ final class SnapListUITests: XCTestCase {
             drawered.debugDescription
         )
         XCTAssertTrue(
-            drawered.otherElements["scan.drawer"].exists,
+            drawered.descendants(matching: .any)["scan.drawer"].exists,
             "The oracle is only meaningful if the shutter really is inside "
                 + "the drawer. \(drawered.debugDescription)"
         )
@@ -4104,7 +4103,7 @@ final class SnapListUITests: XCTestCase {
         // landed on the real Scan surface.
         XCTAssertFalse(scanDock.isSelected, app.debugDescription)
         XCTAssertTrue(
-            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
             app.debugDescription
         )
         XCTAssertEqual(scanDock.label, "Scan")

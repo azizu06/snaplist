@@ -268,6 +268,19 @@ struct ScanDrawerSurface<Content: View>: View {
                 )
             )
             .overlay(alignment: .top) { grabHandle(drawerHeight: height) }
+            // The drawer's own marker, applied outside the clip. A 1x1 point
+            // at the card's top-left corner is exactly what a 28pt corner
+            // radius clips away, and a clipped view never reaches the
+            // accessibility tree — the drawer rendered correctly and was
+            // simply unnameable. Centred on the top edge instead, so its
+            // frame still reports where the drawer starts.
+            .overlay(alignment: .top) {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Scan drawer")
+                    .accessibilityIdentifier("scan.drawer")
+            }
             .offset(
                 y: max(
                     0,

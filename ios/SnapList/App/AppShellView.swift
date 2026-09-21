@@ -857,16 +857,6 @@ struct AppShellView: View {
                 scanCameraSurface
             }
         }
-        .overlay(alignment: .topLeading) {
-            // A zero-size marker rather than an identifier on the container:
-            // an identifier applied to a container propagates down and
-            // overwrites the identifiers of everything inside it.
-            Color.clear
-                .frame(width: 1, height: 1)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Scan drawer")
-                .accessibilityIdentifier("scan.drawer")
-        }
         .fixtureAccessibilityOverrides(configuration)
     }
 
