@@ -1523,7 +1523,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["voice-note.save-recording"].exists)
     }
 
-    func testVoiceNoteReviewDeleteFallsBackToEmptyAndRerecordKeepsPanelOpen() {
+    func testVoiceNoteReviewDeleteFallsBackToTheEmptyRecorderWithThePanelOpen() {
         let app = launchVoiceNoteFixture(
             "--voice-note-recording-fixture",
             expectedControl: "voice-note.cancel"
@@ -1633,16 +1633,18 @@ final class SnapListUITests: XCTestCase {
                 samples.append((bar.frame.height, bar.frame.maxY))
             }
             for label in labels {
-                let settled = XCTNSPredicateExpectation(
-                    predicate: NSPredicate { _, _ in bar.label == label },
-                    object: bar
-                )
-                XCTAssertEqual(
-                    XCTWaiter.wait(for: [settled], timeout: 3),
-                    .completed,
+                // waitForExistence polls fast enough to catch the one-second
+                // saved beat; a predicate expectation samples about once a
+                // second and can miss it.
+                let settled = app.descendants(matching: .any)
+                    .matching(identifier: "photo-review.start-listing")
+                    .matching(NSPredicate(format: "label == %@", label))
+                    .firstMatch
+                XCTAssertTrue(
+                    settled.waitForExistence(timeout: 3),
                     "\(arguments) \(label)"
                 )
-                samples.append((bar.frame.height, bar.frame.maxY))
+                samples.append((settled.frame.height, settled.frame.maxY))
             }
             app.terminate()
             return samples

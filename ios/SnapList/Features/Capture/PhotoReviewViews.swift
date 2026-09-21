@@ -3391,6 +3391,8 @@ struct PhotoReviewView: View {
     private var primaryActionLabelSize: CGFloat = 16
     @ScaledMetric(relativeTo: .subheadline)
     private var submissionMessageSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .body)
+    private var headerCancelSize: CGFloat = 17
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -3567,6 +3569,9 @@ struct PhotoReviewView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
+                // The scrim blocks touch; this keeps VoiceOver inside the
+                // panel too, so nothing behind it (Start listing) is reachable.
+                .accessibilityAddTraits(.isModal)
                 .zIndex(10)
             }
         }
@@ -3595,7 +3600,7 @@ struct PhotoReviewView: View {
                     .allowsHitTesting(
                         !(isCommitting
                             || submissionPresentation.mutationControlsLocked)
-                            || submissionPresentation.headerCancelEvent != nil
+                            || showsHeaderCancel
                     )
 
                 GeometryReader { viewport in
@@ -3939,17 +3944,24 @@ struct PhotoReviewView: View {
         }
     }
 
+    /// Saving locks the header except for this Cancel; with no boundary to
+    /// fire, nothing in the header unlocks.
+    private var showsHeaderCancel: Bool {
+        submissionPresentation.headerCancelEvent != nil && openBoundary != nil
+    }
+
     /// #1136: while saving, Cancel lives where Back does, so the bar under
     /// the photos stays one button. Outside saving this is the normal chevron.
     @ViewBuilder
     private var backControl: some View {
-        if let event = submissionPresentation.headerCancelEvent,
+        if showsHeaderCancel,
+           let event = submissionPresentation.headerCancelEvent,
            let openBoundary {
             Button {
                 openBoundary(event)
             } label: {
                 Text(submissionPresentation.headerCancelLabel ?? "Cancel")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: headerCancelSize, weight: .semibold))
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .padding(.horizontal, 10)
                     .frame(
@@ -5012,12 +5024,19 @@ struct PhotoReviewView: View {
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
         let button = Button {
+            let event = submissionPresentation.primaryActionEvent
             // #1136: Start listing is the implicit Save recording, so a take
-            // still under review is kept rather than silently dropped.
-            if submissionPresentation.primaryActionEvent == .startListing {
-                voiceNoteStore?.commitUnsavedTake()
+            // still under review lands in the intake before submission reads it.
+            if event == .startListing,
+               let voiceNoteStore,
+               voiceNoteStore.hasUnsavedTake {
+                Task {
+                    await voiceNoteStore.commitUnsavedTake()
+                    openBoundary(event)
+                }
+                return
             }
-            openBoundary(submissionPresentation.primaryActionEvent)
+            openBoundary(event)
         } label: {
             Text(submissionPresentation.primaryActionLabel)
                 .font(.system(size: primaryActionLabelSize, weight: .bold))

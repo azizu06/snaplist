@@ -493,7 +493,10 @@ final class VoiceNoteStore {
         phase = .takeReady(duration: duration)
     }
 
-    func save() {
+    /// Returns the authority commit when there is one, so a caller that must
+    /// not race it (Start listing's implicit save) can wait for it to land.
+    @discardableResult
+    func save() -> Task<Void, Never>? {
         if case .recording = phase {
             // The take is ending, so any frames still pending are discarded
             // with it; only the elapsed time matters here.
@@ -520,13 +523,13 @@ final class VoiceNoteStore {
                     phase = authoritativePhase
                 }
             }
-            return
+            return nil
         }
 
         if let authority {
             let mutationID = UUID()
             authorityMutationID = mutationID
-            Task {
+            return Task {
                 let committed = await authority.save(
                     provisionalURL,
                     provisionalDuration,
@@ -553,7 +556,6 @@ final class VoiceNoteStore {
                     phase = .saveFailed
                 }
             }
-            return
         }
 
         do {
@@ -572,6 +574,7 @@ final class VoiceNoteStore {
         } catch {
             phase = .saveFailed
         }
+        return nil
     }
 
     func rerecord() async {
@@ -589,14 +592,15 @@ final class VoiceNoteStore {
         return false
     }
 
-    /// Starting a listing with a take still under review keeps it rather
-    /// than losing it silently; the review's Save recording is the explicit
-    /// path, this is the implicit one (#1136).
-    func commitUnsavedTake() {
+    /// Starting a listing (or leaving the app) with a take still under
+    /// review keeps it rather than losing it silently; the review's Save
+    /// recording is the explicit path, this is the implicit one (#1136).
+    /// Returns once the commit has landed, authority path included.
+    func commitUnsavedTake() async {
         guard hasUnsavedTake else {
             return
         }
-        save()
+        await save()?.value
     }
 
     func toggleTakePlayback() {

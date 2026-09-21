@@ -542,7 +542,7 @@ final class VoiceNoteTests: XCTestCase {
         store.stopRecording()
 
         XCTAssertTrue(store.hasUnsavedTake)
-        store.commitUnsavedTake()
+        await store.commitUnsavedTake()
 
         XCTAssertEqual(store.savedNote?.duration, 4)
         XCTAssertEqual(files.committedURLs, [audio.provisionalURL])
@@ -550,13 +550,77 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
     }
 
-    func testCommitUnsavedTakeDoesNothingWithoutAReviewedTake() {
+    /// The live app commits through the intake authority, which is async.
+    /// Start listing reads the intake right after, so the implicit save must
+    /// have landed by the time it returns.
+    func testImplicitSaveThroughTheIntakeAuthorityHasLandedWhenItReturns()
+        async
+    {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let files = VoiceNoteFileStoreStub()
+        let kept = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/intake-voice.wav"),
+            duration: 4
+        )
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: files,
+            authority: VoiceNoteCommitAuthority(
+                save: { _, _, _ in
+                    for _ in 0..<5 {
+                        await Task.yield()
+                    }
+                    return kept
+                },
+                delete: { _ in true }
+            )
+        )
+        await store.startRecording()
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            meterLevels: [0.4]
+        )
+        store.stopRecording()
+
+        await store.commitUnsavedTake()
+
+        XCTAssertEqual(store.savedNote, kept)
+        XCTAssertFalse(store.hasUnsavedTake)
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+    }
+
+    func testOnlyAStopIntoReviewIsAnnounced() {
+        XCTAssertTrue(
+            VoiceNoteReviewPolicy.announcesStop(
+                from: .recording(elapsed: 4, level: 0.2),
+                to: .takeReady(duration: 4)
+            )
+        )
+        XCTAssertFalse(
+            VoiceNoteReviewPolicy.announcesStop(
+                from: .takeReady(duration: 4),
+                to: .saved(isPlaying: false)
+            )
+        )
+        XCTAssertFalse(
+            VoiceNoteReviewPolicy.announcesStop(
+                from: .ready,
+                to: .recording(elapsed: 0, level: 0)
+            )
+        )
+        XCTAssertEqual(
+            VoiceNoteReviewPolicy.stopAnnouncement,
+            "Recording stopped. Review your voice note."
+        )
+    }
+
+    func testCommitUnsavedTakeDoesNothingWithoutAReviewedTake() async {
         let audio = VoiceNoteAudioClientStub(permission: .allowed)
         let files = VoiceNoteFileStoreStub()
         let store = VoiceNoteStore(audio: audio, files: files)
 
         XCTAssertFalse(store.hasUnsavedTake)
-        store.commitUnsavedTake()
+        await store.commitUnsavedTake()
 
         XCTAssertEqual(files.committedURLs, [])
         XCTAssertEqual(store.phase, .ready)

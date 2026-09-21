@@ -52,7 +52,9 @@
       "SnapListUITests/SnapListUITests/testProGatePurchasePendingHasNoDismissOrRestoreAction",
       "SnapListUITests/SnapListUITests/testRestoredCaptureResumesWithNoFirstValueOnboardingControl",
       "SnapListUITests/SnapListUITests/testSettingsMemberReauthenticationCancelReturnsToDeletionConsequences",
+      "SnapListUITests/SnapListUITests/testSubmissionBarIsOneConstantHeightButtonAcrossEveryPhase",
       "SnapListUITests/SnapListUITests/testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets",
+      "SnapListUITests/SnapListUITests/testVoiceNoteStopKeepsThePanelOpenOnReviewUntilSaveRecording",
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure",
       "SnapListUITests/UINavigationReturnBoundaryTests/testTheThreeSecondBudgetStillMissesThatSameRestoredWall",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut",
@@ -155,6 +157,7 @@
       "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachTheCameraPreview",
       "SnapListUITests/SnapListUITests/testSubscriptionRetryMeetsTheTouchTargetFloorAtSmallestDynamicTypeSize",
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingCancelAndSaveBothDismissToExactRowTruth",
+      "SnapListUITests/SnapListUITests/testVoiceNoteReviewDeleteFallsBackToTheEmptyRecorderWithThePanelOpen",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessThatSuspendsAfterHomeStillTerminatesAndVerifiesExit",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves"

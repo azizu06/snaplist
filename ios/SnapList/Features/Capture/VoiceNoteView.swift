@@ -162,8 +162,15 @@ struct VoiceNoteSheet: View {
             switch phase {
             case .active:
                 store.refreshPermissionTruth()
-            case .inactive, .background:
+            case .inactive:
                 store.handleSceneInactive()
+            case .background:
+                store.handleSceneInactive()
+                // #1136: a take under review survives relaunch, as it did
+                // when the check mark committed it.
+                Task {
+                    await store.commitUnsavedTake()
+                }
             @unknown default:
                 store.handleSceneInactive()
             }
@@ -496,7 +503,7 @@ struct VoiceNoteSheet: View {
                 .accessibilityIdentifier("voice-note.rerecord")
 
                 Button(role: .destructive) {
-                    discardTakeAndCloseIfEmpty()
+                    discardReviewedTake()
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 20, weight: .regular))
@@ -766,7 +773,7 @@ struct VoiceNoteSheet: View {
 
     /// Delete on review keeps the panel open, on the state it fell back to:
     /// the empty recorder, or the prior saved note.
-    private func discardTakeAndCloseIfEmpty() {
+    private func discardReviewedTake() {
 #if DEBUG
         if usesStaticVoiceNoteFixture, store.discardFixtureTake() {
             return
