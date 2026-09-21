@@ -116,6 +116,7 @@ ios/SnapList/Features/ProGate/ProGateView.swift
 ios/SnapList/Features/PushRegistration/PushForegroundNotification.swift
 ios/SnapList/Features/PushRegistration/PushRegistrationComposition.swift
 ios/SnapList/Features/PushRegistration/PushRegistrationDomain.swift
+ios/SnapList/Features/PushRegistration/PushTapRouting.swift
 ios/SnapList/Features/Runs/RunAPIClient.swift
 ios/SnapList/Features/Runs/RunModels.swift
 ios/SnapList/Features/Runs/RunStore.swift
