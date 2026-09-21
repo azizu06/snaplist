@@ -2474,7 +2474,7 @@ final class TrophyWallDomainTests: XCTestCase {
             repository.requestedPages.count == 1
                 && store.collectionOutcome == .unavailable
         }
-        let initialTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        let initialTaskID = driver.refreshState.taskID()
 
         XCTAssertFalse(driver.refreshState.observePrincipal(nil))
         let signedIn = TrophyWallPrincipalIdentity(
@@ -2488,7 +2488,7 @@ final class TrophyWallDomainTests: XCTestCase {
             )
         )
         XCTAssertTrue(driver.refreshState.observePrincipal(signedIn))
-        let principalTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        let principalTaskID = driver.refreshState.taskID()
         XCTAssertNotEqual(principalTaskID, initialTaskID)
 
         await host.settle()
@@ -2500,7 +2500,7 @@ final class TrophyWallDomainTests: XCTestCase {
             findModifiedContent(root.feature.body, as: TrophyWallView.self)
         )
         renderedWall.onTryAgain()
-        let retryTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        let retryTaskID = driver.refreshState.taskID()
         XCTAssertNotEqual(retryTaskID, principalTaskID)
 
         await host.settle()
@@ -3064,6 +3064,8 @@ private struct TrophyWallFeatureTestRoot: View {
             accountInitials: "S",
             correctionAvailability: .notOffered,
             forceReducedMotion: false,
+            startNewItem: {},
+            returnToTrophyWall: {},
             activationListingReviewOpened: {},
             activationListingReviewDismissed: {},
             activationGuestClaimPresentationChanged: { _ in },

@@ -130,6 +130,34 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(dockScan.isSelected)
     }
 
+    /// #1129. Scan stopped being a second root and became a drawer over the
+    /// wall. The discriminator is what happens to Trophy Wall while Scan is
+    /// up: the retired two-root shell mounted exactly one tab's stack, so the
+    /// wall was torn down on the way to Scan. A drawer leaves it underneath.
+    func testScanOpensAsADrawerOverTrophyWallInsteadOfReplacingIt() {
+        let app = launch("HOME-02")
+        let wall = app.otherElements["trophy.wall"]
+        XCTAssertTrue(wall.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(app.otherElements["scan.drawer"].exists)
+
+        // The entry control is whatever chrome currently hosts it. While the
+        // dock is still on screen that is `dock.scan`; it stops selecting a
+        // second root and raises the drawer instead.
+        app.buttons["dock.scan"].tap()
+
+        let drawer = app.otherElements["scan.drawer"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(
+            wall.exists,
+            "Trophy Wall must stay mounted under the drawer. \(app.debugDescription)"
+        )
+
+        app.buttons["scan.close"].tap()
+
+        XCTAssertTrue(wall.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(drawer.exists, app.debugDescription)
+    }
+
     /// One dock, two destinations, on every screen that shows it. The Scan
     /// camera used to draw its own `scan.tab` / `trophy-wall.tab` control; it now
     /// renders the same component, so the identifiers below are the only pair

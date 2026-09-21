@@ -61,6 +61,7 @@ struct AppShellView: View {
     @State private var dockScrollScale = DockScrollScaleModel()
     @State private var isDeleteAccountFlowPresented = false
     @State private var hasConsumedMountedFirstValueDirectScanCommand = false
+    @State private var hasAppliedLaunchScanPresentation = false
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
     @State private var photoReviewSaveFailure: PhotoReviewSaveFailure?
@@ -174,97 +175,6 @@ struct AppShellView: View {
 #else
                 VisualStateBoundaryPlaceholder(state: visualState)
 #endif
-            } else if let session = photoReviewHost.session {
-                PhotoReviewView(
-                    store: session.store,
-                    isCommitting: photoReviewHost.isCommitting,
-                    submissionPresentation: PhotoReviewSubmissionPresentation(
-                        host: submissionHost,
-                        proGateIntakeAdvisory: proGateStore?.intakeAdvisory
-                    ),
-                    focusStartListingRequest: proGateFocusRequest,
-                    acknowledgeSubmissionPresentation: { eventID in
-                        submissionHost.acknowledgePresentation(eventID: eventID)
-                    },
-                    backToCamera: {
-                        returnFromPhotoReview(session)
-                    },
-                    delete: {
-                        await deleteFromPhotoReview(session)
-                    },
-                    saveFailure: photoReviewSaveFailure?.sessionID == session.id
-                        ? photoReviewSaveFailure
-                        : nil,
-                    retrySave: {
-                        retryPhotoReviewSaveFailure(session)
-                    },
-                    discardPhotos: {
-                        discardPhotoReviewSaveFailure(session)
-                    },
-                    commitReorder: { photoID, destinationIndex in
-                        let reordered = await session.commitReorder(
-                            photoID: photoID,
-                            destinationIndex: destinationIndex,
-                            captureFlow: captureFlow
-                        )
-                        if reordered != nil {
-                            advanceActivationGuidance(for: .reorderedPhotos)
-                        }
-                        return reordered
-                    },
-                    // Photo Review consumes #469's Voice note event locally. Start
-                    // listing submits the committed NativeIntake snapshot: displayed
-                    // photo order plus #541's optional recovered WAV under one key.
-                    openBoundary: { event in
-                        if event == .openVoiceNote {
-                            advanceActivationGuidance(for: .openedVoiceNote)
-                        }
-                        if PhotoReviewSubmissionPrimaryActionConsumer.consume(
-                            event,
-                            submissionHost: submissionHost
-                        ) {
-                            return
-                        }
-                        switch event {
-                        case .startListing,
-                             .createAccount,
-                             .openSubscriptionSettings,
-                             .retryReceiptMismatch,
-                             .retryAmbiguousSubmission:
-                            break
-                        case .openVoiceNote,
-                             .cancelSubmission,
-                             .completeSavedSubmission,
-                             .reviewSubmission,
-                             .reviewConflictedSubmission:
-                            return
-                        }
-                        if event == .startListing,
-                           proGateStore?.intakeAdvisory != nil {
-                            Task { await reopenProGate() }
-                            return
-                        }
-                        Task {
-                            await AppShellPhotoReviewSubmissionTransaction.perform(
-                                primaryAction: event,
-                                session: session,
-                                captureFlow: captureFlow,
-                                host: photoReviewHost,
-                                router: router,
-                                submissionHost: submissionHost,
-                                setReturnFocus: { pendingScanReturnFocus = $0 },
-                                onPersistenceRejected: {
-                                    recordPhotoReviewSaveFailure(
-                                        for: .backToCamera,
-                                        session: session
-                                    )
-                                }
-                            )
-                        }
-                    },
-                    voiceNoteStore: session.voiceNoteStore,
-                    intake: photoReviewIntake
-                )
             } else {
                 shell
             }
@@ -334,7 +244,10 @@ struct AppShellView: View {
             }
         }
         .onOpenURL { url in
-            router.open(url)
+            // A deep link names a run on the wall, so the drawer must come
+            // down or it covers the screen the link just brought forward.
+            guard router.open(url) else { return }
+            applyScanDrawer(.dismissed)
         }
         .onChange(
             of: router.captureBoundaryRequest,
@@ -439,7 +352,8 @@ struct AppShellView: View {
             await AppCaptureHandoffCoordinator.presentCaptureLauncher(
                 onboardingModel: onboardingModel,
                 captureFlow: captureFlow,
-                router: router
+                router: router,
+                presentScanDrawer: { applyScanDrawer(.scanSurfaceRestored) }
             )
             if router.presentedFullScreen == .guidedCamera, captureFlow.phase != .camera {
                 // No more launcher sheet to start the camera on dismiss (#864):
@@ -636,29 +550,141 @@ struct AppShellView: View {
         proGateFocusRequest = UUID()
     }
 
-    private var shell: some View {
-        ZStack {
-            ForEach(PrimaryTab.allCases) { tab in
-                if router.selectedTab == tab {
-                    NavigationStack(path: router.pathBinding(for: tab)) {
-                        ZStack(alignment: .top) {
-                            primaryFeature(for: tab)
-#if DEBUG
-                            if configuration.keyboardProbe {
-                                TextField("Fixture keyboard probe", text: $keyboardProbeText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                                    .padding(SnapListMetrics.screenGutter)
-                                    .accessibilityIdentifier("fixture.keyboard-probe")
-                            }
-#endif
-                        }
-                        .navigationDestination(for: AppRoute.self) { route in
-                            destination(for: route)
-                        }
+    /// Photo Review, the second surface inside the Scan drawer.
+    ///
+    /// #1129: this used to sit above the shell as a root of its own, which is
+    /// why Photo Review covered Trophy Wall outright. The whole capture flow
+    /// now runs inside the drawer, so the drawer picks between the camera and
+    /// this and the wall stays mounted underneath either one.
+    @ViewBuilder
+    private func photoReviewSurface(
+        _ session: PhotoReviewLiveSession
+    ) -> some View {
+            PhotoReviewView(
+                store: session.store,
+                isCommitting: photoReviewHost.isCommitting,
+                submissionPresentation: PhotoReviewSubmissionPresentation(
+                    host: submissionHost,
+                    proGateIntakeAdvisory: proGateStore?.intakeAdvisory
+                ),
+                focusStartListingRequest: proGateFocusRequest,
+                acknowledgeSubmissionPresentation: { eventID in
+                    submissionHost.acknowledgePresentation(eventID: eventID)
+                },
+                backToCamera: {
+                    returnFromPhotoReview(session)
+                },
+                delete: {
+                    await deleteFromPhotoReview(session)
+                },
+                saveFailure: photoReviewSaveFailure?.sessionID == session.id
+                    ? photoReviewSaveFailure
+                    : nil,
+                retrySave: {
+                    retryPhotoReviewSaveFailure(session)
+                },
+                discardPhotos: {
+                    discardPhotoReviewSaveFailure(session)
+                },
+                commitReorder: { photoID, destinationIndex in
+                    let reordered = await session.commitReorder(
+                        photoID: photoID,
+                        destinationIndex: destinationIndex,
+                        captureFlow: captureFlow
+                    )
+                    if reordered != nil {
+                        advanceActivationGuidance(for: .reorderedPhotos)
                     }
+                    return reordered
+                },
+                // Photo Review consumes #469's Voice note event locally. Start
+                // listing submits the committed NativeIntake snapshot: displayed
+                // photo order plus #541's optional recovered WAV under one key.
+                openBoundary: { event in
+                    if event == .openVoiceNote {
+                        advanceActivationGuidance(for: .openedVoiceNote)
+                    }
+                    if PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                        event,
+                        submissionHost: submissionHost
+                    ) {
+                        return
+                    }
+                    switch event {
+                    case .startListing,
+                         .createAccount,
+                         .openSubscriptionSettings,
+                         .retryReceiptMismatch,
+                         .retryAmbiguousSubmission:
+                        break
+                    case .openVoiceNote,
+                         .cancelSubmission,
+                         .completeSavedSubmission,
+                         .reviewSubmission,
+                         .reviewConflictedSubmission:
+                        return
+                    }
+                    if event == .startListing,
+                       proGateStore?.intakeAdvisory != nil {
+                        Task { await reopenProGate() }
+                        return
+                    }
+                    Task {
+                        await AppShellPhotoReviewSubmissionTransaction.perform(
+                            primaryAction: event,
+                            session: session,
+                            captureFlow: captureFlow,
+                            host: photoReviewHost,
+                            router: router,
+                            submissionHost: submissionHost,
+                            setReturnFocus: { pendingScanReturnFocus = $0 },
+                            onPersistenceRejected: {
+                                recordPhotoReviewSaveFailure(
+                                    for: .backToCamera,
+                                    session: session
+                                )
+                            }
+                        )
+                    }
+                },
+                voiceNoteStore: session.voiceNoteStore,
+                intake: photoReviewIntake
+            )
+    }
+
+    private var shell: some View {
+        NavigationStack(path: router.pathBinding) {
+            ZStack(alignment: .top) {
+                homeFeature
+#if DEBUG
+                if configuration.keyboardProbe {
+                    TextField("Fixture keyboard probe", text: $keyboardProbeText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                        .padding(SnapListMetrics.screenGutter)
+                        .accessibilityIdentifier("fixture.keyboard-probe")
                 }
+#endif
             }
+            .navigationDestination(for: AppRoute.self) { route in
+                destination(for: route)
+            }
+        }
+        // #1129. The Scan drawer. A system sheet rather than a hand-built
+        // overlay, so the grabber, the downward swipe and the interactive
+        // dismiss are UIKit's and behave the way every other sheet on the
+        // device does. The wall stays mounted underneath it.
+        .sheet(isPresented: scanDrawerBinding) {
+            scanDrawerContent
+        }
+        // A launch fixture that asks to start in Scan replays the same drawer
+        // event the entry control raises, so there is exactly one path that
+        // opens the drawer and exactly one that starts the camera.
+        .task {
+            guard router.launchesIntoScan,
+                  !hasAppliedLaunchScanPresentation else { return }
+            hasAppliedLaunchScanPresentation = true
+            applyScanDrawer(.scanSurfaceRestored)
         }
         // #385. Above the stack, not on the settings destination. The deletion
         // tail is pushed by a `navigationDestination` nested two levels inside
@@ -668,18 +694,22 @@ struct AppShellView: View {
         // right. `AccountDeletionUITests` is what catches this.
         .environment(\.accountDeletionDependencies, accountDeletionDependencies)
         .environment(\.dockScrollScale, dockScrollScale)
+        // #1129: the dock's Scan destination stops selecting a second root and
+        // becomes the entry control that raises the drawer, so Trophy Wall is
+        // the only thing the dock can be "on". Whether the dock survives at
+        // all is the owner's call; this is the seam that decision moves.
         .floatingDock(
-            selectedTab: router.selectedTab,
+            selectedTab: .trophyWall,
             isVisible: shellChromeProjection.showsDock,
-            // #1049: the model is a single shared instance so Trophy Wall's
-            // scroll observation never has to thread through every
-            // intermediate initializer, but that means a shrink from Trophy
-            // Wall scroll would otherwise persist onto Scan after a tab
-            // switch. Scan has no scroll surface to report a reset offset,
-            // so the dock composition call is where full scale is enforced
-            // for every screen but Trophy Wall.
-            scale: router.selectedTab == .trophyWall ? dockScrollScale.scale : DockScrollScalePolicy.fullScale,
-            select: router.select
+            scale: dockScrollScale.scale,
+            select: { destination in
+                switch destination {
+                case .scan:
+                    applyScanDrawer(.scanEntryControlTapped)
+                case .trophyWall:
+                    applyScanDrawer(.dismissed)
+                }
+            }
         )
         .animation(
             reduceMotion ? nil : .easeInOut(duration: 0.16),
@@ -705,7 +735,7 @@ struct AppShellView: View {
     /// onboarding — which do push here — keep working without conditional-shell
     /// state or lifecycle scheduling.
     private var firstValueOnboardingHost: some View {
-        NavigationStack(path: router.pathBinding(for: router.selectedTab)) {
+        NavigationStack(path: router.pathBinding) {
             FirstValueOnboardingView(
                 model: firstValueOnboardingModel,
                 forceReducedMotion: configuration.forceReducedMotion,
@@ -721,36 +751,108 @@ struct AppShellView: View {
         }
     }
 
-    @ViewBuilder
-    private func primaryFeature(for tab: PrimaryTab) -> some View {
-        switch tab {
-        case .scan:
-            ScanCameraView(
-                flow: captureFlow,
-                returnFocus: $pendingScanReturnFocus,
-                closeCapture: {
-                    router.reset(tab: .trophyWall)
-                    router.selectedTab = .trophyWall
-                }
-            ) { destination, photos, opener in
-                router.openCaptureBoundary(
-                    destination: destination,
-                    photos: photos,
-                    opener: opener
-                )
-            }
-            .safeAreaPadding(
-                .bottom,
-                shellChromeProjection.showsDock
-                    ? FloatingDockMetrics.containerHeight(for: .scan)
-                    : 0
+    /// Starts the next item. Clears anything pushed on the wall and raises the
+    /// drawer, which is the one way every "scan another item" affordance —
+    /// Listing Review, the guest claim, Processing, the empty wall — reaches
+    /// Scan now that Scan is not a destination to select.
+    private func startNewItem() {
+        router.resetWallPath()
+        applyScanDrawer(.scanSurfaceRestored)
+    }
+
+    /// Puts the seller back on the wall: clears the pushed stack, and drops the
+    /// drawer if it happens to be up.
+    private func returnToTrophyWall() {
+        router.resetWallPath()
+        applyScanDrawer(.dismissed)
+    }
+
+    /// Applies a drawer event and carries out the camera session work it
+    /// names. Every path that opens or closes the drawer comes through here,
+    /// which is why there is exactly one place the capture session starts and
+    /// exactly one place it stops.
+    private func applyScanDrawer(_ event: ScanDrawerEvent) {
+        let reduction = router.applyScanDrawer(
+            event,
+            context: ScanDrawerContext(
+                hasUnfinishedIntake: !captureFlow.stagedPhotos.isEmpty,
+                isSubmissionInFlight: submissionHost.isSubmitting
             )
-            .task(id: router.selectedTab) {
-                guard router.selectedTab == .scan else { return }
-                await captureFlow.startCamera()
+        )
+        switch reduction.cameraCommand {
+        case .start:
+            Task { await captureFlow.startCamera() }
+        case .stop:
+            // Stops the session and leaves the staged intake exactly where it
+            // is. Nothing here touches the submission host, which is what
+            // makes an interactive dismiss mid-submission harmless.
+            captureFlow.cancelCamera()
+        case nil:
+            break
+        }
+    }
+
+    /// The sheet's own binding. UIKit drives the setter on an interactive
+    /// dismiss the shell never initiated, so routing it back through the
+    /// reducer is what keeps the drawer's state and the camera session in
+    /// agreement however the seller closed it.
+    private var scanDrawerBinding: Binding<Bool> {
+        Binding(
+            get: { router.isScanPresented },
+            set: { isPresented in
+                guard !isPresented else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations =
+                    !ScanDrawerMotionPolicy.shouldAnimatePresentation(
+                        reduceMotion: reduceMotion
+                    )
+                withTransaction(transaction) {
+                    applyScanDrawer(.dismissed)
+                }
             }
-        case .trophyWall:
-            homeFeature
+        )
+    }
+
+    /// What the drawer holds. The whole capture flow lives in here — the
+    /// camera, and Photo Review once an intake is open — so the seller never
+    /// leaves the drawer between the first photo and Done.
+    @ViewBuilder
+    private var scanDrawerContent: some View {
+        Group {
+            if let session = photoReviewHost.session {
+                photoReviewSurface(session)
+            } else {
+                scanCameraSurface
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            // A zero-size marker rather than an identifier on the container:
+            // an identifier applied to a container propagates down and
+            // overwrites the identifiers of everything inside it.
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Scan drawer")
+                .accessibilityIdentifier("scan.drawer")
+        }
+        .presentationDetents([.fraction(ScanDrawerMetrics.heightFraction)])
+        .presentationDragIndicator(.visible)
+        .fixtureAccessibilityOverrides(configuration)
+    }
+
+    private var scanCameraSurface: some View {
+        ScanCameraView(
+            flow: captureFlow,
+            returnFocus: $pendingScanReturnFocus,
+            closeCapture: {
+                applyScanDrawer(.dismissed)
+            }
+        ) { destination, photos, opener in
+            router.openCaptureBoundary(
+                destination: destination,
+                photos: photos,
+                opener: opener
+            )
         }
     }
 
@@ -762,14 +864,8 @@ struct AppShellView: View {
                 store: TrophyWallProcessingLaunchFixture.store,
                 onBack: {},
                 openRoute: { router.navigate(to: .home($0)) },
-                onScan: {
-                    router.reset(tab: .scan)
-                    router.selectedTab = .scan
-                },
-                goToTrophyWall: {
-                    router.reset(tab: .trophyWall)
-                    router.selectedTab = .trophyWall
-                },
+                onScan: startNewItem,
+                goToTrophyWall: returnToTrophyWall,
                 onTryAgain: {},
                 // The fixture has no boundary to re-read, so it stands in for
                 // the round trip. Without a duration the refresh state would
@@ -817,6 +913,8 @@ struct AppShellView: View {
             accountInitials: SettingsProfile.current(configuration: configuration).initials,
             correctionAvailability: configuration.listingReviewCorrectionAvailability,
             forceReducedMotion: configuration.forceReducedMotion,
+            startNewItem: startNewItem,
+            returnToTrophyWall: returnToTrophyWall,
             activationListingReviewOpened: {
                 activationListingReviewPresented = true
                 advanceActivationGuidance(for: .openedProcessing)
@@ -899,7 +997,7 @@ struct AppShellView: View {
                     ? nil
                     : {
                         isDeleteAccountFlowPresented = false
-                        router.reset(tab: .trophyWall)
+                        router.resetWallPath()
                     },
                 deletionFlowPresentationChanged: {
                     isDeleteAccountFlowPresented = $0
@@ -931,23 +1029,18 @@ struct AppShellView: View {
                     },
                     openRoute: { destination in
                         if case .localRecovery(let logicalIdentity) = destination {
-                            router.openLocalRecovery(
+                            guard router.openLocalRecovery(
                                 logicalIdentity,
                                 matching: recoverableLocalPendingIdentity,
                                 photos: captureFlow.stagedPhotos
-                            )
+                            ) else { return }
+                            applyScanDrawer(.scanSurfaceRestored)
                         } else {
                             router.navigate(to: .home(destination))
                         }
                     },
-                    onScan: {
-                        router.reset(tab: .scan)
-                        router.selectedTab = .scan
-                    },
-                    goToTrophyWall: {
-                        router.reset(tab: .trophyWall)
-                        router.selectedTab = .trophyWall
-                    }
+                    onScan: startNewItem,
+                    goToTrophyWall: returnToTrophyWall
                 )
             case .localRecovery:
                 EmptyView()
@@ -1027,7 +1120,7 @@ struct AppShellView: View {
             hasConsumedMountedDirectScanCommand:
                 hasConsumedMountedFirstValueDirectScanCommand,
             recordedOutcome: firstValueOnboardingModel.recordedOutcome,
-            isNormalScanShell: router.selectedTab == .scan
+            isNormalScanShell: router.isScanPresented
                 && router.presentedFullScreen == nil,
             hasRestoredCapture: captureFlow.stagedPhoto != nil,
             stagedPhotoCount: onboardingModel.state.stagedPhotoCount,
@@ -1050,7 +1143,7 @@ struct AppShellView: View {
         AppShellChromePolicy.project(
             AppShellChromeContext(
                 isKeyboardVisible: isKeyboardVisible,
-                isLiveCameraPreviewActive: router.selectedTab == .scan
+                isLiveCameraPreviewActive: router.isScanPresented
                     && captureFlow.phase.isLiveCameraPreview,
                 isDeleteAccountFlowPresented: isDeleteAccountFlowPresented,
                 isListingReviewPresented: activationListingReviewPresented,
@@ -1069,7 +1162,7 @@ struct AppShellView: View {
         // the Trophy Wall mark draw on top of pushed Settings.
         ActivationSurfaceResolutionPolicy.surface(
             hasPhotoReviewSession: photoReviewHost.session != nil,
-            selectedTab: router.selectedTab,
+            isScanPresented: router.isScanPresented,
             pushedPath: router.selectedPath,
             presentedFullScreen: router.presentedFullScreen
         )
@@ -1441,8 +1534,7 @@ struct AppShellView: View {
                 stagedPhotoCount: onboardingModel.state.stagedPhotoCount
             ) else { return }
         hasConsumedMountedFirstValueDirectScanCommand = true
-        router.reset(tab: .scan)
-        router.select(.scan)
+        startNewItem()
     }
 
     /// First-Value completion owns a direct handoff to the canonical Scan root.
@@ -2151,10 +2243,14 @@ enum AppShellPhotoReviewFailureDiscardTransaction {
 
 @MainActor
 enum AppCaptureHandoffCoordinator {
+    /// #1129: the shell hands in the way Scan is raised, because the drawer's
+    /// camera session is the shell's to start and this coordinator has no
+    /// business owning it.
     static func presentCaptureLauncher(
         onboardingModel: OnboardingFlowModel,
         captureFlow: CaptureFlowModel,
-        router: AppRouter
+        router: AppRouter,
+        presentScanDrawer: () -> Void
     ) async {
         guard onboardingModel.state.screen == .captureBoundary,
               let context = onboardingModel.captureEntryContext,
@@ -2188,7 +2284,7 @@ enum AppCaptureHandoffCoordinator {
                     let didRollBackCapture = await captureFlow
                         .rollBackLibraryTransferAfterSourceConsumptionFailure()
                     if !didRollBackCapture {
-                        router.selectedTab = .scan
+                        presentScanDrawer()
                         router.presentedFullScreen = .guidedCamera
                         return
                     }
@@ -2197,7 +2293,7 @@ enum AppCaptureHandoffCoordinator {
             guard onboardingModel.state.screen == .captureBoundary else { return }
         }
 
-        router.selectedTab = .scan
+        presentScanDrawer()
         router.presentedFullScreen = .guidedCamera
     }
 }
@@ -2301,7 +2397,6 @@ struct TrophyWallPrincipalFence {
 /// saved collection can no longer be trusted — a principal transition, or the
 /// seller asking to try again after a failed load.
 struct TrophyWallCollectionRefreshKey: Equatable {
-    let tab: PrimaryTab
     let generation: Int
 }
 
@@ -2323,8 +2418,8 @@ struct TrophyWallCollectionRefreshState {
         generation += 1
     }
 
-    func taskID(tab: PrimaryTab) -> TrophyWallCollectionRefreshKey {
-        TrophyWallCollectionRefreshKey(tab: tab, generation: generation)
+    func taskID() -> TrophyWallCollectionRefreshKey {
+        TrophyWallCollectionRefreshKey(generation: generation)
     }
 }
 
@@ -2370,6 +2465,11 @@ struct TrophyWallFeatureView: View {
     let accountInitials: String
     let correctionAvailability: ListingReviewCorrectionAvailability
     let forceReducedMotion: Bool
+    /// #1129: raising the Scan drawer and starting its camera session is the
+    /// shell's job, so the wall asks for the next item rather than selecting a
+    /// destination of its own.
+    let startNewItem: () -> Void
+    let returnToTrophyWall: () -> Void
     let activationListingReviewOpened: () -> Void
     let activationListingReviewDismissed: () -> Void
     let activationGuestClaimPresentationChanged: (Bool) -> Void
@@ -2408,15 +2508,11 @@ struct TrophyWallFeatureView: View {
             openListing: { runID in
                 await openListing(runID)
             },
-            onScan: {
-                router.reset(tab: .scan)
-                router.selectedTab = .scan
-            },
+            onScan: startNewItem,
             onTryAgain: { refreshState.tryAgain() },
             namespace: zoomTransitionNamespace
         )
-        .task(id: refreshState.taskID(tab: router.selectedTab)) {
-            guard router.selectedTab == .trophyWall else { return }
+        .task(id: refreshState.taskID()) {
             await store.recoverCollection(using: repository)
         }
         .navigationDestination(
@@ -2445,8 +2541,7 @@ struct TrophyWallFeatureView: View {
                     startNewItem: {
                         guestClaimPresentation.dismiss()
                         activationGuestClaimPresentationChanged(false)
-                        router.reset(tab: .scan)
-                        router.selectedTab = .scan
+                        startNewItem()
                     }
                 )
             }
@@ -2472,14 +2567,8 @@ struct TrophyWallFeatureView: View {
             correctionAvailability: correctionAvailability,
             forceReducedMotion: forceReducedMotion,
             dismissReview: { listingReviewPresentation.dismiss() },
-            goToTrophyWall: {
-                router.reset(tab: .trophyWall)
-                router.selectedTab = .trophyWall
-            },
-            startNewItem: {
-                router.reset(tab: .scan)
-                router.selectedTab = .scan
-            },
+            goToTrophyWall: returnToTrophyWall,
+            startNewItem: startNewItem,
             activationInteraction: activationListingReviewInteraction
         )
         if #available(iOS 18, *),
@@ -2503,10 +2592,7 @@ struct TrophyWallFeatureView: View {
             guestClaimPresentation: guestClaimPresentation,
             listingReviewPresentation: listingReviewPresentation,
             applyRetryResult: { _ in false },
-            selectScan: {
-                router.reset(tab: .scan)
-                router.selectedTab = .scan
-            }
+            selectScan: startNewItem
         )
         let outcome = await executor.execute(.review(runID: runID))
         switch outcome {
