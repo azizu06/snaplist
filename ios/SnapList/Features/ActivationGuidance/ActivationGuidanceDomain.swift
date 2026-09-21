@@ -75,7 +75,7 @@ enum ActivationGuidanceTransition: Equatable {
     case completionRecorded
 }
 
-enum ActivationGuidanceSurface: Equatable {
+enum ActivationGuidanceSurface: Equatable, CaseIterable {
     case scan
     case photoReview
     case trophyWall

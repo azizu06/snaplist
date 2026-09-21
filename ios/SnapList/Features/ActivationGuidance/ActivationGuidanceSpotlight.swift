@@ -8,7 +8,17 @@ import UIKit
 /// keeps working, and everything else — including tab switches and pushes — is
 /// swallowed until the seller acts or taps Got it.
 enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
+    /// #1133. The control that opens Scan, wherever the shell puts it. Named
+    /// for the job rather than for the dock so the tour keeps working when the
+    /// camera entry moves.
+    case scanEntryControl
     case scanShutter
+    /// #1133. The tour's own targets: the tap that actually advances the app at
+    /// each step of the owner's flow.
+    case photoReviewStartListing
+    case trophyWallReadyItem
+    case listingReviewPrice
+    case listingReviewPublish
     case photoReviewThumbnailStrip
     case photoReviewVoiceNote
     case trophyWallProcessing
@@ -25,12 +35,31 @@ enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
     /// registered.
     var accessibilityLabel: String {
         switch self {
+        case .scanEntryControl: "Scan"
+        case .photoReviewStartListing: "Start listing"
+        case .trophyWallReadyItem: "Ready item"
+        case .listingReviewPrice: "Price"
+        case .listingReviewPublish: "Publish to eBay"
         case .scanShutter: "Take photo"
         case .photoReviewThumbnailStrip: "Photos"
         case .photoReviewVoiceNote: "Voice note"
         case .trophyWallProcessing: "Processing"
         case .settingsMarketplaces: "Connected marketplaces"
         case .listingReviewForm: "Listing details"
+        }
+    }
+
+    /// Whether the control is drawn as a circle. The halo takes the control's
+    /// own shape, so a round shutter never gets a rounded-rectangle glow.
+    var isRound: Bool {
+        switch self {
+        case .scanShutter, .scanEntryControl, .trophyWallProcessing:
+            true
+        case .photoReviewStartListing, .trophyWallReadyItem,
+             .listingReviewPrice, .listingReviewPublish,
+             .photoReviewThumbnailStrip, .photoReviewVoiceNote,
+             .settingsMarketplaces, .listingReviewForm:
+            false
         }
     }
 
@@ -42,7 +71,9 @@ enum ActivationSpotlightTarget: String, Equatable, Hashable, CaseIterable {
     var standsInForOneControl: Bool {
         switch self {
         case .scanShutter, .photoReviewThumbnailStrip, .photoReviewVoiceNote,
-             .trophyWallProcessing, .settingsMarketplaces:
+             .trophyWallProcessing, .settingsMarketplaces, .scanEntryControl,
+             .photoReviewStartListing, .trophyWallReadyItem,
+             .listingReviewPrice, .listingReviewPublish:
             true
         case .listingReviewForm:
             false
