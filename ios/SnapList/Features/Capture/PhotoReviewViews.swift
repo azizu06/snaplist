@@ -3233,7 +3233,8 @@ enum PhotoReviewBackCoordinator {
     static func perform(
         session: PhotoReviewLiveSession,
         captureFlow: CaptureFlowModel,
-        host: PhotoReviewLiveHost
+        host: PhotoReviewLiveHost,
+        router: AppRouter
     ) async -> PhotoReviewBackOutcome {
         let request = session.scanReturn()
         guard let focus = await captureFlow.applyPhotoReviewScanReturn(
@@ -3243,7 +3244,7 @@ enum PhotoReviewBackCoordinator {
             return .persistenceRejected
         }
 
-        await captureFlow.startCamera()
+        await captureFlow.startCameraIfDrawerIsUp(in: router)
         guard host.completeReturnToScan(from: session) else {
             return .sessionChanged
         }

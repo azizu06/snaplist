@@ -204,6 +204,17 @@ enum ScanDrawerPolicy {
     }
 }
 
+extension CaptureFlowModel {
+    /// Restarts the camera after an asynchronous Photo Review exit, but only
+    /// while the Scan drawer is up. Those exits can finish after the seller has
+    /// pulled the drawer down, and a session started then would run behind a
+    /// closed drawer; raising the drawer again starts it through the reducer.
+    func startCameraIfDrawerIsUp(in router: AppRouter) async {
+        guard router.isScanPresented else { return }
+        await startCamera()
+    }
+}
+
 /// What VoiceOver hears when a saved item drops the drawer. Stated once, as
 /// data, so the announcement and the test that pins it read the same string.
 /// "Analysing" rather than a queue or worker word: the seller-facing states

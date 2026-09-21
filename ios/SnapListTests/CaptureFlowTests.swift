@@ -1854,6 +1854,11 @@ final class CaptureFlowTests: XCTestCase {
                 [.settings],
                 "\(testCase.name): the denial's own button must reach Settings."
             )
+            XCTAssertFalse(
+                scenario.router.isScanPresented,
+                "\(testCase.name): Settings is pushed onto the wall, so the Scan "
+                    + "drawer has to come down or it covers Settings."
+            )
             XCTAssertNil(
                 scenario.host.session,
                 "\(testCase.name): Photo Review covers the shell, so Settings is "
@@ -1873,6 +1878,68 @@ final class CaptureFlowTests: XCTestCase {
                 "\(testCase.name): a refused commit must never be silent."
             )
         }
+    }
+
+    /// #1129: Settings is pushed onto the wall, and the wall sits behind the Scan
+    /// drawer. Leaving Photo Review for Settings brings the drawer down, and the
+    /// camera the Back step restarted stops with it. The staged photos stay.
+    func testSettingsFromPhotoReviewBringsTheDrawerDownAndStopsTheCamera() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "snaplist-1129-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            intake: NativeIntake(
+                applicationSupportDirectory: root,
+                identitySource: .processPrivate
+            )
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .noDraft)
+        let staged = await captureFlow.stageLibraryPhotos(
+            (1...2).map { makeIntakeJPEG(seed: $0) }
+        )
+        XCTAssertEqual(staged, 2)
+        let router = AppRouter()
+        XCTAssertEqual(
+            router.applyScanDrawer(.scanEntryControlTapped).cameraCommand,
+            .start
+        )
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest, captureFlow: captureFlow)
+        )
+        let session = try XCTUnwrap(host.session)
+
+        let reachedSettings = await AppShellSettingsEntryPointTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertTrue(reachedSettings)
+        XCTAssertEqual(router.pathBinding.wrappedValue, [.settings])
+        XCTAssertFalse(
+            router.isScanPresented,
+            "The Scan drawer would cover the Settings screen just pushed onto the wall."
+        )
+        XCTAssertFalse(
+            camera.isSessionActive,
+            "Back restarted the camera; it must not keep running behind a closed drawer."
+        )
+        XCTAssertEqual(captureFlow.stagedPhotos.count, 2)
     }
 
     func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
@@ -3590,6 +3657,8 @@ final class CaptureFlowTests: XCTestCase {
             store: dependencies.captureDraftStore
         )
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the raised Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         let host = PhotoReviewLiveHost()
 
         let restoration = await captureFlow.restore()
@@ -3611,7 +3680,8 @@ final class CaptureFlowTests: XCTestCase {
         let outcome = await PhotoReviewBackCoordinator.perform(
             session: session,
             captureFlow: captureFlow,
-            host: host
+            host: host,
+            router: router
         )
         let expectedReturn = PhotoReviewScanReturn(
             photos: restoredPhotos,
@@ -3641,6 +3711,8 @@ final class CaptureFlowTests: XCTestCase {
             store: dependencies.captureDraftStore
         )
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the raised Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         let host = PhotoReviewLiveHost()
 
         let restoration = await captureFlow.restore()
@@ -4032,6 +4104,148 @@ final class CaptureFlowTests: XCTestCase {
         )
 
         XCTAssertTrue(didReturn)
+        XCTAssertNil(host.session)
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(camera.startCount, 0)
+    }
+
+    /// #1129: the seller can pull the drawer down while Back is still committing.
+    /// Back then lands on a Scan nobody is looking at, so it must not start the
+    /// camera; raising the drawer again does that.
+    func testPhotoReviewBackBehindADismissedDrawerLeavesTheCameraOff() async throws {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000055")
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore(staged: photo)
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try XCTUnwrap(host.session)
+        router.applyScanDrawer(.dismissed)
+
+        let outcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        guard case .completed = outcome else {
+            return XCTFail("Back must still complete behind a dismissed drawer.")
+        }
+        XCTAssertNil(host.session)
+        XCTAssertEqual(captureFlow.stagedPhotos, [photo])
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(camera.startCount, 0)
+    }
+
+    /// #1129: the same window for deleting the final photo, which leaves Photo
+    /// Review for an empty Scan without a Back.
+    func testFinalPhotoDeleteBehindADismissedDrawerLeavesTheCameraOff() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            intake: NativeIntake(
+                applicationSupportDirectory: root,
+                identitySource: .processPrivate
+            )
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .noDraft)
+        let staged = await captureFlow.stageLibraryPhotos([makeIntakeJPEG(seed: 1)])
+        XCTAssertEqual(staged, 1)
+        let onlyPhoto = try XCTUnwrap(captureFlow.stagedPhotos.first)
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest, captureFlow: captureFlow)
+        )
+        let session = try XCTUnwrap(host.session)
+        session.store.selectPhotoForActions(id: onlyPhoto.id)
+        router.applyScanDrawer(.dismissed)
+
+        let application = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertNotNil(application)
+        XCTAssertNil(host.session)
+        XCTAssertTrue(captureFlow.stagedPhotos.isEmpty)
+        XCTAssertFalse(router.isScanPresented)
+        XCTAssertEqual(camera.startCount, 0)
+    }
+
+    /// #1129: the same window for the durable discard a refused save offers.
+    func testFailureDiscardBehindADismissedDrawerLeavesTheCameraOff() async throws {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000056")
+        let draftStore = TestCaptureStore(
+            staged: photo,
+            replacePhotosError: CaptureDraftStoreError.invalidManifest
+        )
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: draftStore
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let router = AppRouter(initialTab: .trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try XCTUnwrap(host.session)
+        let backOutcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+        XCTAssertEqual(backOutcome, .persistenceRejected)
+        router.applyScanDrawer(.dismissed)
+
+        let discarded = await AppShellPhotoReviewFailureDiscardTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertTrue(discarded)
+        XCTAssertEqual(draftStore.discardCount, 1)
         XCTAssertNil(host.session)
         XCTAssertFalse(router.isScanPresented)
         XCTAssertEqual(camera.startCount, 0)
@@ -4629,6 +4843,8 @@ final class CaptureFlowTests: XCTestCase {
         }
 
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the raised Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.openCaptureBoundary(
             destination: .photoReview,
             photos: restoredPhotos,
@@ -7610,6 +7826,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(photos.count, 2, name)
 
         let router = AppRouter(initialFullScreen: .guidedCamera)
+        // Photo Review lives inside the Scan drawer (#1129).
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.openCaptureBoundary(
             destination: .photoReview,
             photos: photos,

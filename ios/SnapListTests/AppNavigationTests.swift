@@ -323,12 +323,12 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertNil(router.presentedFullScreen)
     }
 
-    /// #1129: the shell raises the drawer in the same turn the card asks for
-    /// Photo Review, before the Photo Review session has been built. The
-    /// drawer is about to show Photo Review, not the camera, so raising it
-    /// must not start a capture session nobody can see.
+    /// #1129: a recovered card's request is not a Review-button request, so
+    /// no Photo Review session is built for it and the drawer shows the camera
+    /// with the staged intake. Raising the drawer over it has to start that
+    /// camera, on the first raise and on every raise after a dismiss.
     @MainActor
-    func testRaisingTheDrawerOverARecoveredCardLeavesTheCameraOff() {
+    func testRaisingTheDrawerOverARecoveredCardStartsTheCamera() {
         let photos = Self.recoveryPhotos(count: 2)
         let cardIdentity = Self.logicalIdentity(1)
         let router = Self.processingRouter()
@@ -339,11 +339,16 @@ final class AppNavigationTests: XCTestCase {
                 photos: photos
             )
         )
+        XCTAssertNil(PhotoReviewLiveSession.start(from: router.captureBoundaryRequest))
 
-        let reduction = router.applyScanDrawer(.scanSurfaceRestored)
+        let firstRaise = router.applyScanDrawer(.scanSurfaceRestored)
+        XCTAssertTrue(firstRaise.state.isPresented)
+        XCTAssertEqual(firstRaise.cameraCommand, .start)
 
-        XCTAssertTrue(reduction.state.isPresented)
-        XCTAssertNil(reduction.cameraCommand)
+        XCTAssertEqual(router.applyScanDrawer(.dismissed).cameraCommand, .stop)
+        let secondRaise = router.applyScanDrawer(.scanEntryControlTapped)
+        XCTAssertTrue(secondRaise.state.isPresented)
+        XCTAssertEqual(secondRaise.cameraCommand, .start)
     }
 
     /// A pending card names one specific local item. Recovery used to ignore that

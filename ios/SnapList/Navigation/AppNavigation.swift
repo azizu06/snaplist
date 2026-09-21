@@ -157,21 +157,14 @@ final class AppRouter {
     var isScanPresented: Bool { scanDrawer.isPresented }
 
     /// The one way the drawer moves. Returns the reduction so the caller can
-    /// carry out the camera session work it names — which is the shell's job
-    /// almost everywhere, since only the shell can start or stop a capture
-    /// session. The one exception is documented at its call site.
+    /// carry out the camera session work it names — which is the shell's job,
+    /// since only the shell can start or stop a capture session. The one place
+    /// that discards it is documented at its call site.
     @discardableResult
     func applyScanDrawer(
         _ event: ScanDrawerEvent,
         context: ScanDrawerContext = ScanDrawerContext()
     ) -> ScanDrawerReduction {
-        var context = context
-        // A requested Photo Review is what the drawer shows, even in the turn
-        // before the host has built its session: a pending card reopened from
-        // the wall asks for it and raises the drawer in the same call.
-        if captureBoundaryRequest != nil {
-            context.isPhotoReviewOpen = true
-        }
         let reduction = ScanDrawerPolicy.reduce(scanDrawer, event, context: context)
         scanDrawer = reduction.state
         return reduction
@@ -272,8 +265,8 @@ final class AppRouter {
     /// A relaunch that recovered a durable draft puts the seller back in the
     /// drawer, on their own staged photos.
     ///
-    /// This is the one place a drawer event is applied outside the shell, and
-    /// the camera command is deliberately discarded: the app root owns this
+    /// This is the one place a drawer event's camera command is deliberately
+    /// discarded: the app root owns this
     /// sequence and already starts the session immediately afterwards, because
     /// `restore()` lands a staged photo on `.captured` rather than a live
     /// session (#864). Starting it from here as well would race that call.

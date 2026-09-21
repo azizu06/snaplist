@@ -1835,7 +1835,8 @@ enum AppShellPhotoReviewBackTransaction {
         let outcome = await PhotoReviewBackCoordinator.perform(
             session: session,
             captureFlow: captureFlow,
-            host: host
+            host: host,
+            router: router
         )
 
         switch outcome {
@@ -1931,12 +1932,7 @@ enum AppShellDepartedPhotoReviewTransaction {
         guard host.session != nil else { return false }
         setReturnFocus(.addPhotoButton)
         guard host.leaveForDepartedIntake(using: router) else { return false }
-        // #1129: the intake can depart while the drawer is down. Scan is
-        // still what the drawer holds next, but the camera only runs while
-        // the drawer is up; raising it again starts the session.
-        if router.isScanPresented {
-            await captureFlow.startCamera()
-        }
+        await captureFlow.startCameraIfDrawerIsUp(in: router)
         return true
     }
 }
@@ -2101,9 +2097,7 @@ enum AppShellPhotoReviewSubmissionTransaction {
         // #1129: Done acknowledges and drops the drawer in one turn, and this
         // clear lands after it, so the camera only comes back for a drawer
         // that is still up. Raising the drawer later starts it there.
-        if router.isScanPresented {
-            await captureFlow.startCamera()
-        }
+        await captureFlow.startCameraIfDrawerIsUp(in: router)
         guard host.session === session else {
             return
         }
@@ -2173,6 +2167,12 @@ enum AppShellSettingsEntryPointTransaction {
         // under a full-screen cover the seller never asked for.
         router.presentedFullScreen = nil
         router.navigate(to: .settings)
+        // #1129: Settings is pushed onto the wall, which sits behind the Scan
+        // drawer. Bring the drawer down so Settings is what the seller sees; the
+        // camera the Back step restarted stops with it. Staged photos stay put.
+        if router.applyScanDrawer(.dismissed).cameraCommand == .stop {
+            captureFlow.cancelCamera()
+        }
         return true
     }
 }
@@ -2240,7 +2240,7 @@ enum AppShellPhotoReviewDeleteTransaction {
             return nil
         }
         session.publishCommittedSnapshot(snapshot)
-        await captureFlow.startCamera()
+        await captureFlow.startCameraIfDrawerIsUp(in: router)
         _ = await captureFlow.markPhotoReviewLeft(
             activationID: session.intakeActivationID
         )
@@ -2290,7 +2290,7 @@ enum AppShellPhotoReviewFailureDiscardTransaction {
         guard host.session === session else {
             return false
         }
-        await captureFlow.startCamera()
+        await captureFlow.startCameraIfDrawerIsUp(in: router)
         guard host.session === session,
               host.leaveForDepartedIntake(from: session, using: router) else {
             return false
