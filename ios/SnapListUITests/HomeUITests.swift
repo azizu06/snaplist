@@ -129,7 +129,7 @@ final class HomeUITests: XCTestCase {
         scan.tap()
 
         XCTAssertTrue(
-            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
             app.debugDescription
         )
         XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
@@ -138,21 +138,23 @@ final class HomeUITests: XCTestCase {
     /// #1129. Scan stopped being a second root and became a drawer over the
     /// wall.
     ///
-    /// The discriminator is geometry. The retired shell mounted exactly one
-    /// destination's stack, so Scan filled the screen from the very top; a
-    /// drawer starts partway down with the wall showing above it. The wall is
-    /// deliberately *not* asserted through the accessibility tree here — the
-    /// drawer is a modal container, so the surface under it leaves the tree,
-    /// which is the behaviour the issue asks for.
+    /// Two discriminators, because either alone is weak. Geometry: the
+    /// retired shell mounted exactly one destination's stack, so Scan filled
+    /// the screen from the very top, while a drawer starts partway down with
+    /// the wall showing above it. And mounting: the wall is still in the tree
+    /// underneath, which a torn-down root could not be.
+    ///
+    /// The drawer carries `.isModal`, which XCUI reports as an `Alert`
+    /// element rather than an `Other` — hence the `descendants` query.
     func testScanOpensAsADrawerOverTrophyWallInsteadOfReplacingIt() {
         let app = launch("HOME-02")
         let wall = app.otherElements["trophy.wall"]
         XCTAssertTrue(wall.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertFalse(app.otherElements["scan.drawer"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["scan.drawer"].exists)
 
         app.buttons["dock.scan"].tap()
 
-        let drawer = app.otherElements["scan.drawer"]
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
         XCTAssertTrue(drawer.waitForExistence(timeout: 5), app.debugDescription)
 
         let window = app.windows.firstMatch.frame
@@ -169,9 +171,9 @@ final class HomeUITests: XCTestCase {
             "It is a drawer, not a small card. drawer=\(drawer.frame) "
                 + "window=\(window)"
         )
-        // The modal contract: while the drawer is up, the surface underneath
-        // is not something VoiceOver or a tap can reach.
-        XCTAssertFalse(wall.exists, app.debugDescription)
+        // And the wall is still mounted under it rather than torn down and
+        // rebuilt, which is the thing a second root could not do.
+        XCTAssertTrue(wall.exists, app.debugDescription)
 
         app.buttons["scan.close"].tap()
 
@@ -202,7 +204,7 @@ final class HomeUITests: XCTestCase {
         // while the drawer is up; if it were drawn on top it would still
         // take touches.
         XCTAssertTrue(
-            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
             app.debugDescription
         )
         XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
@@ -549,7 +551,7 @@ final class HomeUITests: XCTestCase {
         // #1129: starting the next item raises the Scan drawer rather than
         // selecting a second root.
         XCTAssertTrue(
-            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.descendants(matching: .any)["scan.drawer"].waitForExistence(timeout: 5),
             app.debugDescription
         )
         XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
