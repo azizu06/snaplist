@@ -79,7 +79,8 @@ struct AssistedExportFixtureView: View {
                     didPerform: { action in
                         await recorder.record(action)
                     }
-                )
+                ),
+                progress: AssistedExportInMemoryProgress()
             )
         )
         _listingRevision = State(
@@ -162,7 +163,7 @@ struct AssistedExportFixtureView: View {
         if fixture == .guideShared {
             // The question mounts with the sheet; give it a beat to appear.
             try? await Task.sleep(for: .milliseconds(500))
-            await store.confirmShared()
+            await store.confirmShared(for: destination)
         }
     }
 

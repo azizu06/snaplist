@@ -105,7 +105,7 @@ struct AssistedExportReceipt: Equatable, Sendable {
 /// only this device: the clipboard, the photo library, or another app being
 /// brought forward. None of them observes the destination, so none of them is
 /// evidence that a listing exists. What they earn is the right to be *asked*.
-enum AssistedExportHandoffAction: Equatable, CaseIterable, Sendable {
+enum AssistedExportHandoffAction: String, Equatable, CaseIterable, Sendable {
     case openedDestination
     case copiedListingText
     case savedPhotos
@@ -163,18 +163,17 @@ struct AssistedExportGuideProgress: Equatable, Sendable {
 enum AssistedExportGuide {
     static func progress(
         performed: Set<AssistedExportHandoffAction>,
-        handedOff: Bool,
         isShared: Bool
     ) -> AssistedExportGuideProgress {
         let all = AssistedExportGuideStep.allCases
         if isShared {
             return AssistedExportGuideProgress(current: nil, completed: all)
         }
-        // A restored receipt records that a handoff happened but not which
-        // action, and the share sheet carries the text and the photos out in
-        // one go. Both mean the three device steps are behind the seller.
+        // The share sheet carries the text and the photos out in one go, so it
+        // puts the three device steps behind the seller. A server receipt alone
+        // does not: it records that some handoff happened, not which one, so
+        // with no local record of the action nothing is shown as done.
         let deviceStepsDone = performed.contains(.sharedAnotherWay)
-            || (performed.isEmpty && handedOff)
         let done: [AssistedExportGuideStep] = all.filter { step in
             switch step {
             case .copyText:
@@ -298,13 +297,25 @@ struct AssistedExportDomain: Equatable, Sendable {
         performed[destination, default: []].insert(action)
     }
 
+    /// The per-destination actions the seller performed, for the store to keep
+    /// across a relaunch.
+    var performedActions: [AssistedExportDestination: Set<AssistedExportHandoffAction>] {
+        performed
+    }
+
+    /// Puts back what an earlier launch recorded for this pack text.
+    mutating func restorePerformed(
+        _ restored: [AssistedExportDestination: Set<AssistedExportHandoffAction>]
+    ) {
+        performed = restored
+    }
+
     /// Where the destination's guided sheet stands. Derived on every read from
     /// the handoff state above, so closing and reopening the sheet cannot lose
     /// or invent progress.
     func guide(for destination: AssistedExportDestination) -> AssistedExportGuideProgress {
         AssistedExportGuide.progress(
             performed: performed[destination] ?? [],
-            handedOff: handedOff.contains(destination),
             isShared: sharedAt[destination] != nil
         )
     }

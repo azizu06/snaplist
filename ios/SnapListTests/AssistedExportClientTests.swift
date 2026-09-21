@@ -111,6 +111,109 @@ final class AssistedExportClientTests: XCTestCase {
         XCTAssertEqual(store.actionMessage, AssistedExportCopy.actionFailed)
     }
 
+    /// Devin #1132 (1): a relaunch loses the in-memory record of which action
+    /// the one coarse receipt stands for, so the guide would show copy, save and
+    /// open all done after a copy alone.
+    func testTheGuideResumesOnTheRightStepAfterARelaunch() async {
+        let progress = AssistedExportInMemoryProgress()
+        let first = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService(),
+            progress: progress
+        )
+        await first.load()
+        first.toggle(.mercari)
+        await first.deliver(
+            .copiedListingText,
+            for: .mercari,
+            pack: first.domain.pack
+        ) { _ in }
+        await first.savePhotos(for: .mercari) {}
+
+        let relaunched = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService(
+                receipts: [
+                    AssistedExportReceipt(
+                        destination: .mercari,
+                        handedOffAt: Date(timeIntervalSince1970: 1_753_464_600),
+                        sharedAt: nil
+                    ),
+                ]
+            ),
+            progress: progress
+        )
+        await relaunched.load()
+
+        XCTAssertEqual(relaunched.domain.guide(for: .mercari).current, .openDestination)
+        XCTAssertEqual(
+            relaunched.domain.guide(for: .mercari).completed,
+            [.copyText, .savePhotos]
+        )
+
+        let rebuilt = AssistedExportStore(
+            pack: .fixture(
+                contentRevision: UUID(uuidString: "58100000-0000-4000-8000-0000000000c8")!
+            ),
+            service: AssistedExportFixtureService(),
+            progress: progress
+        )
+        await rebuilt.load()
+        XCTAssertEqual(
+            rebuilt.domain.guide(for: .mercari).current,
+            .copyText,
+            "Progress belongs to the pack text it was made against."
+        )
+    }
+
+    /// Devin #1132 (2): a conflict clears the confirm question in the domain
+    /// while the guide still shows it, so a later tap must ask again itself.
+    func testConfirmingAgainAfterAConflictStillWorks() async {
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportConflictOnceService()
+        )
+        await store.load()
+        store.toggle(.mercari)
+        await store.recordHandoff(.copiedListingText, for: .mercari)
+
+        await store.confirmShared(for: .mercari)
+        XCTAssertEqual(store.actionMessage, AssistedExportCopy.actionFailed)
+        XCTAssertEqual(store.domain.handoff(for: .mercari), .prepared)
+
+        await store.confirmShared(for: .mercari)
+
+        XCTAssertEqual(
+            store.domain.handoff(for: .mercari),
+            .shared(at: AssistedExportConflictOnceService.sharedAt)
+        )
+    }
+
+    /// Devin #1132 (3): closing the guide while the durable write is pending
+    /// would hide a failure or drop the Undo of a success.
+    func testTheGuideCannotBeClosedWhileTheSharedReceiptIsInFlight() async {
+        let service = AssistedExportSuspendedSharedService()
+        let store = AssistedExportStore(pack: .fixture(), service: service)
+        await store.load()
+        store.toggle(.mercari)
+        await store.recordHandoff(.copiedListingText, for: .mercari)
+        store.presentConfirmSheet(for: .mercari)
+        let confirmation = Task { @MainActor in await store.confirmShared() }
+        await service.waitUntilSharedStarts()
+
+        store.toggle(.mercari)
+
+        XCTAssertEqual(
+            store.domain.openDestination,
+            .mercari,
+            "The guide stays open until the write resolves."
+        )
+
+        await service.releaseShared()
+        await confirmation.value
+        XCTAssertEqual(store.domain.undoWindow, .mercari)
+    }
+
     func testConfirmSheetCannotDismissWhileSharedReceiptIsInFlight() async {
         let service = AssistedExportSuspendedSharedService()
         let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
@@ -735,6 +838,52 @@ private actor AssistedExportFailingSharedService: AssistedExportServing {
     private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
         AssistedExportServerPack(
             receipts: receipts,
+            effectivePrice: pack.effectivePrice,
+            reviewRevision: pack.reviewRevision
+        )
+    }
+}
+
+private actor AssistedExportConflictOnceService: AssistedExportServing {
+    static let sharedAt = Date(timeIntervalSince1970: 1_753_464_600)
+
+    private var handedOff = false
+    private var shared = false
+    private var conflicted = false
+
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
+        response(for: pack)
+    }
+
+    func perform(
+        _ action: AssistedExportServerAction,
+        destination: AssistedExportDestination,
+        pack: AssistedExportPack
+    ) async throws -> AssistedExportServerPack {
+        switch action {
+        case .handoff:
+            handedOff = true
+        case .shared:
+            if !conflicted {
+                conflicted = true
+                throw AssistedExportClientError.conflict
+            }
+            shared = true
+        case .undo:
+            shared = false
+        }
+        return response(for: pack)
+    }
+
+    private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
+        AssistedExportServerPack(
+            receipts: AssistedExportDestination.allCases.map {
+                AssistedExportReceipt(
+                    destination: $0,
+                    handedOffAt: $0 == .mercari && handedOff ? Self.sharedAt : nil,
+                    sharedAt: $0 == .mercari && shared ? Self.sharedAt : nil
+                )
+            },
             effectivePrice: pack.effectivePrice,
             reviewRevision: pack.reviewRevision
         )

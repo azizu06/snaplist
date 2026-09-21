@@ -144,7 +144,6 @@ final class AssistedExportDomainTests: XCTestCase {
     func testAnUntouchedDestinationStartsTheGuideAtStepOneOfFour() {
         let guide = AssistedExportGuide.progress(
             performed: [],
-            handedOff: false,
             isShared: false
         )
 
@@ -159,7 +158,6 @@ final class AssistedExportDomainTests: XCTestCase {
         func guide(_ performed: Set<AssistedExportHandoffAction>) -> AssistedExportGuideProgress {
             AssistedExportGuide.progress(
                 performed: performed,
-                handedOff: !performed.isEmpty,
                 isShared: false
             )
         }
@@ -181,7 +179,6 @@ final class AssistedExportDomainTests: XCTestCase {
     func testAnOutOfOrderActionDoesNotSkipAnUndoneStep() {
         let guide = AssistedExportGuide.progress(
             performed: [.savedPhotos],
-            handedOff: true,
             isShared: false
         )
 
@@ -189,21 +186,22 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertEqual(guide.completed, [.savePhotos])
     }
 
-    func testAHandoffRestoredWithoutActionDetailResumesAtTheConfirmQuestion() {
+    /// The server receipt only says some handoff happened. Copy, save, open and
+    /// the share sheet all write the same one, so with no local record of which
+    /// action it was, nothing may be shown as done.
+    func testAHandoffRestoredWithoutActionDetailResumesAtTheFirstDeviceStep() {
         let guide = AssistedExportGuide.progress(
             performed: [],
-            handedOff: true,
             isShared: false
         )
 
-        XCTAssertEqual(guide.current, .confirmPosted)
-        XCTAssertEqual(guide.completed, [.copyText, .savePhotos, .openDestination])
+        XCTAssertEqual(guide.current, .copyText)
+        XCTAssertEqual(guide.completed, [])
     }
 
     func testSharingAnotherWayHandsEverythingOverSoTheGuideAsksTheQuestion() {
         let guide = AssistedExportGuide.progress(
             performed: [.sharedAnotherWay],
-            handedOff: true,
             isShared: false
         )
 
@@ -213,7 +211,6 @@ final class AssistedExportDomainTests: XCTestCase {
     func testASharedClaimFinishesTheGuide() {
         let guide = AssistedExportGuide.progress(
             performed: [.copiedListingText],
-            handedOff: true,
             isShared: true
         )
 

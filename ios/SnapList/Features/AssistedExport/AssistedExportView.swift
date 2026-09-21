@@ -37,7 +37,10 @@ struct AssistedExportHostView: View {
             initialValue: AssistedExportStore(
                 pack: pack,
                 service: service,
-                funnelAnalytics: funnelAnalytics
+                funnelAnalytics: funnelAnalytics,
+                // Only the product persists progress. Tests and fixtures take
+                // the in-memory default so nothing leaks between launches.
+                progress: AssistedExportUserDefaultsProgress()
             )
         )
     }
@@ -484,6 +487,7 @@ struct AssistedExportView: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .disabled(store.isWriting)
             .accessibilityLabel(AssistedExportCopy.closeGuide)
             .accessibilityIdentifier("assisted-export.guide.close")
         }
@@ -595,7 +599,7 @@ struct AssistedExportView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             SnapListPrimaryButton(title: AssistedExportCopy.confirmShared) {
-                Task { await store.confirmShared() }
+                Task { await store.confirmShared(for: destination) }
             }
             .disabled(store.isWriting)
             SnapListSecondaryButton(title: AssistedExportCopy.confirmNotYet) {

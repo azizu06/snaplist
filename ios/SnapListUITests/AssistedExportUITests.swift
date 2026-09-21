@@ -256,16 +256,13 @@ final class AssistedExportUITests: XCTestCase {
         openRow(mercari, in: app)
         XCTAssertEqual(
             position(in: app),
-            "Step 4 of 4",
-            "A durable handoff resumes on the explicit seller confirmation."
-        )
-        XCTAssertTrue(
-            app.buttons["button.primary.yes,-mark-as-shared"]
-                .waitForExistence(timeout: loadedTreeTimeout)
+            "Step 1 of 4",
+            "A receipt alone says some handoff happened, not which, so the "
+                + "guide resumes at the first device step."
         )
 
         let reachable = [facebook.label, mercari.label, depop.label,
-                         marker("assisted-export.confirm-sheet", in: app).label]
+                         marker("assisted-export.guide.instruction", in: app).label]
             .joined(separator: " ")
             .lowercased()
         for forbidden in ["published", "listed", "sold", "synced", "received", "verified"] {
