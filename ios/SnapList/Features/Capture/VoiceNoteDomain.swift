@@ -325,9 +325,10 @@ final class VoiceNoteStore {
     /// Whether the unsaved take under review is playing. Separate from
     /// `phase` so review keeps one state whether or not it is audible.
     private(set) var isPlayingTake = false
-    /// The implicit save in flight, so Start listing and backgrounding
-    /// share one commit instead of racing two.
-    private var implicitCommit: Task<Void, Never>?
+    /// The authority save in flight and the mutation it belongs to, so a
+    /// second save of the same take (Start listing, backgrounding, Save
+    /// recording) joins it instead of superseding it (#1136).
+    private var authoritySave: (mutationID: UUID, task: Task<Void, Never>)?
 
     private let audio: VoiceNoteAudioClient
     private let files: VoiceNoteFileStoring
@@ -500,6 +501,10 @@ final class VoiceNoteStore {
     /// not race it (Start listing's implicit save) can wait for it to land.
     @discardableResult
     func save() -> Task<Void, Never>? {
+        if let authoritySave,
+           authoritySave.mutationID == authorityMutationID {
+            return authoritySave.task
+        }
         if case .recording = phase {
             // The take is ending, so any frames still pending are discarded
             // with it; only the elapsed time matters here.
@@ -532,7 +537,12 @@ final class VoiceNoteStore {
         if let authority {
             let mutationID = UUID()
             authorityMutationID = mutationID
-            return Task {
+            let task = Task {
+                defer {
+                    if authoritySave?.mutationID == mutationID {
+                        authoritySave = nil
+                    }
+                }
                 let committed = await authority.save(
                     provisionalURL,
                     provisionalDuration,
@@ -559,6 +569,8 @@ final class VoiceNoteStore {
                     phase = .saveFailed
                 }
             }
+            authoritySave = (mutationID, task)
+            return task
         }
 
         do {
@@ -599,17 +611,11 @@ final class VoiceNoteStore {
     /// review keeps it rather than losing it silently; the review's Save
     /// recording is the explicit path, this is the implicit one (#1136).
     /// Returns once the commit has settled, authority path included, and
-    /// whether nothing was lost. A second caller while one is in flight joins
-    /// it instead of starting a competing save.
+    /// whether nothing was lost.
     @discardableResult
     func commitUnsavedTake() async -> Bool {
-        if let implicitCommit {
-            await implicitCommit.value
-        } else if hasUnsavedTake {
-            let commit = save()
-            implicitCommit = commit
-            await commit?.value
-            implicitCommit = nil
+        if hasUnsavedTake {
+            await save()?.value
         }
         return !hasUnsavedTake && phase != .saveFailed
     }

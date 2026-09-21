@@ -618,6 +618,49 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertNil(store.savedNote)
     }
 
+    /// Start listing, backgrounding and Save recording can all ask for the
+    /// same take; they share one authority save instead of superseding it
+    /// and discarding the file the other is reading.
+    func testConcurrentSavesOfOneTakeShareOneAuthorityCommit() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let files = VoiceNoteFileStoreStub()
+        let kept = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/intake-voice.wav"),
+            duration: 4
+        )
+        var authoritySaves = 0
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: files,
+            authority: VoiceNoteCommitAuthority(
+                save: { _, _, _ in
+                    authoritySaves += 1
+                    for _ in 0..<5 {
+                        await Task.yield()
+                    }
+                    return kept
+                },
+                delete: { _ in true }
+            )
+        )
+        await store.startRecording()
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            meterLevels: [0.4]
+        )
+        store.stopRecording()
+
+        async let implicit = store.commitUnsavedTake()
+        let explicit = store.save()
+        let landed = await implicit
+        await explicit?.value
+
+        XCTAssertTrue(landed)
+        XCTAssertEqual(authoritySaves, 1)
+        XCTAssertEqual(files.discardedURLs, [audio.provisionalURL])
+        XCTAssertEqual(store.savedNote, kept)
+    }
+
     func testOnlyAStopIntoReviewIsAnnounced() {
         XCTAssertTrue(
             VoiceNoteReviewPolicy.announcesStop(
