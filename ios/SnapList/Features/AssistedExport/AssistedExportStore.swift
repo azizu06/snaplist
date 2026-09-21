@@ -29,20 +29,41 @@ protocol AssistedExportProgressStoring: AnyObject {
     )
 }
 
+/// Action flags only, never seller text. Keyed by the signed-in Clerk user (a
+/// guest files under `guest`), the item, and holding one pack content revision,
+/// so saving for a newer revision replaces the older one. Sign-out and account
+/// erasure remove every account's entries through
+/// `SettingsLocalCachedDataStore.removeAll()` (see the retention contract row
+/// `local-assisted-export-guide-progress`).
 final class AssistedExportUserDefaultsProgress: AssistedExportProgressStoring {
+    static let keyPrefix = "dev.snaplist.ios.assisted-export-progress."
+
     private struct Entry: Codable {
         let contentRevision: UUID
         let actions: [String: [String]]
     }
 
     private let defaults: UserDefaults
+    private let scope: String
 
-    init(defaults: UserDefaults = .standard) {
+    init(userID: String?, defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        scope = userID.flatMap { $0.isEmpty ? nil : $0 } ?? "guest"
+    }
+
+    /// Takes back every account's entries. Sign-out and erasure are the points
+    /// at which no account on this device has a claim left on them.
+    @discardableResult
+    static func removeAll(defaults: UserDefaults = .standard) -> Bool {
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(keyPrefix) {
+            defaults.removeObject(forKey: key)
+        }
+        return true
     }
 
     private func key(_ itemID: UUID) -> String {
-        "assisted-export.progress.\(itemID.uuidString.lowercased())"
+        "\(Self.keyPrefix)\(scope).\(itemID.uuidString.lowercased())"
     }
 
     func load(

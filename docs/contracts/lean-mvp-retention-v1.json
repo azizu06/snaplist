@@ -43,6 +43,26 @@
       }]
     },
     {
+      "id": "local-assisted-export-guide-progress",
+      "releaseDatum": true,
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-local-client",
+          "deletionTriggers": [
+            "item-deletion",
+            "account-erasure",
+            "sign-out",
+            "pack-content-revision-change"
+          ],
+          "maximumRetention": "until the pack text revision changes, sign-out, or account erasure; a newer revision replaces the older entry on the next save",
+          "executor": "AssistedExportUserDefaultsProgress replacement on save for revision change; settings local cached-data removal for sign-out and account erasure",
+          "completionProof": "after sign-out or account erasure no UserDefaults key under dev.snaplist.ios.assisted-export-progress. remains for any account, and after a revision change the item's entry names only the current revision",
+          "ownerDecision": "Which of copy, save, open, or share-another-way a seller did for one destination is only known on the device, because the server receipt says just that some handoff happened. Keeping those action flags lets the guided sheet resume on the right step after a relaunch. Only the flags are stored, never seller text, photos, titles, or prices, and they are filed under the signed-in Clerk user id plus the item id. Item deletion is expressed as the device-observable event: nothing in the app deletes a single item, so a rebuilt pack (new content revision) or the seller leaving the account is the trigger the client can act on."
+        }
+      ]
+    },
+    {
       "id": "private-storage-photos",
       "releaseDatum": true,
       "dispositions": [{

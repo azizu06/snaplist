@@ -166,6 +166,83 @@ final class AssistedExportClientTests: XCTestCase {
         )
     }
 
+    // MARK: - Persisted guide progress (#1132 round 3)
+
+    private func progressDefaults() -> UserDefaults {
+        let suite = "assisted-export-progress-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return defaults
+    }
+
+    private static let progressKeyPrefix = "dev.snaplist.ios.assisted-export-progress."
+
+    func testPersistedProgressBelongsToTheSignedInAccount() {
+        let defaults = progressDefaults()
+        let item = AssistedExportPack.fixtureItemID
+        let revision = AssistedExportPack.fixtureContentRevision
+        AssistedExportUserDefaultsProgress(userID: "user_a", defaults: defaults)
+            .save([.mercari: [.copiedListingText]], itemID: item, contentRevision: revision)
+
+        XCTAssertEqual(
+            AssistedExportUserDefaultsProgress(userID: "user_a", defaults: defaults)
+                .load(itemID: item, contentRevision: revision),
+            [.mercari: [.copiedListingText]]
+        )
+        XCTAssertEqual(
+            AssistedExportUserDefaultsProgress(userID: "user_b", defaults: defaults)
+                .load(itemID: item, contentRevision: revision),
+            [:],
+            "Another account on this device must not read the first one's progress."
+        )
+        XCTAssertEqual(
+            AssistedExportUserDefaultsProgress(userID: nil, defaults: defaults)
+                .load(itemID: item, contentRevision: revision),
+            [:],
+            "A guest is not a signed-in account."
+        )
+    }
+
+    func testSavingForANewRevisionDropsTheOlderRevisionsEntry() {
+        let defaults = progressDefaults()
+        let progress = AssistedExportUserDefaultsProgress(userID: "user_a", defaults: defaults)
+        let item = AssistedExportPack.fixtureItemID
+        let older = AssistedExportPack.fixtureContentRevision
+        let newer = UUID(uuidString: "58100000-0000-4000-8000-0000000000c7")!
+
+        progress.save([.depop: [.savedPhotos]], itemID: item, contentRevision: older)
+        progress.save([.depop: [.copiedListingText]], itemID: item, contentRevision: newer)
+
+        XCTAssertEqual(progress.load(itemID: item, contentRevision: older), [:])
+        XCTAssertEqual(
+            progress.load(itemID: item, contentRevision: newer),
+            [.depop: [.copiedListingText]]
+        )
+        XCTAssertEqual(
+            defaults.dictionaryRepresentation().keys
+                .filter { $0.hasPrefix(Self.progressKeyPrefix) }.count,
+            1,
+            "One entry per item, so blobs do not accumulate across revisions."
+        )
+    }
+
+    func testRemovingAllProgressForgetsEveryAccountsEntries() {
+        let defaults = progressDefaults()
+        let item = AssistedExportPack.fixtureItemID
+        let revision = AssistedExportPack.fixtureContentRevision
+        for user in ["user_a", "user_b", nil] as [String?] {
+            AssistedExportUserDefaultsProgress(userID: user, defaults: defaults)
+                .save([.mercari: [.openedDestination]], itemID: item, contentRevision: revision)
+        }
+
+        XCTAssertTrue(AssistedExportUserDefaultsProgress.removeAll(defaults: defaults))
+
+        XCTAssertTrue(
+            defaults.dictionaryRepresentation().keys
+                .filter { $0.hasPrefix(Self.progressKeyPrefix) }.isEmpty
+        )
+    }
+
     /// Devin #1132 (2): a conflict clears the confirm question in the domain
     /// while the guide still shows it, so a later tap must ask again itself.
     func testConfirmingAgainAfterAConflictStillWorks() async {

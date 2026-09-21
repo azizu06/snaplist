@@ -40,7 +40,9 @@ struct AssistedExportHostView: View {
                 funnelAnalytics: funnelAnalytics,
                 // Only the product persists progress. Tests and fixtures take
                 // the in-memory default so nothing leaks between launches.
-                progress: AssistedExportUserDefaultsProgress()
+                progress: AssistedExportUserDefaultsProgress(
+                    userID: ClerkAuthenticationComposition.currentUserID()
+                )
             )
         )
     }
