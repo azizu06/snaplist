@@ -102,6 +102,14 @@ enum ActivationSurfaceResolutionPolicy {
         // Photo Review hosts above both tab stacks, so it answers first.
         if hasPhotoReviewSession { return .photoReview }
 
+        // #1129: Scan is a drawer over the wall and everything pushed onto it,
+        // Settings included, so whenever it is up it is the surface in front
+        // of the seller.
+        if isScanPresented,
+           presentedFullScreen == nil || presentedFullScreen == .guidedCamera {
+            return .scan
+        }
+
         if let top = pushedPath.last {
             switch top {
             case .settings:
@@ -114,13 +122,7 @@ enum ActivationSurfaceResolutionPolicy {
             }
         }
 
-        // #1129: Scan is a drawer over the wall, so it answers first — it is
-        // the surface in front of the seller whenever it is up. The wall is
-        // what remains when nothing covers it.
-        if isScanPresented,
-           presentedFullScreen == nil || presentedFullScreen == .guidedCamera {
-            return .scan
-        }
+        // The wall is what remains when nothing covers it.
         if presentedFullScreen == nil {
             return .trophyWall
         }

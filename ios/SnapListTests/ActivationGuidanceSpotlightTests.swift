@@ -39,17 +39,6 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
             "Settings pushed over Trophy Wall is the Settings surface, not Trophy Wall"
         )
 
-        XCTAssertEqual(
-            ActivationSurfaceResolutionPolicy.surface(
-                hasPhotoReviewSession: false,
-                isScanPresented: true,
-                pushedPath: [.settings],
-                presentedFullScreen: nil
-            ),
-            .settings,
-            "and the same holds when Settings is pushed while the drawer is up"
-        )
-
         for pushed in [AppRoute.home(.processing), .future(.draft)] {
             XCTAssertNil(
                 ActivationSurfaceResolutionPolicy.surface(
@@ -101,6 +90,36 @@ final class ActivationGuidanceSpotlightTests: XCTestCase {
                 presentedFullScreen: .guidedCamera
             )
         )
+    }
+
+    /// #1129: Settings is pushed onto the wall's stack and the drawer rises over
+    /// that whole stack, so while the drawer is up it is what the seller sees.
+    /// Answering `.settings` there drew the Settings mark on top of the camera,
+    /// anchored to a screen the drawer covers. Photo Review is still the drawer's
+    /// own top surface, so it keeps answering first.
+    func testAnOpenDrawerCoversSettingsPushedOntoTheWall() {
+        for fullScreen in [nil, AppFullScreen.guidedCamera] {
+            XCTAssertEqual(
+                ActivationSurfaceResolutionPolicy.surface(
+                    hasPhotoReviewSession: false,
+                    isScanPresented: true,
+                    pushedPath: [.settings],
+                    presentedFullScreen: fullScreen
+                ),
+                .scan,
+                "full screen \(String(describing: fullScreen))"
+            )
+            XCTAssertEqual(
+                ActivationSurfaceResolutionPolicy.surface(
+                    hasPhotoReviewSession: true,
+                    isScanPresented: true,
+                    pushedPath: [.settings],
+                    presentedFullScreen: fullScreen
+                ),
+                .photoReview,
+                "full screen \(String(describing: fullScreen))"
+            )
+        }
     }
 
     // MARK: - Spotlight mode and presentation
