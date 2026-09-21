@@ -35,6 +35,7 @@ ios/SnapList/App/AppDependenciesEnvironment.swift
 ios/SnapList/App/AppShellView.swift
 ios/SnapList/App/FloatingDock.swift
 ios/SnapList/App/PushRegistrationAppDelegate.swift
+ios/SnapList/App/ScanDrawer.swift
 ios/SnapList/App/SnapListApp.swift
 ios/SnapList/AppAttest/AppAttestClient.swift
 ios/SnapList/Core/API/AccountErasureClient.swift

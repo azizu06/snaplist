@@ -300,13 +300,17 @@ final class AppNavigationTests: XCTestCase {
         let cardIdentity = Self.logicalIdentity(1)
         let router = Self.processingRouter()
 
-        router.openLocalRecovery(
+        let accepted = router.openLocalRecovery(
             cardIdentity,
             matching: cardIdentity,
             photos: photos
         )
 
-        XCTAssertTrue(router.isScanPresented)
+        // #1129: accepting the card is the router's answer; raising the drawer
+        // is the shell's, which only does it for an accepted card. So the
+        // router reports acceptance and leaves the drawer alone.
+        XCTAssertTrue(accepted)
+        XCTAssertFalse(router.isScanPresented)
         XCTAssertEqual(router.pathBinding.wrappedValue, [])
         XCTAssertEqual(
             router.captureBoundaryRequest,
@@ -689,7 +693,6 @@ final class AppNavigationTests: XCTestCase {
             XCTAssertFalse(router.open(URL(string: rawURL)!))
             XCTAssertFalse(router.isScanPresented)
             XCTAssertEqual(router.pathBinding.wrappedValue, [.settings])
-            XCTAssertTrue(router.pathBinding.wrappedValue.isEmpty)
         }
     }
 }

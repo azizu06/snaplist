@@ -53,11 +53,18 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: ["--camera-status=unavailable"])
 
         XCTAssertTrue(app.staticTexts["scan.recovery-title"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.otherElements["trophy.wall"].exists)
-        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
+        // #1129: Scan is a drawer over Trophy Wall rather than a second root,
+        // so the wall stays mounted underneath instead of being torn down,
+        // and no dock slot is ever selected for Scan again.
+        XCTAssertTrue(app.otherElements["trophy.wall"].exists, app.debugDescription)
+        XCTAssertTrue(app.otherElements["scan.drawer"].exists, app.debugDescription)
+        XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
 
-        app.buttons["dock.trophy-wall"].tap()
+        // The dock sits behind the drawer, so the way back to the wall is the
+        // drawer's own close control.
+        app.buttons["scan.close"].tap()
         XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.otherElements["scan.drawer"].exists, app.debugDescription)
         XCTAssertFalse(app.staticTexts["scan.recovery-title"].exists)
 
         XCTAssertFalse(app.buttons["dock.inbox"].exists)
@@ -1874,8 +1881,10 @@ final class SnapListUITests: XCTestCase {
         } else {
             XCTAssertEqual(recoveryLibrary.label, "Choose from library")
             XCTAssertTrue(recoveryLibrary.isEnabled)
-            XCTAssertTrue(app.buttons["dock.scan"].isSelected)
-            XCTAssertFalse(app.buttons["dock.trophy-wall"].isSelected)
+            // #1129: the dock is chrome on Trophy Wall, which is the only
+            // thing it can be "on" now that Scan is a drawer over it.
+            XCTAssertFalse(app.buttons["dock.scan"].isSelected)
+            XCTAssertTrue(app.buttons["dock.trophy-wall"].isSelected)
         }
 
         XCTAssertFalse(app.staticTexts["Listing Review"].exists)
@@ -4018,7 +4027,14 @@ final class SnapListUITests: XCTestCase {
 
         let scanDock = app.buttons["dock.scan"]
         XCTAssertTrue(scanDock.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(scanDock.isSelected)
+        // #1129: the Scan slot is the drawer's entry control, not a selected
+        // destination, so the drawer being up is what proves the seller
+        // landed on the real Scan surface.
+        XCTAssertFalse(scanDock.isSelected, app.debugDescription)
+        XCTAssertTrue(
+            app.otherElements["scan.drawer"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
         XCTAssertEqual(scanDock.label, "Scan")
 
         let liveLibrary = app.buttons["scan.library"]
