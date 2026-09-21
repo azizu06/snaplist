@@ -1610,8 +1610,14 @@ final class SnapListUITests: XCTestCase {
         let headerCancel = saving.buttons["photo-review.cancel-submission"]
         XCTAssertTrue(headerCancel.isHittable)
         XCTAssertEqual(headerCancel.label, "Cancel saving")
-        XCTAssertGreaterThanOrEqual(headerCancel.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(headerCancel.frame.height, 44)
+        XCTAssertTrue(
+            TouchTargetFloor.isMet(headerCancel.frame.width),
+            "header Cancel width \(headerCancel.frame.width)"
+        )
+        XCTAssertTrue(
+            TouchTargetFloor.isMet(headerCancel.frame.height),
+            "header Cancel height \(headerCancel.frame.height)"
+        )
         XCTAssertFalse(saving.buttons["photo-review.back"].exists)
         headerCancel.tap()
         XCTAssertFalse(headerCancel.exists)
