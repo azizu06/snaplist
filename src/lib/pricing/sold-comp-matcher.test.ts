@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ItemSignal } from "./types";
 import {
   classifySoldComp,
+  conditionOnlyHead,
   normalizeSoldCompCondition,
   selectSoldCompEvidence,
   soldCompRetrievalReason,
@@ -772,11 +773,216 @@ describe("soldCompRetrievalReason distinguishes demotion from rejection (#1138 r
     ).toBe("all-rejected:identity-mismatch");
   });
 
+  it("breaks a 1-vs-1 tie by declaration order, not by which arrived first", () => {
+    // One reject each: the counts tie at 1. `Map` iterates in INSERTION order,
+    // so reading the tally that way would return whichever comp the matcher
+    // happened to classify first — here `quantity-mismatch`, which is declared
+    // LAST of the two. SOLD_COMP_MATCH_REASONS decides instead, so the answer is
+    // stable across two runs that differ only in candidate order.
+    expect(
+      evidence({ rejected: [match(["quantity-mismatch"]), match(["spec-conflict"])] }),
+    ).toBe("all-rejected:spec-conflict");
+    expect(
+      evidence({ rejected: [match(["spec-conflict"]), match(["quantity-mismatch"])] }),
+    ).toBe("all-rejected:spec-conflict");
+  });
+
   it("reports no-candidates when the matcher was handed nothing", () => {
     expect(evidence({})).toBe("no-candidates");
   });
 
   it("reports nothing at all once a comp anchors", () => {
     expect(evidence({ anchors: [match([])], rejected: [match(["identity-mismatch"])] })).toBeNull();
+  });
+});
+
+/**
+ * Issue #1138 round 2 review: requiring an accessory NOUN in the head reopened
+ * the pollution it was meant to close.
+ *
+ * `ACCESSORY_WORDS` is a curated list, not a taxonomy of everything sold "for"
+ * something else, so "Battery for Dell XPS 15" and "Tempered Glass for iPhone 13"
+ * cleared the head check and anchored a $9.99 accessory against the real item.
+ * Widening the list would only move the boundary; there is no finite list of
+ * accessory nouns.
+ *
+ * So the rule is inverted. "Identity only after ' for '" REJECTS by default —
+ * that is what "for X" means on eBay — and the exemptions are the two narrow,
+ * nameable cases: a head made purely of condition/grade/lot language, and a head
+ * that declares the accessory is INCLUDED with the item.
+ */
+describe("compatibility listings reject by default (#1138 round 2)", () => {
+  const classifyFor = (signal: ItemSignal, title: string, price = 9.99) =>
+    selectSoldCompEvidence(
+      [
+        {
+          url: `https://www.ebay.com/itm/${encodeURIComponent(title)}`,
+          title,
+          price,
+          condition: "Pre-Owned",
+        },
+      ],
+      signal,
+    );
+
+  const laptop: ItemSignal = {
+    brand: "Dell",
+    model: "XPS 15",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    specs: ["Silver", "32GB", "1TB SSD"],
+  };
+  const camera: ItemSignal = {
+    brand: "Canon",
+    model: "EOS R6",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    specs: ["Body only", "Black"],
+  };
+  const controller: ItemSignal = {
+    brand: "Sony",
+    model: "PS5 Controller",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    specs: ["White"],
+  };
+  const phone: ItemSignal = {
+    brand: "Apple",
+    model: "iPhone 13",
+    category: "electronics",
+    condition: "very-good",
+    conditionKnown: true,
+    specs: ["128GB", "Blue"],
+  };
+
+  const POLLUTANTS: [ItemSignal, string][] = [
+    [laptop, "Battery for Dell XPS 15"],
+    [camera, "Lens for Canon EOS R6"],
+    [controller, "Skin for PS5 Controller"],
+    [camera, "Manual for Canon EOS R6"],
+    [phone, "Tempered Glass for iPhone 13"],
+  ];
+
+  it.each(POLLUTANTS)(
+    "never anchors a $9.99 accessory against the real item: %#",
+    (signal, title) => {
+      expect(classifyFor(signal, title).anchors).toHaveLength(0);
+    },
+  );
+
+  it.each(POLLUTANTS.filter(([, title]) => title !== "Lens for Canon EOS R6"))(
+    "rejects it as an accessory, though its noun is not in ACCESSORY_WORDS: %#",
+    (signal, title) => {
+      expect(classifyFor(signal, title).rejected[0]!.reasons).toContain("accessory-mismatch");
+    },
+  );
+
+  it("lets the spec rule decide the lens, which reaches the same outcome first", () => {
+    // The seller's camera is "Body only", so a lens listing conflicts on specs
+    // before the accessory rule is consulted. Both rules reject it; asserting
+    // `accessory-mismatch` here would be asserting the wrong rule fired, so this
+    // records which one actually does.
+    const evidence = classifyFor(camera, "Lens for Canon EOS R6");
+    expect(evidence.rejected[0]!.reasons).toContain("spec-conflict");
+    expect(evidence.anchors).toHaveLength(0);
+  });
+
+  it.each([
+    "Tested Working for Apple AirPods Pro",
+    "Excellent Condition for Apple AirPods Pro",
+    "New Sealed for Apple AirPods Pro 2nd Gen",
+    "With Case for Apple AirPods Pro",
+  ])("exempts a condition or included-accessory head: %s", (title) => {
+    const airpods: ItemSignal = {
+      brand: "Apple",
+      model: "AirPods Pro",
+      category: "electronics",
+      condition: "very-good",
+      conditionKnown: true,
+      specs: ["White", "charging case"],
+    };
+    expect(
+      classifyFor(airpods, title, 145).rejected.flatMap((match) => match.reasons),
+    ).not.toContain("accessory-mismatch");
+  });
+
+  it.each([
+    "Silicone Ear Tips for Apple AirPods Pro",
+    "Charging Case for Apple AirPods Pro",
+    "Replacement Left Bud for Apple AirPods Pro",
+    "Box only for Apple AirPods Pro",
+  ])("still rejects a genuine accessory head: %s", (title) => {
+    const airpods: ItemSignal = {
+      brand: "Apple",
+      model: "AirPods Pro",
+      category: "electronics",
+      condition: "very-good",
+      conditionKnown: true,
+      specs: ["White", "charging case", "Silicone ear tips"],
+    };
+    const evidence = classifyFor(airpods, title);
+    expect(evidence.anchors).toHaveLength(0);
+    expect(evidence.rejected[0]!.reasons).toContain("accessory-mismatch");
+  });
+});
+
+
+/**
+ * The head exemption must stay tied to the condition vocabulary it claims to
+ * reuse (#1138 round 2).
+ *
+ * `conditionOnlyHead` is a second reader of the same idea as
+ * `normalizeSoldCompCondition`. If someone teaches the classifier a new grade
+ * and not this, a real listing starts being called an accessory and its price
+ * disappears — silently, because the comp is simply gone. This asserts the two
+ * agree on every grade phrase that can lead a title.
+ */
+describe("the head exemption reuses the condition vocabulary (#1138 round 2)", () => {
+  const GRADES = [
+    "brand new",
+    "new",
+    "new with tags",
+    "new without tags",
+    "new in box",
+    "factory sealed",
+    "sealed",
+    "unopened",
+    "open box",
+    "like new",
+    "near mint",
+    "mint condition",
+    "refurbished",
+    "remanufactured",
+    "pre owned",
+    "used",
+    "very good",
+    "good",
+    "excellent",
+    "acceptable",
+    "fair",
+    "poor",
+    "heavily used",
+  ];
+
+  it.each(GRADES)("the condition classifier recognises %s", (grade) => {
+    expect(normalizeSoldCompCondition(grade)).not.toBe("unknown");
+  });
+
+  it.each(GRADES)("and it clears the head check: %s", (grade) => {
+    expect(conditionOnlyHead(grade)).toBe(true);
+  });
+
+  it.each(["box", "box only", "case", "silicone ear tips", "replacement left bud", "lens"])(
+    "a scope or accessory noun does not clear it: %s",
+    (head) => {
+      expect(conditionOnlyHead(head)).toBe(false);
+    },
+  );
+
+  it("an empty head is a compatibility claim, not condition language", () => {
+    expect(conditionOnlyHead("")).toBe(false);
   });
 });

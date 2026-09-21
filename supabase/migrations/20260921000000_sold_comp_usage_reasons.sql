@@ -254,12 +254,16 @@ as $$
       -- A pre-#1138 entry carries no 'accepted'; ->> gives NULL, sum() skips it,
       -- and the strategy reads as zero accepted rather than failing the merge.
       coalesce(sum((entry->>'accepted')::numeric), 0) as accepted,
-      -- Most informative reason wins, and write order (`||` appends the incoming
-      -- array after the stored one) breaks ties toward the most recent. Taking
-      -- the LAST non-null instead would let a redelivery downgrade a real
-      -- provider failure into "nothing arrived".
+      -- Most informative reason wins. Taking the LAST non-null instead would let
+      -- a redelivery downgrade a real provider failure into "nothing arrived".
+      --
+      -- Equal rank keeps the FIRST entry (`entry_index asc`), because `||`
+      -- appends the incoming array after the stored one and the TS tally it
+      -- mirrors only replaces on a STRICTLY higher rank. Ordering desc here
+      -- would make the same two writes produce different reasons depending on
+      -- which side merged them.
       (array_agg(entry->>'reason' order by
-        private.sold_comp_reason_rank(entry->>'reason') desc, entry_index desc
+        private.sold_comp_reason_rank(entry->>'reason') desc, entry_index asc
       ))[1] as reason,
       -- sum() ignores SQL NULLs and returns NULL when every input is one, which
       -- is exactly the null-preserving rule the table documents: a strategy that

@@ -542,16 +542,68 @@ function compareSpecs(title: string, signal: ItemSignal): "equivalent" | "unveri
  * "256 gb". Each pattern is anchored on the same unit or family its extractor
  * keys on, so the two cannot disagree about what counts as a variant.
  */
-const VARIANT_TOKEN_PATTERNS: readonly RegExp[] = [
-  /\b\d+(?:\.\d+)?\s*(?:gb|tb|mb)\b/gi, // capacityTokens
-  /\b(?:size|sz)\s*\d+(?:\.\d+)?\b/gi, // numericSizeTokens
-  /\b(?:mens?|womens?)\s+\d+(?:\.\d+)?\b/gi, // numericSizeTokens, gendered
-  /\bsize\s+(?:s|m|l|xl)\b/gi, // namedSizeTokens, via the normalizer's size-letter map
-  /\b(?:extra\s+large|small|medium|large)\b/gi, // namedSizeTokens
-  /\b\d+\s*x\s*\d+\b/gi, // dimensionTokens
-  /\b\d+\s*oz\b/gi, // volumeTokens
-  /\b(?:rtx|gtx)\s*\d{3,4}\b/gi, // gpuTokens
+/**
+ * A variant token extractor: the pattern, and which capture group carries the
+ * token (`0` for the whole match).
+ *
+ * `group` exists because some patterns need CONTEXT to fire that must not travel
+ * into the query. "Mens 10" identifies the size 10, but eBay AND-matches, so
+ * sending "Mens 10" drops every sold listing that wrote "Men's 10" or just "10".
+ */
+interface VariantTokenPattern {
+  readonly pattern: RegExp;
+  readonly group: number;
+  /** True when the token is only meaningful for apparel/footwear (#1138 round 2). */
+  readonly sizedCategoryOnly?: boolean;
+}
+
+const VARIANT_TOKEN_PATTERNS: readonly VariantTokenPattern[] = [
+  { pattern: /\b\d+(?:\.\d+)?\s*(?:gb|tb|mb)\b/gi, group: 0 }, // capacityTokens
+  { pattern: /\b(?:size|sz)\s*\d+(?:\.\d+)?\b/gi, group: 0 }, // numericSizeTokens
+  // Gendered sizes keep only the NUMBER: the "mens"/"womens" prefix is how the
+  // spec says "this digit is a size", not part of the size itself.
+  { pattern: /\b(?:mens?|womens?)\s+(\d+(?:\.\d+)?)\b/gi, group: 1 },
+  { pattern: /\bsize\s+(?:s|m|l|xl|xxl)\b/gi, group: 0 }, // namedSizeTokens, via the normalizer's size-letter map
+  // A named size needs a QUALIFIER or an apparel/footwear category. Bare
+  // "Large"/"Small"/"Medium" are ordinary adjectives in a vision spec —
+  // "Large silicone ear tips" describes the tips, not a SKU, and sending
+  // "Large" into an AirPods query starved it (#1138 round 2).
+  { pattern: /\bsize\s+(?:extra\s+large|small|medium|large)\b/gi, group: 0 },
+  { pattern: /\b(?:extra\s+large|small|medium|large)\s+size\b/gi, group: 0 },
+  { pattern: /\b(?:mens?|womens?)\s+((?:extra\s+large|small|medium|large))\b/gi, group: 1 },
+  {
+    pattern: /\b(?:extra\s+large|small|medium|large)\b/gi,
+    group: 0,
+    sizedCategoryOnly: true,
+  },
+  { pattern: /\b\d+\s*x\s*\d+\b/gi, group: 0 }, // dimensionTokens
+  { pattern: /\b\d+\s*oz\b/gi, group: 0 }, // volumeTokens
+  { pattern: /\b(?:rtx|gtx)\s*\d{3,4}\b/gi, group: 0 }, // gpuTokens
 ];
+
+/**
+ * Categories where a bare named size IS the configuration.
+ *
+ * `APPAREL_FORMS` holds garment NOUNS and is matched against titles; this is the
+ * `signal.category` vocabulary, which is a different axis. "sneakers" is already
+ * the value the footwear rule keys on.
+ */
+const SIZED_CATEGORIES = new Set([
+  "apparel",
+  "clothing",
+  "footwear",
+  "shoes",
+  "sneakers",
+]);
+
+function sizedCategory(category: string | undefined): boolean {
+  const normalized = normalizeComparableText(category ?? "");
+  if (!normalized) return false;
+  return (
+    SIZED_CATEGORIES.has(normalized) ||
+    normalized.split(" ").some((word) => SIZED_CATEGORIES.has(word) || APPAREL_FORMS.has(word))
+  );
+}
 
 /**
  * The variant tokens inside one vision spec, in the order they appear (#1138).
@@ -567,16 +619,19 @@ const VARIANT_TOKEN_PATTERNS: readonly RegExp[] = [
  * eBay AND-matches keywords, so only the token itself may narrow a search — the
  * words around it are the seller's description, not the SKU.
  */
-export function variantQueryTokens(spec: string): string[] {
+export function variantQueryTokens(spec: string, category?: string): string[] {
   const value = spec.trim();
   if (!value) return [];
+  const sized = sizedCategory(category);
   const found: { index: number; token: string }[] = [];
-  for (const pattern of VARIANT_TOKEN_PATTERNS) {
+  for (const { pattern, group, sizedCategoryOnly } of VARIANT_TOKEN_PATTERNS) {
+    if (sizedCategoryOnly && !sized) continue;
     // `lastIndex` is shared state on a /g regex; reset so one spec cannot skip
     // a match because a previous spec left the cursor mid-string.
     pattern.lastIndex = 0;
     for (const match of value.matchAll(pattern)) {
-      if (match.index != null) found.push({ index: match.index, token: match[0].trim() });
+      const token = match[group]?.trim();
+      if (match.index != null && token) found.push({ index: match.index, token });
     }
   }
   const seen = new Set<string>();
@@ -599,7 +654,10 @@ export function variantQueryTokens(spec: string): string[] {
  * there the exact text matters.
  */
 export function isVariantDefiningSpec(spec: string): boolean {
-  return variantQueryTokens(spec).length > 0;
+  // The matcher's gate asks only whether an enforceable variant EXISTS, so it
+  // looks under the apparel assumption: a bare "Large" is still a size the
+  // matcher can enforce against a title, even where it must not narrow a query.
+  return variantQueryTokens(spec, "apparel").length > 0;
 }
 
 function hasVerifiableSpecs(signal: ItemSignal): boolean {
@@ -652,8 +710,87 @@ function accessoryIsIncluded(text: string, accessory: string): boolean {
 }
 
 /**
- * A "<accessory> FOR <product>" listing is an accessory, whatever it costs
- * (#1138).
+ * Condition, grade, authenticity, and lot language that can legitimately stand
+ * AHEAD of a "for" without making the listing an accessory (#1138 round 2).
+ *
+ * Every phrase here is one `normalizeSoldCompCondition` already recognises;
+ * `CONDITION_HEAD_WORDS` adds only the words eBay titles carry that the
+ * condition classifier deliberately does not model, because they grade the
+ * SELLER's claim rather than the item's condition: authenticity ("genuine",
+ * "oem") and test language ("tested", "working"). A test asserts that every
+ * grade phrase the classifier recognises also clears this head check, so the two
+ * vocabularies cannot drift apart.
+ *
+ * Scope nouns are deliberately absent. "box", "only", and "parts" are what
+ * separate "New In Box for Apple AirPods Pro" (the item) from "Box only for
+ * Apple AirPods Pro" (the empty box) — the first is a phrase below, the second
+ * has no entry and is rejected.
+ */
+const CONDITION_HEAD_PHRASES: readonly string[] = [
+  "new with tags",
+  "new without tags",
+  "new in box",
+  "new in sealed box",
+  "factory sealed",
+  "open box",
+  "open package",
+  "like new",
+  "near mint",
+  "mint condition",
+  "brand new",
+  "pre owned",
+  "heavily used",
+  "as is",
+];
+
+const CONDITION_HEAD_WORDS = new Set([
+  "acceptable",
+  "authentic",
+  "condition",
+  "excellent",
+  "fair",
+  "genuine",
+  "good",
+  "lot",
+  "mint",
+  "new",
+  "of",
+  "oem",
+  "original",
+  "poor",
+  "refurbished",
+  "remanufactured",
+  "sealed",
+  "sold",
+  "tested",
+  "unopened",
+  "used",
+  "very",
+  "working",
+]);
+
+/**
+ * Whether a title head is made ENTIRELY of condition/grade/lot language.
+ *
+ * Phrases are consumed first, so "new in box" clears while a bare "box" does not.
+ */
+export function conditionOnlyHead(head: string): boolean {
+  const value = head.trim();
+  if (!value) return false;
+  let remaining = ` ${value} `;
+  for (const phrase of CONDITION_HEAD_PHRASES) {
+    remaining = remaining.split(` ${phrase} `).join(" ");
+  }
+  const words = remaining.split(" ").filter(Boolean);
+  if (words.length === 0) return true;
+  return words.every(
+    (word) => CONDITION_HEAD_WORDS.has(word) || /^\d+(?:\.\d+)?$/.test(word),
+  );
+}
+
+/**
+ * A "<something> FOR <product>" listing is an accessory unless the head says
+ * otherwise (#1138, inverted in round 2).
  *
  * `accessoryMismatch` clears a comp when the seller's OWN identity text mentions
  * the same accessory — reasonable, since an item sold with its case should match
@@ -662,21 +799,25 @@ function accessoryIsIncluded(text: string, accessory: string): boolean {
  * accessory list was being unlocked by the seller's own description. A $8.99
  * "Silicone Ear Tips for Apple AirPods Pro" anchored at 0.95 against a $148 item.
  *
- * On eBay, "for X" means COMPATIBLE WITH X. But "the identity appears only after
- * 'for'" is NOT enough on its own, and getting that wrong changes prices: a
- * seller who leads with condition language — "Tested Working for Apple AirPods
- * Pro", "Sold as-is for ...", "New Sealed for ..." — is describing the real item,
- * often at the cheap end of the range, so rejecting those biases the median
- * upward.
+ * Round 1 required an accessory NOUN in the head. That reopened the hole from the
+ * other side: `ACCESSORY_WORDS` is a curated list, not a taxonomy, so "Battery
+ * for Dell XPS 15", "Skin for PS5 Controller", and "Tempered Glass for iPhone 13"
+ * all cleared it and anchored at $9.99. There is no finite list of accessory
+ * nouns, so the default cannot depend on one.
  *
- * What actually distinguishes an accessory is an accessory NOUN at the head of
- * the title, ahead of the "for". That is how sellers write these listings, and it
- * reuses the matcher's own vocabulary instead of adding a second list.
+ * On eBay, "for X" means COMPATIBLE WITH X, so the default is REJECT and the
+ * exemptions are the two nameable cases:
  *
- * Every clause earns its place: the identity must appear AFTER the "for"
- * (otherwise it is not a compatibility claim), must NOT appear before it (which
- * is what keeps "Apple AirPods Pro for Parts" out — its identity leads, and the
- * parts rule decides it), and the head must name an accessory.
+ * 1. A head made purely of condition/grade/lot language ("Tested Working for …",
+ *    "Excellent Condition for …"). That seller is describing the real item,
+ *    usually at the cheap end, and dropping those biases the median upward.
+ * 2. A head that declares the accessory is INCLUDED ("With Case for …"), decided
+ *    by the existing `accessoryIsIncluded` check rather than a second rule.
+ *
+ * The two structural clauses still earn their place: the identity must appear
+ * AFTER the "for" (otherwise it is not a compatibility claim) and must NOT appear
+ * before it (which keeps "Apple AirPods Pro for Parts" out — its identity leads,
+ * and the parts rule decides it).
  *
  * Only the first " for " is inspected. A title with a later one has already been
  * decided by the head, which is the part sellers put the accessory noun in.
@@ -694,7 +835,16 @@ function compatibilityListing(title: string, signal: ItemSignal): boolean {
   if (identities.length === 0) return false;
   if (!identities.some((identity) => containsPhrase(after, identity))) return false;
   if (identities.some((identity) => containsPhrase(before, identity))) return false;
-  return ACCESSORY_WORDS.some((accessory) => accessoryQuantity(before, accessory) > 0);
+  if (conditionOnlyHead(before)) return false;
+  if (
+    ACCESSORY_WORDS.some(
+      (accessory) =>
+        accessoryQuantity(before, accessory) > 0 && accessoryIsIncluded(before, accessory),
+    )
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function accessoryMismatch(title: string, signal: ItemSignal): boolean {

@@ -653,14 +653,20 @@ export function buildSoldSearchQuery(signal: ItemSignal): string | null {
     // specs, three pieces of prose evicted the real configuration behind them: a
     // Dell XPS signal kept "Silver RTX 4070 backlit keyboard" and dropped
     // "32GB" / "1TB SSD" entirely.
+    //
+    // A token the identity ALREADY carries is dropped (#1138 round 2). An
+    // iPhone whose model reads "iPhone 13 256GB" against a "256GB" spec
+    // produced "Apple iPhone 13 256GB 256GB" — eBay AND-matches, so the
+    // duplicate narrows nothing and only spends one of the three slots.
+    const identity = `${brand} ${model}`.toLowerCase().replace(/\s+/g, " ");
     const seenTokens = new Set<string>();
     const specsHint = (signal.specs ?? [])
-      .flatMap((spec) => variantQueryTokens(spec))
+      .flatMap((spec) => variantQueryTokens(spec, signal.category))
       .filter((token) => {
         const key = token.toLowerCase().replace(/\s+/g, " ");
         if (seenTokens.has(key)) return false;
         seenTokens.add(key);
-        return true;
+        return !` ${identity} `.includes(` ${key} `);
       })
       .slice(0, 3)
       .join(" ");

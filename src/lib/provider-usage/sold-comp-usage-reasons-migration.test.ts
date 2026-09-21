@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { ProviderUsageTally } from "./record";
 
 /**
  * The offline guard for the #1138 usage-reason migration.
@@ -58,9 +59,31 @@ describe("sold-comp usage reason migration (#1138)", () => {
       );
     }
     expect(migration).toMatch(/when p_reason like 'all-rejected:%' then 2/);
+    // `asc`, not `desc`: on an EQUAL rank the TS tally keeps what it already
+    // stored (it replaces only on a strictly higher rank), and `||` puts the
+    // incoming entry second. Ordering desc here would make the same two writes
+    // resolve differently in SQL than in process.
     expect(migration).toMatch(
-      /order by\s*\n\s*private\.sold_comp_reason_rank\(entry->>'reason'\) desc, entry_index desc/,
+      /order by\s*\n\s*private\.sold_comp_reason_rank\(entry->>'reason'\) desc, entry_index asc/,
     );
+  });
+
+  it("keeps the equal-rank tie-break identical to the tally", () => {
+    // The tally's rule, restated as an executable claim rather than a comment:
+    // a strictly higher rank replaces, an equal one does not.
+    const tally = new ProviderUsageTally();
+    tally.addSoldCompOutcome({ strategy: "apify", accepted: 0, reason: "no-anchors" });
+    tally.addSoldCompOutcome({
+      strategy: "apify",
+      accepted: 0,
+      reason: "all-rejected:accessory-mismatch",
+    });
+    expect(tally.snapshot().soldComps[0]!.reason).toBe("no-anchors");
+
+    const escalating = new ProviderUsageTally();
+    escalating.addSoldCompOutcome({ strategy: "apify", accepted: 0, reason: "no-anchors" });
+    escalating.addSoldCompOutcome({ strategy: "apify", accepted: 0, reason: "provider-error" });
+    expect(escalating.snapshot().soldComps[0]!.reason).toBe("provider-error");
   });
 
   it("accepts every reason the TypeScript vocabulary can produce, and no free text", () => {

@@ -3254,13 +3254,18 @@ describe("buildSoldSearchQuery — descriptive specs must not starve the sold qu
  */
 describe("buildSoldSearchQuery — only extracted tokens reach the query (#1138)", () => {
   it("emits the size token from prose that merely contains one", () => {
+    // Round 2 narrowed WHICH tokens qualify: a bare "Large" is only a size for
+    // an apparel/footwear category, so this case carries one to keep the
+    // extraction claim honest. Electronics prose is covered by the round-2
+    // suite below, where the same spec must yield nothing at all.
     expect(
       buildSoldSearchQuery({
-        brand: "Apple",
-        model: "AirPods Pro",
-        specs: ["Large silicone ear tips included"],
+        category: "apparel",
+        brand: "Patagonia",
+        model: "Better Sweater",
+        specs: ["Large fleece pullover, zip pockets"],
       }),
-    ).toBe("Apple AirPods Pro Large");
+    ).toBe("Patagonia Better Sweater Large");
   });
 
   it("emits the capacity token from prose that merely contains one", () => {
@@ -3291,5 +3296,73 @@ describe("buildSoldSearchQuery — only extracted tokens reach the query (#1138)
         specs: ["RTX 4070 graphics", "32GB RAM and 1TB SSD", "15.6 inch display"],
       }),
     ).toBe("Dell XPS 15 RTX 4070 32GB 1TB");
+  });
+});
+
+/**
+ * Issue #1138 round 2: a bare named size is an adjective, not a SKU.
+ *
+ * "Large silicone ear tips" describes the tips. Sending "Large" into an AirPods
+ * query AND-matches it against every sold title and starves the search, which is
+ * the same failure the round-1 fix was meant to close — one word further down.
+ */
+describe("buildSoldSearchQuery keeps adjectives out of the query (#1138 round 2)", () => {
+  const base = { category: "electronics", condition: "very-good", conditionKnown: true } as const;
+
+  it("takes no token from a bare named size", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        brand: "Apple",
+        model: "AirPods Pro",
+        specs: ["Large silicone ear tips included", "White charging case"],
+      }),
+    ).toBe("Apple AirPods Pro");
+  });
+
+  it("takes the size when a qualifier makes it one", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        brand: "Nike",
+        model: "Air Max 90",
+        specs: ["Size Large"],
+      }),
+    ).toBe("Nike Air Max 90 Size Large");
+  });
+
+  it("takes a bare named size for an apparel category", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        category: "apparel",
+        brand: "Patagonia",
+        model: "Better Sweater",
+        specs: ["Large", "Navy"],
+      }),
+    ).toBe("Patagonia Better Sweater Large");
+  });
+
+  it("keeps only the number from a gendered size", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        category: "sneakers",
+        brand: "Nike",
+        model: "Air Max 90",
+        specs: ["Mens 10.5"],
+      }),
+    ).toBe("Nike Air Max 90 10.5");
+  });
+
+  it("drops a token the brand and model already carry", () => {
+    expect(
+      buildSoldSearchQuery({
+        ...base,
+        brand: "Apple",
+        model: "iPhone 13 256GB",
+        specs: ["256GB storage capacity model", "Blue"],
+      }),
+    ).toBe("Apple iPhone 13 256GB");
   });
 });
