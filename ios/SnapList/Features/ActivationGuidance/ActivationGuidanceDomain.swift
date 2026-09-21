@@ -95,7 +95,7 @@ enum ActivationGuidanceSurface: Equatable {
 enum ActivationSurfaceResolutionPolicy {
     static func surface(
         hasPhotoReviewSession: Bool,
-        selectedTab: PrimaryTab,
+        isScanPresented: Bool,
         pushedPath: [AppRoute],
         presentedFullScreen: AppFullScreen?
     ) -> ActivationGuidanceSurface? {
@@ -114,12 +114,15 @@ enum ActivationSurfaceResolutionPolicy {
             }
         }
 
-        if selectedTab == .trophyWall, presentedFullScreen == nil {
-            return .trophyWall
-        }
-        if selectedTab == .scan,
+        // #1129: Scan is a drawer over the wall, so it answers first — it is
+        // the surface in front of the seller whenever it is up. The wall is
+        // what remains when nothing covers it.
+        if isScanPresented,
            presentedFullScreen == nil || presentedFullScreen == .guidedCamera {
             return .scan
+        }
+        if presentedFullScreen == nil {
+            return .trophyWall
         }
         return nil
     }

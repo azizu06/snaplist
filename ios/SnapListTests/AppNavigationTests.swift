@@ -223,43 +223,45 @@ final class AppNavigationTests: XCTestCase {
 
         router.navigate(to: .future(.account))
 
-        XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [])
+        XCTAssertEqual(router.pathBinding.wrappedValue, [])
         XCTAssertTrue(router.presentedAccountEntry)
 
         // Positive control: an ordinary route still pushes, so the assertion above
         // is a rejection of one boundary rather than a router that stopped routing.
         router.navigate(to: .settings)
 
-        XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [.settings])
+        XCTAssertEqual(router.pathBinding.wrappedValue, [.settings])
     }
 
+    /// #1129 retired the second stack. Scan is a drawer over the wall and has
+    /// nothing to push, so every route lands on the one path in the order it
+    /// was pushed — and raising or dropping the drawer does not disturb it.
     @MainActor
-    func testEachPrimaryTabKeepsAnIndependentNavigationPath() {
+    func testEveryRoutePushesOntoTheOneWallPath() {
         let router = AppRouter()
 
         router.navigate(to: .home(.processing))
-        router.select(.trophyWall)
+        router.applyScanDrawer(.scanEntryControlTapped)
         router.navigate(to: .settings)
+        router.applyScanDrawer(.dismissed)
 
         XCTAssertEqual(
-            router.pathBinding(for: .scan).wrappedValue,
-            [.home(.processing)]
+            router.pathBinding.wrappedValue,
+            [.home(.processing), .settings]
         )
-        XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
     }
 
     /// Scan opens directly into the camera preview (#864): there is no more
     /// launcher sheet to stand the seller up in, so a relaunch that restores a
-    /// staged photo has to move the seller onto the Scan tab itself, where
-    /// `ScanCameraView` is mounted, rather than presenting anything over
-    /// whichever tab they happened to be on.
+    /// staged photo has to put Scan itself in front of the seller. #1129 makes
+    /// that the drawer rather than a tab selection.
     @MainActor
     func testRestoredCaptureLandsDirectlyOnScan() {
         let router = AppRouter(initialTab: .trophyWall)
 
         router.handleCaptureRestoration(.stagedPhoto)
 
-        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertTrue(router.isScanPresented)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
@@ -304,8 +306,8 @@ final class AppNavigationTests: XCTestCase {
             photos: photos
         )
 
-        XCTAssertEqual(router.selectedTab, .scan)
-        XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [])
+        XCTAssertTrue(router.isScanPresented)
+        XCTAssertEqual(router.pathBinding.wrappedValue, [])
         XCTAssertEqual(
             router.captureBoundaryRequest,
             CaptureBoundaryRequest(
@@ -340,9 +342,9 @@ final class AppNavigationTests: XCTestCase {
                 photos: Self.recoveryPhotos(count: testCase.photos)
             )
 
-            XCTAssertEqual(router.selectedTab, .trophyWall, testCase.name)
+            XCTAssertFalse(router.isScanPresented, testCase.name)
             XCTAssertEqual(
-                router.pathBinding(for: .trophyWall).wrappedValue,
+                router.pathBinding.wrappedValue,
                 [.home(.processing)],
                 testCase.name
             )
@@ -626,9 +628,13 @@ final class AppNavigationTests: XCTestCase {
                 initialRoute: fixture.initialRoute
             )
 
-            XCTAssertEqual(router.selectedTab, fixture.initialTab)
+            XCTAssertEqual(router.launchesIntoScan, fixture.initialTab == .scan)
+            // #1129: a launch into Scan is declared, not seeded. The shell
+            // replays it as a drawer event on first appear so the camera
+            // starts exactly the way it does for a tap on the entry control.
+            XCTAssertFalse(router.isScanPresented)
             XCTAssertEqual(
-                router.pathBinding(for: fixture.initialTab).wrappedValue,
+                router.pathBinding.wrappedValue,
                 fixture.initialRoute.map { [$0] } ?? []
             )
         }
@@ -649,10 +655,10 @@ final class AppNavigationTests: XCTestCase {
         )
 
         XCTAssertTrue(didOpen)
-        XCTAssertEqual(router.selectedTab, .trophyWall)
+        XCTAssertFalse(router.isScanPresented)
         XCTAssertFalse(router.presentedAccountEntry)
         XCTAssertEqual(
-            router.pathBinding(for: .trophyWall).wrappedValue,
+            router.pathBinding.wrappedValue,
             [.home(.processing)]
         )
     }
@@ -681,9 +687,9 @@ final class AppNavigationTests: XCTestCase {
         for rawURL in rejected {
             XCTAssertNil(RunDeepLink(url: URL(string: rawURL)!))
             XCTAssertFalse(router.open(URL(string: rawURL)!))
-            XCTAssertEqual(router.selectedTab, .trophyWall)
-            XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
-            XCTAssertTrue(router.pathBinding(for: .scan).wrappedValue.isEmpty)
+            XCTAssertFalse(router.isScanPresented)
+            XCTAssertEqual(router.pathBinding.wrappedValue, [.settings])
+            XCTAssertTrue(router.pathBinding.wrappedValue.isEmpty)
         }
     }
 }

@@ -485,7 +485,9 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(store.photos.map(\.id), [third.id, replacement.id])
         XCTAssertEqual(store.selectedPhotoID, third.id)
         XCTAssertEqual(router.photoReviewScanReturn, returned)
-        XCTAssertEqual(router.selectedTab, .scan)
+        // #1129: Photo Review lives inside the Scan drawer, so leaving it moves
+        // the surface within the drawer and never the drawer itself.
+        XCTAssertFalse(router.isScanPresented)
     }
 
     func testAcceptedSubmissionEventConsumerAnnouncesAndAcknowledgesBeforeExactClearAndReturnsToReadyScan() async throws {
@@ -725,8 +727,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertNil(router.captureBoundaryRequest)
-        XCTAssertEqual(router.selectedTab, .scan)
-        XCTAssertTrue(router.pathBinding(for: .scan).wrappedValue.isEmpty)
+        XCTAssertTrue(router.pathBinding.wrappedValue.isEmpty)
         XCTAssertEqual(pendingScanFocus, .addPhotoButton)
         XCTAssertNil(submissionHost.pendingPresentationEvent)
         XCTAssertFalse(photoReviewHost.isCommitting)
@@ -1082,11 +1083,8 @@ final class CaptureFlowTests: XCTestCase {
         let routeBeforeSubmission = router.captureBoundaryRequest
         let fullScreenBeforeSubmission = router.presentedFullScreen
         let scanReturnBeforeSubmission = router.photoReviewScanReturn
-        let selectedTabBeforeSubmission = router.selectedTab
-        let scanPathBeforeSubmission =
-            router.pathBinding(for: .scan).wrappedValue
-        let trophyWallPathBeforeSubmission =
-            router.pathBinding(for: .trophyWall).wrappedValue
+        let scanPresentedBeforeSubmission = router.isScanPresented
+        let wallPathBeforeSubmission = router.pathBinding.wrappedValue
 
         let photoReviewHost = PhotoReviewLiveHost()
         XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
@@ -1283,14 +1281,10 @@ final class CaptureFlowTests: XCTestCase {
             router.photoReviewScanReturn,
             scanReturnBeforeSubmission
         )
-        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
+        XCTAssertEqual(router.isScanPresented, scanPresentedBeforeSubmission)
         XCTAssertEqual(
-            router.pathBinding(for: .scan).wrappedValue,
-            scanPathBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.pathBinding(for: .trophyWall).wrappedValue,
-            trophyWallPathBeforeSubmission
+            router.pathBinding.wrappedValue,
+            wallPathBeforeSubmission
         )
         XCTAssertEqual(
             router.captureBoundaryRequest?.destination,
@@ -1853,7 +1847,7 @@ final class CaptureFlowTests: XCTestCase {
             )
 
             XCTAssertEqual(
-                scenario.router.pathBinding(for: .scan).wrappedValue,
+                scenario.router.pathBinding.wrappedValue,
                 [.settings],
                 "\(testCase.name): the denial's own button must reach Settings."
             )
@@ -8406,7 +8400,7 @@ final class CaptureFlowTests: XCTestCase {
 
         let router = AppRouter()
         router.handleCaptureRestoration(restoration)
-        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertTrue(router.isScanPresented)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
@@ -8430,13 +8424,15 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(restoration, .noDraft)
         let router = AppRouter(initialTab: .trophyWall)
 
+        var didPresentScanDrawer = false
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: { didPresentScanDrawer = true }
         )
 
-        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertTrue(didPresentScanDrawer)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(store.stageCount, 1)
         XCTAssertEqual(store.lastStagedImageData, firstPhoto)
@@ -8477,7 +8473,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(capture.phase, .failed)
@@ -8524,7 +8521,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(captureStore.stageCount, 1)
@@ -8541,7 +8539,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(captureStore.stageCount, 2)
@@ -8592,7 +8591,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(capture.phase, .failed)
@@ -8620,7 +8620,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: relaunchedCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         let durablyStaged = try XCTUnwrap(relaunchedCapture.stagedPhoto)
@@ -8653,7 +8654,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: expiredOnboarding,
             captureFlow: expiredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         XCTAssertNil(expiredCapture.stagedPhoto)
@@ -8793,7 +8795,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(capture.phase, .captured)
@@ -8827,7 +8830,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: relaunchedCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertEqual(relaunchedCapture.stagedPhoto?.libraryTransferReceipt, originalReceipt)
 
@@ -8852,7 +8856,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: stillBlockedOnboarding,
             captureFlow: expiredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertNil(expiredCapture.stagedPhoto)
         XCTAssertEqual(stillBlockedOnboarding.state, initialState)
@@ -8886,7 +8891,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: recoveredOnboarding,
             captureFlow: recoveredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertEqual(
             recoveredCapture.stagedPhoto?.libraryTransferReceipt?.transferredDigest,
@@ -8955,7 +8961,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         let durablyStaged = try XCTUnwrap(capture.stagedPhoto)
@@ -8983,7 +8990,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: relaunchedCapture,
-            router: relaunchedRouter
+            router: relaunchedRouter,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
@@ -8996,7 +9004,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: relaunchedCapture,
-            router: relaunchedRouter
+            router: relaunchedRouter,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
@@ -9024,7 +9033,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: restoredOnboarding,
             captureFlow: expiredCapture,
-            router: expiredRouter
+            router: expiredRouter,
+            presentScanDrawer: {}
         )
 
         let nextStagedPhoto = try XCTUnwrap(expiredCapture.stagedPhoto)
@@ -9083,7 +9093,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: initialCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
 
         let initialStagedPhoto = try XCTUnwrap(initialCapture.stagedPhoto)
@@ -9119,7 +9130,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: restoredCapture,
-            router: AppRouter()
+            router: AppRouter(),
+            presentScanDrawer: {}
         )
         XCTAssertEqual(restoredCapture.stagedPhoto, initialStagedPhoto)
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst()))
@@ -9140,7 +9152,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: relaunchedOnboarding,
             captureFlow: expiredCapture,
-            router: relaunchedRouter
+            router: relaunchedRouter,
+            presentScanDrawer: {}
         )
 
         let nextStagedPhoto = try XCTUnwrap(expiredCapture.stagedPhoto)
@@ -9228,7 +9241,8 @@ final class CaptureFlowTests: XCTestCase {
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
-            router: router
+            router: router,
+            presentScanDrawer: {}
         )
 
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
@@ -10487,9 +10501,8 @@ private final class RetainedSubmissionPhotoReviewScenario {
     private let routeBeforeSubmission: CaptureBoundaryRequest?
     private let fullScreenBeforeSubmission: AppFullScreen?
     private let scanReturnBeforeSubmission: PhotoReviewScanReturn?
-    private let selectedTabBeforeSubmission: PrimaryTab
-    private let scanPathBeforeSubmission: [AppRoute]
-    private let trophyWallPathBeforeSubmission: [AppRoute]
+    private let scanPresentedBeforeSubmission: Bool
+    private let wallPathBeforeSubmission: [AppRoute]
     private let sessionPhotosBeforeSubmission: [StagedCapturePhoto]
     private let selectedPhotoBeforeSubmission: StagedCapturePhoto.ID?
     private let actionsPhotoBeforeSubmission: StagedCapturePhoto.ID?
@@ -10571,11 +10584,8 @@ private final class RetainedSubmissionPhotoReviewScenario {
         routeBeforeSubmission = router.captureBoundaryRequest
         fullScreenBeforeSubmission = router.presentedFullScreen
         scanReturnBeforeSubmission = router.photoReviewScanReturn
-        selectedTabBeforeSubmission = router.selectedTab
-        scanPathBeforeSubmission =
-            router.pathBinding(for: .scan).wrappedValue
-        trophyWallPathBeforeSubmission =
-            router.pathBinding(for: .trophyWall).wrappedValue
+        scanPresentedBeforeSubmission = router.isScanPresented
+        wallPathBeforeSubmission = router.pathBinding.wrappedValue
 
         let photoReviewHost = PhotoReviewLiveHost()
         self.photoReviewHost = photoReviewHost
@@ -10651,14 +10661,10 @@ private final class RetainedSubmissionPhotoReviewScenario {
             router.photoReviewScanReturn,
             scanReturnBeforeSubmission
         )
-        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
+        XCTAssertEqual(router.isScanPresented, scanPresentedBeforeSubmission)
         XCTAssertEqual(
-            router.pathBinding(for: .scan).wrappedValue,
-            scanPathBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.pathBinding(for: .trophyWall).wrappedValue,
-            trophyWallPathBeforeSubmission
+            router.pathBinding.wrappedValue,
+            wallPathBeforeSubmission
         )
         XCTAssertNil(pendingScanFocus)
         XCTAssertEqual(camera.startCount, 0)
