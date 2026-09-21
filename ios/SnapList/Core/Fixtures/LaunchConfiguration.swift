@@ -114,8 +114,14 @@ enum FoundationFixture: String, CaseIterable {
 
     var initialTab: PrimaryTab {
         switch self {
-        case .onboarding, .scan: .scan
-        case .trophyProcessing, .trophyWall, .account: .trophyWall
+        // #1129: launch lands on Trophy Wall. Only a fixture that names the
+        // Scan surface outright starts with the drawer up — the default
+        // build no longer does, because a returning seller's home is the
+        // wall. First-run onboarding still hands off to Scan when it
+        // finishes, but it does that by asking for a new item, not by the
+        // app having launched there.
+        case .scan: .scan
+        case .onboarding, .trophyProcessing, .trophyWall, .account: .trophyWall
         }
     }
 

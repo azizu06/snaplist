@@ -3066,6 +3066,7 @@ private struct TrophyWallFeatureTestRoot: View {
             forceReducedMotion: false,
             startNewItem: {},
             returnToTrophyWall: {},
+            scrollToTopToken: 0,
             activationListingReviewOpened: {},
             activationListingReviewDismissed: {},
             activationGuestClaimPresentationChanged: { _ in },

@@ -53,11 +53,12 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: ["--camera-status=unavailable"])
 
         XCTAssertTrue(app.staticTexts["scan.recovery-title"].waitForExistence(timeout: 2))
-        // #1129: Scan is a drawer over Trophy Wall rather than a second root,
-        // so the wall stays mounted underneath instead of being torn down,
-        // and no dock slot is ever selected for Scan again.
-        XCTAssertTrue(app.otherElements["trophy.wall"].exists, app.debugDescription)
+        // #1129: Scan is a drawer over Trophy Wall rather than a second root.
+        // The drawer is a modal container, so the wall leaves the
+        // accessibility tree while it is up and comes back when it closes —
+        // `HomeUITests` pins the geometry that proves it is a drawer.
         XCTAssertTrue(app.otherElements["scan.drawer"].exists, app.debugDescription)
+        XCTAssertFalse(app.otherElements["trophy.wall"].exists, app.debugDescription)
         XCTAssertFalse(app.buttons["dock.scan"].isSelected, app.debugDescription)
 
         // The dock sits behind the drawer, so the way back to the wall is the
@@ -1541,7 +1542,29 @@ final class SnapListUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [beatEnded], timeout: 3), .completed)
         done.tap()
-        XCTAssertEqual(done.label, "Start listing")
+
+        // #1129: Done used to hand the seller straight back to Photo Review's
+        // "Start listing" button — on the owner's device that read as "where
+        // did the item go?". The server has already accepted it, so finishing
+        // drops the Scan drawer onto Trophy Wall instead, and never returns to
+        // the camera. The drawer's absence is the discriminator: the wall is
+        // mounted under the drawer the whole time, so its presence alone would
+        // hold either way.
+        let drawer = accepted.otherElements["scan.drawer"]
+        let drawerDropped = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in !drawer.exists },
+            object: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [drawerDropped], timeout: 5),
+            .completed,
+            accepted.debugDescription
+        )
+        XCTAssertTrue(
+            accepted.otherElements["trophy.wall"].exists,
+            accepted.debugDescription
+        )
+        XCTAssertFalse(done.exists, accepted.debugDescription)
     }
 
     /// Every other rejection state has a launch route, which is what makes a
@@ -3699,6 +3722,52 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(flash.frame.height, 48, accuracy: 0.5)
     }
 
+    /// #1129's reason for drawing the drawer instead of presenting a sheet.
+    ///
+    /// iOS 26 renders a sheet that does not reach the screen edges as an
+    /// inset card and scales its contents: with a `.fraction(0.9)` detent the
+    /// 56pt shutter measured 53.3pt and every 44pt control came back 42.2pt,
+    /// under the touch-target floor. The drawer is an in-app overlay so its
+    /// controls keep their real size, and this is the guard on that — the
+    /// same control, rendered at the root and inside the drawer.
+    func testDrawerControlsKeepTheirRealSizeAgainstTheRootRenderedOracle() {
+        let root = launch(extraArguments: ["--visual-state=CAM-03"])
+        let rootShutter = root.buttons["scan.shutter"]
+        XCTAssertTrue(rootShutter.waitForExistence(timeout: 3), root.debugDescription)
+        let oracle = rootShutter.frame
+        XCTAssertGreaterThan(oracle.width, 0, root.debugDescription)
+        root.terminate()
+
+        let drawered = XCUIApplication()
+        drawered.launchArguments = [
+            "--restored-capture-fixture",
+            "--zero-network-fixtures"
+        ]
+        drawered.launchAfterRetiringPriorInstance()
+        let drawerShutter = drawered.buttons["scan.shutter"]
+        XCTAssertTrue(
+            drawerShutter.waitForExistence(timeout: 5),
+            drawered.debugDescription
+        )
+        XCTAssertTrue(
+            drawered.otherElements["scan.drawer"].exists,
+            "The oracle is only meaningful if the shutter really is inside "
+                + "the drawer. \(drawered.debugDescription)"
+        )
+        XCTAssertEqual(
+            drawerShutter.frame.width,
+            oracle.width,
+            accuracy: 0.5,
+            "root=\(oracle) drawer=\(drawerShutter.frame)"
+        )
+        XCTAssertEqual(
+            drawerShutter.frame.height,
+            oracle.height,
+            accuracy: 0.5,
+            "root=\(oracle) drawer=\(drawerShutter.frame)"
+        )
+    }
+
     func testCaptureGuidanceRespectsLandscapeSafeAreas() {
         let app = launch(
             extraArguments: ["--visual-state=CAP-02b2"],
@@ -3718,8 +3787,7 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
-        let app = launch()
-        app.buttons["dock.trophy-wall"].tap()
+        let app = launch(extraArguments: ["--fixture=trophy-wall"])
         let processing = app.buttons["trophy.wall.processing"]
         let account = app.buttons["trophy.wall.account"]
 
@@ -3738,7 +3806,9 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testKeyboardHidesTheFloatingDock() {
-        let app = launch(extraArguments: ["--keyboard-probe"])
+        // #1129: the probe lives on the home surface, so this launches onto
+        // the wall rather than behind the Scan drawer.
+        let app = launch(extraArguments: ["--fixture=trophy-wall", "--keyboard-probe"])
         let probe = app.textFields["fixture.keyboard-probe"]
 
         probe.tap()
@@ -3968,8 +4038,10 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testAccessibilityDynamicTypeKeepsFoundationControlsReachable() {
-        let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
-        app.buttons["dock.trophy-wall"].tap()
+        let app = launch(extraArguments: [
+            "--fixture=trophy-wall",
+            "--dynamic-type=accessibility3"
+        ])
 
         XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["trophy.wall.processing"].exists)

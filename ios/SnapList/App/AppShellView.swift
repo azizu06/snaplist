@@ -62,6 +62,10 @@ struct AppShellView: View {
     @State private var isDeleteAccountFlowPresented = false
     @State private var hasConsumedMountedFirstValueDirectScanCommand = false
     @State private var hasAppliedLaunchScanPresentation = false
+    /// #1129: bumped when a completed submission puts the seller back on the
+    /// wall. A token rather than a Bool the wall has to clear, so two
+    /// completions in a row are two distinct requests.
+    @State private var trophyWallScrollToTopToken = 0
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
     @State private var photoReviewSaveFailure: PhotoReviewSaveFailure?
@@ -604,6 +608,17 @@ struct AppShellView: View {
                     if event == .openVoiceNote {
                         advanceActivationGuidance(for: .openedVoiceNote)
                     }
+                    // #1129: Done is handled before the generic consumer so
+                    // the drawer's completion cannot take a second route. The
+                    // consumer's own handling of this case is exactly the
+                    // acknowledgement below, so nothing is skipped; what is
+                    // added is the part the owner's device pass found missing
+                    // — Done used to leave the seller back on the camera,
+                    // asking where the item went.
+                    if case .completeSavedSubmission(let eventID) = event {
+                        completeSavedSubmission(eventID: eventID)
+                        return
+                    }
                     if PhotoReviewSubmissionPrimaryActionConsumer.consume(
                         event,
                         submissionHost: submissionHost
@@ -670,13 +685,6 @@ struct AppShellView: View {
                 destination(for: route)
             }
         }
-        // #1129. The Scan drawer. A system sheet rather than a hand-built
-        // overlay, so the grabber, the downward swipe and the interactive
-        // dismiss are UIKit's and behave the way every other sheet on the
-        // device does. The wall stays mounted underneath it.
-        .sheet(isPresented: scanDrawerBinding) {
-            scanDrawerContent
-        }
         // A launch fixture that asks to start in Scan replays the same drawer
         // event the entry control raises, so there is exactly one path that
         // opens the drawer and exactly one that starts the camera.
@@ -710,6 +718,34 @@ struct AppShellView: View {
                     applyScanDrawer(.dismissed)
                 }
             }
+        )
+        // #1129. The Scan drawer, drawn rather than presented.
+        //
+        // A system sheet was the first choice — its grabber, swipe and
+        // interactive dismiss are free. But iOS 26 renders a sheet that does
+        // not reach the screen edges as an inset card and *scales its
+        // contents*: measured against the same camera rendered at the root,
+        // a 56pt shutter came back 53.3pt and every 44pt control became
+        // 42.2pt. The drawer has to cover 85-90% with the wall showing above
+        // it, and it may not buy that with a 4% shrink under the touch-target
+        // floor, so the presentation is ours. Attached after the dock so it
+        // draws over it.
+        .overlay {
+            if router.isScanPresented {
+                ScanDrawerSurface(
+                    reduceMotion: reduceMotion,
+                    dismiss: { applyScanDrawer(.dismissed) }
+                ) {
+                    scanDrawerContent
+                }
+                .transition(
+                    ScanDrawerMotionPolicy.transition(reduceMotion: reduceMotion)
+                )
+            }
+        }
+        .animation(
+            ScanDrawerMotionPolicy.presentationAnimation(reduceMotion: reduceMotion),
+            value: router.isScanPresented
         )
         .animation(
             reduceMotion ? nil : .easeInOut(duration: 0.16),
@@ -762,6 +798,23 @@ struct AppShellView: View {
 
     /// Puts the seller back on the wall: clears the pushed stack, and drops the
     /// drawer if it happens to be up.
+    /// #1129: what Done means now. The item is already on its way — the
+    /// acceptance was ingested when the server took it — so finishing drops
+    /// the drawer onto Trophy Wall rather than returning to the camera, which
+    /// is what left the owner asking where the item had gone. Scanning another
+    /// item stays one tap on the Scan entry control.
+    private func completeSavedSubmission(eventID: UUID) {
+        submissionHost.acknowledgePresentation(eventID: eventID)
+        router.resetWallPath()
+        applyScanDrawer(.submissionCompleted)
+        // The wall may be scrolled anywhere from before the item was started,
+        // so the seller is put back at the top where the newest work is.
+        trophyWallScrollToTopToken += 1
+        AccessibilityNotification.Announcement(
+            AppShellSubmissionCompletionCopy.announcement
+        ).post()
+    }
+
     private func returnToTrophyWall() {
         router.resetWallPath()
         applyScanDrawer(.dismissed)
@@ -792,27 +845,6 @@ struct AppShellView: View {
         }
     }
 
-    /// The sheet's own binding. UIKit drives the setter on an interactive
-    /// dismiss the shell never initiated, so routing it back through the
-    /// reducer is what keeps the drawer's state and the camera session in
-    /// agreement however the seller closed it.
-    private var scanDrawerBinding: Binding<Bool> {
-        Binding(
-            get: { router.isScanPresented },
-            set: { isPresented in
-                guard !isPresented else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations =
-                    !ScanDrawerMotionPolicy.shouldAnimatePresentation(
-                        reduceMotion: reduceMotion
-                    )
-                withTransaction(transaction) {
-                    applyScanDrawer(.dismissed)
-                }
-            }
-        )
-    }
-
     /// What the drawer holds. The whole capture flow lives in here — the
     /// camera, and Photo Review once an intake is open — so the seller never
     /// leaves the drawer between the first photo and Done.
@@ -835,8 +867,6 @@ struct AppShellView: View {
                 .accessibilityLabel("Scan drawer")
                 .accessibilityIdentifier("scan.drawer")
         }
-        .presentationDetents([.fraction(ScanDrawerMetrics.heightFraction)])
-        .presentationDragIndicator(.visible)
         .fixtureAccessibilityOverrides(configuration)
     }
 
@@ -915,6 +945,7 @@ struct AppShellView: View {
             forceReducedMotion: configuration.forceReducedMotion,
             startNewItem: startNewItem,
             returnToTrophyWall: returnToTrophyWall,
+            scrollToTopToken: trophyWallScrollToTopToken,
             activationListingReviewOpened: {
                 activationListingReviewPresented = true
                 advanceActivationGuidance(for: .openedProcessing)
@@ -2470,6 +2501,9 @@ struct TrophyWallFeatureView: View {
     /// destination of its own.
     let startNewItem: () -> Void
     let returnToTrophyWall: () -> Void
+    /// #1129: incremented by the shell when a completed submission returns the
+    /// seller to the wall, so the grid goes back to the top.
+    let scrollToTopToken: Int
     let activationListingReviewOpened: () -> Void
     let activationListingReviewDismissed: () -> Void
     let activationGuestClaimPresentationChanged: (Bool) -> Void
@@ -2510,7 +2544,8 @@ struct TrophyWallFeatureView: View {
             },
             onScan: startNewItem,
             onTryAgain: { refreshState.tryAgain() },
-            namespace: zoomTransitionNamespace
+            namespace: zoomTransitionNamespace,
+            scrollToTopToken: scrollToTopToken
         )
         .task(id: refreshState.taskID()) {
             await store.recoverCollection(using: repository)

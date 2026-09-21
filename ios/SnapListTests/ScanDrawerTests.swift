@@ -111,3 +111,102 @@ final class ScanDrawerPresentationTests: XCTestCase {
         )
     }
 }
+
+final class AppShellSubmissionCompletionCopyTests: XCTestCase {
+    /// #1129: the exact line VoiceOver hears when a saved item drops the
+    /// drawer. Pinned because it is the only thing that tells a seller who
+    /// cannot see the wall that their item went somewhere, and because the
+    /// seller-facing vocabulary may never name a queue, worker or lease.
+    func testTheCompletionAnnouncementNamesWhereTheItemWentAndWhatItIsDoing() {
+        XCTAssertEqual(
+            AppShellSubmissionCompletionCopy.announcement,
+            "Item added to Trophy Wall. Analysing."
+        )
+    }
+}
+
+final class ScanDrawerDragPolicyTests: XCTestCase {
+    private let drawerHeight: CGFloat = 700
+
+    /// A short tug that the seller lets go of is not a dismissal. The drawer
+    /// holds an unfinished intake, so the cheap mistake has to be the one that
+    /// keeps it open.
+    func testAShortSlowDragSettlesBackInsteadOfDismissing() {
+        XCTAssertEqual(
+            ScanDrawerDragPolicy.outcome(
+                translation: drawerHeight * 0.2,
+                velocity: 0,
+                drawerHeight: drawerHeight
+            ),
+            .settle
+        )
+    }
+
+    func testDraggingPastAQuarterOfTheDrawerDismissesIt() {
+        XCTAssertEqual(
+            ScanDrawerDragPolicy.outcome(
+                translation: drawerHeight * 0.26,
+                velocity: 0,
+                drawerHeight: drawerHeight
+            ),
+            .dismiss
+        )
+    }
+
+    /// A flick is an intention even when the finger barely moved.
+    func testAFastFlickDismissesFromAnyDistance() {
+        XCTAssertEqual(
+            ScanDrawerDragPolicy.outcome(
+                translation: 12,
+                velocity: ScanDrawerDragPolicy.dismissVelocity,
+                drawerHeight: drawerHeight
+            ),
+            .dismiss
+        )
+    }
+
+    /// Dragging up is not a dismissal however hard it is thrown; the drawer is
+    /// already at its full height.
+    func testAnUpwardDragNeverDismisses() {
+        XCTAssertEqual(
+            ScanDrawerDragPolicy.outcome(
+                translation: -400,
+                velocity: -4000,
+                drawerHeight: drawerHeight
+            ),
+            .settle
+        )
+    }
+
+    func testDownwardDragFollowsTheFingerExactly() {
+        XCTAssertEqual(
+            ScanDrawerDragPolicy.offset(forTranslation: 120, drawerHeight: drawerHeight),
+            120,
+            accuracy: 0.001
+        )
+    }
+
+    /// Upward, the drawer gives a little and resists: some travel, always less
+    /// than the finger, and never more than the drawer's own height however
+    /// far the drag goes.
+    func testUpwardDragIsRubberBandedRatherThanFollowedOrFrozen() {
+        let modest = ScanDrawerDragPolicy.offset(
+            forTranslation: -100,
+            drawerHeight: drawerHeight
+        )
+        XCTAssertLessThan(modest, 0, "The drawer has to give something.")
+        XCTAssertGreaterThan(modest, -100, "It must not follow the finger.")
+
+        let extreme = ScanDrawerDragPolicy.offset(
+            forTranslation: -100_000,
+            drawerHeight: drawerHeight
+        )
+        XCTAssertGreaterThan(
+            extreme,
+            -drawerHeight,
+            "However hard it is pulled, the give stays bounded."
+        )
+        XCTAssertLessThan(extreme, modest, "Pulling harder still gives more.")
+    }
+}
+
