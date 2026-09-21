@@ -2517,8 +2517,10 @@ final class TrophyWallDomainTests: XCTestCase {
     func testTheWallRefetchesOnceEachTimeTheScanDrawerComesDown() async throws {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: [])
+        // A load that succeeds: a failed one retries on its own timer, and
+        // those fetches would be counted as drawer returns.
         let repository = ScriptedTrophyWallRunHistoryRepository(
-            results: [.failure(RunAPIError.unavailable)]
+            results: [.page(TrophyWallRunHistoryPage(entries: [], nextCursor: nil))]
         )
         let router = AppRouter(initialTab: .trophyWall)
         let root = TrophyWallFeatureTestRoot(
