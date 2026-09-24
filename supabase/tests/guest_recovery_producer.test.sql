@@ -1,6 +1,6 @@
 begin;
 
-select plan(69);
+select plan(73);
 
 select has_column(
   'private', 'mobile_item_submissions', 'recovery_id',
@@ -782,40 +782,89 @@ select is(
 -- recomputing that digest from the current envelope paths.
 reset role;
 
--- The cleanup proof requires a row staged by the top-level transaction, so
--- stage it here; only the rejected update runs inside throws_ok.
+create temporary table remapped_recovery on commit drop as
+select
+  recovery.id as recovery_id,
+  recovery.item_id,
+  recovery.draft_id,
+  item.photos as envelope_paths
+from private.guest_draft_recoveries recovery
+join public.items item on item.id = recovery.item_id
+where recovery.id = '63830000-0000-4000-8000-000000000013';
+
+-- Each control isolates one requirement. The cleanup proof requires a row
+-- staged by the top-level transaction, so jobs are staged here; the draft
+-- removal and the rejected scrub run inside throws_ok and roll back together.
 insert into private.pipeline_storage_cleanup_jobs (
   source_type, source_id, photo_paths
-) values (
-  'guest_recovery',
-  '63830000-0000-4000-8000-000000000013',
-  array[
-    'guest_21d440432c7055a7284db05990333cd2c7d76a8a185db3ef/guest-recovery/63830000-0000-4000-8000-000000000013/0-front.enc'
-  ]
-);
+)
+select 'guest_recovery', recovery_id, envelope_paths
+from remapped_recovery;
 select throws_ok(
   $$
-    update public.items
-    set photos = '{}'::text[]
-    where id = (select item_id from acquired_guest_run)
+    do $scrub$ begin
+      delete from public.listings
+      where id = (select draft_id from remapped_recovery);
+      update public.items
+      set photos = '{}'::text[]
+      where id = (select item_id from remapped_recovery);
+    end $scrub$
   $$,
   '23514',
   'A credited item photo set is immutable; start a new AI-item run',
   'exact cleanup authority cannot scrub a remapped recovery before it expires'
 );
-delete from private.pipeline_storage_cleanup_jobs
-where source_type = 'guest_recovery'
-  and source_id = '63830000-0000-4000-8000-000000000013';
 
 update private.guest_draft_recoveries
 set usable_draft_at = statement_timestamp() - interval '24 hours',
     expires_at = statement_timestamp()
-where id = '63830000-0000-4000-8000-000000000013';
+where id = (select recovery_id from remapped_recovery);
 select throws_ok(
   $$
     update public.items
     set photos = '{}'::text[]
-    where id = (select item_id from acquired_guest_run)
+    where id = (select item_id from remapped_recovery)
+  $$,
+  '23514',
+  'A credited item photo set is immutable; start a new AI-item run',
+  'a due remapped recovery cannot be scrubbed while its unclaimed draft exists'
+);
+
+update private.pipeline_storage_cleanup_jobs cleanup
+set photo_paths = remapped.envelope_paths || array[
+  'guest_21d440432c7055a7284db05990333cd2c7d76a8a185db3ef/guest-recovery/63830000-0000-4000-8000-000000000013/1-extra.enc'
+]
+from remapped_recovery remapped
+where cleanup.source_type = 'guest_recovery'
+  and cleanup.source_id = remapped.recovery_id;
+select throws_ok(
+  $$
+    do $scrub$ begin
+      delete from public.listings
+      where id = (select draft_id from remapped_recovery);
+      update public.items
+      set photos = '{}'::text[]
+      where id = (select item_id from remapped_recovery);
+    end $scrub$
+  $$,
+  '23514',
+  'A credited item photo set is immutable; start a new AI-item run',
+  'a due remapped recovery requires cleanup authority for exactly its photos'
+);
+
+delete from private.pipeline_storage_cleanup_jobs cleanup
+using remapped_recovery remapped
+where cleanup.source_type = 'guest_recovery'
+  and cleanup.source_id = remapped.recovery_id;
+select throws_ok(
+  $$
+    do $scrub$ begin
+      delete from public.listings
+      where id = (select draft_id from remapped_recovery);
+      update public.items
+      set photos = '{}'::text[]
+      where id = (select item_id from remapped_recovery);
+    end $scrub$
   $$,
   '23514',
   'A credited item photo set is immutable; start a new AI-item run',
@@ -839,6 +888,19 @@ select is(
    where id = '63830000-0000-4000-8000-000000000013'),
   'expired',
   'the remapped recovery reaches its terminal expired state'
+);
+select is(
+  (select count(*)::integer
+   from public.listings
+   where id = (select draft_id from remapped_recovery)),
+  0,
+  'expiry deletes the unclaimed guest draft'
+);
+select ok(
+  (select encrypted_artifact is null and storage_manifest is null
+   from private.guest_draft_recoveries
+   where id = '63830000-0000-4000-8000-000000000013'),
+  'expiry discards the encrypted draft artifact and its manifest'
 );
 select is(
   (select item.photos

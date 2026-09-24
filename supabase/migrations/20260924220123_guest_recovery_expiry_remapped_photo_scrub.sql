@@ -9,11 +9,12 @@
 --
 -- The guard keeps every existing requirement. A digest mismatch is excused only
 -- for the settled reservation bound to a due, unclaimed recovery of this item
--- whose run carries the recovery identity, whose canonical photo identity still
--- matches the item, whose manifest is exactly the current photo set, and whose
--- exact cleanup job was staged in this transaction.
+-- whose run carries the recovery identity, whose unclaimed draft is already
+-- gone, whose canonical photo identity still matches the item, whose manifest
+-- is exactly the current photo set, and whose exact cleanup job was staged in
+-- this transaction.
 
-create or replace function private.guest_recovery_expiry_scrub_allowed(
+create or replace function private.guest_recovery_expiry_photo_digest_excused(
   p_item public.items,
   p_reservation public.ai_item_credit_reservations
 )
@@ -42,6 +43,11 @@ as $$
       and recovery.pipeline_run_id = p_reservation.pipeline_run_id
       and recovery.state in ('claimable', 'copying')
       and recovery.expires_at <= statement_timestamp()
+      and not exists (
+        select 1
+        from public.listings draft
+        where draft.id = recovery.draft_id
+      )
       and private.guest_manifest_source_paths(recovery.storage_manifest)
         is not distinct from p_item.photos
       and p_reservation.item_id = p_item.id
@@ -53,7 +59,7 @@ as $$
   )
 $$;
 
-revoke all on function private.guest_recovery_expiry_scrub_allowed(
+revoke all on function private.guest_recovery_expiry_photo_digest_excused(
   public.items, public.ai_item_credit_reservations
 ) from public, anon, authenticated, service_role;
 
@@ -102,7 +108,7 @@ begin
           or (
             reservation.photo_set_fingerprint
               is distinct from v_photo_set_fingerprint
-            and not private.guest_recovery_expiry_scrub_allowed(old, reservation)
+            and not private.guest_recovery_expiry_photo_digest_excused(old, reservation)
           )
         )
     )
