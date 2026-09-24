@@ -1,6 +1,6 @@
 begin;
 
-select plan(60);
+select plan(69);
 
 select has_column(
   'private', 'mobile_item_submissions', 'recovery_id',
@@ -774,6 +774,115 @@ select is(
    from public.items item
    where item.id = (select item_id from acquired_guest_run)),
   'the issuable handoff preserves the run immutable photo-set fingerprint'
+);
+
+-- Hourly maintenance must be able to expire the recovery this producer
+-- registers. The remap above leaves the credited legacy path digest on the
+-- plaintext staging paths, so the 24-hour photo scrub cannot be proven by
+-- recomputing that digest from the current envelope paths.
+reset role;
+
+-- The cleanup proof requires a row staged by the top-level transaction, so
+-- stage it here; only the rejected update runs inside throws_ok.
+insert into private.pipeline_storage_cleanup_jobs (
+  source_type, source_id, photo_paths
+) values (
+  'guest_recovery',
+  '63830000-0000-4000-8000-000000000013',
+  array[
+    'guest_21d440432c7055a7284db05990333cd2c7d76a8a185db3ef/guest-recovery/63830000-0000-4000-8000-000000000013/0-front.enc'
+  ]
+);
+select throws_ok(
+  $$
+    update public.items
+    set photos = '{}'::text[]
+    where id = (select item_id from acquired_guest_run)
+  $$,
+  '23514',
+  'A credited item photo set is immutable; start a new AI-item run',
+  'exact cleanup authority cannot scrub a remapped recovery before it expires'
+);
+delete from private.pipeline_storage_cleanup_jobs
+where source_type = 'guest_recovery'
+  and source_id = '63830000-0000-4000-8000-000000000013';
+
+update private.guest_draft_recoveries
+set usable_draft_at = statement_timestamp() - interval '24 hours',
+    expires_at = statement_timestamp()
+where id = '63830000-0000-4000-8000-000000000013';
+select throws_ok(
+  $$
+    update public.items
+    set photos = '{}'::text[]
+    where id = (select item_id from acquired_guest_run)
+  $$,
+  '23514',
+  'A credited item photo set is immutable; start a new AI-item run',
+  'a due remapped recovery still requires same-transaction cleanup authority'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"role":"service_role","sub":"guest-recovery-producer-test"}',
+  true
+);
+-- Called directly, not through lives_ok: the guard's cleanup proof binds the
+-- cleanup row to the top-level transaction, as in the maintenance RPC.
+select is(
+  (public.expire_guest_draft_recoveries(25)->>'expiredCount')::integer,
+  1,
+  'hourly maintenance expires a recovery registered through the photo remap'
+);
+select is(
+  (select state from private.guest_draft_recoveries
+   where id = '63830000-0000-4000-8000-000000000013'),
+  'expired',
+  'the remapped recovery reaches its terminal expired state'
+);
+select is(
+  (select item.photos
+   from public.items item
+   join acquired_guest_run acquired on acquired.item_id = item.id),
+  '{}'::text[],
+  'expiry scrubs the encrypted envelope references from the guest item'
+);
+select is(
+  (select cleanup.photo_paths
+   from private.pipeline_storage_cleanup_jobs cleanup
+   where cleanup.source_type = 'guest_recovery'
+     and cleanup.source_id = '63830000-0000-4000-8000-000000000013'
+     and cleanup.state = 'pending'),
+  array[
+    'guest_21d440432c7055a7284db05990333cd2c7d76a8a185db3ef/guest-recovery/63830000-0000-4000-8000-000000000013/0-front.enc'
+  ],
+  'expiry queues deletion of exactly the encrypted envelope objects'
+);
+select is(
+  (select count(*)::integer
+   from private.pipeline_storage_cleanup_jobs cleanup
+   where cleanup.source_type = 'staging'
+     and cleanup.source_id = '63830000-0000-4000-8000-000000000013'
+     and cleanup.state = 'pending'),
+  1,
+  'expiry leaves the superseded plaintext cleanup job in place'
+);
+select is(
+  (select concat(reservation.state, ':', reservation.photo_set_fingerprint)
+   from public.ai_item_credit_reservations reservation
+   where reservation.pipeline_run_id = (select run_id from acquired_guest_run)),
+  'settled:' || encode(
+    sha256(convert_to(array_to_json(array[
+      'guest_21d440432c7055a7284db05990333cd2c7d76a8a185db3ef/pipeline-staging/63830000-0000-4000-8000-000000000010/0/front.jpg'
+    ]::text[])::text, 'UTF8')),
+    'hex'
+  ),
+  'expiry preserves the settled credit and its credited photo-set digest'
+);
+select is(
+  (public.expire_guest_draft_recoveries(25)->>'expiredCount')::integer,
+  0,
+  'a repeated maintenance cycle does not expire the recovery twice'
 );
 
 select * from finish();
