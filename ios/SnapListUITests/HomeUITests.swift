@@ -37,8 +37,45 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(empty.buttons["trophy.wall.scan"].exists)
         XCTAssertFalse(empty.scrollViews["trophy.wall.grid"].exists)
         XCTAssertTrue(empty.staticTexts["Trophy Wall"].isHittable)
-        XCTAssertTrue(empty.buttons["trophy.wall.processing"].isHittable)
+        // #1134: the header clock is gone, and with nothing in flight the dock
+        // carries no Processing slot, so no empty Processing screen is one tap
+        // away.
+        XCTAssertFalse(empty.buttons["trophy.wall.processing"].exists)
+        XCTAssertFalse(empty.buttons["dock.processing"].exists)
         XCTAssertTrue(empty.buttons["trophy.wall.account"].isHittable)
+    }
+
+    /// #1134: Processing is a dock slot, not a header clock. With one item in
+    /// flight the dock carries three slots; Processing reads as selected on its
+    /// screen, Trophy Wall returns to the wall, and Processing comes back.
+    func testProcessingDockSlotNavigatesBetweenProcessingAndTrophyWall() {
+        let app = launch("RUN-02")
+
+        XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 3))
+        let processingSlot = app.buttons["dock.processing"]
+        let trophySlot = app.buttons["dock.trophy-wall"]
+        XCTAssertTrue(processingSlot.isHittable)
+        XCTAssertTrue(app.buttons["dock.scan"].isHittable)
+        XCTAssertTrue(processingSlot.isSelected)
+        XCTAssertFalse(trophySlot.isSelected)
+        XCTAssertEqual(processingSlot.label, "Processing, 1 item")
+        XCTAssertGreaterThanOrEqual(processingSlot.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(processingSlot.frame.height, 44)
+        addScreenshot(named: "DOCK-PROCESSING-selected.png")
+
+        trophySlot.tap()
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.otherElements["trophy.processing"].exists)
+        XCTAssertFalse(app.buttons["trophy.wall.processing"].exists)
+        XCTAssertTrue(trophySlot.isSelected)
+        XCTAssertFalse(processingSlot.isSelected)
+        addScreenshot(named: "DOCK-TROPHY-selected.png")
+
+        processingSlot.tap()
+        XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 2))
+        XCTAssertTrue(processingSlot.isSelected)
+        app.buttons["trophy.processing.back"].tap()
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
     }
 
     /// Trophy Wall is the seller's one return destination, and the tile is how
@@ -312,16 +349,11 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["home.search.open"].exists)
         XCTAssertFalse(app.staticTexts["Orders"].exists)
 
-        let processing = app.buttons["trophy.wall.processing"]
-        XCTAssertTrue(processing.isHittable)
-        XCTAssertGreaterThanOrEqual(processing.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(processing.frame.height, 44)
-        processing.tap()
-
-        XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 2))
-        app.buttons["trophy.processing.back"].tap()
-        XCTAssertTrue(wall.waitForExistence(timeout: 2))
-        XCTAssertTrue(processing.isHittable)
+        // #1134: the settled wall has nothing in flight, so neither the
+        // retired header clock nor a Processing dock slot is offered.
+        XCTAssertFalse(app.buttons["trophy.wall.processing"].exists)
+        XCTAssertFalse(app.buttons["dock.processing"].exists)
+        XCTAssertTrue(app.buttons["dock.trophy-wall"].isHittable)
     }
 
     func testTrophyWallRemainsReachableAtAccessibilityTypeWithReducedMotion() {
@@ -1007,6 +1039,13 @@ final class HomeUITests: XCTestCase {
             isVerticallyClear(finalTile.frame, within: viewport),
             "Final tile frame \(finalTile.frame) must fit within the unobscured scroll viewport \(viewport)."
         )
+    }
+
+    private func addScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func launch(

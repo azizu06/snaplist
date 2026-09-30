@@ -776,4 +776,56 @@ final class AppNavigationTests: XCTestCase {
             XCTAssertEqual(router.pathBinding.wrappedValue, [.settings])
         }
     }
+
+    // MARK: - #1134 Processing dock slot
+
+    func testProcessingSlotPresencePolicyCoversAllThreeValues() {
+        let primary: [DockSlot] = [.primary(.scan), .primary(.trophyWall)]
+
+        XCTAssertEqual(ProcessingDockSlotPresence.current, .whenActive)
+
+        XCTAssertEqual(DockSlotPolicy.slots(processingCount: 0, presence: .whenActive), primary)
+        XCTAssertEqual(DockSlotPolicy.slots(processingCount: 3, presence: .whenActive), primary + [.processing])
+
+        XCTAssertEqual(DockSlotPolicy.slots(processingCount: 0, presence: .always), primary + [.processing])
+        XCTAssertEqual(DockSlotPolicy.slots(processingCount: 3, presence: .always), primary + [.processing])
+
+        XCTAssertEqual(DockSlotPolicy.slots(processingCount: 0, presence: .never), primary)
+        XCTAssertEqual(DockSlotPolicy.slots(processingCount: 3, presence: .never), primary)
+    }
+
+    func testProcessingSlotIsSelectedOnlyWhileTheProcessingScreenIsOnTop() {
+        XCTAssertEqual(DockSlotPolicy.selectedSlot(path: []), .primary(.trophyWall))
+        XCTAssertEqual(DockSlotPolicy.selectedSlot(path: [.home(.processing)]), .processing)
+        XCTAssertEqual(DockSlotPolicy.selectedSlot(path: [.settings]), .primary(.trophyWall))
+        XCTAssertEqual(
+            DockSlotPolicy.selectedSlot(path: [.home(.processing), .settings]),
+            .primary(.trophyWall)
+        )
+    }
+
+    func testProcessingSlotUsesAProgressIconAndCountsInItsLabel() {
+        XCTAssertEqual(DockSlot.processing.accessibilityIdentifier, "dock.processing")
+        XCTAssertEqual(DockSlot.primary(.scan).accessibilityIdentifier, "dock.scan")
+        XCTAssertEqual(DockSlot.primary(.trophyWall).accessibilityIdentifier, "dock.trophy-wall")
+        XCTAssertNotEqual(DockSlot.processing.systemImage(isSelected: false), "clock")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "Processing")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 1), "Processing, 1 item")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 4), "Processing, 4 items")
+    }
+
+    @MainActor
+    func testProcessingDockSlotLandsOnProcessingFromAnywhereInTheWallStack() {
+        let router = AppRouter(initialTab: .trophyWall)
+        router.openProcessingFromDock()
+        XCTAssertEqual(router.selectedPath, [.home(.processing)])
+
+        router.openProcessingFromDock()
+        XCTAssertEqual(router.selectedPath, [.home(.processing)])
+
+        router.resetWallPath()
+        router.navigate(to: .settings)
+        router.openProcessingFromDock()
+        XCTAssertEqual(router.selectedPath, [.home(.processing)])
+    }
 }

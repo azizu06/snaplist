@@ -81,14 +81,16 @@ extension EnvironmentValues {
     }
 }
 
-/// The one approved dock: exactly the two primary destinations, rendered the
-/// same way on every screen that shows it. It iterates `PrimaryTab` rather than
-/// a parallel dock enum so a destination cannot exist in one list and not the
-/// other.
+/// The one approved dock: the two primary destinations plus, per
+/// `ProcessingDockSlotPresence`, a Processing shortcut (#1134), rendered the
+/// same way on every screen that shows it. Slots come from `DockSlotPolicy`
+/// rather than being listed here, so the dock cannot drift from the policy.
 struct FloatingDock: View {
-    let selectedTab: PrimaryTab
+    let slots: [DockSlot]
+    let selectedSlot: DockSlot
+    var processingCount: Int = 0
     var scale: CGFloat = DockScrollScalePolicy.fullScale
-    let select: (PrimaryTab) -> Void
+    let select: (DockSlot) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
@@ -109,6 +111,12 @@ struct FloatingDock: View {
         .scaleEffect(scale, anchor: .bottom)
     }
 
+    private var slotMotion: Animation? {
+        DockGlassMotionPolicy.shouldAnimateSelectionMorph(reduceMotion: systemReduceMotion)
+            ? .default
+            : nil
+    }
+
     /// `.glassEffect` is applied straight to the icon row's own content
     /// (background is its documented contract: the row's foreground still
     /// renders on top), never to a separately-sized decoy view. A decoy — a
@@ -126,25 +134,21 @@ struct FloatingDock: View {
     private var glassBody: some View {
         GlassEffectContainer(spacing: FloatingDockMetrics.destinationSpacing) {
             HStack(spacing: FloatingDockMetrics.destinationSpacing) {
-                ForEach(PrimaryTab.allCases) { tab in
-                    tabButton(tab)
+                ForEach(slots) { slot in
+                    slotButton(slot)
                 }
             }
             .padding(FloatingDockMetrics.contentPadding)
             .glassEffect(.regular, in: SnapListShape(minimumRadius: FloatingDockMetrics.cornerRadius))
-            .animation(
-                DockGlassMotionPolicy.shouldAnimateSelectionMorph(reduceMotion: systemReduceMotion)
-                    ? .default
-                    : nil,
-                value: selectedTab
-            )
+            .animation(slotMotion, value: selectedSlot)
+            .animation(slotMotion, value: slots)
         }
     }
 
     private var legacyBody: some View {
         HStack(spacing: FloatingDockMetrics.destinationSpacing) {
-            ForEach(PrimaryTab.allCases) { tab in
-                tabButton(tab)
+            ForEach(slots) { slot in
+                slotButton(slot)
             }
         }
         .padding(FloatingDockMetrics.contentPadding)
@@ -157,34 +161,56 @@ struct FloatingDock: View {
             SnapListShape(minimumRadius: FloatingDockMetrics.cornerRadius)
                 .stroke(SnapListColorToken.inkPrimary.color.opacity(0.08), lineWidth: 1)
         }
+        .animation(slotMotion, value: slots)
     }
 
-    private func tabButton(_ tab: PrimaryTab) -> some View {
-        let isSelected = tab == selectedTab
+    private func slotButton(_ slot: DockSlot) -> some View {
+        let isSelected = slot == selectedSlot
 
         return Button {
-            select(tab)
+            select(slot)
         } label: {
-            Image(systemName: tab.systemImage(isSelected: isSelected))
+            Image(systemName: slot.systemImage(isSelected: isSelected))
                 .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? SnapListColorToken.action.color : SnapListColorToken.textTertiary.color)
                 .frame(
                     width: FloatingDockMetrics.destinationWidth,
-                    height: FloatingDockMetrics.destinationHeight(for: selectedTab)
+                    height: FloatingDockMetrics.destinationHeight(for: .trophyWall)
                 )
                 .background(isSelected ? SnapListColorToken.actionTint.color : Color.clear)
                 .clipShape(SnapListShape(minimumRadius: 16))
+                .overlay(alignment: .topTrailing) {
+                    if slot == .processing, processingCount > 0 {
+                        DockCountBadge(count: processingCount)
+                    }
+                }
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(tab.title)
+        .accessibilityLabel(slot.accessibilityLabel(processingCount: processingCount))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .accessibilityIdentifier("dock.\(tab.rawValue)")
-        // #1129: the Scan slot is the Scan drawer's entry control, so it
-        // publishes its frame under the stable `scanEntry` anchor. A mark
-        // that points at "start an item" then keeps pointing at the right
-        // control if the entry stops being a dock slot.
-        .modifier(ScanEntryAnchor(isScanEntry: tab == .scan) { select(tab) })
+        .accessibilityIdentifier(slot.accessibilityIdentifier)
+        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+        .modifier(DockSlotAnchor(slot: slot) { select(slot) })
+    }
+}
+
+/// The in-flight count on the Processing slot. Decorative to VoiceOver: the
+/// slot's own label already carries the count.
+private struct DockCountBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: 11, weight: .bold))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(Capsule().fill(SnapListColorToken.action.color))
+            .padding(.top, 4)
+            .padding(.trailing, 4)
+            .accessibilityHidden(true)
     }
 }
 
@@ -203,24 +229,38 @@ extension View {
     /// option, with today's hard-clip unchanged.
     @ViewBuilder
     func floatingDock(
-        selectedTab: PrimaryTab,
+        slots: [DockSlot] = DockSlotPolicy.slots(processingCount: 0),
+        selectedSlot: DockSlot = .primary(.trophyWall),
+        processingCount: Int = 0,
         isVisible: Bool = true,
         scale: CGFloat = DockScrollScalePolicy.fullScale,
-        select: @escaping (PrimaryTab) -> Void
+        select: @escaping (DockSlot) -> Void
     ) -> some View {
         if #available(iOS 26.0, *) {
             safeAreaBar(edge: .bottom, spacing: 0) {
                 if isVisible {
-                    FloatingDock(selectedTab: selectedTab, scale: scale, select: select)
-                        .padding(.bottom, FloatingDockMetrics.bottomInset(for: selectedTab))
+                    FloatingDock(
+                        slots: slots,
+                        selectedSlot: selectedSlot,
+                        processingCount: processingCount,
+                        scale: scale,
+                        select: select
+                    )
+                        .padding(.bottom, FloatingDockMetrics.bottomInset(for: .trophyWall))
                         .transition(.opacity)
                 }
             }
         } else {
             safeAreaInset(edge: .bottom, spacing: 0) {
                 if isVisible {
-                    FloatingDock(selectedTab: selectedTab, scale: scale, select: select)
-                        .padding(.bottom, FloatingDockMetrics.bottomInset(for: selectedTab))
+                    FloatingDock(
+                        slots: slots,
+                        selectedSlot: selectedSlot,
+                        processingCount: processingCount,
+                        scale: scale,
+                        select: select
+                    )
+                        .padding(.bottom, FloatingDockMetrics.bottomInset(for: .trophyWall))
                         .transition(.opacity)
                 }
             }
@@ -229,18 +269,23 @@ extension View {
 }
 
 
-/// Publishes the Scan entry control's frame under `ActivationSpotlightTarget
-/// .scanEntry`, and only for the one slot that is the entry. `isScanEntry` is
-/// fixed per slot, so the branch below is decided once at composition and
-/// never flips a live view's identity.
-private struct ScanEntryAnchor: ViewModifier {
-    let isScanEntry: Bool
+/// Publishes the Scan slot's frame under `ActivationSpotlightTarget
+/// .scanEntry` and the Processing slot's under `.trophyWallProcessing`, so
+/// the coach marks that used to point at the Scan tab and the header clock
+/// point at the dock slots that replaced them. `slot` is fixed per button, so
+/// the branch below is decided once at composition and never flips a live
+/// view's identity.
+private struct DockSlotAnchor: ViewModifier {
+    let slot: DockSlot
     let select: () -> Void
 
     func body(content: Content) -> some View {
-        if isScanEntry {
+        switch slot {
+        case .primary(.scan):
             content.activationSpotlightTarget(.scanEntry, action: select)
-        } else {
+        case .processing:
+            content.activationSpotlightTarget(.trophyWallProcessing, action: select)
+        case .primary(.trophyWall):
             content
         }
     }

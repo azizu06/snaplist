@@ -705,19 +705,27 @@ struct AppShellView: View {
         .environment(\.accountDeletionDependencies, accountDeletionDependencies)
         .environment(\.dockScrollScale, dockScrollScale)
         // #1129: the dock's Scan destination stops selecting a second root and
-        // becomes the entry control that raises the drawer, so Trophy Wall is
-        // the only thing the dock can be "on". Whether the dock survives at
-        // all is the owner's call; this is the seam that decision moves.
+        // becomes the entry control that raises the drawer. #1134: Processing
+        // moves off the wall header's clock into its own dock slot, which
+        // reads as selected while the Processing screen is on top.
         .floatingDock(
-            selectedTab: .trophyWall,
+            slots: DockSlotPolicy.slots(processingCount: dockProcessingCount),
+            selectedSlot: DockSlotPolicy.selectedSlot(path: router.selectedPath),
+            processingCount: dockProcessingCount,
             isVisible: shellChromeProjection.showsDock,
             scale: dockScrollScale.scale,
-            select: { destination in
-                switch destination {
-                case .scan:
+            select: { slot in
+                switch slot {
+                case .primary(.scan):
                     applyScanDrawer(.scanEntryControlTapped)
-                case .trophyWall:
+                case .primary(.trophyWall):
+                    if router.selectedPath.last == .home(.processing) {
+                        router.resetWallPath()
+                    }
                     applyScanDrawer(.dismissed)
+                case .processing:
+                    applyScanDrawer(.dismissed)
+                    router.openProcessingFromDock()
                 }
             }
         )
@@ -1194,6 +1202,20 @@ struct AppShellView: View {
         case .unknown:
             nil
         }
+    }
+
+    /// The in-flight items the Processing slot counts and gates on: exactly
+    /// the rows the Processing screen lists, so the badge never promises a
+    /// row the screen does not show.
+    private var dockProcessingCount: Int {
+#if DEBUG
+        // The Processing fixture draws its rows from its own store at the
+        // root, so the slot counts what that screen actually shows.
+        if configuration.fixture == .trophyProcessing {
+            return TrophyWallProcessingLaunchFixture.store.processingRows.count
+        }
+#endif
+        return trophyWallStore.processingRows.count
     }
 
     private var shellChromeProjection: AppShellChromeProjection {
@@ -2576,9 +2598,6 @@ struct TrophyWallFeatureView: View {
         TrophyWallView(
             store: store,
             accountInitials: accountInitials,
-            openProcessing: {
-                router.navigate(to: .home(.processing))
-            },
             openAccount: { router.navigate(to: .settings) },
             openListing: { runID in
                 await openListing(runID)

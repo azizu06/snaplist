@@ -31,7 +31,6 @@ struct TrophyWallView: View {
     /// so the header can never show a different answer than Settings does
     /// for the same signed-in seller (#1051).
     let accountInitials: String
-    let openProcessing: () -> Void
     let openAccount: () -> Void
     /// #963: a settled tile opens its listing surface directly rather than an
     /// intermediate run-status card. The outcome comes back so the tile can
@@ -66,24 +65,6 @@ struct TrophyWallView: View {
 
                 Spacer(minLength: 0)
 
-                Button(action: openProcessing) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 18, weight: .medium))
-                        .frame(
-                            width: SnapListMetrics.minimumTouchTarget,
-                            height: SnapListMetrics.minimumTouchTarget
-                        )
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .accessibilityLabel("Processing")
-                .accessibilityIdentifier("trophy.wall.processing")
-                .activationSpotlightTarget(
-                    .trophyWallProcessing,
-                    action: openProcessing
-                )
-
                 Button(action: openAccount) {
                     Text(accountInitials)
                         .font(.system(size: 14, weight: .semibold))
@@ -109,9 +90,13 @@ struct TrophyWallView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(SnapListColorToken.canvas.color)
+        // The wall draws its own header and never puts content in the system
+        // bar. Without this, a programmatic pop back to the wall (the dock's
+        // Trophy Wall slot, #1134) left an empty bar reserving space above it.
+        .toolbar(.hidden, for: .navigationBar)
         // On a plain stack the identifier binds to no element of its own and
         // propagates down instead, so the header buttons were all published as
-        // `trophy.wall` and `trophy.wall.processing` resolved to nothing.
+        // `trophy.wall` and `trophy.wall.account` resolved to nothing.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.wall")
     }
