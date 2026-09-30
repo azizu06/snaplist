@@ -2144,8 +2144,8 @@ final class SnapListUITests: XCTestCase {
 
     /// #1129: dismissing the drawer is a presentation change, never a
     /// cancellation. The held fixture keeps the submission in flight for ten
-    /// minutes, so however slow the runner, dragging the drawer away by its
-    /// header and bringing it back through the entry control finds the same
+    /// minutes, so however slow the runner, dragging the drawer away from its
+    /// body and bringing it back through the entry control finds the same
     /// item still sending. `delayed` resolves after eight seconds, and a
     /// resolved submission reads exactly like a cancelled one.
     func testDismissingTheDrawerMidSubmissionNeitherCancelsNorDropsTheItem() {
@@ -2171,16 +2171,12 @@ final class SnapListUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [saving], timeout: 3), .completed)
 
-        // The drawer's marker sits on its top edge; the 32pt grab band, the
-        // only place the drag starts, is directly below it.
+        // Start on the body, well below the grabber. A presentation-only
+        // dismissal must preserve the same in-flight item when reopened.
         let drawer = app.descendants(matching: .any)["scan.drawer"]
-        let header = drawer
-            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .withOffset(CGVector(dx: 0, dy: 16))
-        header.press(
-            forDuration: 0.05,
-            thenDragTo: header.withOffset(CGVector(dx: 0, dy: 500))
-        )
+        let body = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+        body.press(forDuration: 0.05, thenDragTo:
+            body.withOffset(CGVector(dx: 0, dy: 450)))
         XCTAssertTrue(
             drawer.waitForNonExistence(timeout: 3),
             app.debugDescription

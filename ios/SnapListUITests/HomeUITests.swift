@@ -261,6 +261,65 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(wall.isHittable, app.debugDescription)
     }
 
+    func testDownwardDragFromCameraSurfaceDismissesScanDrawer() {
+        let app = launch("HOME-02")
+        app.buttons["dock.scan"].tap()
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "camera-drawer-before-body-drag"
+        before.lifetime = .keepAlways
+        add(before)
+        // Well below the grabber, away from the camera's action controls.
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+        let topBefore = drawer.frame.minY
+        start.press(forDuration: 0.1,
+                    thenDragTo: start.withOffset(CGVector(dx: 0, dy: 60)),
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
+        XCTAssertTrue(drawer.exists, "A short slow drag must return to the open drawer.")
+        let settled = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in abs(drawer.frame.minY - topBefore) <= 1 },
+            object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 2), .completed)
+        XCTAssertEqual(drawer.frame.minY, topBefore, accuracy: 1)
+        start.press(forDuration: 0.1, thenDragTo:
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)))
+        XCTAssertTrue(drawer.waitForNonExistence(timeout: 3),
+            "Dragging the drawer body must close it, not require the grabber.")
+        XCTAssertTrue(app.otherElements["trophy.wall"].isHittable)
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "camera-drawer-after-body-drag"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
+    func testPhotoReviewDownwardScrollAwayFromTopKeepsDrawerOpen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture",
+                               "--zero-network-fixtures",
+                               "--dynamic-type=accessibility5"]
+        app.launchAfterRetiringPriorInstance()
+        app.buttons["scan.review"].tap()
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 5))
+        let voice = app.buttons["photo-review.voice"]
+        let originalY = voice.frame.minY
+        screen.swipeUp()
+        let scrolledY = voice.frame.minY
+        XCTAssertLessThan(scrolledY, originalY - 5,
+            "The fixture must overflow so this tests a scrolled surface.")
+        let start = screen.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.15))
+        let end = screen.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.95))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        XCTAssertTrue(app.descendants(matching: .any)["scan.drawer"].exists,
+            "A downward scroll from below the top must scroll content, not dismiss.")
+        XCTAssertGreaterThan(voice.frame.minY, scrolledY + 5)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "photo-review-scroll-preserved-accessibility5"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     /// One dock, two destinations, on every screen that shows it. The Scan
     /// camera used to draw its own `scan.tab` / `trophy-wall.tab` control; it now
     /// renders the same component, so the identifiers below are the only pair
