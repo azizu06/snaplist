@@ -782,7 +782,7 @@ final class AppNavigationTests: XCTestCase {
     func testProcessingSlotPresencePolicyCoversAllThreeValues() {
         let primary: [DockSlot] = [.primary(.scan), .primary(.trophyWall)]
 
-        XCTAssertEqual(ProcessingDockSlotPresence.current, .whenActive)
+        XCTAssertEqual(ProcessingDockSlotPresence.current, .always)
 
         XCTAssertEqual(DockSlotPolicy.slots(processingCount: 0, presence: .whenActive), primary)
         XCTAssertEqual(DockSlotPolicy.slots(processingCount: 3, presence: .whenActive), primary + [.processing])
@@ -792,6 +792,17 @@ final class AppNavigationTests: XCTestCase {
 
         XCTAssertEqual(DockSlotPolicy.slots(processingCount: 0, presence: .never), primary)
         XCTAssertEqual(DockSlotPolicy.slots(processingCount: 3, presence: .never), primary)
+    }
+
+    /// Captain, 2026-09-30: with nothing in flight the Processing slot is
+    /// still the one way to its screen, so it must exist at count zero. Its
+    /// existence and its badge are separate facts: zero carries no count in
+    /// the label (and `FloatingDock` draws no badge for zero).
+    func testProcessingSlotStaysReachableWithNothingInFlight() {
+        let slots = DockSlotPolicy.slots(processingCount: 0)
+
+        XCTAssertEqual(slots, [.primary(.scan), .primary(.trophyWall), .processing])
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "Processing")
     }
 
     func testProcessingSlotIsSelectedOnlyWhileTheProcessingScreenIsOnTop() {

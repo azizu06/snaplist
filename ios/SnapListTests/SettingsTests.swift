@@ -696,11 +696,45 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(flow.stateID, "DEL-02")
     }
 
+    /// The server's default free first listing verifies as `.included` with no
+    /// subscription, grant, or allowance period behind it. Settings must not
+    /// read it as "SnapList Pro · Included"; it names the included access and
+    /// its real remaining count, and says nothing about a subscription.
+    func testIncludedAllowanceIsNotLabelledAsSnapListPro() {
+        let included = SettingsSubscriptionPresentation(
+            state: .verified(
+                ServerVerifiedSubscription(
+                    source: .included,
+                    status: .included,
+                    remainingItems: 1,
+                    periodStart: nil,
+                    periodEnd: nil,
+                    gracePeriodEnd: nil,
+                    transitionState: .reconciled,
+                    legacyStripeStatus: nil
+                )
+            ),
+            locale: Locale(identifier: "en_US")
+        )
+
+        XCTAssertEqual(included.stateID, "SUB-06")
+        XCTAssertEqual(included.planLabel, "Plan")
+        XCTAssertEqual(included.status, "Included access")
+        XCTAssertEqual(included.remainingItems, 1)
+        XCTAssertFalse(included.accessibilityAnnouncement.contains("SnapList Pro"))
+        XCTAssertTrue(included.actions.contains(.seePlans))
+
+        XCTAssertEqual(
+            SettingsSubscriptionPresentation(state: .available([])).planLabel,
+            "SnapList Pro"
+        )
+    }
+
     func testSubscriptionPresentationKeepsEveryFrozenReadingDistinct() {
         let periodEnd = Date(timeIntervalSince1970: 1_786_406_400)
         let graceEnd = Date(timeIntervalSince1970: 1_784_937_600)
         let verified: [(VerifiedSubscriptionStatus, String, String, Bool, SettingsDeletionSubscriptionTruth)] = [
-            (.included, "SUB-06", "Included", true, .included),
+            (.included, "SUB-06", "Included access", true, .included),
             (.active, "SUB-07", "Active", true, .billing),
             (.grace, "SUB-08", "Payment problem", true, .billing),
             (.billingRetry, "SUB-09", "Retrying payment", true, .billing),

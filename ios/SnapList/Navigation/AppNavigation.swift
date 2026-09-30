@@ -26,12 +26,15 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
 /// Whether the dock carries a Processing slot. Processing is a secondary
 /// screen, not a third primary destination, so the slot is a shortcut that
 /// the owner can tune after a device pass by flipping `current` (#1134).
+/// The owner's device pass (2026-09-30) chose `.always`: with the header clock
+/// gone, hiding the slot at zero left an empty account no way to Processing.
+/// The count badge, not the slot, is what reports whether anything is in flight.
 enum ProcessingDockSlotPresence: Equatable {
     case always
     case whenActive
     case never
 
-    static let current: Self = .whenActive
+    static let current: Self = .always
 }
 
 /// One slot in the floating dock. The two primary destinations come straight
