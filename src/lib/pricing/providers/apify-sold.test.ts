@@ -11,7 +11,8 @@ import { priceResultSchema, type ItemSignal } from "../types";
 const apifySdk = vi.hoisted(() => ({
   clients: [] as Array<Record<string, unknown>>,
   actorIds: [] as string[],
-  call: vi.fn(),
+  start: vi.fn(),
+  getRun: vi.fn(),
   datasetIds: [] as string[],
   listItems: vi.fn(),
 }));
@@ -24,7 +25,11 @@ vi.mock("apify-client", () => ({
 
     actor(actorId: string) {
       apifySdk.actorIds.push(actorId);
-      return { call: apifySdk.call };
+      return { start: apifySdk.start };
+    }
+
+    run() {
+      return { get: apifySdk.getRun };
     }
 
     dataset(datasetId: string) {
@@ -114,7 +119,9 @@ describe("Apify sold-comp configuration", () => {
     apifySdk.clients.length = 0;
     apifySdk.actorIds.length = 0;
     apifySdk.datasetIds.length = 0;
-    apifySdk.call.mockReset().mockResolvedValue({
+    apifySdk.start.mockReset().mockResolvedValue({ id: "run-fixture", status: "RUNNING" });
+    apifySdk.getRun.mockReset().mockResolvedValue({
+      id: "run-fixture",
       status: "SUCCEEDED",
       defaultDatasetId: "dataset-fixture",
     });
@@ -151,7 +158,7 @@ describe("Apify sold-comp configuration", () => {
     });
     expect(apifySdk.actorIds).toEqual([APIFY_SOLD_ACTOR_ID]);
     expect(apifySdk.datasetIds).toEqual(["dataset-fixture"]);
-    expect(apifySdk.call).toHaveBeenCalledWith(
+    expect(apifySdk.start).toHaveBeenCalledWith(
       request.input,
       expect.objectContaining({
         build: APIFY_SOLD_ACTOR_BUILD_DEFAULT,
@@ -160,6 +167,7 @@ describe("Apify sold-comp configuration", () => {
         maxTotalChargeUsd: APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT,
       }),
     );
+    expect(apifySdk.getRun).toHaveBeenCalledWith({ waitForFinish: 20 });
     expect(apifySdk.listItems).toHaveBeenCalledWith({
       limit: APIFY_SOLD_MAX_RESULTS_DEFAULT,
     });
@@ -1509,7 +1517,7 @@ describe("createApifySoldPricingProvider", () => {
         emitDiagnostic: () => undefined,
       });
       let settled = false;
-      const first = provider.price(SIGNAL).then((value) => {
+      const first = withProviderUsageRun(() => provider.price(SIGNAL)).then((value) => {
         settled = true;
         return value;
       });
@@ -1517,7 +1525,16 @@ describe("createApifySoldPricingProvider", () => {
       await vi.advanceTimersByTimeAsync(2_501);
 
       expect(settled).toBe(true);
-      await expect(first).resolves.toBeNull();
+      const expired = await first;
+      expect(expired.value).toBeNull();
+      expect(expired.usage.soldComps).toEqual([{
+        strategy: "apify",
+        attempts: 1,
+        results: 0,
+        accepted: 0,
+        reason: "provider-error",
+        chargedUsd: null,
+      }]);
       const retry = provider.price(SIGNAL);
       await vi.advanceTimersByTimeAsync(2_501);
       await expect(retry).resolves.toBeNull();
@@ -1681,6 +1698,68 @@ describe("APIFY_SOLD_ACTOR_BUILD_DEFAULT (#1138)", () => {
  * status SUCCEEDED — so both runs succeeded and returned an EMPTY dataset.
  */
 describe("sold-comp usage reasons (#1138)", () => {
+  it.each(["thrown", "TIMED-OUT", "non-zero-exit"])(
+    "keeps a %s failure out of the success cache without allowing another paid start",
+    async (failure) => {
+      const cache = sharedTestCache<ApifySoldComp[]>();
+      const runActor = vi.fn(async () => {
+        if (failure === "thrown") throw new Error("synthetic transport failure");
+        if (failure === "non-zero-exit") {
+          return { status: "SUCCEEDED", exitCode: 1, items: [], chargedTotalUsd: 0.0031 };
+        }
+        return { status: "TIMED-OUT", items: [], chargedTotalUsd: 0.0031 };
+      });
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        emitDiagnostic: () => undefined,
+        runActor,
+      });
+      const secondWorker = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        emitDiagnostic: () => undefined,
+        runActor,
+      });
+
+      await withProviderUsageRun(() => provider.price(SIGNAL));
+      const { value, usage } = await withProviderUsageRun(() => secondWorker.price(SIGNAL));
+
+      expect(value).toBeNull();
+      expect(runActor).toHaveBeenCalledTimes(1);
+      // An empty cache hit would manufacture no-candidates for the next worker.
+      expect(usage.soldComps).toEqual([]);
+    },
+  );
+
+  it("counts a thrown retrieval as one provider error with unknown charge", async () => {
+    const runActor = vi.fn(async () => {
+      throw new Error("synthetic transport timeout after start");
+    });
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      emitDiagnostic: () => undefined,
+      runActor,
+    });
+
+    const { value, usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    expect(value).toBeNull();
+    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(usage.soldComps).toEqual([{
+      strategy: "apify",
+      attempts: 1,
+      results: 0,
+      accepted: 0,
+      reason: "provider-error",
+      chargedUsd: null,
+    }]);
+  });
+
   it("names an empty successful run rather than leaving it indistinguishable", async () => {
     const provider = createApifySoldPricingProvider({
       enabled: true,

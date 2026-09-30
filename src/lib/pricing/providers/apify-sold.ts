@@ -492,23 +492,39 @@ export function normalizeApifySoldItems(
 export function createDefaultApifySoldActorRunner(token: string): RunApifySoldActor {
   return async (request) => {
     // Never retry the paid Actor-start POST: an ambiguous transport failure must
-    // fall through, not risk launching a duplicate paid run. The separate dataset
-    // read is idempotent and may use the bounded request retry allowance.
+    // fall through, not risk launching a duplicate paid run. Status observation
+    // is separate so the SDK cannot put a 60s long poll in a 30s HTTP envelope.
     const runClient = new ApifyClient({
       token,
       maxRetries: 0,
       timeoutSecs: Math.min(request.timeoutSecs, 30),
       userAgentSuffix: "SnapList-pricing/1.0",
     });
-    const run = await runClient.actor(request.actorId).call(request.input, {
+    let run = await runClient.actor(request.actorId).start(request.input, {
       build: request.build,
       timeout: request.timeoutSecs,
-      waitSecs: request.waitSecs,
       maxItems: request.maxItems,
       maxTotalChargeUsd: request.maxTotalChargeUsd,
       restartOnError: request.restartOnError,
-      log: null,
     });
+    const statusDeadline = Date.now() + request.waitSecs * 1_000;
+    const httpTimeoutSecs = Math.min(request.timeoutSecs, 30);
+    // Leave transport headroom inside every HTTP request without extending the
+    // overall status window or the Actor's runtime/charge/count limits.
+    const pollWaitSecs = Math.min(20, Math.max(0, httpTimeoutSecs - 1));
+    while (!["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"].includes(run.status)) {
+      const remainingSecs = Math.ceil((statusDeadline - Date.now()) / 1_000);
+      const observed = await settleBeforeApifyPricingDeadline(
+        () => runClient.run(run.id).get({
+          waitForFinish: Math.max(0, Math.min(pollWaitSecs, remainingSecs)),
+        }),
+        statusDeadline,
+      );
+      if (observed === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED || !observed) {
+        throw new Error("Apify sold status observation unavailable");
+      }
+      run = observed;
+    }
     if (run.status !== "SUCCEEDED" || !run.defaultDatasetId) {
       return {
         status: run.status,
@@ -1168,12 +1184,36 @@ export function createApifySoldPricingProvider(
     pricingDeadline: number,
   ): Promise<ApifySoldComp[] | null> {
     if (Date.now() >= pricingDeadline) return null;
+    let attemptStarted = false;
+    let attemptRecorded = false;
+    function recordUnconfirmedAttempt(): void {
+      if (!attemptStarted || attemptRecorded) return;
+      attemptRecorded = true;
+      try {
+        // Invocation is known; terminal status and charge are not. Never infer
+        // a free or empty successful run from an ambiguous transport failure.
+        recordSoldCompUsage({
+          strategy: "apify",
+          results: 0,
+          chargedUsd: null,
+          reason: "provider-error",
+        });
+      } catch {
+        emitDiagnostic("pricing.apify_sold.usage_recording_failed", {
+          reason: "unconfirmed-attempt",
+        });
+      }
+    }
     try {
       const actorResult = await settleBeforeApifyPricingDeadline(
-        () => runActor(requestFor(query, maxItems)),
+        () => {
+          attemptStarted = true;
+          return runActor(requestFor(query, maxItems));
+        },
         pricingDeadline,
       );
       if (actorResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        recordUnconfirmedAttempt();
         recordFailure("request-timeout");
         return null;
       }
@@ -1203,6 +1243,7 @@ export function createApifySoldPricingProvider(
           ? "no-candidates"
           : null;
       try {
+        attemptRecorded = true;
         recordSoldCompUsage({
           strategy: "apify",
           results: result.items.length,
@@ -1217,7 +1258,7 @@ export function createApifySoldPricingProvider(
               : String(usageError),
         });
       }
-      if (result.status !== "SUCCEEDED") {
+      if (failedProviderSide) {
         recordFailure(boundedStatus(result.status));
         return null;
       }
@@ -1235,6 +1276,7 @@ export function createApifySoldPricingProvider(
       circuit.openUntil = 0;
       return comps;
     } catch {
+      recordUnconfirmedAttempt();
       recordFailure("request-failed");
       return null;
     }
@@ -1252,9 +1294,9 @@ export function createApifySoldPricingProvider(
       pricingDeadline,
     );
     if (initial == null) {
-      return (await writeCache(key, [], pricingDeadline)) === "unconfirmed"
-        ? null
-        : [];
+      // The paid-start claim remains fenced until its TTL. A failed retrieval
+      // has no successful dataset to cache, including a negative cache entry.
+      return null;
     }
 
     let combined = normalizeEbaySoldCompUrls(initial);
