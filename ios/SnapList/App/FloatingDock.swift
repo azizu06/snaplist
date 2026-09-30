@@ -204,7 +204,7 @@ private struct DockCountBadge: View {
         Text(count > 99 ? "99+" : "\(count)")
             .font(.system(size: 11, weight: .bold))
             .monospacedDigit()
-            .foregroundStyle(.white)
+            .foregroundStyle(SnapListColorToken.canvas.color)
             .padding(.horizontal, 5)
             .frame(minWidth: 18, minHeight: 18)
             .background(Capsule().fill(SnapListColorToken.action.color))
