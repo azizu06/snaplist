@@ -18,6 +18,43 @@ struct EbayPublishFixtureAuthority: Equatable, Sendable {
     let reviewRevision: UUID
 }
 
+/// Zero-network status for a listing eBay already confirmed, whichever listing
+/// Listing Review asks about. It answers only the read-only status call, so a
+/// fixture proving View on eBay can never reach publish or connect.
+struct OwnEbayPostingFixtureService: EbayPublishFeatureServing {
+    static let ebayListingID = "742000000001"
+
+    func createOAuthSession(idempotencyKey: UUID) async throws -> EbayOAuthSession {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func connection() async throws -> EbayConnectionStatus {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func disconnect() async throws -> EbayConnectionStatus {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func preflight(listingID: UUID) async throws -> EbayPublishPreflight {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func status(listingID: UUID) async throws -> EbayPublishStatus {
+        EbayPublishStatus(
+            listingID: listingID,
+            outcome: .published,
+            ebayListingID: Self.ebayListingID,
+            ebayOfferID: "742-OFFER-1",
+            alreadyPublished: true,
+            environment: .production
+        )
+    }
+    func publish(
+        listingID: UUID,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID
+    ) async throws -> EbayPublishTransportOutcome {
+        throw EbayPublishClientError.invalidResponse
+    }
+}
+
 /// Zero-network eBay adapter for the four approved v5 projections.
 ///
 /// This deliberately conforms to `EbayPublishFeatureServing` instead of

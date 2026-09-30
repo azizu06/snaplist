@@ -75,6 +75,7 @@
     "SnapListUITests/HomeVisualRegressionTests/testBothApprovedTrophyWallStatesRenderAtCanonicalViewport": 23.411,
     "SnapListUITests/ListingReviewUITests/testANonIdentitySpecificCommitsInPlaceWithoutAPushedEditor": 21.067,
     "SnapListUITests/ListingReviewUITests/testASpentCorrectionLeavesIdentitySpecificsUnavailableAndSaysWhy": 14.719,
+    "SnapListUITests/ListingReviewUITests/testAPublishedListingReopenedFromTrophyWallOpensItsOwnEbayPosting": 30.209,
     "SnapListUITests/ListingReviewUITests/testATapOnTheGlyphsPutsTheCaretWhereTheFingerIsAndNotAtTheEnd": 16.351,
     "SnapListUITests/ListingReviewUITests/testCanonicalRunOpensListingReviewAndCleanDoneRestoresExactOpener": 52.618,
     "SnapListUITests/ListingReviewUITests/testConditionDrawerSlidesDownToDismissWithoutSaving": 15.0,

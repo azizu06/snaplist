@@ -980,6 +980,159 @@ final class EbayPublishDeliveryTests: XCTestCase {
         )
         XCTAssertNil(feedback)
     }
+
+    // MARK: - The seller's own posting, reopened from Trophy Wall
+
+    func testOwnPostingOpensTheConfirmedProductionOrSandboxItemPage() async {
+        let listingID = UUID()
+        for (environment, expected) in [
+            (EbayListingEnvironment.production, "https://www.ebay.com/itm/110377000001"),
+            (EbayListingEnvironment.sandbox, "https://www.sandbox.ebay.com/itm/110377000001"),
+        ] {
+            let service = OwnPostingStatusService(.success(EbayPublishStatus(
+                listingID: listingID,
+                outcome: .published,
+                ebayListingID: "110377000001",
+                ebayOfferID: "offer-1",
+                alreadyPublished: true,
+                listingURL: nil,
+                environment: environment
+            )))
+
+            let destination = await EbayOwnListingDestination.resolve(
+                listingID: listingID,
+                service: service
+            )
+
+            XCTAssertEqual(destination?.absoluteString, expected)
+            let calls = await service.calls
+            XCTAssertEqual(calls.statusListingIDs, [listingID])
+            XCTAssertEqual(calls.publishCount, 0, "Reading a posting must never publish.")
+        }
+    }
+
+    func testOwnPostingPrefersTheProviderReceiptURLForThatListing() async {
+        let listingID = UUID()
+        let service = OwnPostingStatusService(.success(EbayPublishStatus(
+            listingID: listingID,
+            outcome: .published,
+            ebayListingID: "110377000001",
+            ebayOfferID: nil,
+            alreadyPublished: true,
+            listingURL: URL(string: "https://www.sandbox.ebay.com/itm/110377000001?ssPageName=x#top"),
+            environment: .production
+        )))
+
+        let destination = await EbayOwnListingDestination.resolve(
+            listingID: listingID,
+            service: service
+        )
+
+        XCTAssertEqual(
+            destination?.absoluteString,
+            "https://www.sandbox.ebay.com/itm/110377000001"
+        )
+    }
+
+    func testOwnPostingHasNoDestinationUntilEbayConfirmedThisListing() async {
+        let listingID = UUID()
+        let unconfirmed: [EbayPublishStatus] = [
+            .init(listingID: listingID, outcome: .notPublished, ebayListingID: nil,
+                  ebayOfferID: nil, alreadyPublished: false, environment: .production),
+            .init(listingID: listingID, outcome: .outcomeNotYetKnown, ebayListingID: nil,
+                  ebayOfferID: nil, alreadyPublished: false, environment: .production),
+            .init(listingID: listingID, outcome: .failed, ebayListingID: nil,
+                  ebayOfferID: nil, alreadyPublished: false, environment: .production),
+            // Published without eBay's listing id is not a posting anyone can open.
+            .init(listingID: listingID, outcome: .published, ebayListingID: nil,
+                  ebayOfferID: nil, alreadyPublished: true, environment: .production),
+            // An id with no environment cannot say which eBay it lives on.
+            .init(listingID: listingID, outcome: .published, ebayListingID: "110377000001",
+                  ebayOfferID: nil, alreadyPublished: true, environment: nil),
+            // Another listing's receipt is never this item's posting.
+            .init(listingID: UUID(), outcome: .published, ebayListingID: "110377000001",
+                  ebayOfferID: nil, alreadyPublished: true, environment: .production),
+        ]
+        for status in unconfirmed {
+            let destination = await EbayOwnListingDestination.resolve(
+                listingID: listingID,
+                service: OwnPostingStatusService(.success(status))
+            )
+            XCTAssertNil(destination, "\(status)")
+        }
+
+        let unreadable = await EbayOwnListingDestination.resolve(
+            listingID: listingID,
+            service: OwnPostingStatusService(.failure(EbayPublishClientError.invalidResponse))
+        )
+        XCTAssertNil(unreadable, "A failed read must hide the link, not guess one.")
+    }
+
+    func testOwnPostingRefusesAProviderURLThatIsNotAnEbayItemPage() async {
+        let listingID = UUID()
+        for untrusted in [
+            "http://www.ebay.com/itm/110377000001",
+            "https://ebay.com.example.com/itm/110377000001",
+            "https://www.ebay.com/sch/i.html?_nkw=controller",
+            "https://www.ebay.com/itm/",
+            "https://name:password@www.ebay.com/itm/110377000001",
+        ] {
+            let destination = await EbayOwnListingDestination.resolve(
+                listingID: listingID,
+                service: OwnPostingStatusService(.success(EbayPublishStatus(
+                    listingID: listingID,
+                    outcome: .published,
+                    ebayListingID: "110377000001",
+                    ebayOfferID: nil,
+                    alreadyPublished: true,
+                    listingURL: URL(string: untrusted),
+                    environment: .production
+                )))
+            )
+            XCTAssertNil(destination, untrusted)
+        }
+    }
+}
+
+/// Answers only the read-only status call; every other method records or
+/// refuses, so a test can prove resolving a posting never reaches publish.
+private actor OwnPostingStatusService: EbayPublishFeatureServing {
+    private let statusResult: Result<EbayPublishStatus, Error>
+    private(set) var statusListingIDs: [UUID] = []
+    private(set) var publishCount = 0
+
+    init(_ statusResult: Result<EbayPublishStatus, Error>) {
+        self.statusResult = statusResult
+    }
+
+    var calls: (statusListingIDs: [UUID], publishCount: Int) {
+        (statusListingIDs, publishCount)
+    }
+
+    func createOAuthSession(idempotencyKey: UUID) async throws -> EbayOAuthSession {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func connection() async throws -> EbayConnectionStatus {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func disconnect() async throws -> EbayConnectionStatus {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func preflight(listingID: UUID) async throws -> EbayPublishPreflight {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func status(listingID: UUID) async throws -> EbayPublishStatus {
+        statusListingIDs.append(listingID)
+        return try statusResult.get()
+    }
+    func publish(
+        listingID: UUID,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID
+    ) async throws -> EbayPublishTransportOutcome {
+        publishCount += 1
+        throw EbayPublishClientError.invalidResponse
+    }
 }
 
 private struct EbayPublishTestBearer: BearerTokenProviding {

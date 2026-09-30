@@ -627,6 +627,14 @@ struct AppDependencies {
         )
         if configuration.usesZeroNetworkFixtures {
             let client = ZeroNetworkMobileAPIClient()
+            let ebayPublishService: any EbayPublishFeatureServing
+#if DEBUG
+            ebayPublishService = configuration.ownEbayPostingFixture
+                ? OwnEbayPostingFixtureService()
+                : UnavailableEbayPublishFeatureService()
+#else
+            ebayPublishService = UnavailableEbayPublishFeatureService()
+#endif
             return AppDependencies(
                 mobileAPIClient: client,
                 contractFixtureProvider: client,
@@ -646,7 +654,7 @@ struct AppDependencies {
                 analyticsClient: NoOpAnalyticsClient(),
                 funnelAnalytics: NoOpFunnelAnalyticsEventSink(),
                 assistedExportService: AssistedExportFixtureService(),
-                ebayPublishService: UnavailableEbayPublishFeatureService(),
+                ebayPublishService: ebayPublishService,
                 guestClaimService: UnavailableGuestClaimService(),
                 guestAccountAuthenticator:
                     UnavailableGuestAccountAuthenticator(),

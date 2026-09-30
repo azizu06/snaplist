@@ -288,6 +288,54 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertFalse(anyElement("listing-review.sold-detail", in: app).exists)
     }
 
+    func testAPublishedListingReopenedFromTrophyWallOpensItsOwnEbayPosting() {
+        // Negative control: eBay has confirmed nothing for this listing, so the
+        // row stays Publish to eBay and no posting is offered.
+        var app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        XCTAssertTrue(
+            app.buttons["listing-review.ebay-publish"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertFalse(app.buttons["listing-review.view-on-ebay"].exists)
+        UIProcessTerminationBoundary()
+            .assertRetired(app, "The unpublished listing fixture")
+
+        app = launch(
+            resetDraft: true,
+            extraArguments: ["--own-ebay-posting-fixture"]
+        )
+        _ = openReview(in: app)
+        let viewOnEbay = app.buttons["listing-review.view-on-ebay"]
+        XCTAssertTrue(viewOnEbay.waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            app.buttons["listing-review.ebay-publish"].exists,
+            "A confirmed posting must not offer to publish again."
+        )
+        scrollUntilClearOfFooter(
+            viewOnEbay,
+            footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch,
+            in: app
+        )
+        XCTAssertTrue(viewOnEbay.isHittable)
+        XCTAssertEqual(viewOnEbay.label, "View on eBay")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "own-ebay-posting-row"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        viewOnEbay.tap()
+        let backgrounded = NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }
+        let handoff = XCTNSPredicateExpectation(predicate: backgrounded, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [handoff], timeout: 10), .completed,
+                       "View on eBay must hand the seller's posting to the system URL handler.")
+        app.activate()
+        XCTAssertTrue(app.otherElements["listing-review"].waitForExistence(timeout: 3))
+    }
+
     func testCorrectionBoundaryAndAdaptiveManualFallbackRemainReachable() {
         var app = launch(resetDraft: true)
         _ = openReview(in: app)

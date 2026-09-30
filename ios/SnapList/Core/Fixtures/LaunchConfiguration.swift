@@ -399,6 +399,11 @@ struct LaunchConfiguration: Equatable {
     /// Defaulted rather than added to the memberwise initializers below,
     /// because the absence of the argument is the real device-truth answer.
     var scanZoomFixture: ScanZoomFixtureState? = nil
+    /// Answers the read-only eBay status as a confirmed production posting, so
+    /// Listing Review reopened from Trophy Wall offers View on eBay without a
+    /// signed-in seller or a live publish. Defaulted for the same reason as
+    /// `scanZoomFixture`.
+    var ownEbayPostingFixture = false
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -654,6 +659,8 @@ struct LaunchConfiguration: Equatable {
                 if configuration.ebayPublishFixture != nil {
                     configuration.usesZeroNetworkFixtures = true
                 }
+            } else if argument == "--own-ebay-posting-fixture" {
+                configuration.ownEbayPostingFixture = true
             } else if argument.hasPrefix("--guest-claim-fixture=") {
                 let value = String(
                     argument.dropFirst("--guest-claim-fixture=".count)
