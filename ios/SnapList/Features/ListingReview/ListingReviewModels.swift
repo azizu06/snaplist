@@ -371,6 +371,23 @@ struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
     let format: ListingReviewSoldFormat?
     let shipping: ListingReviewSoldShipping?
 
+    /// Match the server's trusted eBay item boundary before handing off to iOS.
+    /// HTTPS permits the eBay universal link and the system browser fallback.
+    var ebayListingURL: URL? {
+        guard var components = URLComponents(url: sourceURL, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.user == nil, components.password == nil,
+              let host = components.host?.lowercased(),
+              host == "ebay.com" || host.hasSuffix(".ebay.com"),
+              components.path.lowercased().hasPrefix("/itm/"),
+              components.path.count > "/itm/".count else { return nil }
+        components.scheme = "https"
+        components.host = host
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id
         case sourceURL

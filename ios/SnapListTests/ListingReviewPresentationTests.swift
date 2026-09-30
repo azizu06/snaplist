@@ -38,6 +38,65 @@ final class ListingReviewPresentationTests: XCTestCase {
         )
     }
 
+    func testSoldMatchOpensTheCanonicalEbayItemDestination() throws {
+        for source in [
+            "https://www.ebay.com/itm/123456789001?utm_source=receipt#details",
+            "https://WWW.EBAY.COM/itm/Controller/123456789001?campaign=demo",
+            "https://ebay.com/itm/123456789001",
+        ] {
+            let match = try decodedSoldMatch(sourceURL: source)
+            let url = try XCTUnwrap(match.ebayListingURL)
+            XCTAssertEqual(url.scheme, "https")
+            XCTAssertEqual(url.host, URL(string: source)?.host?.lowercased())
+            XCTAssertEqual(url.path, URL(string: source)?.path)
+            XCTAssertNil(url.query)
+            XCTAssertNil(url.fragment)
+        }
+    }
+
+    func testSoldMatchWithAnUntrustedSourceHasNoExternalDestination() throws {
+        for source in [
+            "https://example.com/itm/123456789001",
+            "https://ebay.com.example.com/itm/123456789001",
+            "https://www.ebay.com/sch/i.html?_nkw=controller",
+            "https://www.ebay.com/itm/",
+            "https://name:password@www.ebay.com/itm/123456789001",
+        ] {
+            XCTAssertNil(try decodedSoldMatch(sourceURL: source).ebayListingURL, source)
+        }
+    }
+
+    func testReviewRetainsBothAvailableMatchesAndAllFiveAtTheCap() throws {
+        for count in [0, 2, 5] {
+            let review = ListingReviewLaunchFixture.review(matchCount: count)
+            let encoded = try JSONEncoder().encode(review)
+            let decoded = try JSONDecoder().decode(ListingReviewResult.self, from: encoded)
+            XCTAssertEqual(decoded.verifiedSoldMatches.count, count)
+        }
+        var oversized = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(ListingReviewLaunchFixture.review(matchCount: 5))
+        ) as? [String: Any])
+        var matches = try XCTUnwrap(oversized["verifiedSoldMatches"] as? [[String: Any]])
+        var extra = matches[0]
+        extra["id"] = "sixth-match"
+        matches.append(extra)
+        oversized["verifiedSoldMatches"] = matches
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ListingReviewResult.self,
+            from: JSONSerialization.data(withJSONObject: oversized)
+        ))
+    }
+
+    private func decodedSoldMatch(sourceURL: String) throws -> ListingReviewSoldMatch {
+        try JSONDecoder().decode(ListingReviewSoldMatch.self, from:
+            JSONSerialization.data(withJSONObject: [
+                "id": "sold-1", "sourceURL": sourceURL, "soldPrice": 62,
+                "currency": "USD", "title": NSNull(),
+                "condition": NSNull(), "soldAt": NSNull(),
+            ])
+        )
+    }
+
     func testSoldSummaryRendersOneRangeWhenEveryMatchSharesACurrency() throws {
         let matches = try soldMatches([(40, "USD"), (52, "USD"), (66, "USD")])
 

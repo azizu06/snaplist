@@ -341,7 +341,7 @@ enum ListingReviewLaunchFixture {
             var match: [String: Any] = [
                 "id": "fixture-sold-\(index + 1)",
                 "sourceURL":
-                    "https://example.com/sold/\(index + 1)",
+                    "https://www.ebay.com/itm/12345678900\(index + 1)",
                 "title":
                     "Sony DualSense controller sold listing \(index + 1)",
                 "soldPrice": soldPrices[index],
@@ -357,6 +357,8 @@ enum ListingReviewLaunchFixture {
                 match["format"] = "buy-it-now"
                 match["shipping"] = ["type": "free"]
             case 1:
+                // Keep the missing-photo state visible in the sold-card proof.
+                match.removeValue(forKey: "photoURL")
                 match["size"] = "With 50mm lens"
                 match["format"] = "auction"
                 match["shipping"] = [
@@ -743,6 +745,7 @@ struct ListingReviewPhotoPager: View {
 private struct ListingReviewImage: View {
     let url: URL?
     let fallbackSystemImage: String
+    var placeholderFill: Color = SnapListColorToken.quietFill.color
 
     var body: some View {
 #if DEBUG
@@ -758,25 +761,30 @@ private struct ListingReviewImage: View {
 #endif
     }
 
+    @ViewBuilder
     private var remoteImage: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().scaledToFill()
-            case .empty:
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .failure:
-                fallback
-            @unknown default:
-                fallback
+        if url == nil {
+            fallback
+        } else {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failure:
+                    fallback
+                @unknown default:
+                    fallback
+                }
             }
         }
     }
 
     private var fallback: some View {
         ZStack {
-            SnapListColorToken.quietFill.color
+            placeholderFill
             Image(systemName: fallbackSystemImage)
                 .font(.title2)
                 .foregroundStyle(SnapListColorToken.textTertiary.color)
@@ -1541,44 +1549,56 @@ struct ListingReviewSoldCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 10) {
                 ListingReviewImage(
                     url: match.photoURL,
-                    fallbackSystemImage: "shippingbox"
+                    fallbackSystemImage: "shippingbox",
+                    placeholderFill: SnapListColorToken.actionTint.color
                 )
                 .frame(height: 130)
                 .frame(maxWidth: .infinity)
+                .background(SnapListColorToken.actionTint.color)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .accessibilityHidden(true)
 
-                Text(soldPriceText)
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .contentTransition(
-                        .numericText(value: NSDecimalNumber(decimal: match.soldPrice).doubleValue)
-                    )
+                HStack(alignment: .firstTextBaseline) {
+                    Text(soldPriceText)
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .contentTransition(
+                            .numericText(value: NSDecimalNumber(decimal: match.soldPrice).doubleValue)
+                        )
+                    Spacer(minLength: 4)
+                    Text("eBay")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.actionDeep.color)
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.actionDeep.color)
+                        .accessibilityHidden(true)
+                }
 
                 Text(match.soldDateLabel)
                     .font(.caption)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(12)
             .background(SnapListColorToken.canvas.color)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
-        .frame(width: 176)
-        .accessibilityLabel(
-            "Sold \(soldPriceText) on \(match.soldDateLabel)"
-        )
+        .frame(width: 184)
+        .disabled(match.ebayListingURL == nil)
+        .accessibilityLabel("eBay, sold \(soldPriceText) on \(match.soldDateLabel)")
         .accessibilityValue(
-            [match.title, match.condition]
-                .compactMap { $0 }
-                .joined(separator: ". ")
+            [match.title, match.condition].compactMap { $0 }.joined(separator: ". ")
         )
-        .accessibilityHint("View sold comp details")
+        .accessibilityHint("Opens sold listing on eBay")
         .accessibilityIdentifier("listing-review.sold-match.\(index)")
     }
 }
