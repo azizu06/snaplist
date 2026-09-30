@@ -1179,7 +1179,7 @@ final class VoiceNoteTests: XCTestCase {
     }
 
     func testFrozenV21CopyGeometryAndAccessibilityTruth() {
-        XCTAssertEqual(VoiceNotePresentation.sheetHeight, 220)
+        XCTAssertEqual(VoiceNotePresentation.sheetHeight, 300)
         XCTAssertEqual(VoiceNotePresentation.minimumTarget, 44)
         XCTAssertEqual(
             VoiceNotePresentation.emptyRowHelper,
@@ -1188,6 +1188,10 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(
             VoiceNotePresentation.sheetContext,
             "Add details the photos might miss."
+        )
+        XCTAssertEqual(
+            VoiceNotePresentation.recordingHint,
+            "Tap Stop when you're done."
         )
         XCTAssertEqual(
             VoiceNotePresentation.recordingAccessibilityLabel(elapsed: 7.8),
