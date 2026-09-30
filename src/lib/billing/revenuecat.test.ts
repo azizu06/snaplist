@@ -110,6 +110,33 @@ describe("RevenueCat webhook authentication", () => {
     ).toThrow("allowed environment");
   });
 
+  it("parses the sandbox grant allowlist as exact Clerk ids only", () => {
+    const base = {
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: "secret",
+      REVENUECAT_WEBHOOK_AUTHORIZATION: "Bearer auth",
+      REVENUECAT_APP_ID: "app",
+      REVENUECAT_ENTITLEMENT_ID: "pro",
+      REVENUECAT_MONTHLY_PRODUCT_ID: "snaplist-pro-fixture",
+      REVENUECAT_ALLOWED_ENVIRONMENT: "SANDBOX",
+      SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: "24",
+    };
+    expect(resolveRevenueCatServerConfig(base)?.sandboxGrantUserIds).toBeUndefined();
+    expect(
+      resolveRevenueCatServerConfig({
+        ...base,
+        REVENUECAT_SANDBOX_GRANT_USER_IDS: " user_2sandboxTester , user_2sandboxTester,user_2second ",
+      })?.sandboxGrantUserIds,
+    ).toEqual(["user_2sandboxTester", "user_2second"]);
+    for (const invalid of ["tester@example.com", "user_*", "user_", "2sandboxTester"]) {
+      expect(() =>
+        resolveRevenueCatServerConfig({
+          ...base,
+          REVENUECAT_SANDBOX_GRANT_USER_IDS: invalid,
+        }),
+      ).toThrow("REVENUECAT_SANDBOX_GRANT_USER_IDS");
+    }
+  });
+
   it("keeps native public configuration server-provided instead of source-coded", () => {
     expect(
       resolveRevenueCatServerConfig({
@@ -207,6 +234,35 @@ describe("RevenueCat persistence composition", () => {
       "record_verified_revenuecat_ai_item_period",
       expect.objectContaining({ p_environment: "PRODUCTION" }),
     );
+    expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty("p_sandbox_grant");
+  });
+
+  it("forwards the scoped sandbox grant decision into period persistence", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const entitlementStore = createSupabaseRevenueCatEntitlementStore({ rpc } as never);
+
+    await entitlementStore.recordPeriod({
+      userId: "user_123",
+      source: "storekit",
+      periodKey: "original-1:2026-07-01T00:00:00.000Z",
+      originalTransactionId: "original-1",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      expiresDate: "2026-08-01T00:00:00.000Z",
+      state: "active",
+      graceExpiresDate: null,
+      allowance: 24,
+      eventId: "event-initial",
+      eventCreatedAt: now.toISOString(),
+      eventType: "INITIAL_PURCHASE",
+      transactionId: "transaction-1",
+      environment: "SANDBOX",
+      sandboxGrant: true,
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "record_verified_revenuecat_ai_item_period",
+      expect.objectContaining({ p_environment: "SANDBOX", p_sandbox_grant: true }),
+    );
   });
 
   it("passes the signed original App User ID into reconciliation", async () => {
@@ -298,7 +354,46 @@ describe("RevenueCat verified lifecycle bridge", () => {
 
     expect(result).toEqual({ processed: true });
     expect(fake.recordPeriod).toHaveBeenCalledWith(
-      expect.objectContaining({ environment: "SANDBOX" }),
+      expect.objectContaining({ environment: "SANDBOX", sandboxGrant: false }),
+    );
+  });
+
+  it("marks a sandbox period as a grant only for an allowlisted test customer", async () => {
+    const sandboxConfig = {
+      ...webhookConfig,
+      allowedEnvironment: "SANDBOX",
+      sandboxGrantUserIds: ["user_123"],
+    } satisfies RevenueCatWebhookConfig;
+
+    const allowlisted = await handle({ environment: "SANDBOX" }, {}, sandboxConfig);
+    expect(allowlisted.fake.recordPeriod).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user_123", sandboxGrant: true }),
+    );
+
+    const ordinary = await handle(
+      { environment: "SANDBOX" },
+      {
+        resolveCustomer: vi.fn().mockResolvedValue({
+          userId: "user_ordinary",
+          transitionState: "not_required",
+        }),
+      },
+      sandboxConfig,
+    );
+    expect(ordinary.fake.recordPeriod).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user_ordinary", sandboxGrant: false }),
+    );
+  });
+
+  it("never marks a production period as a sandbox grant", async () => {
+    const { fake } = await handle(
+      {},
+      {},
+      { ...webhookConfig, sandboxGrantUserIds: ["user_123"] },
+    );
+
+    expect(fake.recordPeriod).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "PRODUCTION", sandboxGrant: false }),
     );
   });
 

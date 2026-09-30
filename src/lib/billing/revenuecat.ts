@@ -54,6 +54,13 @@ export interface RevenueCatWebhookConfig {
   monthlyProductId: string;
   monthlyAllowance: number;
   allowedEnvironment: RevenueCatEnvironment;
+  /**
+   * Exact Clerk ids whose signature-verified Apple SANDBOX purchases may create
+   * StoreKit periods. Unset means none: every SANDBOX event stays an audited
+   * `sandbox_ignored` row (#679). This is a test-account scope, not a public
+   * sandbox mode, so ordinary sellers can never earn Pro from a sandbox receipt.
+   */
+  sandboxGrantUserIds?: readonly string[];
 }
 
 export interface RevenueCatServerConfig extends RevenueCatWebhookConfig {
@@ -64,6 +71,31 @@ export interface RevenueCatServerConfig extends RevenueCatWebhookConfig {
 function nonBlank(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+const SANDBOX_GRANT_USER_ID_PATTERN = /^user_[A-Za-z0-9]{1,120}$/;
+const MAX_SANDBOX_GRANT_USER_IDS = 10;
+
+function sandboxGrantUserIds(value: string | undefined): string[] {
+  const entries = [
+    ...new Set(
+      (value ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (entries.some((entry) => !SANDBOX_GRANT_USER_ID_PATTERN.test(entry))) {
+    throw new Error(
+      "REVENUECAT_SANDBOX_GRANT_USER_IDS must list exact Clerk user ids; emails and wildcards are never accepted.",
+    );
+  }
+  if (entries.length > MAX_SANDBOX_GRANT_USER_IDS) {
+    throw new Error(
+      `REVENUECAT_SANDBOX_GRANT_USER_IDS may list at most ${MAX_SANDBOX_GRANT_USER_IDS} test accounts.`,
+    );
+  }
+  return entries;
 }
 
 /** Returns null for the safe unconfigured state; partial config is rejected. */
@@ -94,6 +126,7 @@ export function resolveRevenueCatServerConfig(
   if (required.some((value) => value === undefined)) {
     throw new Error("RevenueCat server configuration is incomplete.");
   }
+  const sandboxGrants = sandboxGrantUserIds(environment.REVENUECAT_SANDBOX_GRANT_USER_IDS);
   const monthlyAllowance = Number(allowanceValue);
   if (!Number.isSafeInteger(monthlyAllowance) || monthlyAllowance < 1 || monthlyAllowance > 10_000) {
     throw new Error("RevenueCat monthly allowance must be an integer from 1 to 10000.");
@@ -111,6 +144,7 @@ export function resolveRevenueCatServerConfig(
     allowedEnvironment,
     ...(iosPublicSdkKey ? { iosPublicSdkKey } : {}),
     ...(offeringId ? { offeringId } : {}),
+    ...(sandboxGrants.length > 0 ? { sandboxGrantUserIds: sandboxGrants } : {}),
   };
 }
 
@@ -152,6 +186,8 @@ export interface VerifiedStoreKitPeriod {
   eventType: string;
   transactionId: string | null;
   environment: RevenueCatEnvironment;
+  /** True only for a SANDBOX event whose resolved customer is on the test allowlist. */
+  sandboxGrant?: boolean;
 }
 
 export interface RevenueCatEntitlementStore {
@@ -378,6 +414,9 @@ export async function handleRevenueCatWebhook(
     eventType: event.type,
     transactionId: event.transaction_id ?? null,
     environment: event.environment,
+    sandboxGrant:
+      event.environment === "SANDBOX" &&
+      (config.sandboxGrantUserIds ?? []).includes(customer.userId),
   });
   return applied
     ? { processed: true }

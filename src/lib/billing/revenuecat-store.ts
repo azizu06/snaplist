@@ -101,6 +101,9 @@ export function createSupabaseRevenueCatEntitlementStore(
           p_revenuecat_app_user_id: period.userId,
           p_state: period.state,
           p_user_id: period.userId,
+          // Sent only when granted, so a PRODUCTION delivery never depends on
+          // the scoped-sandbox-grant migration having been applied first.
+          ...(period.sandboxGrant ? { p_sandbox_grant: true } : {}),
         },
       );
       if (error) throw error;
