@@ -353,7 +353,7 @@ extension ProGateStore {
         )
         store.offerProduct = product
         switch fixture {
-        case .pay01:
+        case .pay01, .pay01Plans:
             store.state = .offer(
                 product: product,
                 advisory: nil,
@@ -361,7 +361,7 @@ extension ProGateStore {
             )
         case .pay03:
             store.state = .confirming
-        case .pay04a:
+        case .pay04a, .pay04aPlans:
             store.state = .ready(source: .purchase)
         case .pay04b:
             store.state = .ready(source: .existingSubscription)

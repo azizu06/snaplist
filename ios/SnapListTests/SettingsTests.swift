@@ -766,6 +766,97 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    /// Settings offers `Get SnapList Pro` only where the server says no
+    /// StoreKit subscription is running: never while one is active, in a
+    /// billing problem, unconfirmed, loading, or failed to load.
+    func testSeePlansIsOfferedOnlyWithoutARunningSubscription() {
+        func verified(_ status: VerifiedSubscriptionStatus) -> SettingsSubscriptionPresentation {
+            SettingsSubscriptionPresentation(
+                state: .verified(
+                    ServerVerifiedSubscription(
+                        source: status == .included ? .included : .storeKit,
+                        status: status,
+                        remainingItems: 3,
+                        periodStart: nil,
+                        periodEnd: nil,
+                        gracePeriodEnd: nil,
+                        transitionState: nil,
+                        legacyStripeStatus: nil
+                    )
+                )
+            )
+        }
+
+        for status in [VerifiedSubscriptionStatus.included, .expired, .revoked, .refunded] {
+            XCTAssertEqual(verified(status).actions.first, .seePlans, "\(status)")
+        }
+        XCTAssertEqual(
+            SettingsSubscriptionPresentation(state: .available([])).actions,
+            [.seePlans, .manage, .restore]
+        )
+        XCTAssertEqual(
+            SettingsSubscriptionPresentation(state: .restoreNotFound).actions.first,
+            .seePlans
+        )
+
+        for status in [VerifiedSubscriptionStatus.active, .grace, .billingRetry, .ambiguous, .unconfigured] {
+            XCTAssertFalse(verified(status).actions.contains(.seePlans), "\(status)")
+        }
+        for state: SubscriptionStore.State in [
+            .loading, .restoring, .purchasing(productID: "p"), .pending(productID: "p"),
+            .awaitingServerVerification(action: .purchase), .failed("offline"), .unconfigured,
+        ] {
+            XCTAssertFalse(
+                SettingsSubscriptionPresentation(state: state).actions.contains(.seePlans),
+                "\(state)"
+            )
+        }
+        XCTAssertFalse(
+            SettingsSubscriptionPresentation(state: .available([]), loadPhase: .loading)
+                .actions.contains(.seePlans)
+        )
+    }
+
+    /// Sandbox device finding: after signing out and into another account in
+    /// the same launch, Settings kept the first account's verified plan. The
+    /// reading now belongs to one account and resets when the account changes.
+    @MainActor
+    func testSubscriptionReadingDoesNotSurviveAnAccountSwitch() {
+        let first = SettingsIdentity.member(method: .emailCode, email: "first@example.com")
+        let second = SettingsIdentity.member(method: .emailCode, email: "second@example.com")
+        let scope = SettingsSubscriptionAccountScope(
+            identity: first,
+            makeStore: { SubscriptionStore(client: FixtureSubscriptionClient()) }
+        )
+        scope.store.applyServerVerification(
+            ServerVerifiedSubscription(
+                source: .storeKit,
+                status: .active,
+                remainingItems: 9_996,
+                periodStart: nil,
+                periodEnd: nil,
+                gracePeriodEnd: nil,
+                transitionState: nil,
+                legacyStripeStatus: nil
+            )
+        )
+        let firstStore = scope.store
+
+        XCTAssertFalse(scope.rebind(to: first))
+        XCTAssertTrue(scope.store === firstStore)
+
+        XCTAssertTrue(scope.rebind(to: second))
+        XCTAssertFalse(scope.store === firstStore)
+        XCTAssertEqual(scope.store.state, .unconfigured)
+        XCTAssertEqual(
+            SettingsSubscriptionPresentation(
+                state: scope.store.state,
+                loadPhase: .loading
+            ).status,
+            "Checking"
+        )
+    }
+
     func testSubscriptionFirstPaintAndConfigurationFailureAreHonest() {
         let unresolved = SettingsSubscriptionPresentation(
             state: .unconfigured,

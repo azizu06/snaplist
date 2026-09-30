@@ -217,6 +217,9 @@ enum ProGateFixtureState: String, Equatable {
     case pay07 = "PAY-07"
     case pay08 = "PAY-08"
     case pay10 = "PAY-10"
+    /// The same offer and ready outcome opened on purpose from Settings.
+    case pay01Plans = "PAY-01-plans"
+    case pay04aPlans = "PAY-04a-plans"
 }
 
 /// The four owner-approved eBay v5 seller-visible projections (issue #742).
@@ -320,6 +323,9 @@ enum SettingsSellingFixtureState: String, Equatable {
 /// therefore the one subscription action whose 44pt floor went unproved.
 enum SettingsSubscriptionFixtureState: String, Equatable {
     case loadFailed = "load-failed"
+    /// An account on its included allowance, the reading that offers
+    /// `Get SnapList Pro`; tapping it opens the zero-network plans fixture.
+    case included = "included"
 }
 
 /// Issue #385. Scripts what the erasure endpoint answers, so a UI test can walk

@@ -14,6 +14,7 @@ struct SettingsView: View {
     private let settingsProofSafeExit: (() -> Void)?
     private let deletionFlowPresentationChanged: (Bool) -> Void
     private let mobileAPIClient: any MobileAPIClient
+    private let subscriptionClient: any SubscriptionClient
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
     private let analyticsClient: any AnalyticsClient
@@ -31,10 +32,17 @@ struct SettingsView: View {
     @State private var ebayConnectionLoadPhase =
         SettingsSellingPresentation.LoadPhase.loading
     @State private var analyticsConsentState: SettingsAnalyticsConsentState
-    @State private var subscriptionStore: SubscriptionStore
+    @State private var subscriptionScope: SettingsSubscriptionAccountScope
     @State private var subscriptionLoadPhase =
         SettingsSubscriptionPresentation.LoadPhase.loading
     @State private var managesSubscription = false
+    /// The SnapList Pro offer opened from `Get SnapList Pro`. It is the same
+    /// `ProGateStore` the item gate uses, so purchase, restore, and the
+    /// server-verified `ready` outcome behave identically here.
+    @State private var plansStore: ProGateStore?
+    @State private var isPreparingPlans = false
+    @State private var plansFallbackPending = false
+    @State private var plansUnavailable = false
 
     init(
         configuration: LaunchConfiguration,
@@ -49,13 +57,15 @@ struct SettingsView: View {
         settingsProofSafeExit: (() -> Void)? = nil,
         deletionFlowPresentationChanged: @escaping (Bool) -> Void = { _ in }
     ) {
-        profile = .current(configuration: configuration)
+        let profile = SettingsProfile.current(configuration: configuration)
+        self.profile = profile
         settingsProofState = configuration.settingsProofState
         settingsSellingFixture = configuration.settingsSellingFixture
         settingsSubscriptionFixture = configuration.settingsSubscriptionFixture
         self.settingsProofSafeExit = settingsProofSafeExit
         self.deletionFlowPresentationChanged = deletionFlowPresentationChanged
         self.mobileAPIClient = mobileAPIClient
+        self.subscriptionClient = subscriptionClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
         self.analyticsClient = analyticsClient
@@ -67,8 +77,11 @@ struct SettingsView: View {
                 consent: UserDefaultsAnalyticsConsentStore().consent
             )
         )
-        _subscriptionStore = State(
-            initialValue: SubscriptionStore(client: subscriptionClient)
+        _subscriptionScope = State(
+            initialValue: SettingsSubscriptionAccountScope(
+                identity: profile.identity,
+                makeStore: { SubscriptionStore(client: subscriptionClient) }
+            )
         )
     }
 
@@ -300,11 +313,37 @@ struct SettingsView: View {
             Text("Your preference did not change. Try again.")
         }
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
+        .sheet(isPresented: plansPresentationBinding, onDismiss: plansDismissed) {
+            if let plansStore {
+                ProGateSheet(
+                    store: plansStore,
+                    listingSummary: nil,
+                    startListing: { _ = plansStore.consumeResumeIntent() },
+                    fallbackToPhotoReview: { plansFallbackPending = true },
+                    context: .settingsPlans
+                )
+            }
+        }
+        .alert(
+            "SnapList Pro is not available right now",
+            isPresented: $plansUnavailable
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("SnapList could not load the plan. Try again in a moment.")
+        }
         .task {
             guard !isSettingsHubProof else { return }
             await loadEbayConnection()
         }
-        .task {
+        // Keyed on the account: Settings can stay on the navigation stack
+        // while the seller signs out and into another account, and the card
+        // must never keep the previous account's plan.
+        .task(id: profile.identity) {
+            if subscriptionScope.rebind(to: profile.identity) {
+                subscriptionLoadPhase = .loading
+                plansStore = nil
+            }
             guard !profile.isGuest, !isSettingsHubProof else { return }
             await loadSubscription()
         }
@@ -315,6 +354,10 @@ struct SettingsView: View {
             // row keeps showing whatever was true when the screen opened.
             guard phase == .active else { return }
             Task { await refreshNotificationsPermission() }
+            // A purchase approved outside the app (Ask to Buy, a bank
+            // step-up) lands while SnapList is backgrounded; the item gate
+            // refreshes the same way in `AppShellProGateTransaction`.
+            Task { await plansStore?.refreshPendingVerification() }
         }
         .accessibilityIdentifier("settings.screen")
     }
@@ -375,6 +418,8 @@ struct SettingsView: View {
                 // so the hit target stays at the row height instead of
                 // collapsing to one line of text at the smallest Dynamic
                 // Type size, the same fix the account rows needed (#831).
+                case .seePlans:
+                    seePlansRow
                 case .manage:
                     Button {
                         managesSubscription = true
@@ -433,6 +478,91 @@ struct SettingsView: View {
                 reading.accessibilityAnnouncement
             ).post()
         }
+    }
+
+    private var subscriptionStore: SubscriptionStore {
+        subscriptionScope.store
+    }
+
+    private var seePlansRow: some View {
+        Button {
+            Task { await openPlans() }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.action.color)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        SnapListColorToken.actionTint.color,
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .accessibilityHidden(true)
+                Text(isPreparingPlans ? "Loading SnapList Pro" : "Get SnapList Pro")
+                    .fontWeight(.semibold)
+                Spacer(minLength: 8)
+                if isPreparingPlans {
+                    ProgressView()
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.textTertiary.color)
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(SnapListColorToken.action.color)
+        .disabled(isPreparingPlans)
+        .accessibilityIdentifier("settings.subscription.see-plans")
+        .accessibilityHint("Shows the SnapList Pro plan and its price")
+    }
+
+    private var plansPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { plansStore?.isPresented ?? false },
+            set: { presented in
+                guard !presented else { return }
+                plansStore?.dismiss()
+            }
+        )
+    }
+
+    private func openPlans() async {
+        guard !isPreparingPlans, plansStore == nil else { return }
+#if DEBUG
+        if isSettingsHubProof || settingsSubscriptionFixture != nil {
+            plansStore = ProGateStore.fixture(.pay01Plans)
+            return
+        }
+#endif
+        isPreparingPlans = true
+        defer { isPreparingPlans = false }
+        let store = ProGateStore(
+            mobileAPIClient: mobileAPIClient,
+            subscriptionClient: subscriptionClient
+        )
+        switch await store.prepare() {
+        case .presented:
+            plansStore = store
+        case .fallbackToPhotoReview, .fallbackToAccountClaim:
+            plansUnavailable = true
+        }
+    }
+
+    /// Whatever happened in the sheet, the Subscription card re-reads the
+    /// server so it never shows Pro before the server granted it, and always
+    /// shows it once it has.
+    private func plansDismissed() {
+        plansStore = nil
+        if plansFallbackPending {
+            plansFallbackPending = false
+            plansUnavailable = true
+        }
+        guard !isSettingsHubProof, settingsSubscriptionFixture == nil else { return }
+        Task { await loadSubscription() }
     }
 
     private func loadSubscription() async {
@@ -608,6 +738,23 @@ struct SettingsView: View {
             return SettingsSubscriptionPresentation(
                 state: .unconfigured,
                 loadPhase: .failed,
+                locale: Locale(identifier: "en_US")
+            )
+        case .included:
+            return SettingsSubscriptionPresentation(
+                state: .verified(
+                    ServerVerifiedSubscription(
+                        source: .included,
+                        status: .included,
+                        remainingItems: 1,
+                        periodStart: nil,
+                        periodEnd: nil,
+                        gracePeriodEnd: nil,
+                        transitionState: nil,
+                        legacyStripeStatus: nil
+                    )
+                ),
+                loadPhase: .loaded,
                 locale: Locale(identifier: "en_US")
             )
         }

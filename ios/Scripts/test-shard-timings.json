@@ -206,6 +206,7 @@
     "SnapListUITests/SnapListUITests/testSignOutRowMeetsTheTouchTargetFloorAcrossDynamicTypeSizes": 13.164,
     "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachTheCameraPreview": 14.7,
     "SnapListUITests/SnapListUITests/testSubmissionVisualFixturesExposeWorkingCancelRetryAndDoneActions": 18.338,
+    "SnapListUITests/SnapListUITests/testSettingsGetSnapListProOpensThePlansPaywall": 12.434,
     "SnapListUITests/SnapListUITests/testSubscriptionActionButtonsMeetTheTouchTargetFloorAtSmallestDynamicTypeSize": 8.146,
     "SnapListUITests/SnapListUITests/testSubscriptionRetryMeetsTheTouchTargetFloorAtSmallestDynamicTypeSize": 7.574,
     "SnapListUITests/SnapListUITests/testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable": 28.898,

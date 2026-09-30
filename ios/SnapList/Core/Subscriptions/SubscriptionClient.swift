@@ -2,7 +2,7 @@ import Foundation
 
 enum SubscriptionClientError: Error, Equatable {
     case unconfigured
-    case alreadyConfiguredForAnotherAccount
+    case anonymousIdentityCannotSwitch
     case offeringUnavailable
     case productUnavailable
 }
