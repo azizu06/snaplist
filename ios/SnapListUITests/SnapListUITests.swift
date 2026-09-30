@@ -4101,21 +4101,16 @@ final class SnapListUITests: XCTestCase {
 
     func testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
         let app = launch(extraArguments: ["--fixture=trophy-wall"])
-        let processing = app.buttons["trophy.wall.processing"]
         let account = app.buttons["trophy.wall.account"]
 
-        for control in [processing, account] {
-            XCTAssertTrue(control.exists)
-            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
-        }
+        XCTAssertTrue(account.exists)
+        XCTAssertGreaterThanOrEqual(account.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(account.frame.height, 44)
 
-        XCTAssertEqual(processing.label, "Processing")
+        // #1134: Processing moved from the header clock to a dock slot.
+        XCTAssertFalse(app.buttons["trophy.wall.processing"].exists)
         XCTAssertEqual(account.label, "Account, opens Settings")
         XCTAssertFalse(app.buttons["dock.capture"].exists)
-
-        processing.tap()
-        XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 2))
     }
 
     func testKeyboardHidesTheFloatingDock() {
@@ -4357,7 +4352,6 @@ final class SnapListUITests: XCTestCase {
         ])
 
         XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["trophy.wall.processing"].exists)
         XCTAssertTrue(app.buttons["trophy.wall.account"].exists)
         XCTAssertTrue(app.buttons["dock.scan"].exists)
         XCTAssertTrue(app.buttons["dock.trophy-wall"].exists)
