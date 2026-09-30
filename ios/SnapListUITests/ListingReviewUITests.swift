@@ -232,80 +232,60 @@ final class ListingReviewUITests: XCTestCase {
         }
     }
 
-    func testZeroAndFiveEvidenceStayTruthfulAndSoldDetailReturnsToInvoker() {
+    func testZeroAndFiveEvidenceStayTruthfulAndSoldCardsOpenEbay() {
         var app = launch(fixture: "zero-evidence", resetDraft: true)
         _ = openReview(in: app)
-
-        // #896 retired this label from the screen: the formatted number under
-        // it already read as a price. What the screen asserts is true did not
-        // change, so the no-evidence line below is still required here.
-        XCTAssertFalse(app.staticTexts["Starting price estimate"].exists)
-        XCTAssertTrue(
-            app.staticTexts["No verified sold matches found."].exists
-        )
-        XCTAssertEqual(
-            soldMatchButtons(in: app).count,
-            0,
-            "Zero evidence must not invent a sold card."
-        )
-        UIProcessTerminationBoundary()
-            .assertRetired(app, "The zero-evidence fixture")
+        XCTAssertTrue(app.staticTexts["No verified sold matches found."].exists)
+        XCTAssertEqual(soldMatchButtons(in: app).count, 0)
+        UIProcessTerminationBoundary().assertRetired(app, "The zero-evidence fixture")
 
         app = launch(fixture: "five-evidence", resetDraft: true)
         _ = openReview(in: app)
-
         XCTAssertTrue(
             app.staticTexts.matching(
                 NSPredicate(format: "label BEGINSWITH %@", "5 sold")
             ).firstMatch.exists
         )
-        let price = app.textFields["listing-review.price"]
-        XCTAssertTrue(price.exists)
-        XCTAssertTrue(String(describing: price.value as Any).contains("$58"))
-
         let firstMatch = app.buttons["listing-review.sold-match.0"]
         XCTAssertTrue(firstMatch.exists)
-        firstMatch.tap()
-        XCTAssertTrue(
-            anyElement("listing-review.sold-detail", in: app)
-                .waitForExistence(timeout: 3)
+        scrollUntilClearOfFooter(
+            firstMatch,
+            footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch,
+            in: app
         )
-        // A sold comp explains the price only when the terms of the sale come
-        // with it: a free-shipping Buy It Now and a paid auction are not the
-        // same $52.
-        XCTAssertTrue(
-            app.staticTexts["Body only"].exists,
-            "The sold detail must carry the comp's size."
-        )
-        XCTAssertTrue(
-            app.staticTexts["Buy It Now"].exists,
-            "The sold detail must carry the comp's selling format."
-        )
-        XCTAssertTrue(
-            app.staticTexts["Free shipping"].exists,
-            "The sold detail must carry the comp's shipping term."
-        )
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(firstMatch.waitForExistence(timeout: 3))
         XCTAssertTrue(firstMatch.isHittable)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "verified-sold-cards"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
 
-        // The third fixture record carries none of the three optional facts.
-        // An absent fact drops its row; it never renders a labelled blank.
-        let bareMatch = app.buttons["listing-review.sold-match.2"]
-        XCTAssertTrue(bareMatch.waitForExistence(timeout: 3))
-        bareMatch.tap()
-        XCTAssertTrue(
-            anyElement("listing-review.sold-detail", in: app)
-                .waitForExistence(timeout: 3)
-        )
-        for absent in ["SIZE", "FORMAT", "SHIPPING"] {
-            XCTAssertFalse(
-                app.staticTexts[absent].exists,
-                "An absent \(absent) fact must not render its row."
-            )
+        XCTAssertFalse(app.staticTexts["Sold prices, not asking prices."].exists)
+        XCTAssertTrue(firstMatch.label.hasPrefix("eBay, sold $62 on "))
+        XCTAssertEqual(firstMatch.value as? String,
+                       "Sony DualSense controller sold listing 1. Used")
+        let cards = app.scrollViews["listing-review.sold-matches"]
+        let fifthMatch = app.buttons["listing-review.sold-match.4"]
+        func isFullyVisible(_ element: XCUIElement) -> Bool {
+            guard element.exists else { return false }
+            let frame = element.frame
+            return frame.width > 0 && frame.height > 0 && app.windows.firstMatch.frame.contains(frame)
         }
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(bareMatch.waitForExistence(timeout: 3))
+        for _ in 0..<5 where !isFullyVisible(fifthMatch) { cards.swipeLeft() }
+        XCTAssertTrue(isFullyVisible(fifthMatch), "The carousel must retain the fifth API match.")
+        XCTAssertTrue(fifthMatch.isHittable)
+        for _ in 0..<5 where !isFullyVisible(firstMatch) { cards.swipeRight() }
+        XCTAssertTrue(firstMatch.isHittable)
+        firstMatch.tap()
+        let backgrounded = NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }
+        let handoff = XCTNSPredicateExpectation(predicate: backgrounded, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [handoff], timeout: 10), .completed,
+                       "A sold card must hand its eBay listing to the system URL handler.")
+        app.activate()
+        XCTAssertTrue(app.otherElements["listing-review"].waitForExistence(timeout: 3))
+        XCTAssertFalse(anyElement("listing-review.sold-detail", in: app).exists)
     }
 
     func testCorrectionBoundaryAndAdaptiveManualFallbackRemainReachable() {

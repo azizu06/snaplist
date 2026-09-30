@@ -2,14 +2,12 @@ import SwiftUI
 
 private enum ListingReviewDestination: Identifiable, Hashable {
     case specifics
-    case sold(Int)
     case correction
     case ebayPublish
 
     var id: String {
         switch self {
         case .specifics: "specifics"
-        case .sold(let index): "sold-\(index)"
         case .correction: "correction"
         case .ebayPublish: "ebay-publish"
         }
@@ -42,6 +40,7 @@ struct ListingReviewView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
+    @Environment(\.openURL) private var openURL
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var destination: ListingReviewDestination?
@@ -491,13 +490,8 @@ struct ListingReviewView: View {
                             index: index,
                             total: matches.count
                         ) {
-                            returnFocus = .soldMatch(index)
-                            Task {
-                                await inlineEdits.flush(into: store)
-                                await commitPrice()
-                                await store.flushPendingAutosave()
-                                destination = .sold(index)
-                            }
+                            activationInteraction()
+                            if let url = match.ebayListingURL { openURL(url) }
                         }
                         .accessibilityFocused(
                             $focusedElement,
@@ -507,15 +501,10 @@ struct ListingReviewView: View {
                 }
                 .scrollTargetLayout()
             }
-            .contentMargins(.horizontal, 6, for: .scrollContent)
+            .accessibilityIdentifier("listing-review.sold-matches")
+            .contentMargins(.horizontal, 18, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .padding(.top, 10)
-
-            Text("Sold prices, not asking prices.")
-                .font(.caption)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-                .padding(.horizontal, 18)
-                .padding(.top, 10)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
@@ -828,11 +817,6 @@ struct ListingReviewView: View {
                 correctionAvailability: correctionAvailability,
                 inlineEdits: inlineEdits
             )
-        case .sold(let index):
-            if let matches = store.snapshot?.verifiedSoldMatches,
-               matches.indices.contains(index) {
-                SoldMatchDetailView(match: matches[index])
-            }
         case .correction:
             ListingReviewCorrectionBoundaryView()
         case .ebayPublish:
