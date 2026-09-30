@@ -99,6 +99,26 @@ enum EbayListingEnvironment: String, Codable, Sendable {
     case production
 }
 
+/// The one boundary for handing an eBay item page to iOS. HTTPS on an
+/// `ebay.com` host (sandbox included) with an `/itm/` path permits the eBay
+/// universal link and the system browser fallback; anything else is refused.
+enum EbayItemURL {
+    static func trusted(_ url: URL) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.user == nil, components.password == nil,
+              let host = components.host?.lowercased(),
+              host == "ebay.com" || host.hasSuffix(".ebay.com"),
+              components.path.lowercased().hasPrefix("/itm/"),
+              components.path.count > "/itm/".count else { return nil }
+        components.scheme = "https"
+        components.host = host
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+}
+
 enum EbayListingURL {
     static func resolve(
         providerURL: URL?,
@@ -182,6 +202,23 @@ struct EbayPublishStatus: Codable, Equatable, Sendable {
             ebayListingID: ebayListingID,
             listingURL: resolvedURL
         )
+    }
+}
+
+/// The seller's own eBay posting, for a surface outside the publish journey
+/// (Listing Review reopened from Trophy Wall). It reads the same status the
+/// journey loads first, so it never publishes. Only eBay's confirmed
+/// publication of this exact listing yields a destination; a draft, a failed
+/// or unknown outcome, another listing's receipt, or a failed read yields none.
+enum EbayOwnListingDestination {
+    static func resolve(
+        listingID: UUID,
+        service: any EbayPublishFeatureServing
+    ) async -> URL? {
+        guard let status = try? await service.status(listingID: listingID),
+              status.listingID == listingID,
+              let published = status.publishedListing else { return nil }
+        return EbayItemURL.trusted(published.listingURL)
     }
 }
 

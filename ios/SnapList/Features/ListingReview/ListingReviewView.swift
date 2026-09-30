@@ -14,6 +14,11 @@ private enum ListingReviewDestination: Identifiable, Hashable {
     }
 }
 
+private struct OwnEbayPostingLookup: Equatable {
+    let listingID: UUID?
+    let reviewIsFrontmost: Bool
+}
+
 private struct ListingReviewSharingPresentation: Identifiable {
     let pack: AssistedExportPack
     let summary: AssistedExportItemSummary
@@ -51,6 +56,9 @@ struct ListingReviewView: View {
     @State private var priceInvalid = false
     @State private var conditionDrawerPresented = false
     @State private var conditionSelection = ListingReviewCondition.good
+    // The seller's own live eBay posting, once eBay has confirmed it. Nil
+    // until then, and for every draft, so the row stays Publish to eBay.
+    @State private var ownEbayPostingURL: URL?
     // Owned here rather than by the fields, because Item specifics is pushed
     // and its fields would otherwise take their pending text down with them.
     @State private var inlineEdits = ListingReviewInlineEdits()
@@ -191,6 +199,21 @@ struct ListingReviewView: View {
         .onChange(of: inlineFocus) { previous, current in
             reactToFocusChange(previous: previous, current: current)
         }
+        // Re-read on return from the publish journey too, so a listing the
+        // seller just posted offers its eBay page without reopening review.
+        .task(id: OwnEbayPostingLookup(
+            listingID: store.snapshot?.binding.listingID,
+            reviewIsFrontmost: destination == nil
+        )) {
+            guard let listingID = store.snapshot?.binding.listingID,
+                  destination == nil else { return }
+            let resolved = await EbayOwnListingDestination.resolve(
+                listingID: listingID,
+                service: dependencies.ebayPublishService
+            )
+            guard !Task.isCancelled else { return }
+            ownEbayPostingURL = resolved
+        }
         .onChange(of: destination?.id) { previous, current in
             guard previous != nil, current == nil else { return }
             focusedElement = returnFocus
@@ -268,7 +291,11 @@ struct ListingReviewView: View {
 
                     details(snapshot: snapshot, draft: draft)
 
-                    ebayPublishEntry
+                    if let ownEbayPostingURL {
+                        viewOnEbayEntry(ownEbayPostingURL)
+                    } else {
+                        ebayPublishEntry
+                    }
 
                     assistedExportEntry
                 }
@@ -714,6 +741,42 @@ struct ListingReviewView: View {
         )
         .accessibilityFocused($focusedElement, equals: .assistedExport)
         .accessibilityIdentifier("listing-review.assisted-export")
+    }
+
+    /// Replaces Publish to eBay once eBay confirmed this listing, because the
+    /// seller's next move on a live posting is to look at it, not post again.
+    private func viewOnEbayEntry(_ url: URL) -> some View {
+        Button {
+            openURL(url)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "shippingbox")
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.action.color)
+                    .accessibilityHidden(true)
+                Text("View on eBay")
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .accessibilityHidden(true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(SnapListColorToken.canvas.color)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(SnapListColorToken.hairline.color)
+        }
+        .accessibilityHint("Opens your published listing on eBay")
+        .accessibilityFocused($focusedElement, equals: .ebayPublish)
+        .accessibilityIdentifier("listing-review.view-on-ebay")
     }
 
     private var ebayPublishEntry: some View {
