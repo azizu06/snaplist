@@ -2739,7 +2739,6 @@ final class TrophyWallDomainTests: XCTestCase {
                 rootView: TrophyWallView(
                     store: store,
                     accountInitials: "S",
-                    openProcessing: {},
                     openAccount: {},
                     openListing: { _ in .presentedReview },
                     onScan: {},
@@ -2786,7 +2785,6 @@ final class TrophyWallDomainTests: XCTestCase {
         let exhaustedWall = TrophyWallView(
             store: settledStore,
             accountInitials: "S",
-            openProcessing: {},
             openAccount: {},
             openListing: { _ in .presentedReview },
             onScan: {},

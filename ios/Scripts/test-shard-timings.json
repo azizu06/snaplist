@@ -63,6 +63,7 @@
     "SnapListUITests/HomeUITests/testScanOpensAsADrawerOverTrophyWallInsteadOfReplacingIt": 8.273,
     "SnapListUITests/HomeUITests/testSettledTileOpensListingReviewDirectlyAndReturnsToTrophyWall": 10.594,
     "SnapListUITests/HomeUITests/testSettledTileSurfacesUnavailableInlineWhenTheDraftCannotLoad": 9.019,
+    "SnapListUITests/HomeUITests/testProcessingDockSlotNavigatesBetweenProcessingAndTrophyWall": 12.123,
     "SnapListUITests/HomeUITests/testTrophyWallFixtureUsesValidatedWallAndPushedProcessing": 14.139,
     "SnapListUITests/HomeUITests/testTrophyWallProcessingItemNameStopsTruncatingAtLargestAccessibilitySize": 7.712,
     "SnapListUITests/HomeUITests/testTrophyWallProcessingStateLabelStopsTruncatingAtLargestAccessibilitySize": 7.579,

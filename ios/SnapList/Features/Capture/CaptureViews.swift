@@ -1342,7 +1342,7 @@ struct ScanCameraVisualStateView: View {
     /// in the real app, so the fixture keeps giving them one here.
     var body: some View {
         if carriesDock {
-            surface.floatingDock(selectedTab: .scan, select: { _ in })
+            surface.floatingDock(selectedSlot: .primary(.scan), select: { _ in })
         } else {
             surface
         }

@@ -23,6 +23,78 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// Whether the dock carries a Processing slot. Processing is a secondary
+/// screen, not a third primary destination, so the slot is a shortcut that
+/// the owner can tune after a device pass by flipping `current` (#1134).
+enum ProcessingDockSlotPresence: Equatable {
+    case always
+    case whenActive
+    case never
+
+    static let current: Self = .whenActive
+}
+
+/// One slot in the floating dock. The two primary destinations come straight
+/// from `PrimaryTab`, so a destination cannot exist in one list and not the
+/// other; Processing is the only non-primary slot.
+enum DockSlot: Hashable, Identifiable {
+    case primary(PrimaryTab)
+    case processing
+
+    var id: String { accessibilityIdentifier }
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .primary(let tab): "dock.\(tab.rawValue)"
+        case .processing: "dock.processing"
+        }
+    }
+
+    func systemImage(isSelected: Bool) -> String {
+        switch self {
+        case .primary(let tab): tab.systemImage(isSelected: isSelected)
+        case .processing: "progress.indicator"
+        }
+    }
+
+    func accessibilityLabel(processingCount: Int) -> String {
+        switch self {
+        case .primary(let tab):
+            return tab.title
+        case .processing:
+            guard processingCount > 0 else { return "Processing" }
+            return processingCount == 1
+                ? "Processing, 1 item"
+                : "Processing, \(processingCount) items"
+        }
+    }
+}
+
+/// Which slots the dock shows and which one reads as selected. Pure, so the
+/// three presence values and the selection rule are unit-tested directly.
+enum DockSlotPolicy {
+    static func slots(
+        processingCount: Int,
+        presence: ProcessingDockSlotPresence = .current
+    ) -> [DockSlot] {
+        let primary = PrimaryTab.allCases.map(DockSlot.primary)
+        let showsProcessing: Bool
+        switch presence {
+        case .always: showsProcessing = true
+        case .whenActive: showsProcessing = processingCount > 0
+        case .never: showsProcessing = false
+        }
+        return showsProcessing ? primary + [.processing] : primary
+    }
+
+    /// Processing reads as selected while its screen is the top of the
+    /// wall's stack; everywhere else the dock is on Trophy Wall, because the
+    /// Scan slot raises a drawer rather than selecting a screen (#1129).
+    static func selectedSlot(path: [AppRoute]) -> DockSlot {
+        path.last == .home(.processing) ? .processing : .primary(.trophyWall)
+    }
+}
+
 enum FutureBoundary: String, Hashable {
     case account
     case run
@@ -300,6 +372,14 @@ final class AppRouter {
 
     func resetWallPath() {
         wallPath = []
+    }
+
+    /// The dock's Processing slot behaves like a tab: it lands on the
+    /// Processing screen from anywhere in the wall's stack, and tapping it
+    /// again while already there changes nothing.
+    func openProcessingFromDock() {
+        guard wallPath != [.home(.processing)] else { return }
+        wallPath = [.home(.processing)]
     }
 
     /// The shell closes Scan through its camera-safe dismissal; the item then
