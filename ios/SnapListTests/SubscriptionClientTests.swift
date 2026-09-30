@@ -92,6 +92,66 @@ final class SubscriptionClientTests: XCTestCase {
         XCTAssertEqual(verified.source, .storeKit)
     }
 
+    /// Sandbox device finding: after an in-app switch from account A to B,
+    /// the SDK stayed bound to A until relaunch, so B could not load the plan
+    /// and a checkout could have been attributed to A. B's server-issued ID
+    /// now rebinds the SDK with `logIn`, never `logOut`, never a reconfigure.
+    func testAccountSwitchRebindsTheSDKToTheCurrentServerIssuedUser() async throws {
+        let identity = RecordingRevenueCatIdentity()
+        let client = RevenueCatSubscriptionClient(identity: identity)
+
+        try await client.configure(.revenueCatFixture(appUserID: "user_A"))
+        try await client.configure(.revenueCatFixture(appUserID: "user_A"))
+        XCTAssertEqual(identity.configuredUsers, ["user_A"])
+        XCTAssertEqual(identity.loggedInUsers, [])
+
+        try await client.configure(.revenueCatFixture(appUserID: "user_B"))
+        XCTAssertEqual(identity.configuredUsers, ["user_A"])
+        XCTAssertEqual(identity.loggedInUsers, ["user_B"])
+        XCTAssertEqual(identity.appUserID, "user_B")
+    }
+
+    /// `logIn` from an anonymous ID aliases it into the new account. SnapList
+    /// never configures one, so meeting one refuses instead of merging.
+    func testAnonymousSDKIdentityIsNeverMergedIntoTheSignedInAccount() async {
+        let identity = RecordingRevenueCatIdentity(
+            configuredAs: "$RCAnonymousID:device",
+            anonymous: true
+        )
+        let client = RevenueCatSubscriptionClient(identity: identity)
+
+        do {
+            try await client.configure(.revenueCatFixture(appUserID: "user_B"))
+            XCTFail("An anonymous SDK identity must not be switched")
+        } catch {
+            XCTAssertEqual(
+                error as? SubscriptionClientError,
+                .anonymousIdentityCannotSwitch
+            )
+        }
+        XCTAssertEqual(identity.loggedInUsers, [])
+    }
+
+    /// A failed switch leaves nothing a purchase could use for the old user.
+    func testFailedAccountSwitchLeavesTheClientUnconfigured() async throws {
+        let identity = RecordingRevenueCatIdentity()
+        let client = RevenueCatSubscriptionClient(identity: identity)
+        try await client.configure(.revenueCatFixture(appUserID: "user_A"))
+        identity.logInError = URLError(.notConnectedToInternet)
+
+        do {
+            try await client.configure(.revenueCatFixture(appUserID: "user_B"))
+            XCTFail("The switch should have failed")
+        } catch {}
+
+        do {
+            _ = try await client.purchase(productID: "snaplist.pro.monthly")
+            XCTFail("A purchase must not run after a failed switch")
+        } catch {
+            XCTAssertEqual(error as? SubscriptionClientError, .unconfigured)
+        }
+    }
+
     func testRevenueCatAppleKeyValidationRejectsTestStoreForRelease() {
         XCTAssertTrue(
             RevenueCatSDKKey.isAccepted(
@@ -128,6 +188,48 @@ final class SubscriptionClientTests: XCTestCase {
             monthlyProductID: "fixture-monthly",
             offeringID: "current",
             transitionState: .notRequired,
+            legacyStripeStatus: nil
+        )
+    }
+}
+
+private final class RecordingRevenueCatIdentity: RevenueCatIdentity, @unchecked Sendable {
+    private(set) var isConfigured: Bool
+    private(set) var appUserID: String
+    let isAnonymous: Bool
+    private(set) var configuredUsers: [String] = []
+    private(set) var loggedInUsers: [String] = []
+    var logInError: Error?
+
+    init(configuredAs appUserID: String? = nil, anonymous: Bool = false) {
+        isConfigured = appUserID != nil
+        self.appUserID = appUserID ?? ""
+        isAnonymous = anonymous
+    }
+
+    func configure(apiKey: String, appUserID: String) {
+        isConfigured = true
+        self.appUserID = appUserID
+        configuredUsers.append(appUserID)
+    }
+
+    func logIn(_ appUserID: String) async throws {
+        if let logInError { throw logInError }
+        self.appUserID = appUserID
+        loggedInUsers.append(appUserID)
+    }
+}
+
+private extension NativeSubscriptionConfiguration {
+    static func revenueCatFixture(appUserID: String) -> Self {
+        Self(
+            configured: true,
+            appUserID: appUserID,
+            publicSDKKey: "appl_fixture",
+            entitlementID: "pro",
+            monthlyProductID: "snaplist.pro.monthly",
+            offeringID: nil,
+            transitionState: nil,
             legacyStripeStatus: nil
         )
     }
