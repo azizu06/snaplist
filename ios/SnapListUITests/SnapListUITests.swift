@@ -639,6 +639,50 @@ final class SnapListUITests: XCTestCase {
     /// target that comes from text height rather than the 44pt floor is
     /// thinnest at the smallest Dynamic Type size, which is where this checks —
     /// the opposite direction from the accessibility-size checks above.
+    /// Settings is the seller's standing way into SnapList Pro: an account on
+    /// its included allowance sees `Get SnapList Pro`, and it opens the same
+    /// paywall the item gate uses, framed for Settings rather than an item.
+    func testSettingsGetSnapListProOpensThePlansPaywall() {
+        let app = launch(extraArguments: [
+            "--settings-proof=SET-01",
+            "--settings-subscription-fixture=included",
+        ])
+        XCTAssertTrue(
+            app.descendants(matching: .any)["settings.screen"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+
+        let seePlans = app.buttons["settings.subscription.see-plans"]
+        for _ in 0..<6 where !seePlans.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(seePlans.isHittable, app.debugDescription)
+        XCTAssertGreaterThanOrEqual(seePlans.frame.height, 44)
+        addScreenshot(named: "settings-get-snaplist-pro")
+        seePlans.tap()
+
+        let title = app.staticTexts["pro-gate.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(title.label, "SnapList Pro")
+        XCTAssertFalse(app.staticTexts["What happens if you don’t subscribe"].exists)
+        XCTAssertEqual(
+            app.descendants(matching: .any)["pro-gate.plan"].label,
+            "SnapList Pro, Monthly, $9.99 per month"
+        )
+        for control in [
+            app.buttons["pro-gate.primary"],
+            app.buttons["pro-gate.restore-purchase"],
+            app.buttons["pro-gate.not-now"],
+        ] {
+            XCTAssertTrue(control.isHittable, control.identifier)
+        }
+        addScreenshot(named: "settings-plans-paywall")
+
+        app.buttons["pro-gate.not-now"].tap()
+        XCTAssertFalse(title.waitForExistence(timeout: 2))
+        XCTAssertTrue(seePlans.waitForExistence(timeout: 3))
+    }
+
     func testSubscriptionActionButtonsMeetTheTouchTargetFloorAtSmallestDynamicTypeSize() {
         let app = XCUIApplication()
         app.launchArguments = ["--settings-proof=SET-01", "--dynamic-type=xSmall"]
@@ -4137,7 +4181,7 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
 
         let row = app.descendants(matching: .any)["pro-gate.allowance-row"]
-        let price = app.staticTexts["$9.99 per month"]
+        let price = app.descendants(matching: .any)["pro-gate.plan"]
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         XCTAssertTrue(price.waitForExistence(timeout: 3))
 
@@ -4164,7 +4208,10 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts["What happens if you don’t subscribe"].exists
         )
-        XCTAssertTrue(app.staticTexts["$9.99 per month"].exists)
+        XCTAssertEqual(
+            app.descendants(matching: .any)["pro-gate.plan"].label,
+            "SnapList Pro, Monthly, $9.99 per month"
+        )
 
         for control in [
             app.buttons["pro-gate.primary"],
@@ -4232,10 +4279,13 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThan(title.frame.height, standardTitleHeight * 1.5)
 
         let primary = app.buttons["pro-gate.primary"]
-        for _ in 0..<5 where !primary.isHittable {
+        // The decision controls sit below the plan tile and Subscribe, so
+        // scroll until the last of them is reachable, not just the first.
+        let decline = app.buttons["pro-gate.not-now"]
+        for _ in 0..<6 where !decline.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(app.staticTexts["$9.99 per month"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["pro-gate.plan"].exists)
         for control in [
             primary,
             app.buttons["pro-gate.restore-purchase"],

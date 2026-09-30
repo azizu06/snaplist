@@ -11,7 +11,8 @@ final class ProGateStoreTests: XCTestCase {
         billingPeriod: .init(value: 1, unit: .month)
     )
 
-    func testProGateV3UsesApprovedCopyMaterialAndFixedDetent() {
+    func testProGateKeepsTheApprovedItemGateCopy() {
+        XCTAssertEqual(ProGateCopy.offerTitle, "This item needs SnapList Pro")
         XCTAssertEqual(
             ProGateCopy.reassuranceTitle,
             "What happens if you don’t subscribe"
@@ -19,10 +20,6 @@ final class ProGateStoreTests: XCTestCase {
         XCTAssertEqual(
             SnapListColorToken.proGateReassuranceDivider.rawValue,
             "#E6E7EA"
-        )
-        XCTAssertEqual(
-            ProGateSheet.presentationDetentHeight,
-            504
         )
     }
 

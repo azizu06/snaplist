@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftUI
 import UserNotifications
 
@@ -497,6 +498,35 @@ enum SettingsValueRowLayout {
     }
 }
 
+/// Binds the Settings subscription reading to one account. Settings can
+/// outlive an in-app sign-out and sign-in, so a store that already holds the
+/// previous account's verified plan is replaced rather than reused.
+@MainActor
+@Observable
+final class SettingsSubscriptionAccountScope {
+    private(set) var identity: SettingsIdentity
+    private(set) var store: SubscriptionStore
+    @ObservationIgnored private let makeStore: () -> SubscriptionStore
+
+    init(
+        identity: SettingsIdentity,
+        makeStore: @escaping () -> SubscriptionStore
+    ) {
+        self.identity = identity
+        self.makeStore = makeStore
+        store = makeStore()
+    }
+
+    /// Returns `true` when the account changed and the reading was reset.
+    @discardableResult
+    func rebind(to identity: SettingsIdentity) -> Bool {
+        guard identity != self.identity else { return false }
+        self.identity = identity
+        store = makeStore()
+        return true
+    }
+}
+
 struct SettingsSubscriptionVisibility: Equatable {
     let isVisible: Bool
 
@@ -513,6 +543,10 @@ struct SettingsSubscriptionPresentation: Equatable {
     }
 
     enum Action: Equatable {
+        /// Opens the SnapList Pro offer through the same `ProGateStore`
+        /// the item gate uses. Only drawn where the server says this account
+        /// has no StoreKit subscription running.
+        case seePlans
         case manage
         case restore
         case retry
@@ -599,7 +633,7 @@ struct SettingsSubscriptionPresentation: Equatable {
         case .available, .restoreNotFound:
             self.init(
                 stateID: "SUB-03", status: "Not subscribed", facts: [], note: nil,
-                actions: manageAndRestore, showsOwnershipNote: true
+                actions: [.seePlans] + manageAndRestore, showsOwnershipNote: true
             )
         case .restoring:
             self.init(
@@ -637,7 +671,7 @@ struct SettingsSubscriptionPresentation: Equatable {
             return Self(
                 stateID: "SUB-06", status: "Included", facts: [remaining],
                 note: "This allowance comes with your account. There is no subscription on this Apple Account.",
-                actions: manageAndRestore, showsOwnershipNote: true
+                actions: [.seePlans] + manageAndRestore, showsOwnershipNote: true
             )
         case .active:
             return Self(
@@ -689,7 +723,7 @@ struct SettingsSubscriptionPresentation: Equatable {
     private static func ended(_ id: String, _ status: String, _ note: String) -> Self {
         Self(
             stateID: id, status: status, facts: [], note: note,
-            actions: [.manage, .restore], showsOwnershipNote: true
+            actions: [.seePlans, .manage, .restore], showsOwnershipNote: true
         )
     }
 
