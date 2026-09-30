@@ -18,6 +18,8 @@
     }
   },
   "selector_observed_seconds": {
+    "SnapListUITests/HomeUITests/testDownwardDragFromCameraSurfaceDismissesScanDrawer": 9.218,
+    "SnapListUITests/HomeUITests/testPhotoReviewDownwardScrollAwayFromTopKeepsDrawerOpen": 8.390,
     "SnapListUITests/AccountDeletionUITests/testADeletionThatStoppedPartwayKeepsTheControlThatCanFinishIt": 6.075,
     "SnapListUITests/AccountDeletionUITests/testAKeyTheServerBoundElsewhereIsNotOfferedARetryThatCannotWork": 7.588,
     "SnapListUITests/AccountDeletionUITests/testAServerThatConfirmedNothingReportsNoDeletionAndKeepsRetry": 7.475,

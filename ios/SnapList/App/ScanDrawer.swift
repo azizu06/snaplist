@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// What moved the Scan drawer. Every presentation change goes through one of
 /// these, so the camera session's lifetime is decided in one place instead of
@@ -75,9 +76,7 @@ enum ScanDrawerMetrics {
     static let cornerRadius: CGFloat = 28
     /// How far the wall behind the drawer is dimmed.
     static let scrimOpacity: Double = 0.32
-    /// The band at the drawer's top edge that owns the downward drag. The
-    /// gesture lives here and nowhere else, so it can never take a swipe
-    /// meant for the photo pager or the thumbnail reorder underneath it.
+    /// Space for the grabber above the drawer's content.
     static let grabHandleBandHeight: CGFloat = 32
 }
 
@@ -240,6 +239,7 @@ struct ScanDrawerSurface<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     @State private var dragTranslation: CGFloat = 0
+    @State private var revealProgress: CGFloat = 0
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
@@ -263,6 +263,20 @@ struct ScanDrawerSurface<Content: View>: View {
                         scrim
                             .transition(.opacity)
                         card(layout)
+                            // Animate an already-mounted card. A transition
+                            // inside nested geometry readers can insert at its
+                            // final position even with an animated transaction.
+                            .offset(y: reduceMotion ? 0 : layout.drawerHeight * (1 - revealProgress))
+                            .opacity(reduceMotion ? revealProgress : 1)
+                            .onAppear {
+                                withAnimation(ScanDrawerMotionPolicy.presentationAnimation(
+                                    reduceMotion: reduceMotion
+                                )) { revealProgress = 1 }
+                            }
+                            .onDisappear {
+                                revealProgress = 0
+                                dragTranslation = 0
+                            }
                             .transition(
                                 ScanDrawerMotionPolicy.transition(
                                     reduceMotion: reduceMotion
@@ -335,17 +349,31 @@ struct ScanDrawerSurface<Content: View>: View {
             // the drawer, the same promise the close control and the swipe
             // make.
             .accessibilityAction(.escape, dismiss)
+            .modifier(ScanDrawerPanModifier(
+                changed: { dragTranslation = $0 },
+                ended: { translation, velocity in
+                    let outcome = ScanDrawerDragPolicy.outcome(
+                        translation: translation,
+                        velocity: velocity,
+                        drawerHeight: height
+                    )
+                    if outcome == .dismiss {
+                        // Keep the finger's offset while the removal transition
+                        // runs; resetting first makes the card jump back up.
+                        dismiss()
+                    } else {
+                        withAnimation(ScanDrawerMotionPolicy.presentationAnimation(
+                            reduceMotion: reduceMotion
+                        )) { dragTranslation = 0 }
+                    }
+                }
+            ))
     }
 
-    /// The grabber, and the only place the downward drag starts.
-    ///
-    /// The gesture is confined to this band on purpose. Photo Review's pager
-    /// swipes horizontally and its thumbnail strip drags to reorder; a drag
-    /// attached to the whole card would be competing with both of them for
-    /// every touch, and the drawer would occasionally win a swipe the seller
-    /// meant for their photos.
+    /// The grabber marks the same downward gesture available on the card.
+    @ViewBuilder
     private func grabHandle(drawerHeight: CGFloat) -> some View {
-        Color.clear
+        let handle = Color.clear
             .frame(height: ScanDrawerMetrics.grabHandleBandHeight)
             .frame(maxWidth: .infinity)
             .contentShape(.rect)
@@ -365,24 +393,113 @@ struct ScanDrawerSurface<Content: View>: View {
                 }
                 .frame(width: 36, height: 5)
             }
-            .gesture(dragGesture(drawerHeight: drawerHeight))
             .accessibilityHidden(true)
+        if #available(iOS 18, *) {
+            handle
+        } else {
+            // Older SwiftUI has no native recognizer bridge. Retain the
+            // grabber gesture rather than taking a nested scroll's touches.
+            handle.gesture(DragGesture(minimumDistance: 4)
+                .onChanged { dragTranslation = $0.translation.height }
+                .onEnded { value in
+                    if ScanDrawerDragPolicy.outcome(
+                        translation: value.translation.height,
+                        velocity: value.velocity.height,
+                        drawerHeight: drawerHeight
+                    ) == .dismiss {
+                        dismiss()
+                    } else {
+                        withAnimation(ScanDrawerMotionPolicy.presentationAnimation(
+                            reduceMotion: reduceMotion
+                        )) { dragTranslation = 0 }
+                    }
+                })
+        }
+    }
+}
+
+private struct ScanDrawerPanModifier: ViewModifier {
+    let changed: (CGFloat) -> Void
+    let ended: (CGFloat, CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.gesture(ScanDrawerSurfacePan(changed: changed, ended: ended))
+        } else {
+            content
+        }
+    }
+}
+
+/// UIKit's pan primitive lets nested scrollers and native text editing keep
+/// their gestures. Only a downward, vertical drag at a scroller's top can
+/// move the drawer; horizontal photo paging and thumbnail reordering retain
+/// their existing recognizers.
+@available(iOS 18, *)
+private struct ScanDrawerSurfacePan: UIGestureRecognizerRepresentable {
+    let changed: (CGFloat) -> Void
+    let ended: (CGFloat, CGFloat) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
     }
 
-    private func dragGesture(drawerHeight: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 4)
-            .onChanged { value in
-                dragTranslation = value.translation.height
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.maximumNumberOfTouches = 1
+        pan.cancelsTouchesInView = false
+        pan.delegate = context.coordinator
+        return pan
+    }
+
+    func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
+        let translation = pan.translation(in: pan.view).y
+        switch pan.state {
+        case .began, .changed:
+            changed(ScanDrawerDragPolicy.offset(forTranslation: translation))
+        case .ended:
+            ended(translation, pan.velocity(in: pan.view).y)
+        case .cancelled, .failed:
+            ended(0, 0)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private var scrollViews: [UIScrollView] = []
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldReceive touch: UITouch) -> Bool {
+            scrollViews = []
+            var view = touch.view
+            while let current = view {
+                // Native text selection/editing and drag-and-drop belong to
+                // the touched control, including an unsaved voice-note editor.
+                if current is UITextView || current is UIControl
+                    || current.interactions.contains(where: { $0 is UIDragInteraction }) {
+                    return false
+                }
+                if let scroll = current as? UIScrollView, scroll.isScrollEnabled {
+                    scrollViews.append(scroll)
+                }
+                view = current.superview
             }
-            .onEnded { value in
-                let outcome = ScanDrawerDragPolicy.outcome(
-                    translation: value.translation.height,
-                    velocity: value.velocity.height,
-                    drawerHeight: drawerHeight
-                )
-                dragTranslation = 0
-                guard outcome == .dismiss else { return }
-                dismiss()
+            return true
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: pan.view)
+            guard velocity.y > abs(velocity.x) else { return false }
+            return scrollViews.allSatisfy { scroll in
+                scroll.contentOffset.y <= -scroll.adjustedContentInset.top + 1
             }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
+        }
     }
 }
