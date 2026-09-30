@@ -558,6 +558,9 @@ struct SettingsSubscriptionPresentation: Equatable {
     }
 
     let stateID: String
+    /// The status row's label. Every reading names SnapList Pro except the
+    /// included allowance, which is not a subscription (SUB-06).
+    let planLabel: String
     let status: String
     let facts: [Fact]
     let note: String?
@@ -566,6 +569,7 @@ struct SettingsSubscriptionPresentation: Equatable {
 
     private init(
         stateID: String,
+        planLabel: String = "SnapList Pro",
         status: String,
         facts: [Fact],
         note: String?,
@@ -573,6 +577,7 @@ struct SettingsSubscriptionPresentation: Equatable {
         showsOwnershipNote: Bool
     ) {
         self.stateID = stateID
+        self.planLabel = planLabel
         self.status = status
         self.facts = facts
         self.note = note
@@ -585,7 +590,7 @@ struct SettingsSubscriptionPresentation: Equatable {
     }
 
     var accessibilityAnnouncement: String {
-        var parts = ["SnapList Pro"]
+        var parts = [planLabel]
         if !status.isEmpty { parts.append(status) }
         parts += facts.map { "\($0.label), \($0.value)" }
         if let note { parts.append(note) }
@@ -669,7 +674,8 @@ struct SettingsSubscriptionPresentation: Equatable {
         switch verified.status {
         case .included:
             return Self(
-                stateID: "SUB-06", status: "Included", facts: [remaining],
+                stateID: "SUB-06", planLabel: "Plan", status: "Included access",
+                facts: [remaining],
                 note: "This allowance comes with your account. There is no subscription on this Apple Account.",
                 actions: [.seePlans] + manageAndRestore, showsOwnershipNote: true
             )

@@ -123,7 +123,30 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertTrue(
             ActivationPresentationPolicy.shouldPresent(
                 hasOnboarded: true,
-                hasCompletedActivation: false
+                hasCompletedActivation: false,
+                isGuidanceEnabled: true
+            )
+        )
+    }
+
+    /// Captain, 2026-09-30: post-onboarding guidance is parked for later work.
+    /// An onboarded seller who never finished it sees nothing in a shipped
+    /// build; only an explicit activation fixture opts back in.
+    func testShippedBuildsNeverPresentPostOnboardingGuidance() {
+        XCTAssertFalse(ActivationGuidanceAvailability.isShipped)
+        XCTAssertFalse(
+            ActivationGuidanceAvailability.isEnabled(activationFixtureOptIn: false)
+        )
+        XCTAssertTrue(
+            ActivationGuidanceAvailability.isEnabled(activationFixtureOptIn: true)
+        )
+        XCTAssertFalse(
+            ActivationPresentationPolicy.shouldPresent(
+                hasOnboarded: true,
+                hasCompletedActivation: false,
+                isGuidanceEnabled: ActivationGuidanceAvailability.isEnabled(
+                    activationFixtureOptIn: false
+                )
             )
         )
     }
@@ -132,19 +155,22 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertFalse(
             ActivationPresentationPolicy.shouldPresent(
                 hasOnboarded: false,
-                hasCompletedActivation: false
+                hasCompletedActivation: false,
+                isGuidanceEnabled: true
             )
         )
         XCTAssertFalse(
             ActivationPresentationPolicy.shouldPresent(
                 hasOnboarded: true,
-                hasCompletedActivation: true
+                hasCompletedActivation: true,
+                isGuidanceEnabled: true
             )
         )
         XCTAssertFalse(
             ActivationPresentationPolicy.shouldPresent(
                 hasOnboarded: false,
-                hasCompletedActivation: true
+                hasCompletedActivation: true,
+                isGuidanceEnabled: true
             )
         )
     }

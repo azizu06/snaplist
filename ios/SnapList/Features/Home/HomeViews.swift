@@ -50,6 +50,10 @@ struct TrophyWallView: View {
     /// The zero-height marker the scroll-to-top request targets.
     private static let topAnchorID = "trophy.wall.top"
 
+    /// The genuinely empty wall's Scout. Processing's loaded-empty screen,
+    /// one dock tap away, uses a different clip (`CollectionMessage.scout`).
+    static let emptyWallScout: TrophyWallScout = .uncertainty
+
     @ScaledMetric(relativeTo: .title) private var titleSize = 28
     @Environment(\.dockScrollScale) private var dockScrollScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -506,7 +510,7 @@ private struct TrophyWallEmptyView: View {
     var body: some View {
         VStack(spacing: TrophyWallEmptyMetrics.contentSpacing) {
             TrophyWallScoutView(
-                scout: .uncertainty,
+                scout: TrophyWallView.emptyWallScout,
                 height: TrophyWallEmptyMetrics.scoutHeight,
                 accessibilityLabel: "Scout, the SnapList camera helper"
             )

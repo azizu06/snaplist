@@ -133,6 +133,57 @@ final class TrophyWallCollectionMessageScoutTests: XCTestCase {
         XCTAssertEqual(presentation.collectionMessage?.scout, .reassurance)
     }
 
+    /// The Processing dock slot now opens its screen with nothing in flight,
+    /// so its loaded-empty state sits one tap from Trophy Wall's genuinely
+    /// empty state. They must stay distinct Scout states, and neither may be
+    /// claimed before the collection is proved.
+    func testLoadedEmptyProcessingAndEmptyTrophyWallAreDistinctScoutStates() {
+        let processingEmpty = TrophyWallProcessingView.presentation(
+            from: [],
+            collectionOutcome: .loaded,
+            refreshRecovery: .idle,
+            availableHeight: 800,
+            isExpanded: false
+        )
+        let wallEmpty = TrophyWallView.presentation(
+            hasSettledTiles: false,
+            collectionOutcome: .loaded,
+            refreshRecovery: .idle
+        )
+
+        XCTAssertTrue(wallEmpty.showsEmptyView)
+        XCTAssertEqual(TrophyWallView.emptyWallScout, .uncertainty)
+        XCTAssertEqual(processingEmpty.collectionMessage?.heading, "Nothing is processing.")
+        XCTAssertNotEqual(processingEmpty.collectionMessage?.scout, TrophyWallView.emptyWallScout)
+    }
+
+    func testNeitherScreenClaimsEmptyWhileLoadingOrUnavailable() {
+        for outcome in [TrophyWallCollectionOutcome.unknown, .offline, .unavailable] {
+            let processing = TrophyWallProcessingView.presentation(
+                from: [],
+                collectionOutcome: outcome,
+                refreshRecovery: .idle,
+                availableHeight: 800,
+                isExpanded: false
+            )
+            let wall = TrophyWallView.presentation(
+                hasSettledTiles: false,
+                collectionOutcome: outcome,
+                refreshRecovery: .idle
+            )
+
+            XCTAssertFalse(wall.showsEmptyView, "\(outcome)")
+            XCTAssertNotEqual(processing.collectionMessage?.heading, "Nothing is processing.", "\(outcome)")
+            if outcome == .unknown {
+                XCTAssertNil(processing.collectionMessage)
+                XCTAssertNil(wall.collectionMessage)
+            } else {
+                XCTAssertEqual(processing.collectionMessage?.scout, .recovery, "\(outcome)")
+                XCTAssertEqual(wall.collectionMessage?.scout, .recovery, "\(outcome)")
+            }
+        }
+    }
+
     func testUnavailableCollectionMessageKeepsRecovery() {
         XCTAssertEqual(
             TrophyWallProcessingView.unavailableCollectionMessage.scout,

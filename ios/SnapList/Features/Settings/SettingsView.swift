@@ -402,7 +402,7 @@ struct SettingsView: View {
             settingsSubscriptionHeader(presentation)
             settingsCard {
                 settingsCardRow {
-                    valueRow("SnapList Pro", presentation.status)
+                    valueRow(presentation.planLabel, presentation.status)
                 }
             ForEach(Array(presentation.facts.enumerated()), id: \.offset) { _, fact in
                     settingsCardDivider

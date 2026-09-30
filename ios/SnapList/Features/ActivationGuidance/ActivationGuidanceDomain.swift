@@ -4,9 +4,25 @@ import Foundation
 enum ActivationPresentationPolicy {
     static func shouldPresent(
         hasOnboarded: Bool,
-        hasCompletedActivation: Bool
+        hasCompletedActivation: Bool,
+        isGuidanceEnabled: Bool
     ) -> Bool {
-        hasOnboarded && !hasCompletedActivation
+        isGuidanceEnabled && hasOnboarded && !hasCompletedActivation
+    }
+}
+
+/// Whether post-onboarding activation guidance (the ACT coach marks and
+/// spotlight) may run at all. The captain parked it on 2026-09-30 for later
+/// work: first-value onboarding, permissions, and saved guidance progress are
+/// untouched, and this module stays compiled and fixture-tested, but a shipped
+/// build never presents it. Flip `isShipped` to bring it back.
+enum ActivationGuidanceAvailability {
+    static let isShipped = false
+
+    /// `activationFixtureOptIn` is the DEBUG-only `--activation-onboarded-fixture`
+    /// launch argument, the way the guidance's own UI tests keep exercising it.
+    static func isEnabled(activationFixtureOptIn: Bool) -> Bool {
+        isShipped || activationFixtureOptIn
     }
 }
 

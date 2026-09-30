@@ -37,12 +37,43 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(empty.buttons["trophy.wall.scan"].exists)
         XCTAssertFalse(empty.scrollViews["trophy.wall.grid"].exists)
         XCTAssertTrue(empty.staticTexts["Trophy Wall"].isHittable)
-        // #1134: the header clock is gone, and with nothing in flight the dock
-        // carries no Processing slot, so no empty Processing screen is one tap
-        // away.
+        // #1134: the header clock is gone. The Processing dock slot stays
+        // reachable with nothing in flight; the count badge is what zero drops.
         XCTAssertFalse(empty.buttons["trophy.wall.processing"].exists)
-        XCTAssertFalse(empty.buttons["dock.processing"].exists)
+        XCTAssertTrue(empty.buttons["dock.processing"].isHittable)
+        XCTAssertEqual(empty.buttons["dock.processing"].label, "Processing")
         XCTAssertTrue(empty.buttons["trophy.wall.account"].isHittable)
+    }
+
+    /// Captain, 2026-09-30: a truly empty account still reaches Processing
+    /// from the dock. Its loaded-empty screen is its own Scout state, and
+    /// Trophy Wall brings the seller back to the genuinely empty wall.
+    func testProcessingDockSlotNavigatesFromAnEmptyWall() {
+        let app = launch("HOME-02")
+        XCTAssertTrue(app.staticTexts["No items yet"].waitForExistence(timeout: 3))
+        let processingSlot = app.buttons["dock.processing"]
+        let trophySlot = app.buttons["dock.trophy-wall"]
+        XCTAssertTrue(processingSlot.isHittable)
+        XCTAssertFalse(processingSlot.isSelected)
+        XCTAssertTrue(trophySlot.isSelected)
+        XCTAssertGreaterThanOrEqual(processingSlot.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(processingSlot.frame.height, 44)
+        addScreenshot(named: "DOCK-EMPTY-wall.png")
+
+        processingSlot.tap()
+        XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 3))
+        XCTAssertTrue(processingSlot.isSelected)
+        XCTAssertEqual(
+            app.staticTexts["trophy.processing.collection.heading"].label,
+            "Nothing is processing."
+        )
+        XCTAssertFalse(app.staticTexts["No items yet"].exists)
+        addScreenshot(named: "DOCK-EMPTY-processing.png")
+
+        trophySlot.tap()
+        XCTAssertTrue(app.staticTexts["No items yet"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.otherElements["trophy.processing"].exists)
+        XCTAssertTrue(trophySlot.isSelected)
     }
 
     /// #1134: Processing is a dock slot, not a header clock. With one item in
@@ -408,10 +439,10 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["home.search.open"].exists)
         XCTAssertFalse(app.staticTexts["Orders"].exists)
 
-        // #1134: the settled wall has nothing in flight, so neither the
-        // retired header clock nor a Processing dock slot is offered.
+        // #1134: the retired header clock stays gone; the Processing dock
+        // slot stays reachable even with nothing in flight.
         XCTAssertFalse(app.buttons["trophy.wall.processing"].exists)
-        XCTAssertFalse(app.buttons["dock.processing"].exists)
+        XCTAssertTrue(app.buttons["dock.processing"].isHittable)
         XCTAssertTrue(app.buttons["dock.trophy-wall"].isHittable)
     }
 

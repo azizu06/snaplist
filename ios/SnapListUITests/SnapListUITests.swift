@@ -4523,7 +4523,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["first-value-onboarding.start-scanning"].exists)
     }
 
-    func testActualOnboardingCaptureEntryPresentsACT01BeforeCameraOrLibrary() {
+    /// Captain, 2026-09-30: post-onboarding activation guidance is parked.
+    /// The real onboarding exit still lands on the Scan camera (first value
+    /// is untouched), but no coach mark or spotlight follows it, even with
+    /// saved guidance progress reset to its first step.
+    func testActualOnboardingCaptureEntryReachesScanWithoutActivationGuidance() {
         let app = launchFirstValueOnboarding(
             resetProgress: true,
             extraArguments: ["--reset-activation-guidance"]
@@ -4536,9 +4540,6 @@ final class SnapListUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.otherElements["onboarding.state.ONB-07"].exists)
-        XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
-        XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["One item, up to five photos."].exists)
 
         let liveLibrary = app.buttons["scan.library"]
         let recoveryLibrary = app.buttons["scan.choose-library"]
@@ -4547,7 +4548,11 @@ final class SnapListUITests: XCTestCase {
                 || recoveryLibrary.waitForExistence(timeout: 2),
             app.debugDescription
         )
-        XCTAssertTrue(activationGuidance(in: app).exists)
+        XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["One item, up to five photos."].exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["activation-guidance.spotlight"].exists
+        )
     }
 
     func testFirstValueOnboardingPresentsOnceInOrder() {

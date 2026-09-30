@@ -319,7 +319,8 @@ struct AppShellView: View {
             guard !hasCompletedActivation,
                   ActivationPresentationPolicy.shouldPresent(
                     hasOnboarded: hasOnboardedForActivation,
-                    hasCompletedActivation: hasCompletedActivation
+                    hasCompletedActivation: hasCompletedActivation,
+                    isGuidanceEnabled: isActivationGuidanceEnabled
                   ),
                   !activationCompletionChecked else { return }
             await bootstrapActivationCompletion()
@@ -1175,8 +1176,15 @@ struct AppShellView: View {
             && activationAuthentication != .unknown
             && ActivationPresentationPolicy.shouldPresent(
                 hasOnboarded: hasOnboardedForActivation,
-                hasCompletedActivation: hasCompletedActivation
+                hasCompletedActivation: hasCompletedActivation,
+                isGuidanceEnabled: isActivationGuidanceEnabled
             )
+    }
+
+    private var isActivationGuidanceEnabled: Bool {
+        ActivationGuidanceAvailability.isEnabled(
+            activationFixtureOptIn: configuration.activationOnboardedFixture
+        )
     }
 
     private var hasOnboardedForActivation: Bool {
