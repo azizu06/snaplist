@@ -247,6 +247,11 @@
     "SnapListUITests/SnapListUITests/testReviewCapsuleAtCapDoesNotDisplaceTheShutterAtAccessibilityFive": 15.0,
     "SnapListUITests/SnapListUITests/testSubmissionBarIsOneConstantHeightButtonAcrossEveryPhase": 21.593,
     "SnapListUITests/SnapListUITests/testVoiceNoteStopKeepsThePanelOpenOnReviewUntilSaveRecording": 10.948,
-    "SnapListUITests/SnapListUITests/testVoiceNoteReviewDeleteFallsBackToTheEmptyRecorderWithThePanelOpen": 10.391
+    "SnapListUITests/SnapListUITests/testVoiceNoteReviewDeleteFallsBackToTheEmptyRecorderWithThePanelOpen": 10.391,
+    "SnapListUITests/HomeUITests/testNotificationTappedWhileAppIsOpenOpensTheItem": 7.048,
+    "SnapListUITests/HomeUITests/testTappedNotificationForAnItemTheServerWillNotOpenLandsOnTheWall": 8.991,
+    "SnapListUITests/HomeUITests/testTappedNotificationOpensTheItemItAnnounced": 18.13,
+    "SnapListUITests/HomeUITests/testTappedNotificationWithNoUsableIdentityLandsOnTheWall": 5.669,
+    "SnapListUITests/ListingReviewUITests/testDescriptionFitsShortTextAndGrowsWhenTheSellerAddsDetails": 32.941
   }
 }

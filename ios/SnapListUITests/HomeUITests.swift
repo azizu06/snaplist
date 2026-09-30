@@ -90,6 +90,82 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["listing-review"].waitForExistence(timeout: 5))
     }
 
+    /// #1137. A tapped notification carries the run it announced and opens that
+    /// item the way its tile does, for both moments a seller is told about. The
+    /// fixture launches with the tap already delivered, which is the cold-launch
+    /// shape; a tap while the app is open reaches the same `receive`.
+    func testTappedNotificationOpensTheItemItAnnounced() {
+        for moment in ["listingReady", "listingPublished"] {
+            let app = launch(
+                "HOME-01",
+                extraArguments: [
+                    "--run-detail-fixture=reviewable",
+                    "--listing-review-fixture=loaded",
+                    "--reset-listing-review-draft",
+                    "--push-tap-fixture=\(moment):37500000-0000-4000-8000-000000000021",
+                ]
+            )
+            XCTAssertTrue(
+                app.otherElements["listing-review"].waitForExistence(timeout: 5),
+                moment
+            )
+            XCTAssertTrue(app.textFields["listing-review.price"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            let receipt = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            receipt.name = "notification-opens-exact-item-\(moment)"
+            receipt.lifetime = .keepAlways
+            add(receipt)
+
+            app.buttons["listing-review.back"].tap()
+            XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 3), moment)
+            app.terminate()
+        }
+    }
+
+    func testNotificationTappedWhileAppIsOpenOpensTheItem() {
+        let app = launch(
+            "HOME-01",
+            extraArguments: [
+                "--run-detail-fixture=reviewable",
+                "--listing-review-fixture=loaded",
+                "--reset-listing-review-draft",
+                "--push-tap-fixture=listingReady:37500000-0000-4000-8000-000000000021",
+                "--push-tap-fixture-delay=4",
+            ]
+        )
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 3))
+        // Delivered after launch, as a banner tapped while the app is open is.
+        XCTAssertTrue(
+            app.otherElements["listing-review"].waitForExistence(timeout: 8)
+        )
+    }
+
+    func testTappedNotificationWithNoUsableIdentityLandsOnTheWall() {
+        let app = launch(
+            "HOME-01",
+            extraArguments: [
+                "--run-detail-fixture=reviewable",
+                "--push-tap-fixture=listingReady:not-a-run",
+            ]
+        )
+
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.otherElements["listing-review"].waitForExistence(timeout: 2))
+    }
+
+    func testTappedNotificationForAnItemTheServerWillNotOpenLandsOnTheWall() {
+        let app = launch(
+            "HOME-01",
+            extraArguments: [
+                "--run-detail-fixture=unavailable",
+                "--push-tap-fixture=listingPublished:37500000-0000-4000-8000-000000000021",
+            ]
+        )
+
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.otherElements["listing-review"].waitForExistence(timeout: 2))
+    }
+
     /// A ready item whose draft the server refuses to load must say so where
     /// the seller already is, never by resurrecting an intermediate screen.
     func testSettledTileSurfacesUnavailableInlineWhenTheDraftCannotLoad() {

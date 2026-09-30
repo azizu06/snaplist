@@ -53,6 +53,7 @@ struct AppShellView: View {
     /// Shared with the app delegate, which is the only thing that receives a
     /// foreground push (#891).
     private let foregroundPush = PushRegistrationComposition.foregroundPresenter
+    private let pushTaps = PushRegistrationComposition.tapRouter
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -213,10 +214,8 @@ struct AppShellView: View {
             reduceMotion ? nil : .easeInOut(duration: 0.16),
             value: foregroundPush.visible
         )
-        // The delegate reads this to decide whether it may suppress Apple's
-        // banner. It is set from the surface that actually draws, because a
-        // presenter that claimed to be mounted while nothing was on screen
-        // would swallow the notification entirely.
+        // Keep the legacy in-app presenter tied to its actual host. APNs uses
+        // the system banner so the same notification-response route handles taps.
         .onAppear { foregroundPush.mounted = true }
         .onDisappear { foregroundPush.mounted = false }
         // Attached above the shell/onboarding split so both sign-in entry points
@@ -690,6 +689,12 @@ struct AppShellView: View {
                   !hasAppliedLaunchScanPresentation else { return }
             hasAppliedLaunchScanPresentation = true
             applyScanDrawer(.scanSurfaceRestored)
+        }
+        .onChange(of: pushTaps.pending, initial: true) { _, pending in
+            guard pending != nil else { return }
+            hasAppliedLaunchScanPresentation = true
+            router.showTrophyWallForPushTap()
+            applyScanDrawer(.dismissed)
         }
         // #385. Above the stack, not on the settings destination. The deletion
         // tail is pushed by a `navigationDestination` nested two levels inside
@@ -2520,6 +2525,7 @@ enum TrophyWallZoomTransitionPolicy {
 
 @MainActor
 struct TrophyWallFeatureView: View {
+    var pushTaps = PushRegistrationComposition.tapRouter
     @Environment(\.appDependencies) private var dependencies
 
     @Bindable var router: AppRouter
@@ -2584,6 +2590,12 @@ struct TrophyWallFeatureView: View {
         )
         .task(id: refreshState.taskID(trophyWallReturns: router.trophyWallReturns)) {
             await store.recoverCollection(using: repository)
+        }
+        // Taking the tap changes this value. A keyed task would cancel its
+        // own open; the opener instead consumes the tap before any await.
+        .onChange(of: pushTaps.pending, initial: true) { _, pending in
+            guard pending != nil else { return }
+            Task { await openPushTap() }
         }
         .navigationDestination(
             isPresented: Binding(
@@ -2652,6 +2664,19 @@ struct TrophyWallFeatureView: View {
             )
         } else {
             destination
+        }
+    }
+
+    private func openPushTap() async {
+        _ = await PushTapOpener.open(from: pushTaps) { runID in
+            // Let the shell's synchronous navigation reset land first. A
+            // second observer takes nothing and cannot dismiss this open.
+            await Task.yield()
+            if listingReviewPresentation.isPresented {
+                listingReviewPresentation.dismiss()
+                await Task.yield()
+            }
+            return await openListing(runID)
         }
     }
 

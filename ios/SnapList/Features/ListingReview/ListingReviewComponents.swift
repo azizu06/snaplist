@@ -845,8 +845,12 @@ struct ListingReviewInlineField<Content: View>: View {
             content()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: SnapListMetrics.minimumTouchTarget,
+            alignment: .leading
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(SnapListColorToken.inputBorder.color)

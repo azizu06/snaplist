@@ -9,6 +9,35 @@ private extension Locale {
 }
 
 final class ListingReviewPresentationTests: XCTestCase {
+    @MainActor
+    func testShortInlineValuesFitCompactFieldsAndLongValuesStillWrap() {
+        func height(_ value: String) -> CGFloat {
+            let host = UIHostingController(rootView:
+                ListingReviewInlineTextField(
+                    label: "Title",
+                    value: value,
+                    identifier: "compact-title",
+                    field: .title,
+                    edits: ListingReviewInlineEdits(),
+                    focusValue: "title",
+                    focus: .constant(nil),
+                    lineLimit: 1...3
+                )
+                .dynamicTypeSize(.large)
+            )
+            return host.sizeThatFits(in: CGSize(width: 342, height: 1_000)).height
+        }
+
+        let short = height("Camera")
+        XCTAssertGreaterThanOrEqual(short, 44)
+        XCTAssertLessThanOrEqual(short, 68, "A short value must not reserve multiple lines inside its box.")
+        XCTAssertGreaterThan(
+            height("A camera with its original accessories and a description long enough to wrap onto several lines"),
+            short,
+            "Long titles must retain wrapping rather than being clipped to one line."
+        )
+    }
+
     func testSoldSummaryRendersOneRangeWhenEveryMatchSharesACurrency() throws {
         let matches = try soldMatches([(40, "USD"), (52, "USD"), (66, "USD")])
 
