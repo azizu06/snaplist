@@ -83,7 +83,9 @@ enum VoiceNoteRecordingAccessibilityElement: Equatable {
 
 enum VoiceNotePresentation {
     static let maximumDuration: TimeInterval = 15
-    static let sheetHeight: CGFloat = 220
+    /// Voice Note A1: one height for the recorder, a stopped take and a saved
+    /// note, so nothing in the panel moves when a take stops.
+    static let sheetHeight: CGFloat = 300
     static let minimumTarget: CGFloat = 44
     // Compact card sheets render through a width transform (386 / 402 on
     // iPhone 17 Pro). 46 is the smallest whole-point layout target whose
@@ -91,6 +93,7 @@ enum VoiceNotePresentation {
     static let compactSheetControlLayoutTarget: CGFloat = 46
     static let emptyRowHelper = "Add details the photos might miss"
     static let sheetContext = "Add details the photos might miss."
+    static let recordingHint = "Tap Stop when you're done."
     static let recordingAccessibilityOrder:
         [VoiceNoteRecordingAccessibilityElement] = [
             .cancel,

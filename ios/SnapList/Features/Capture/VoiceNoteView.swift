@@ -226,28 +226,13 @@ struct VoiceNoteSheet: View {
     private var content: some View {
         switch store.phase {
         case .recording(let elapsed, _):
-            recordingControls(elapsed: elapsed, canSave: elapsed > 0)
+            recordingSlots(elapsed: elapsed, canSave: elapsed > 0)
         case .takeReady(let duration):
             takeReview(duration: duration)
         case .ready:
-            VStack(spacing: 0) {
-                standardHeader
-                Text(VoiceNotePresentation.sheetContext)
-                    .snapListTypography(.body)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .padding(.top, 22)
-                    .accessibilityIdentifier("voice-note.helper")
-                recordButton
-                    .padding(.top, 20)
-            }
-            .padding(.top, 18)
+            readySlots
         case .saved(let isPlaying):
-            VStack(spacing: 0) {
-                standardHeader
-                savedPlayback(isPlaying: isPlaying)
-                    .padding(.top, 24)
-            }
-            .padding(.top, 18)
+            savedSlots(isPlaying: isPlaying)
         case .accessOff(let permission):
             VStack(spacing: 0) {
                 standardHeader
@@ -274,30 +259,41 @@ struct VoiceNoteSheet: View {
 
     private var standardHeader: some View {
         HStack {
-            Text("Voice note")
-                .snapListTypography(.sectionHeader)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .accessibilityIdentifier("voice-note.title")
+            sheetTitle
             Spacer()
-            Button {
-                closePresentationIfPossible()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(
-                        SnapListColorToken.textSecondary.color
-                    )
-            }
-            .buttonStyle(.plain)
+            closeButton
+        }
+        .padding(.trailing, -8)
+    }
+
+    private var sheetTitle: some View {
+        Text("Voice note")
+            .snapListTypography(.sectionHeader)
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .accessibilityIdentifier("voice-note.title")
+            .accessibilitySortPriority(VoiceNoteSheetLayout.titleSortPriority)
+    }
+
+    private var closeButton: some View {
+        Button {
+            closePresentationIfPossible()
+        } label: {
+            headerGlyph("xmark", size: 20)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close")
+        .accessibilityIdentifier("voice-note.close")
+    }
+
+    private func headerGlyph(_ systemName: String, size: CGFloat) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: size, weight: .regular))
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
             .frame(
                 width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                 height: VoiceNotePresentation.compactSheetControlLayoutTarget
             )
             .contentShape(.rect)
-            .accessibilityLabel("Close")
-            .accessibilityIdentifier("voice-note.close")
-        }
-        .padding(.trailing, -8)
     }
 
     private var recordButton: some View {
@@ -321,73 +317,123 @@ struct VoiceNoteSheet: View {
         .accessibilityIdentifier("voice-note.record")
     }
 
-    private func recordingControls(
+    /// Voice Note A1 (captain pick, 2026-09-30): the empty recorder, a live
+    /// take, a stopped take and a saved note share one header, one transport
+    /// row, one reserved line and one action row. Stopping swaps what sits in
+    /// each slot and moves nothing around it, so Save recording lands in the
+    /// exact frame Stop used.
+    private func steadySheet(
+        headerControl: some View,
+        leadingSlot: some View,
+        waveform: some View,
+        trailingSlot: some View,
+        line: some View,
+        lineAlignment: Alignment,
+        action: some View
+    ) -> some View {
+        VStack(spacing: VoiceNoteSheetLayout.rowSpacing) {
+            HStack {
+                sheetTitle
+                Spacer()
+                headerControl
+            }
+            .padding(.trailing, -8)
+
+            HStack(spacing: 14) {
+                leadingSlot
+                    .frame(
+                        width: VoiceNotePresentation.compactSheetControlLayoutTarget,
+                        height: VoiceNotePresentation.compactSheetControlLayoutTarget
+                    )
+                waveform
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: VoiceNoteSheetLayout.waveformHeight,
+                        maxHeight: VoiceNoteSheetLayout.waveformHeight
+                    )
+                trailingSlot
+                    .frame(
+                        minWidth: VoiceNoteSheetLayout.timeSlotWidth,
+                        alignment: .trailing
+                    )
+            }
+            .frame(minHeight: VoiceNoteSheetLayout.transportHeight)
+
+            line
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: VoiceNoteSheetLayout.reservedLineHeight,
+                    alignment: lineAlignment
+                )
+
+            action
+        }
+        .padding(.top, 18)
+    }
+
+    private var readySlots: some View {
+        steadySheet(
+            headerControl: closeButton,
+            leadingSlot: micGlyph(isLive: false),
+            waveform: VoiceNoteWaveform(
+                isLive: true,
+                reduceMotion: reduceMotion,
+                samples: VoiceNoteWaveformGeometry.emptyLiveMeterSamples,
+                elapsed: 0
+            ),
+            trailingSlot: timeText(
+                VoiceNotePresentation.maximumDuration,
+                isMuted: true
+            )
+            .accessibilityHidden(true),
+            line: Text(VoiceNotePresentation.sheetContext)
+                .snapListTypography(.body)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .accessibilityIdentifier("voice-note.helper"),
+            lineAlignment: .leading,
+            action: Button {
+                Task {
+                    await store.startRecording()
+                }
+            } label: {
+                actionLabel("Record", systemImage: "mic.fill")
+            }
+            .buttonStyle(VoiceNoteSheetActionStyle(kind: .ink))
+            .accessibilityLabel("Start recording")
+            .accessibilityIdentifier("voice-note.record")
+        )
+    }
+
+    private func recordingSlots(
         elapsed: TimeInterval,
         canSave: Bool
     ) -> some View {
-        VStack(spacing: 15) {
-            HStack(spacing: 14) {
-                Button {
-                    if store.cancelRecording() {
-                        closePresentationIfPossible()
-                    }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(
-                            SnapListColorToken.textTertiary.color
-                        )
-                        .frame(
-                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                        )
+        steadySheet(
+            headerControl: Button {
+                if store.cancelRecording() {
+                    closePresentationIfPossible()
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Cancel recording")
-                .accessibilityIdentifier("voice-note.cancel")
-                .accessibilitySortPriority(
-                    VoiceNoteRecordingAccessibilityElement
-                        .cancel
-                        .sortPriority
-                )
-
-                VoiceNoteWaveform(
-                    isLive: true,
-                    reduceMotion: reduceMotion,
-                    samples: usesStaticLiveFixtureSamples
-                        ? Self.staticLiveFixtureSamples
-                        : store.liveMeterSamples,
-                    elapsed: elapsed
-                )
-                .frame(maxWidth: .infinity, minHeight: 52)
-
-                Button {
-                    store.stopRecording()
-                } label: {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                        .frame(
-                            width: 52,
-                            height: 52
-                        )
-                        .background(SnapListColorToken.inkPrimary.color)
-                        .clipShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSave)
-                .accessibilityLabel("Stop recording")
-                .accessibilityIdentifier("voice-note.save")
-                .accessibilitySortPriority(
-                    VoiceNoteRecordingAccessibilityElement
-                        .save
-                        .sortPriority
-                )
+            } label: {
+                headerGlyph("xmark", size: 20)
             }
-
-            Text(VoiceNotePresentation.elapsedText(elapsed))
-                .snapListTypography(.status)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel recording")
+            .accessibilityIdentifier("voice-note.cancel")
+            .accessibilitySortPriority(
+                VoiceNoteRecordingAccessibilityElement
+                    .cancel
+                    .sortPriority
+            ),
+            leadingSlot: micGlyph(isLive: true),
+            waveform: VoiceNoteWaveform(
+                isLive: true,
+                reduceMotion: reduceMotion,
+                samples: usesStaticLiveFixtureSamples
+                    ? Self.staticLiveFixtureSamples
+                    : store.liveMeterSamples,
+                elapsed: elapsed
+            ),
+            trailingSlot: timeText(elapsed, isMuted: true)
                 .accessibilityLabel(
                     VoiceNotePresentation.recordingAccessibilityLabel(
                         elapsed: elapsed
@@ -398,227 +444,231 @@ struct VoiceNoteSheet: View {
                     VoiceNoteRecordingAccessibilityElement
                         .elapsed
                         .sortPriority
-                )
-        }
-        .padding(.top, 71)
+                ),
+            line: Text(VoiceNotePresentation.recordingHint)
+                .snapListTypography(.status)
+                .foregroundStyle(SnapListColorToken.textTertiary.color),
+            lineAlignment: .leading,
+            action: Button {
+                store.stopRecording()
+            } label: {
+                actionLabel("Stop", systemImage: "stop.fill")
+            }
+            .buttonStyle(VoiceNoteSheetActionStyle(kind: .ink))
+            .disabled(!canSave)
+            .accessibilityLabel("Stop recording")
+            .accessibilityIdentifier("voice-note.save")
+            .accessibilitySortPriority(
+                VoiceNoteRecordingAccessibilityElement
+                    .save
+                    .sortPriority
+            )
+        )
     }
 
-    /// A stopped take waiting on the seller. The check mark lands here; only
-    /// Save recording (or the chevron, which keeps the take) closes the panel.
+    /// A stopped take waiting on the seller. The chevron keeps the take and
+    /// Save recording saves it; either closes the panel. Delete and Re-record
+    /// keep it open.
     private func takeReview(duration: TimeInterval) -> some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("Voice note")
-                    .snapListTypography(.sectionHeader)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .accessibilityIdentifier("voice-note.title")
-                Spacer()
-                Button {
-                    saveAndDismissWhenCommitted()
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(
-                            SnapListColorToken.textSecondary.color
-                        )
-                        .frame(
-                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                        )
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Collapse and keep voice note")
-                .accessibilityIdentifier("voice-note.collapse")
+        steadySheet(
+            headerControl: Button {
+                saveAndDismissWhenCommitted()
+            } label: {
+                headerGlyph("chevron.down", size: 18)
             }
-            .padding(.trailing, -8)
-
-            HStack(spacing: 14) {
-                Button {
-                    toggleTakePlayback()
-                } label: {
-                    Image(
-                        systemName: store.isPlayingTake
-                            ? "pause.fill"
-                            : "play.fill"
-                    )
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                    .frame(
-                        width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                        height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                    )
-                    .background(SnapListColorToken.inkPrimary.color)
-                    .clipShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    VoiceNotePresentation.playbackAccessibilityLabel(
-                        isPlaying: store.isPlayingTake
-                    )
-                )
-                .accessibilityIdentifier("voice-note.playback")
-
-                VoiceNoteWaveform(
-                    isLive: false,
-                    reduceMotion: true,
-                    samples: VoiceNoteWaveformGeometry.reviewSamples(
-                        trail: usesStaticLiveFixtureSamples
-                            ? Self.staticLiveFixtureSamples
-                            : store.liveMeterSamples,
-                        duration: duration
-                    ),
-                    playbackProgress: store.playbackProgress
-                )
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .accessibilityHidden(true)
-                .padding(.trailing, 4)
-
-                Text(VoiceNotePresentation.elapsedText(duration))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .accessibilityIdentifier("voice-note.elapsed")
-            }
-
-            HStack(spacing: 12) {
-                Button {
+            .buttonStyle(.plain)
+            .accessibilityLabel("Collapse and keep voice note")
+            .accessibilityIdentifier("voice-note.collapse"),
+            leadingSlot: playbackButton(isPlaying: store.isPlayingTake) {
+                toggleTakePlayback()
+            },
+            waveform: VoiceNoteWaveform(
+                isLive: false,
+                reduceMotion: true,
+                samples: VoiceNoteWaveformGeometry.reviewSamples(
+                    trail: usesStaticLiveFixtureSamples
+                        ? Self.staticLiveFixtureSamples
+                        : store.liveMeterSamples,
+                    duration: duration
+                ),
+                playbackProgress: store.playbackProgress
+            ),
+            trailingSlot: timeText(duration, isMuted: false)
+                .accessibilityIdentifier("voice-note.elapsed"),
+            line: takeActions(
+                rerecord: {
                     Task {
                         await store.rerecord()
                     }
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 20, weight: .regular))
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .frame(
-                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                        )
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Re-record")
-                .accessibilityIdentifier("voice-note.rerecord")
-
-                Button(role: .destructive) {
-                    discardReviewedTake()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 20, weight: .regular))
-                        .foregroundStyle(SnapListColorToken.deleteIconTint.color)
-                        .frame(
-                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                        )
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Delete")
-                .accessibilityIdentifier("voice-note.delete")
-
-                SnapListPrimaryButton(title: "Save recording") {
-                    saveAndDismissWhenCommitted()
-                }
-                .accessibilityIdentifier("voice-note.save-recording")
+                },
+                delete: discardReviewedTake
+            ),
+            lineAlignment: .bottom,
+            action: Button {
+                saveAndDismissWhenCommitted()
+            } label: {
+                actionLabel("Save recording")
             }
-        }
-        .padding(.top, 18)
+            .buttonStyle(VoiceNoteSheetActionStyle(kind: .action))
+            .accessibilityIdentifier("voice-note.save-recording")
+        )
     }
 
-    private func savedPlayback(isPlaying: Bool) -> some View {
-        VStack(spacing: 19) {
-            HStack(spacing: 14) {
-                Button {
-                    store.togglePlayback()
-                } label: {
-                    Image(
-                        systemName: isPlaying
-                            ? "pause.fill"
-                            : "play.fill"
-                    )
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                    .frame(
-                        width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                        height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                    )
-                    .background(SnapListColorToken.inkPrimary.color)
-                    .clipShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    VoiceNotePresentation.playbackAccessibilityLabel(
-                        isPlaying: isPlaying
-                    )
-                )
-                .accessibilityIdentifier("voice-note.playback")
-                .accessibilityFocused(
-                    $focusedControl,
-                    equals: .savedSummary
-                )
-
-                VoiceNoteWaveform(
-                    isLive: false,
-                    reduceMotion: true,
-                    samples: usesStaticVoiceNoteFixture
-                        ? Self.staticSavedFixtureSamples
-                        : store.savedNoteWaveform,
-                    playbackProgress: store.playbackProgress
-                )
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .accessibilityHidden(
-                    VoiceNotePresentation
-                        .savedWaveformIsAccessibilityHidden
-                )
-                .allowsHitTesting(
-                    VoiceNotePresentation.savedWaveformIsInteractive
-                )
-                .padding(.trailing, 18)
-
-                Text(
-                    VoiceNotePresentation.elapsedText(
-                        store.savedNote?.duration ?? 0
-                    )
-                )
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .accessibilityIdentifier("voice-note.duration")
+    private func savedSlots(isPlaying: Bool) -> some View {
+        steadySheet(
+            headerControl: closeButton,
+            leadingSlot: playbackButton(isPlaying: isPlaying) {
+                store.togglePlayback()
             }
-
-            HStack(spacing: 40) {
-                Button {
+            .accessibilityFocused(
+                $focusedControl,
+                equals: .savedSummary
+            ),
+            waveform: VoiceNoteWaveform(
+                isLive: false,
+                reduceMotion: true,
+                samples: usesStaticVoiceNoteFixture
+                    ? Self.staticSavedFixtureSamples
+                    : store.savedNoteWaveform,
+                playbackProgress: store.playbackProgress
+            )
+            .accessibilityHidden(
+                VoiceNotePresentation
+                    .savedWaveformIsAccessibilityHidden
+            )
+            .allowsHitTesting(
+                VoiceNotePresentation.savedWaveformIsInteractive
+            ),
+            trailingSlot: timeText(
+                store.savedNote?.duration ?? 0,
+                isMuted: false
+            )
+            .accessibilityIdentifier("voice-note.duration"),
+            line: takeActions(
+                rerecord: {
                     Task {
                         await store.rerecord()
                     }
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 22, weight: .regular))
-                        .frame(
-                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Rerecord")
-                .accessibilityIdentifier("voice-note.rerecord")
-
-                Button(role: .destructive) {
+                },
+                delete: {
                     Task {
                         await store.deleteSavedNote()
                     }
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 24, weight: .regular))
-                        .foregroundStyle(SnapListColorToken.deleteIconTint.color)
-                        .frame(
-                            width: VoiceNotePresentation.compactSheetControlLayoutTarget,
-                            height: VoiceNotePresentation.compactSheetControlLayoutTarget
-                        )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Delete")
-                .accessibilityIdentifier("voice-note.delete")
+            ),
+            lineAlignment: .bottom,
+            action: Button {
+                closePresentationIfPossible()
+            } label: {
+                actionLabel("Done")
             }
+            .buttonStyle(VoiceNoteSheetActionStyle(kind: .outline))
+            .accessibilityIdentifier("voice-note.done")
+        )
+    }
+
+    private func micGlyph(isLive: Bool) -> some View {
+        Image(systemName: "mic")
+            .font(.system(size: 18, weight: .medium))
+            .foregroundStyle(
+                isLive
+                    ? SnapListColorToken.inkPrimary.color
+                    : SnapListColorToken.textTertiary.color
+            )
+            .frame(
+                width: VoiceNotePresentation.compactSheetControlLayoutTarget,
+                height: VoiceNotePresentation.compactSheetControlLayoutTarget
+            )
+            .background(SnapListColorToken.quietFill.color)
+            .clipShape(.circle)
+            .accessibilityHidden(true)
+    }
+
+    private func playbackButton(
+        isPlaying: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(
+                    width: VoiceNotePresentation.compactSheetControlLayoutTarget,
+                    height: VoiceNotePresentation.compactSheetControlLayoutTarget
+                )
+                .background(SnapListColorToken.inkPrimary.color)
+                .clipShape(.circle)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            VoiceNotePresentation.playbackAccessibilityLabel(
+                isPlaying: isPlaying
+            )
+        )
+        .accessibilityIdentifier("voice-note.playback")
+    }
+
+    /// One text style for the transport's time slot, so the running timer and
+    /// the take length occupy the same frame; only the color says which.
+    private func timeText(
+        _ seconds: TimeInterval,
+        isMuted: Bool
+    ) -> some View {
+        Text(VoiceNotePresentation.elapsedText(seconds))
+            .font(.system(size: 15, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(
+                isMuted
+                    ? SnapListColorToken.textTertiary.color
+                    : SnapListColorToken.inkPrimary.color
+            )
+    }
+
+    /// Re-record and Delete as an equal pair above the action row.
+    private func takeActions(
+        rerecord: @escaping () -> Void,
+        delete: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: VoiceNoteSheetLayout.rowSpacing) {
+            Button(action: rerecord) {
+                actionLabel(
+                    "Re-record",
+                    systemImage: "arrow.counterclockwise",
+                    height: VoiceNoteSheetLayout.takeActionHeight
+                )
+            }
+            .buttonStyle(VoiceNoteSheetActionStyle(kind: .outline))
+            .accessibilityIdentifier("voice-note.rerecord")
+
+            Button(role: .destructive, action: delete) {
+                actionLabel(
+                    "Delete",
+                    systemImage: "trash",
+                    height: VoiceNoteSheetLayout.takeActionHeight
+                )
+            }
+            .buttonStyle(VoiceNoteSheetActionStyle(kind: .outlineDestructive))
+            .accessibilityIdentifier("voice-note.delete")
+        }
+    }
+
+    private func actionLabel(
+        _ title: String,
+        systemImage: String? = nil,
+        height: CGFloat = VoiceNoteSheetLayout.actionHeight
+    ) -> some View {
+        HStack(spacing: 7) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .accessibilityHidden(true)
+            }
+            Text(title)
+                .snapListTypography(.rowTitle)
+                .snapListFitsFixedSlot()
+        }
+        .frame(maxWidth: .infinity, minHeight: height)
+        .contentShape(.rect)
     }
 
     private func accessOff(
@@ -814,6 +864,82 @@ struct VoiceNoteSheet: View {
             dismissPresentation()
         } else {
             systemDismiss()
+        }
+    }
+}
+
+/// Voice Note A1 geometry. With the 18 pt top inset these rows fill
+/// `VoiceNotePresentation.sheetHeight` above the home indicator.
+enum VoiceNoteSheetLayout {
+    static let rowSpacing: CGFloat = 10
+    static let transportHeight: CGFloat = 52
+    static let waveformHeight: CGFloat = 48
+    static let timeSlotWidth: CGFloat = 40
+    /// Holds helper copy while recording and the Re-record and Delete pair
+    /// after stop. The pair sits at its bottom, so it keeps 22 pt clear of the
+    /// waveform row (captain: "not too cramped to the actual voice note").
+    static let reservedLineHeight: CGFloat = 56
+    static let takeActionHeight: CGFloat = 44
+    static let actionHeight: CGFloat = 52
+    static let actionRadius: CGFloat = 15
+    /// The title reads first even while recording, ahead of Cancel, the
+    /// timer and Stop (`VoiceNoteRecordingAccessibilityElement`).
+    static let titleSortPriority: Double = 4
+}
+
+private struct VoiceNoteSheetActionStyle: ButtonStyle {
+    enum Kind {
+        case ink
+        case action
+        case outline
+        case outlineDestructive
+    }
+
+    let kind: Kind
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(foreground)
+            .background(fill.opacity(isEnabled ? 1 : 0.45))
+            .clipShape(
+                .rect(cornerRadius: VoiceNoteSheetLayout.actionRadius)
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: VoiceNoteSheetLayout.actionRadius
+                )
+                .stroke(
+                    SnapListColorToken.neutralOutline.color,
+                    lineWidth: isOutlined ? 1 : 0
+                )
+            }
+            .opacity(configuration.isPressed ? 0.88 : 1)
+    }
+
+    private var isOutlined: Bool {
+        kind == .outline || kind == .outlineDestructive
+    }
+
+    private var fill: Color {
+        switch kind {
+        case .ink:
+            SnapListColorToken.inkPrimary.color
+        case .action:
+            SnapListColorToken.action.color
+        case .outline, .outlineDestructive:
+            SnapListColorToken.canvas.color
+        }
+    }
+
+    private var foreground: Color {
+        switch kind {
+        case .ink, .action:
+            SnapListColorToken.onDarkSurface.color
+        case .outline:
+            SnapListColorToken.inkPrimary.color
+        case .outlineDestructive:
+            SnapListColorToken.deleteIconTint.color
         }
     }
 }

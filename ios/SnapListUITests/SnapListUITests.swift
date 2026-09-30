@@ -1636,6 +1636,55 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["voice-note.save-recording"].exists)
     }
 
+    /// Stopping swaps what sits in each slot without moving the sheet around
+    /// it: the title and the take's time stay put, Save recording lands in the
+    /// exact frame Stop used, and Re-record and Delete sit above it as an
+    /// equal pair with clear space below the waveform row.
+    func testVoiceNoteStopKeepsTheSheetSteadyAndStacksReviewActions() {
+        let app = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        let title = app.staticTexts["voice-note.title"]
+        let elapsed = app.staticTexts["voice-note.elapsed"]
+        let stop = app.buttons["voice-note.save"]
+        XCTAssertTrue(title.exists, "The title stays visible while recording.")
+        XCTAssertTrue(elapsed.exists)
+        let recordingTitleFrame = title.frame
+        let recordingElapsedFrame = elapsed.frame
+        let stopFrame = stop.frame
+
+        stop.tap()
+
+        let save = app.buttons["voice-note.save-recording"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2))
+        let playback = app.buttons["voice-note.playback"]
+        let rerecord = app.buttons["voice-note.rerecord"]
+        let delete = app.buttons["voice-note.delete"]
+
+        XCTAssertEqual(title.frame.minY, recordingTitleFrame.minY, accuracy: 1)
+        XCTAssertEqual(
+            app.staticTexts["voice-note.elapsed"].frame.midY,
+            recordingElapsedFrame.midY,
+            accuracy: 1
+        )
+        XCTAssertEqual(save.frame.minX, stopFrame.minX, accuracy: 1)
+        XCTAssertEqual(save.frame.minY, stopFrame.minY, accuracy: 1)
+        XCTAssertEqual(save.frame.width, stopFrame.width, accuracy: 1)
+        XCTAssertEqual(save.frame.height, stopFrame.height, accuracy: 1)
+
+        XCTAssertEqual(rerecord.frame.width, delete.frame.width, accuracy: 1)
+        XCTAssertEqual(rerecord.frame.minY, delete.frame.minY, accuracy: 1)
+        XCTAssertLessThan(rerecord.frame.midX, delete.frame.midX)
+        XCTAssertLessThanOrEqual(rerecord.frame.maxY, save.frame.minY)
+        XCTAssertGreaterThanOrEqual(
+            rerecord.frame.minY - playback.frame.maxY,
+            20,
+            "The pair must not crowd the waveform row."
+        )
+        addScreenshot(named: "VOICE-NOTE-A1-STACKED-REVIEW-402x874.png")
+    }
+
     func testVoiceNoteReviewDeleteFallsBackToTheEmptyRecorderWithThePanelOpen() {
         let app = launchVoiceNoteFixture(
             "--voice-note-recording-fixture",
