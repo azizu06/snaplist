@@ -5,7 +5,6 @@ private enum ListingReviewDestination: Identifiable, Hashable {
     case sold(Int)
     case correction
     case ebayPublish
-    case assistedExport
 
     var id: String {
         switch self {
@@ -13,9 +12,14 @@ private enum ListingReviewDestination: Identifiable, Hashable {
         case .sold(let index): "sold-\(index)"
         case .correction: "correction"
         case .ebayPublish: "ebay-publish"
-        case .assistedExport: "assisted-export"
         }
     }
+}
+
+private struct ListingReviewSharingPresentation: Identifiable {
+    let pack: AssistedExportPack
+    let summary: AssistedExportItemSummary
+    var id: UUID { pack.itemID }
 }
 
 /// The fields the seller types into directly on this screen.
@@ -41,6 +45,7 @@ struct ListingReviewView: View {
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var destination: ListingReviewDestination?
+    @State private var sharingPresentation: ListingReviewSharingPresentation?
     @State private var returnFocus: ListingReviewFocus = .back
     @State private var hasAppeared = false
     @State private var priceText = ""
@@ -162,6 +167,11 @@ struct ListingReviewView: View {
         .sheet(isPresented: $conditionDrawerPresented) {
             conditionDrawer
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $sharingPresentation, onDismiss: {
+            focusedElement = .assistedExport
+        }) { presentation in
+            sharingDrawer(presentation)
         }
         .onAppear {
             if hasAppeared {
@@ -674,7 +684,13 @@ struct ListingReviewView: View {
                     return
                 }
                 returnFocus = .assistedExport
-                destination = .assistedExport
+                guard let pack = assistedExportPack,
+                      let summary = assistedExportSummary else { return }
+                focusedField = nil
+                inlineFocus = nil
+                sharingPresentation = ListingReviewSharingPresentation(
+                    pack: pack, summary: summary
+                )
             }
         } label: {
             HStack(spacing: 12) {
@@ -682,13 +698,11 @@ struct ListingReviewView: View {
                     .font(.headline)
                     .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityHidden(true)
-                // #896: the row pushes to a screen that explains itself, so the
-                // headline carries it alone and the row gets skinnier.
                 Text(AssistedExportCopy.entryTitle)
                     .font(.headline)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.up")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .accessibilityHidden(true)
@@ -839,18 +853,20 @@ struct ListingReviewView: View {
                     startNewItem: startNewItem
                 )
             }
-        case .assistedExport:
-            if let pack = assistedExportPack,
-               let summary = assistedExportSummary {
-                AssistedExportHostView(
-                    pack: pack,
-                    summary: summary,
-                    service: dependencies.assistedExportService,
-                    funnelAnalytics: dependencies.funnelAnalytics,
-                    refreshPack: refreshAssistedExportPack
-                )
-            }
         }
+    }
+
+    private func sharingDrawer(
+        _ presentation: ListingReviewSharingPresentation
+    ) -> some View {
+        AssistedExportHostView(
+            pack: assistedExportPack ?? presentation.pack,
+            summary: assistedExportSummary ?? presentation.summary,
+            service: dependencies.assistedExportService,
+            funnelAnalytics: dependencies.funnelAnalytics,
+            refreshPack: refreshAssistedExportPack
+        )
+        .dynamicTypeSize(dynamicTypeSize)
     }
 
     private var assistedExportPack: AssistedExportPack? {

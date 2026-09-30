@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The assisted-export screen (issue #581, design authority
-/// `Assisted Export + Share Handoff v1`, XPORT-01 through XPORT-05).
+/// The contextual export drawer. The July v1 family supplies the handoff
+/// contract; the September sharing revamp keeps selection and guide together.
 ///
 /// Every seller-facing string on this screen comes from `AssistedExportCopy`,
 /// never from a literal here. That is what keeps the vocabulary sweep in the
@@ -100,6 +100,8 @@ struct AssistedExportHostView: View {
 @MainActor
 struct AssistedExportView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.dismiss) private var dismiss
 
     @Bindable private var store: AssistedExportStore
     @State private var sharePayload: AssistedExportSharePayload?
@@ -154,25 +156,48 @@ struct AssistedExportView: View {
                     .accessibilityIdentifier("assisted-export.retry")
                 }
             case .ready:
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        itemIdentity
-                        if domain.isPackOutOfDate {
-                            packOutOfDate
-                        } else {
-                            packMeta
+                VStack(spacing: 0) {
+                    if let destination = openDestination {
+                        guideHeader(destination)
+                        guideContent(destination)
+                    } else {
+                        drawerHeader
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                itemIdentity
+                                if domain.isPackOutOfDate {
+                                    packOutOfDate
+                                } else {
+                                    packMeta
+                                }
+                                destinationRows
+                                Text(AssistedExportCopy.manualHandoff)
+                                    .snapListTypography(.status)
+                                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                                    .padding(.vertical, 16)
+                            }
                         }
-                        destinationRows
-                        Color.clear.frame(height: 40)
                     }
                 }
             }
         }
         .background(SnapListColorToken.canvas.color)
-        .navigationTitle(AssistedExportCopy.screenTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: guideBinding) { destination in
-            guideSheet(destination)
+        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.fraction(0.82), .large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+        .presentationContentInteraction(.scrolls)
+        .interactiveDismissDisabled(store.isWriting)
+        .sheet(item: $sharePayload) { payload in
+            AssistedExportActivitySheet(items: payload.items) {
+                Task {
+                    await store.recordHandoff(
+                        .sharedAnotherWay,
+                        for: payload.destination,
+                        pack: payload.pack
+                    )
+                }
+            }
         }
         .task {
             store.listingRevisionChanged(to: listingRevision)
@@ -185,32 +210,66 @@ struct AssistedExportView: View {
 
     private var domain: AssistedExportDomain { store.domain }
 
+    private var openDestination: AssistedExportDestination? {
+        domain.destinations.first { domain.isWorkspaceOpen($0) }
+    }
+
+    private var drawerHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(AssistedExportCopy.screenTitle)
+                .snapListTypography(.sectionHeader)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("assisted-export.drawer")
+            Spacer(minLength: 0)
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .background(SnapListColorToken.quietFill.color, in: Circle())
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .disabled(store.isWriting)
+            .accessibilityLabel(AssistedExportCopy.closeGuide)
+            .accessibilityIdentifier("assisted-export.drawer.close")
+        }
+        .padding(.horizontal, SnapListMetrics.screenGutter)
+        .padding(.top, 20)
+        .padding(.bottom, 8)
+    }
+
     // MARK: - Identity
 
     private var itemIdentity: some View {
-        HStack(spacing: 12) {
-            AsyncImage(url: domain.pack.photoReferences.first) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                SnapListColorToken.quietFill.color
-            }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 12) {
+            itemPhoto(height: 176)
+            VStack(alignment: .leading, spacing: 6) {
                 Text(summary.title)
                     .snapListTypography(.cardTitle)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 Text(summary.priceText)
-                    .snapListTypography(.body)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .snapListTypography(.sectionHeader)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .monospacedDigit()
             }
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, SnapListMetrics.screenGutter)
         .padding(.top, 16)
         .padding(.bottom, 14)
+    }
+
+    private func itemPhoto(height: CGFloat) -> some View {
+        GeometryReader { geometry in
+            AssistedExportPhoto(url: domain.pack.photoReferences.first)
+                .frame(width: geometry.size.width, height: height)
+                .clipped()
+        }
+        .frame(height: height)
+        .background(SnapListColorToken.quietFill.color)
+        .clipShape(.rect(cornerRadius: 18))
+        .accessibilityLabel("\(summary.title), \(summary.priceText)")
+        .accessibilityIdentifier("assisted-export.item-photo")
     }
 
     private var packMeta: some View {
@@ -274,10 +333,10 @@ struct AssistedExportView: View {
                 destinationRow(destination)
             }
         }
+        .padding(.horizontal, SnapListMetrics.screenGutter)
     }
 
-    /// A row opens that destination's guide sheet. The trailing chevron points
-    /// up because that is where the sheet rises from; nothing expands inline.
+    /// Destination selection changes the content of this same drawer.
     private func destinationRow(_ destination: AssistedExportDestination) -> some View {
         Button {
             withMotion { store.toggle(destination) }
@@ -291,16 +350,13 @@ struct AssistedExportView: View {
                     stateLine(destination)
                 }
                 Spacer(minLength: 0)
-                // Intentionally static and decorative: it points at where the
-                // sheet rises from and never animates or changes with state.
-                Image(systemName: "chevron.up")
+                Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.vertical, 11)
-            .frame(minHeight: 60)
+            .padding(.vertical, 16)
+            .frame(minHeight: 76)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -379,36 +435,17 @@ struct AssistedExportView: View {
 
     // MARK: - Guide sheet
 
-    /// The sheet is presented exactly while the store says one destination's
-    /// workspace is on screen. A stale pack takes it down without forgetting
-    /// the destination, so the setter only closes a sheet that was showing.
-    private var guideBinding: Binding<AssistedExportDestination?> {
-        Binding(
-            get: {
-                domain.destinations.first { domain.isWorkspaceOpen($0) }
-            },
-            set: { presented in
-                guard presented == nil,
-                      let open = domain.destinations.first(where: {
-                          domain.isWorkspaceOpen($0)
-                      }) else { return }
-                withMotion { store.toggle(open) }
-            }
-        )
-    }
-
-    private func guideSheet(_ destination: AssistedExportDestination) -> some View {
+    /// A stale pack returns to selection. The domain retains the destination
+    /// and retires the confirm question without writing a Shared claim.
+    private func guideContent(_ destination: AssistedExportDestination) -> some View {
         let progress = domain.guide(for: destination)
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                guideHeader(destination)
+                itemPhoto(height: 136)
+                guideItemIdentity
 
                 if progress.current != nil {
-                    Text(progress.positionText)
-                        .snapListTypography(.status)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        .monospacedDigit()
-                        .accessibilityIdentifier("assisted-export.guide.position")
+                    guideProgress(progress)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -434,6 +471,9 @@ struct AssistedExportView: View {
                 }
 
                 if progress.current != nil {
+                    Text(AssistedExportCopy.manualHandoff)
+                        .snapListTypography(.status)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
                     shareAnotherWay(destination)
                 }
 
@@ -450,24 +490,73 @@ struct AssistedExportView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(SnapListColorToken.canvas.color)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        .interactiveDismissDisabled(store.isWriting)
-        .sheet(item: $sharePayload) { payload in
-            AssistedExportActivitySheet(items: payload.items) {
-                Task {
-                    await store.recordHandoff(
-                        .sharedAnotherWay,
-                        for: payload.destination,
-                        pack: payload.pack
-                    )
+        .id(destination)
+    }
+
+    private var guideItemIdentity: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    guideItemTitle
+                    guideItemPrice
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    guideItemTitle
+                    Spacer(minLength: 0)
+                    guideItemPrice
                 }
             }
+        }
+        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+    }
+
+    private var guideItemTitle: some View {
+        Text(summary.title)
+            .snapListTypography(.cardTitle)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var guideItemPrice: some View {
+        Text(summary.priceText)
+            .snapListTypography(.cardTitle)
+            .monospacedDigit()
+    }
+
+    private func guideProgress(_ progress: AssistedExportGuideProgress) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(progress.positionText)
+                .snapListTypography(.rowTitle)
+                .foregroundStyle(SnapListColorToken.action.color)
+                .monospacedDigit()
+                .accessibilityIdentifier("assisted-export.guide.position")
+            HStack(spacing: 6) {
+                ForEach(AssistedExportGuideStep.allCases, id: \.self) { step in
+                    Capsule()
+                        .fill(step.rawValue <= (progress.current?.rawValue ?? 3)
+                              ? SnapListColorToken.action.color
+                              : SnapListColorToken.quietFill.color)
+                        .frame(height: 4)
+                }
+            }
+            .accessibilityHidden(true)
         }
     }
 
     private func guideHeader(_ destination: AssistedExportDestination) -> some View {
         HStack {
+            Button {
+                withMotion { store.toggle(destination) }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .disabled(store.isWriting)
+            .accessibilityLabel(AssistedExportCopy.chooseMarketplace)
+            .accessibilityIdentifier("assisted-export.guide.back")
             destinationMark(destination)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(destination.displayName)
@@ -493,7 +582,9 @@ struct AssistedExportView: View {
             .accessibilityLabel(AssistedExportCopy.closeGuide)
             .accessibilityIdentifier("assisted-export.guide.close")
         }
-        .padding(.top, 8)
+        .padding(.horizontal, SnapListMetrics.screenGutter)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -527,14 +618,22 @@ struct AssistedExportView: View {
                         )
                 )
         } else {
-            Text(AssistedExportCopy.upcomingStepTitle(step, for: destination))
-                .snapListTypography(.status)
-                .foregroundStyle(SnapListColorToken.textSecondary.color.opacity(0.7))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel(
-                    AssistedExportCopy.upcomingStepTitle(step, for: destination)
-                )
-                .accessibilityValue(AssistedExportCopy.stepUpcoming)
+            HStack(spacing: 10) {
+                Text("\(step.rawValue + 1)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .background(SnapListColorToken.quietFill.color, in: Circle())
+                    .accessibilityHidden(true)
+                Text(AssistedExportCopy.upcomingStepTitle(step, for: destination))
+                    .snapListTypography(.status)
+            }
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                AssistedExportCopy.upcomingStepTitle(step, for: destination)
+            )
+            .accessibilityValue(AssistedExportCopy.stepUpcoming)
         }
     }
 
@@ -590,6 +689,7 @@ struct AssistedExportView: View {
                 confirmControls(destination)
             }
         }
+        .padding(.vertical, 8)
     }
 
     /// The only writer of `Shared` on this screen. The question being on screen
@@ -778,6 +878,43 @@ struct AssistedExportView: View {
             change()
         } else {
             withAnimation(.easeOut(duration: 0.18), change)
+        }
+    }
+}
+
+/// Shares the Listing Review fixture photograph without changing real-media
+/// fetching or any of the export payload's ordered photo references.
+private struct AssistedExportPhoto: View {
+    let url: URL?
+
+    var body: some View {
+#if DEBUG
+        if url?.host == "example.com" {
+            Image("FirstValueController")
+                .resizable()
+                .scaledToFill()
+        } else {
+            remotePhoto
+        }
+#else
+        remotePhoto
+#endif
+    }
+
+    private var remotePhoto: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().scaledToFill()
+            case .empty:
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            default:
+                Image(systemName: "photo")
+                    .font(.title2)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }

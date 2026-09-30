@@ -479,6 +479,8 @@ enum AssistedExportCopy {
     static let notStarted = "Not started"
     static let rowHint = "Opens a step-by-step guide"
     static let closeGuide = "Close"
+    static let chooseMarketplace = "Choose marketplace"
+    static let manualHandoff = "You finish posting in the marketplace app."
     static let stepDone = "done"
     static let stepUpcoming = "upcoming"
     static let prepared = "Prepared"
@@ -605,6 +607,8 @@ enum AssistedExportCopy {
         notStarted,
         rowHint,
         closeGuide,
+        chooseMarketplace,
+        manualHandoff,
         stepDone,
         stepUpcoming,
         prepared,

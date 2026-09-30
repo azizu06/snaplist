@@ -18,6 +18,8 @@ import UIKit
 /// a DEBUG-only type.
 struct AssistedExportFixtureView: View {
     let fixture: AssistedExportFixture
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.legibilityWeight) private var legibilityWeight
 
     private static let itemID = UUID(
         uuidString: "58100000-0000-4000-8000-000000000001"
@@ -44,6 +46,7 @@ struct AssistedExportFixtureView: View {
     @State private var sheetWasPresented = false
     @State private var store: AssistedExportStore
     @State private var recorder: AssistedExportFixtureRecorder
+    @State private var drawerPresented = false
 
     init(fixture: AssistedExportFixture) {
         self.fixture = fixture
@@ -92,11 +95,21 @@ struct AssistedExportFixtureView: View {
 
     var body: some View {
         NavigationStack {
+            Button(AssistedExportCopy.entryTitle) { drawerPresented = true }
+                .accessibilityIdentifier("assisted-export.fixture.open")
+        }
+        .sheet(isPresented: $drawerPresented, onDismiss: {
+            if let destination = store.domain.destinations.first(where: {
+                store.domain.isWorkspaceOpen($0)
+            }) {
+                store.toggle(destination)
+            }
+        }) {
             AssistedExportView(
                 store: store,
                 summary: AssistedExportItemSummary(
-                    title: "Denim jacket, relaxed fit, size L",
-                    priceText: "$58",
+                    title: "Sony DualSense Controller",
+                    priceText: "$145",
                     preparedAtText: "2:41 PM"
                 ),
                 listingRevision: listingRevision,
@@ -104,26 +117,31 @@ struct AssistedExportFixtureView: View {
                 onUpdatePack: preparePackForCurrentListing,
                 onConfirmSheetPresented: confirmSheetPresented
             )
-        }
-        .task { await openGuideForFixture() }
-        .overlay(alignment: .topLeading) {
-            if sheetWasPresented {
-                Color.clear
-                    .frame(width: 2, height: 2)
-                    .accessibilityElement()
-                    .accessibilityLabel("Confirm sheet was presented")
-                    .accessibilityIdentifier(
-                        "assisted-export.fixture.sheet-was-presented"
-                    )
+            .dynamicTypeSize(dynamicTypeSize)
+            .environment(\.legibilityWeight, legibilityWeight)
+            .overlay(alignment: .topLeading) {
+                if sheetWasPresented {
+                    Color.clear
+                        .frame(width: 2, height: 2)
+                        .accessibilityElement()
+                        .accessibilityLabel("Confirm sheet was presented")
+                        .accessibilityIdentifier(
+                            "assisted-export.fixture.sheet-was-presented"
+                        )
+                }
+                fixtureCounter(
+                    recorder.photoWriteCount,
+                    identifier: "assisted-export.fixture.photo-write-count"
+                )
+                fixtureCounter(
+                    recorder.handoffWriteCount,
+                    identifier: "assisted-export.fixture.handoff-write-count"
+                )
             }
-            fixtureCounter(
-                recorder.photoWriteCount,
-                identifier: "assisted-export.fixture.photo-write-count"
-            )
-            fixtureCounter(
-                recorder.handoffWriteCount,
-                identifier: "assisted-export.fixture.handoff-write-count"
-            )
+        }
+        .task {
+            drawerPresented = true
+            await openGuideForFixture()
         }
     }
 
@@ -176,7 +194,7 @@ struct AssistedExportFixtureView: View {
             itemID: Self.itemID,
             contentRevision: Self.rebuiltContentRevision,
             reviewRevision: listingRevision,
-            title: "Denim jacket, relaxed fit, size L",
+            title: "Sony DualSense Controller",
             description: "A clean seller description.",
             effectivePrice: 145,
             photoReferences: Self.photoReferences
@@ -209,7 +227,7 @@ struct AssistedExportFixtureView: View {
     }
 
     private static let photoReferences = (1...8).map {
-        URL(string: "https://cdn.example/fixture-\($0).jpg")!
+        URL(string: "https://example.com/fixture-\($0).jpg")!
     }
 
     private var fixtureDeviceActions: AssistedExportDeviceActions {
