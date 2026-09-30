@@ -112,6 +112,8 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(
             waitForLabel("Step 1 of 4", on: positionElement(in: app), timeout: loadedTreeTimeout)
         )
+        app.buttons["assisted-export.guide.back"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout: loadedTreeTimeout))
         let label = row.label
         XCTAssertFalse(
             label.localizedCaseInsensitiveContains("shared"),
@@ -205,7 +207,8 @@ final class AssistedExportUITests: XCTestCase {
         let question = app.staticTexts["assisted-export.confirm-sheet"]
         XCTAssertTrue(question.waitForExistence(timeout: loadedTreeTimeout))
 
-        let start = question.coordinate(
+        // Drag the drawer's fixed header, rather than its scrollable content.
+        let start = marker("assisted-export.workspace.facebook", in: app).coordinate(
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0)
         )
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
@@ -215,6 +218,7 @@ final class AssistedExportUITests: XCTestCase {
             waitForDisappearance(of: question, timeout: loadedTreeTimeout),
             "A swipe-down must dismiss the sheet before any write starts."
         )
+        app.buttons["assisted-export.fixture.open"].tap()
         let row = app.buttons["assisted-export.row.facebook"]
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         XCTAssertFalse(
@@ -252,6 +256,7 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(facebook.label.localizedCaseInsensitiveContains("shared"))
         XCTAssertTrue(mercari.label.localizedCaseInsensitiveContains("prepared"))
         XCTAssertTrue(depop.label.localizedCaseInsensitiveContains("not started"))
+        let rowLabels = [facebook.label, mercari.label, depop.label]
 
         openRow(mercari, in: app)
         XCTAssertEqual(
@@ -261,8 +266,7 @@ final class AssistedExportUITests: XCTestCase {
                 + "guide resumes at the first device step."
         )
 
-        let reachable = [facebook.label, mercari.label, depop.label,
-                         marker("assisted-export.guide.instruction", in: app).label]
+        let reachable = (rowLabels + [marker("assisted-export.guide.instruction", in: app).label])
             .joined(separator: " ")
             .lowercased()
         for forbidden in ["published", "listed", "sold", "synced", "received", "verified"] {
@@ -342,13 +346,16 @@ final class AssistedExportUITests: XCTestCase {
         entry.tap()
 
         XCTAssertTrue(
-            app.navigationBars["Share to other marketplaces"]
+            marker("assisted-export.drawer", in: app)
                 .waitForExistence(timeout: loadedTreeTimeout)
         )
         XCTAssertTrue(
             app.buttons["assisted-export.row.facebook"]
                 .waitForExistence(timeout: loadedTreeTimeout)
         )
+        XCTAssertFalse(app.navigationBars["Share to other marketplaces"].exists)
+        app.buttons["assisted-export.drawer.close"].tap()
+        XCTAssertTrue(entry.waitForExistence(timeout: loadedTreeTimeout))
     }
 
     /// Opens a destination row and does not return until its guide sheet is
