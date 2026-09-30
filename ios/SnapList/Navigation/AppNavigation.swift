@@ -301,6 +301,14 @@ final class AppRouter {
     func resetWallPath() {
         wallPath = []
     }
+
+    /// The shell closes Scan through its camera-safe dismissal; the item then
+    /// opens from the wall's root through the normal authenticated opener.
+    func showTrophyWallForPushTap() {
+        presentedFullScreen = nil
+        presentedAccountEntry = false
+        resetWallPath()
+    }
 }
 
 enum DockVisibilityPolicy {

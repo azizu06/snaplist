@@ -179,7 +179,7 @@ export async function publishListingToEbayAndNotify(
   if (!outcome.alreadyPublished) {
     const { data: published } = await supabase
       .from("listings")
-      .select("title, item_id")
+      .select("title, item_id, run_id")
       .eq("id", listingId)
       .maybeSingle();
     await createNotification(supabase, {
@@ -204,6 +204,7 @@ export async function publishListingToEbayAndNotify(
         listingId,
         externalListingId: outcome.ebayListingId,
         itemName: (published?.title as string | null) ?? null,
+        runId: (published?.run_id as string | null) ?? null,
       });
     } catch {
       // The dispatcher already logs. A publish that succeeded must not be

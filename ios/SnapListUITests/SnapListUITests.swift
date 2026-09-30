@@ -1328,6 +1328,18 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testPhotoReviewControlsReachTheirExactTypedBoundaryDestinations() {
+        let saving = XCUIApplication()
+        saving.launchArguments = [
+            "--photo-review-state=REV-02",
+            "--submission-visual-state=SUB-01",
+            "--zero-network-fixtures"
+        ]
+        saving.launchAfterRetiringPriorInstance()
+        XCTAssertTrue(saving.descendants(matching: .any)["photo-review.start-listing"]
+            .waitForExistence(timeout: 3))
+        addScreenshot(named: "submission-saving-compact-footer")
+        saving.terminate()
+
         let acknowledgmentNotification =
             "dev.snaplist.ios.test.submission-ack.\(UUID().uuidString)"
         let app = XCUIApplication()
@@ -1369,6 +1381,7 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["voice-note.close"].tap()
         XCTAssertTrue(startListing.waitForExistence(timeout: 2))
+        addScreenshot(named: "submission-before-start-listing")
 
         startListing.tap()
 
@@ -1384,6 +1397,12 @@ final class SnapListUITests: XCTestCase {
             "Start listing control must reach the accepted Done boundary."
         )
         XCTAssertTrue(startListing.isEnabled)
+        XCTAssertLessThanOrEqual(
+            app.windows.firstMatch.frame.maxY - startListing.frame.maxY,
+            65,
+            "Done must leave only footer padding and the home-indicator safe area below it."
+        )
+        addScreenshot(named: "submission-success-done-only")
         // Status lives inside the button since #1126, so there is no separate
         // "Item saved" message row to read.
         XCTAssertFalse(app.buttons["photo-review.add"].isEnabled)

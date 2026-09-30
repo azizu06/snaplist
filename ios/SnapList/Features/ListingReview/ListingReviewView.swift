@@ -579,7 +579,7 @@ struct ListingReviewView: View {
                 edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.description,
                 focus: $inlineFocus,
-                lineLimit: 3...10
+                lineLimit: 1...10
             )
             .accessibilityFocused($focusedElement, equals: .description)
 

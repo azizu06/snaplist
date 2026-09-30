@@ -26,6 +26,47 @@ final class ListingReviewUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    func testDescriptionFitsShortTextAndGrowsWhenTheSellerAddsDetails() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        let description = app.textViews["listing-review.description"]
+        XCTAssertTrue(description.waitForExistence(timeout: 3))
+        scrollUntilClearOfFooter(
+            description,
+            footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch,
+            in: app
+        )
+        description.tap()
+        description.press(forDuration: 1)
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 2))
+        selectAll.tap()
+        description.typeText("Boxed.")
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(String(describing: description.value).contains("Boxed."))
+        XCTAssertEqual(description.frame.height, 44, accuracy: 1,
+                       "Short descriptions must not reserve three empty lines.")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "compact-listing-inputs"
+        compact.lifetime = .keepAlways
+        add(compact)
+
+        description.tap()
+        description.typeText(String(repeating: " Original accessories included.", count: 5))
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertGreaterThan(description.frame.height, 44)
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "description-grows-with-content"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+        openItemSpecifics(in: app)
+        let specifics = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        specifics.name = "compact-item-specifics"
+        specifics.lifetime = .keepAlways
+        add(specifics)
+    }
+
     func testCanonicalRunOpensListingReviewAndCleanDoneRestoresExactOpener() {
         let app = launch(resetDraft: true)
         let reviewOpener = openReview(in: app)

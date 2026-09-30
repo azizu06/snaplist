@@ -62,6 +62,48 @@ function createStore(
   };
 }
 
+describe("push run identity (#1137)", () => {
+  const RUN = "44444444-4444-4444-8444-444444444444";
+
+  it("hands the run to the sender for the ready moment", async () => {
+    const sender = new MockApnsSender();
+    const dispatcher = createSellerPushDispatcher({ store: createStore(), sender });
+
+    await dispatcher.listingReady({ userId: OWNER, runId: RUN, itemName: null });
+
+    expect(sender.sent[0]?.runId).toBe(RUN);
+  });
+
+  it("hands the run to the sender for the published moment", async () => {
+    const sender = new MockApnsSender();
+    const dispatcher = createSellerPushDispatcher({ store: createStore(), sender });
+
+    await dispatcher.listingPublished({
+      userId: OWNER,
+      listingId: "listing-1",
+      externalListingId: "ext-1",
+      itemName: null,
+      runId: RUN,
+    });
+
+    expect(sender.sent[0]?.runId).toBe(RUN);
+  });
+
+  it("sends a published moment with no known run as no run at all", async () => {
+    const sender = new MockApnsSender();
+    const dispatcher = createSellerPushDispatcher({ store: createStore(), sender });
+
+    await dispatcher.listingPublished({
+      userId: OWNER,
+      listingId: "listing-1",
+      externalListingId: "ext-1",
+      itemName: null,
+    });
+
+    expect(sender.sent[0]?.runId ?? null).toBeNull();
+  });
+});
+
 describe("seller push dispatch (#891)", () => {
   it("tells every device the seller registered that a listing is ready", async () => {
     const sender = new MockApnsSender();

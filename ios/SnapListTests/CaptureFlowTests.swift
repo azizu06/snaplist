@@ -9,6 +9,38 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    func testSubmissionFooterFitsItsVisibleActionThroughSavingSavedAndDone() async {
+        for dynamicTypeSize in [DynamicTypeSize.large, .accessibility3] {
+            for presentation in [
+                PhotoReviewSubmissionPresentation.idle,
+                .visualState(.saving),
+                .visualState(.accepted)
+            ] {
+                let host = HostedPhotoReviewTestWindow(
+                    store: PhotoReviewStore(photos: makeHeroNavigationPhotos(count: 1)),
+                    dynamicTypeSize: dynamicTypeSize,
+                    submissionPresentation: presentation
+                )
+                defer { host.close() }
+                await host.settle()
+                func assertContentFits() {
+                    let footer = host.observation.frame(for: .footer)
+                    let action = host.observation.frame(for: .startListing)
+                    XCTAssertGreaterThanOrEqual(action.height, 52)
+                    XCTAssertEqual(action.minY - footer.minY, 12, accuracy: 1)
+                    XCTAssertEqual(footer.maxY - action.maxY, 12, accuracy: 1,
+                                   "No invisible status/action slot may survive below the button.")
+                }
+                assertContentFits()
+                if presentation == .visualState(.accepted) {
+                    try? await Task.sleep(for: .seconds(1.1))
+                    await host.settle()
+                    assertContentFits()
+                }
+            }
+        }
+    }
+
     /// #1126 (owner pick B): status lives inside the button. While saving the
     /// primary reads "Saving your item" and Cancel replaces the header back control (#1136);
     /// accepted shows "Item saved" for one beat and then the filled Done.
@@ -8083,7 +8115,8 @@ final class CaptureFlowTests: XCTestCase {
         init(
             store: PhotoReviewStore,
             dynamicTypeSize: DynamicTypeSize = .large,
-            size: CGSize = CGSize(width: 390, height: 844)
+            size: CGSize = CGSize(width: 390, height: 844),
+            submissionPresentation: PhotoReviewSubmissionPresentation = .idle
         ) {
             let box = PhotoReviewLayoutObservationBox()
             observationBox = box
@@ -8091,6 +8124,7 @@ final class CaptureFlowTests: XCTestCase {
                 rootView: AnyView(
                     PhotoReviewView(
                         store: store,
+                        submissionPresentation: submissionPresentation,
                         delete: { nil },
                         openBoundary: { _ in },
                         onLayoutObservation: { box.value = $0 }
