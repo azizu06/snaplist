@@ -66,6 +66,7 @@ Required server environment:
 - `REVENUECAT_IOS_PUBLIC_SDK_KEY`
 - optional `REVENUECAT_OFFERING_ID`
 - `SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE`
+- optional `REVENUECAT_SANDBOX_GRANT_USER_IDS` (comma-separated exact Clerk ids of test accounts)
 
 Leaving every value unset is the supported offline/unconfigured state. Partial server configuration
 is rejected. There is no default RevenueCat environment: production delivery must explicitly set
@@ -74,6 +75,18 @@ is rejected. There is no default RevenueCat environment: production delivery mus
 request. The server and native client both accept only the exact configured monthly product ID; do
 not map an annual product to the entitlement until a separately approved monthly-ledger semantic
 exists for annual billing.
+
+A signature-verified `SANDBOX` event is audit-only (`sandbox_ignored`) and never creates allowance,
+unless its resolved customer is listed in `REVENUECAT_SANDBOX_GRANT_USER_IDS`. Only then does the
+webhook pass `p_sandbox_grant`, so that test account's genuine Apple sandbox purchase creates a real
+StoreKit period (Pro plus the configured monthly allowance) with a `SANDBOX` audit row. Entries must
+be exact `user_…` Clerk ids (at most 10); emails and wildcards are refused. The list only matters
+while `REVENUECAT_ALLOWED_ENVIRONMENT=SANDBOX`, because a `PRODUCTION` deployment rejects every
+sandbox delivery before it reaches the ledger. A sandbox event already stored as `sandbox_ignored`
+is an idempotent replay and is never granted later, so a tester added to the list must make a fresh
+sandbox purchase. Leave it unset for every ordinary seller, and remove the ids once sandbox testing
+ends; sandbox periods expire on Apple's accelerated sandbox renewal clock. Apply the
+`20260930190000_revenuecat_scoped_sandbox_grant` migration before setting the list.
 
 ## Lifecycle and replay policy
 

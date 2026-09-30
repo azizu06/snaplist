@@ -1,6 +1,6 @@
 begin;
 
-select plan(88);
+select plan(93);
 
 -- Issue #524 fences the included first AI run by physical device, so every
 -- non-guest tenant here needs the reserved claim a real redemption would have
@@ -54,7 +54,7 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)',
+    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz,boolean)',
     'execute'
   ),
   'service role may translate a verified provider event into the ledger'
@@ -62,7 +62,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)',
+    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz,boolean)',
     'execute'
   ),
   'sellers cannot call the verified provider event seam'
@@ -72,6 +72,12 @@ select ok(
     'public.record_verified_revenuecat_ai_item_period(text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)'
   ) is null,
   'the environment-blind period RPC signature no longer exists'
+);
+select ok(
+  to_regprocedure(
+    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)'
+  ) is null,
+  'the grant-blind period RPC signature no longer exists'
 );
 select ok(
   to_regprocedure(
@@ -245,6 +251,51 @@ select is(
      and event.event_id = 'rc-direct-sandbox'),
   'sandbox_ignored',
   'the direct sandbox RPC denial remains auditable'
+);
+
+-- A scoped sandbox grant (the webhook sets it only for an allowlisted test
+-- account) is the one way a SANDBOX event may reach the shared ledger.
+select * from public.bind_revenuecat_customer('rc-user-sandbox-grant', 'rc-user-sandbox-grant');
+select * from public.resolve_revenuecat_customer(
+  'rc-user-sandbox-grant', 'rc-user-sandbox-grant', 'rc-original-sandbox-grant'
+);
+select ok(
+  public.record_verified_revenuecat_ai_item_period(
+    'rc-user-sandbox-grant', 'rc-user-sandbox-grant', 'SANDBOX',
+    'rc-original-sandbox-grant:p1', 'rc-original-sandbox-grant',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+    'active', null, 24, 'rc-granted-sandbox', 'INITIAL_PURCHASE',
+    date_trunc('month', now()) + interval '3 minutes',
+    true
+  ),
+  'a granted sandbox purchase creates a StoreKit period'
+);
+select is(
+  (select count(*)::integer from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-sandbox-grant'
+     and period.source = 'storekit'
+     and period.state = 'active'
+     and period.allowance = 24),
+  1,
+  'the granted sandbox period carries the configured allowance'
+);
+select is(
+  (select event.outcome from private.revenuecat_webhook_events event
+   where event.environment = 'SANDBOX'
+     and event.event_id = 'rc-granted-sandbox'),
+  'applied',
+  'the granted sandbox event is audited as applied'
+);
+select ok(
+  not public.record_verified_revenuecat_ai_item_period(
+    'rc-user-sandbox-grant', 'rc-user-sandbox-grant', 'SANDBOX',
+    'rc-original-sandbox-grant:p1', 'rc-original-sandbox-grant',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+    'active', null, 24, 'rc-granted-sandbox', 'INITIAL_PURCHASE',
+    date_trunc('month', now()) + interval '3 minutes',
+    true
+  ),
+  'a replayed granted sandbox event is an idempotent duplicate'
 );
 
 select * from public.bind_revenuecat_customer(

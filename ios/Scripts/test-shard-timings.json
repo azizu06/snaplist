@@ -97,7 +97,7 @@
     "SnapListUITests/ListingReviewUITests/testTheReviewBackButtonMeetsTheTouchTargetFloorInBothDimensions": 12.62,
     "SnapListUITests/ListingReviewUITests/testTheSharedInlineFieldTakesTapsAboveAndBelowItsGlyphs": 21.58,
     "SnapListUITests/ListingReviewUITests/testTouchTargetFloorRoundsBeforeComparing": 0.187,
-    "SnapListUITests/ListingReviewUITests/testZeroAndFiveEvidenceStayTruthfulAndSoldDetailReturnsToInvoker": 47.839,
+    "SnapListUITests/ListingReviewUITests/testZeroAndFiveEvidenceStayTruthfulAndSoldCardsOpenEbay": 47.839,
     "SnapListUITests/ScanDrawerScreenshotTests/testScanDrawerDevicePass": 24.308,
     "SnapListUITests/SnapListUITests/testAboutRowMeetsTouchTargetFloorAtSmallestDynamicTypeSize": 5.755,
     "SnapListUITests/SnapListUITests/testAboutRowStaysOnScreenWithBoldTextOn": 5.966,
