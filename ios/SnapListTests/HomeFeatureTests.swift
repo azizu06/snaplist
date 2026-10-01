@@ -2262,7 +2262,8 @@ final class TrophyWallDomainTests: XCTestCase {
             let wall = TrophyWallView.presentation(
                 hasSettledTiles: true,
                 collectionOutcome: expectation.outcome,
-                refreshRecovery: expectation.recovery
+                refreshRecovery: expectation.recovery,
+                refreshMaySettleItems: false
             )
             XCTAssertEqual(wall.offlineNotice, expectation.offlineNotice)
             XCTAssertEqual(
@@ -2955,7 +2956,8 @@ final class TrophyWallDomainTests: XCTestCase {
                 TrophyWallView.presentation(
                     hasSettledTiles: testCase.hasSettledTiles,
                     collectionOutcome: testCase.outcome,
-                    refreshRecovery: .idle
+                    refreshRecovery: .idle,
+                    refreshMaySettleItems: false
                 ),
                 testCase.expected,
                 testCase.name
@@ -4599,5 +4601,79 @@ private struct StaticTrophyWallRepository: TrophyWallRepository {
 
     func initialCards(for principalScope: TrophyWallPrincipalScope) -> [TrophyWallCard] {
         cards.filter { $0.principalScope == principalScope }
+    }
+}
+
+/// Flips tiles and To list rows draw the same signed cover photos. Each refresh
+/// re-signs them, so only the token in the query changes; the photo behind the
+/// path does not. A photo decoded once must be drawn again on the next visit
+/// without waiting on the network.
+final class CoverPhotoImageCacheTests: XCTestCase {
+    private func signedURL(path: String, token: String) -> URL {
+        URL(string: "https://example.supabase.co/storage/v1/object/sign/item-photos/\(path)?token=\(token)")!
+    }
+
+    private func image() -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+    }
+
+    func testPhotoDecodedOnceIsReusedWhenTheSameObjectIsReSigned() {
+        let cache = CoverPhotoImageCache()
+        let stored = image()
+        cache.insert(stored, for: signedURL(path: "user/run/0.jpg", token: "first"))
+
+        XCTAssertTrue(
+            cache.image(for: signedURL(path: "user/run/0.jpg", token: "second")) === stored
+        )
+    }
+
+    func testDifferentPhotoPathDoesNotReuseAnotherItemsPhoto() {
+        let cache = CoverPhotoImageCache()
+        cache.insert(image(), for: signedURL(path: "user/run/0.jpg", token: "a"))
+
+        XCTAssertNil(cache.image(for: signedURL(path: "user/other/0.jpg", token: "a")))
+    }
+
+    func testReviewSizedDecodeIsHeldApartFromTheTileDecode() {
+        let cache = CoverPhotoImageCache()
+        let tile = image()
+        let hero = image()
+        let url = signedURL(path: "user/run/0.jpg", token: "a")
+        cache.insert(tile, for: url)
+        cache.insert(hero, for: url, variant: "review-1300")
+
+        XCTAssertTrue(cache.image(for: url) === tile)
+        XCTAssertTrue(
+            cache.image(for: signedURL(path: "user/run/0.jpg", token: "b"), variant: "review-1300") === hero
+        )
+        XCTAssertNil(cache.image(for: url, variant: "review-200"))
+    }
+}
+
+/// Publishing from To list and tapping Go to Flips arrives while the refresh
+/// that moves the item onto the wall is still in flight. The wall's earlier
+/// page proved it empty, but that is no longer true; it must not say so.
+final class TrophyWallPendingSettleTests: XCTestCase {
+    func testWallWithholdsEmptyStateWhileARefreshMaySettleToListItems() {
+        let settling = TrophyWallView.presentation(
+            hasSettledTiles: false,
+            collectionOutcome: .loaded,
+            refreshRecovery: .idle,
+            refreshMaySettleItems: true
+        )
+        XCTAssertFalse(settling.showsEmptyView)
+        XCTAssertFalse(settling.showsGrid)
+        XCTAssertNil(settling.collectionMessage)
+
+        let settled = TrophyWallView.presentation(
+            hasSettledTiles: false,
+            collectionOutcome: .loaded,
+            refreshRecovery: .idle,
+            refreshMaySettleItems: false
+        )
+        XCTAssertTrue(settled.showsEmptyView)
     }
 }

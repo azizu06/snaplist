@@ -113,10 +113,16 @@ struct TrophyWallView: View {
     /// `refreshRecovery` carries no default on purpose. A default let the wall
     /// itself omit the argument and silently present `.idle`, which made the
     /// notice unreachable in production while every seam test still passed.
+    ///
+    /// `refreshMaySettleItems` is a refresh in flight while To list still holds
+    /// items. Publishing from To list and tapping Go to Flips lands here before
+    /// that refresh moves the item onto the wall, and the earlier page's proved
+    /// emptiness drew "No items yet" for about a second first.
     static func presentation(
         hasSettledTiles: Bool,
         collectionOutcome: TrophyWallCollectionOutcome,
-        refreshRecovery: TrophyWallCollectionRefreshRecovery
+        refreshRecovery: TrophyWallCollectionRefreshRecovery,
+        refreshMaySettleItems: Bool
     ) -> Presentation {
         guard !hasSettledTiles else {
             return Presentation(
@@ -147,7 +153,7 @@ struct TrophyWallView: View {
         case .loaded:
             return Presentation(
                 showsGrid: false,
-                showsEmptyView: true,
+                showsEmptyView: !refreshMaySettleItems,
                 offlineNotice: nil,
                 refreshUnavailableNotice: nil,
                 collectionMessage: nil
@@ -169,7 +175,9 @@ struct TrophyWallView: View {
         let presentation = Self.presentation(
             hasSettledTiles: !store.settledTiles.isEmpty,
             collectionOutcome: store.collectionOutcome,
-            refreshRecovery: store.collectionRefreshRecovery
+            refreshRecovery: store.collectionRefreshRecovery,
+            refreshMaySettleItems: store.isRefreshingCollection
+                && !store.processingRows.isEmpty
         )
 
         if let offlineNotice = presentation.offlineNotice {
@@ -460,22 +468,31 @@ private struct TrophyWallSettledTileView: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
             } else if let coverPhotoURL = tile.coverPhotoURL {
-                AsyncImage(url: coverPhotoURL) { image in
+                CoverPhotoRemoteImage(url: coverPhotoURL) { image in
                     image
                         .resizable()
                         .scaledToFill()
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .clipped()
                 } placeholder: {
-                    fallback
+                    // The tile's own fill holds the space while the photo
+                    // loads; a name drawn here only flashed under the date.
+                    Color.clear
                 }
             } else {
                 fallback
+                    .frame(
+                        width: proxy.size.width,
+                        height: proxy.size.height,
+                        alignment: .bottom
+                    )
             }
         }
         .accessibilityHidden(true)
     }
 
+    /// Sits at the bottom of the tile: `GeometryReader` places its content at
+    /// the top leading corner, under the date chip, which the name overlapped.
     private var fallback: some View {
         Text(tile.itemName)
             .snapListTypography(.status)
@@ -1194,7 +1211,7 @@ struct TrophyWallProcessingRowPhoto: View {
                             .rect(cornerRadius: Self.cornerRadiusPoints)
                         )
                 case .remote(let url):
-                    AsyncImage(url: url) { image in
+                    CoverPhotoRemoteImage(url: url) { image in
                         image
                             .resizable()
                             .scaledToFill()
@@ -1589,5 +1606,104 @@ private extension TrophyWallProcessingAction {
         } else {
             true
         }
+    }
+}
+
+// MARK: - Cover photo cache
+
+/// Decoded item photos shared for the session by Flips tiles, To list rows,
+/// Listing Review, and the eBay publish screens. `AsyncImage` keeps nothing
+/// between appearances, so every visit started each photo blank and fetched it
+/// again. The server re-signs these URLs on every refresh, so the token in the
+/// query changes while the storage object behind the path does not; the key
+/// drops the query.
+final class CoverPhotoImageCache: @unchecked Sendable {
+    static let shared = CoverPhotoImageCache()
+
+    /// Points × 3 for the widest tile or thumbnail the shared view fills.
+    static let maxPixelDimension: CGFloat = 800
+
+    private let storage = NSCache<NSString, UIImage>()
+
+    init(countLimit: Int = 150, totalCostLimit: Int = 160 * 1_024 * 1_024) {
+        storage.countLimit = countLimit
+        storage.totalCostLimit = totalCostLimit
+    }
+
+    /// `variant` separates decodes of one photo at different sizes.
+    static func key(for url: URL, variant: String? = nil) -> String {
+        var base = url.absoluteString
+        if var components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        ) {
+            components.query = nil
+            components.fragment = nil
+            base = components.string ?? base
+        }
+        guard let variant else { return base }
+        return base + "#" + variant
+    }
+
+    func image(for url: URL, variant: String? = nil) -> UIImage? {
+        storage.object(forKey: Self.key(for: url, variant: variant) as NSString)
+    }
+
+    func insert(_ image: UIImage, for url: URL, variant: String? = nil) {
+        let pixels = image.size.width * image.scale * image.size.height * image.scale
+        storage.setObject(
+            image,
+            forKey: Self.key(for: url, variant: variant) as NSString,
+            cost: Int(pixels) * 4
+        )
+    }
+}
+
+/// A remote item photo that draws a photo already decoded this session in the
+/// first frame and fetches only on a miss. Shaped like `AsyncImage` so callers
+/// keep their own sizing and clipping.
+struct CoverPhotoRemoteImage<Content: View, Placeholder: View>: View {
+    let url: URL
+    var cache: CoverPhotoImageCache = .shared
+    @ViewBuilder let content: (Image) -> Content
+    @ViewBuilder let placeholder: () -> Placeholder
+
+    /// Keyed so a view reused for another photo never draws the previous one.
+    @State private var loaded: (key: String, image: UIImage)?
+
+    private var image: UIImage? {
+        if let cached = cache.image(for: url) {
+            return cached
+        }
+        guard let loaded, loaded.key == CoverPhotoImageCache.key(for: url) else {
+            return nil
+        }
+        return loaded.image
+    }
+
+    var body: some View {
+        if let image {
+            content(Image(uiImage: image))
+        } else {
+            placeholder()
+                .task(id: CoverPhotoImageCache.key(for: url)) {
+                    await load()
+                }
+        }
+    }
+
+    private func load() async {
+        guard let data = try? await ListingReviewImagePipeline.download(url),
+              let image = try? await Task.detached(priority: .userInitiated, operation: {
+                  try ListingReviewImagePipeline.downsample(
+                      data,
+                      maxPixelDimension: CoverPhotoImageCache.maxPixelDimension
+                  )
+              }).value
+        else {
+            return
+        }
+        cache.insert(image, for: url)
+        loaded = (CoverPhotoImageCache.key(for: url), image)
     }
 }

@@ -171,7 +171,8 @@ final class TrophyWallCollectionMessageScoutTests: XCTestCase {
         let wallEmpty = TrophyWallView.presentation(
             hasSettledTiles: false,
             collectionOutcome: .loaded,
-            refreshRecovery: .idle
+            refreshRecovery: .idle,
+            refreshMaySettleItems: false
         )
 
         XCTAssertTrue(wallEmpty.showsEmptyView)
@@ -192,7 +193,8 @@ final class TrophyWallCollectionMessageScoutTests: XCTestCase {
             let wall = TrophyWallView.presentation(
                 hasSettledTiles: false,
                 collectionOutcome: outcome,
-                refreshRecovery: .idle
+                refreshRecovery: .idle,
+                refreshMaySettleItems: false
             )
 
             XCTAssertFalse(wall.showsEmptyView, "\(outcome)")
