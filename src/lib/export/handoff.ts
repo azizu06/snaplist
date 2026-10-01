@@ -247,6 +247,7 @@ export async function loadExportHandoffPack(
 }
 
 interface SavedDraftRow {
+  platform: string;
   title: string | null;
   description: string | null;
 }
@@ -262,6 +263,10 @@ interface SavedDraftRow {
  * is RLS-scoped and `persist_export_packs` refuses the write unless the caller
  * owns the item and both revisions are still current, so a stale or foreign
  * pack fails closed here exactly as it does at the receipt.
+ *
+ * A pack the destination already holds at this revision is left alone: a
+ * receipt may already point at it, and replacing its text would leave that
+ * receipt describing words the seller never handed over.
  */
 export async function prepareExportPackFromSavedDraft(
   supabase: SupabaseClient,
@@ -270,18 +275,19 @@ export async function prepareExportPackFromSavedDraft(
   assertAssisted(input.platform);
   const { data, error } = await supabase
     .from("listings")
-    .select("title, description")
+    .select("platform, title, description")
     .eq("item_id", input.itemId)
-    .eq("platform", "ebay")
-    .eq("source_review_revision", input.reviewContentRevision)
-    .maybeSingle();
+    .in("platform", ["ebay", input.platform])
+    .eq("source_review_revision", input.reviewContentRevision);
   if (error) {
     refused({
       message: `Failed to read the saved listing: ${error.message}`,
       code: error.code,
     });
   }
-  const draft = data as SavedDraftRow | null;
+  const rows = (data ?? []) as SavedDraftRow[];
+  if (rows.some((row) => row.platform === input.platform)) return;
+  const draft = rows.find((row) => row.platform === "ebay");
   if (!draft?.title?.trim() || !draft.description?.trim()) {
     throw new ExportHandoffError(
       "This listing changed after the pack was prepared.",

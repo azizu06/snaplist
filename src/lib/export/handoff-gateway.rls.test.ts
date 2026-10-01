@@ -198,6 +198,35 @@ describe("native assisted export handoff against the real database", () => {
     ).toBe("shared");
   });
 
+  it("keeps a destination pack that already exists, so its receipt still describes the text handed over", async () => {
+    const listing = await seedSavedListing();
+    const existing = await admin.from("listings").insert({
+      user_id: sellerId,
+      item_id: listing.itemId,
+      platform: "mercari",
+      title: "Switch OLED with dock",
+      description: "Earlier Mercari pack text.",
+      copy: { copyBlock: "Earlier Mercari pack text." },
+      status: "draft",
+      source_review_revision: listing.reviewContentRevision,
+    });
+    if (existing.error) throw new Error(existing.error.message);
+
+    const response = await handler(sellerId)(
+      action(listing, "mercari", "handoff"),
+    );
+
+    expect(response.status).toBe(200);
+    const { data } = await admin
+      .from("listings")
+      .select("title, description")
+      .eq("item_id", listing.itemId)
+      .eq("platform", "mercari");
+    expect(data).toEqual([
+      { title: "Switch OLED with dock", description: "Earlier Mercari pack text." },
+    ]);
+  });
+
   it("still refuses a handoff for a pack the listing has moved past", async () => {
     const listing = await seedSavedListing();
 
