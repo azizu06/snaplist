@@ -119,11 +119,6 @@ struct ListingReviewView: View {
                 .accessibilityIdentifier("listing-review.back")
                 .buttonStyle(.plain)
             }
-            if #available(iOS 26.0, *) {
-                keyboardDone.sharedBackgroundVisibility(.hidden)
-            } else {
-                keyboardDone
-            }
         }
         .navigationDestination(isPresented: $typeCorrectionPresented) {
             ListingReviewCorrectionBoundaryView()
@@ -322,6 +317,8 @@ struct ListingReviewView: View {
             if focusedField == nil && inlineFocus == nil {
                 footer
                     .background(SnapListColorToken.canvas.color)
+            } else {
+                editingDoneBar
             }
         }
     }
@@ -738,22 +735,35 @@ struct ListingReviewView: View {
         }
     }
 
-    private var keyboardDone: some ToolbarContent {
-        ToolbarItemGroup(placement: .keyboard) {
-            Spacer()
-            Button {
-                focusedField = nil
-                inlineFocus = nil
-            } label: {
-                Text("Done")
-                    .fontWeight(.bold)
-                    .frame(minWidth: SnapListMetrics.minimumTouchTarget,
-                           minHeight: SnapListMetrics.minimumTouchTarget)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Done editing, keeps it on this phone")
-            .accessibilityIdentifier("listing-review.keyboard-done")
+    /// The editing-state Done. A `.keyboard` toolbar item rendered as a bare
+    /// word floating in a corner whenever the software keyboard was absent
+    /// (hardware keyboard, simulator). This bar sits in the bottom inset, so
+    /// it rides above the keyboard when there is one and stays put when there
+    /// is not, in the same filled style as the footer's Done. It only ends
+    /// editing; the footer's Done is what saves and leaves.
+    private var editingDoneBar: some View {
+        Button {
+            focusedField = nil
+            inlineFocus = nil
+        } label: {
+            Text("Done")
+                .font(.headline)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 52)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .background(SnapListColorToken.action.color)
+        .clipShape(RoundedRectangle(cornerRadius: 15))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(SnapListColorToken.canvas.color)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+        .accessibilityLabel("Done editing, keeps it on this phone")
+        .accessibilityIdentifier("listing-review.keyboard-done")
     }
 
     private var assistedExportEntry: some View {
