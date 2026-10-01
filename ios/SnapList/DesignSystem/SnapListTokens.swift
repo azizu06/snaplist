@@ -22,7 +22,7 @@ enum SnapListColorToken: String, CaseIterable {
     /// The paywall's packing slip: kraft ink, its field labels, the dashed
     /// rule between rows, and the paper edge.
     case proGateSlipInk = "#3A3226"
-    case proGateSlipLabel = "#8A7A60"
+    case proGateSlipLabel = "#75644E"
     case proGateSlipRule = "#E3D9C8"
     case proGateSlipEdge = "#EFE7DA"
 

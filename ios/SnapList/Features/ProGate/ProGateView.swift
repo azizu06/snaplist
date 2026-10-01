@@ -8,7 +8,7 @@ enum ProGateCopy {
     static let wantMore = "Want more AI listings?"
     static let slipIncludes = "AI listings every month"
     static let purchaseFailedLead = "Didn’t go through."
-    static let purchaseFailed = "Nothing was charged."
+    static let purchaseFailed = "Try again or restore your purchase."
     static let nothingToRestore = "No Pro subscription on this Apple Account."
     static let confirmingTitle = "Confirming"
     static let confirmingBubble = "Checking your account."
@@ -148,13 +148,14 @@ struct ProGateSheet: View {
     }
 
     /// Accessibility sizes keep the full-height sheet so nothing is cut off;
-    /// otherwise the drawer is exactly as tall as the scene, slip, title and
-    /// actions, plus the home-indicator inset the footer sits above.
+    /// otherwise the drawer fits the scene, slip, title and actions. The
+    /// system supplies the bottom safe area; adding it again leaves a gap
+    /// between the heading and the pinned actions.
     private var detent: PresentationDetent {
         guard !isAccessibilitySize, contentHeight > 0, footerHeight > 0 else {
             return .large
         }
-        return .height(contentHeight + footerHeight + 34)
+        return .height(contentHeight + footerHeight)
     }
 
     // MARK: - Hero
@@ -250,6 +251,12 @@ struct ProGateSheet: View {
             slipRow("Renews") { slipValue(product.proGateRenewsLine) }
             ProGateBarcode()
                 .frame(width: 112, height: 20)
+                // The rotated confirmation stamp needs its own paper area;
+                // its visual bounds must not cover the renewal disclosure.
+                .frame(
+                    height: stampContent == nil ? 20 : stampSize * 5.5,
+                    alignment: .bottomLeading
+                )
                 .padding(.top, 10)
                 .accessibilityHidden(true)
         }

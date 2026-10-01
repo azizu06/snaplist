@@ -4431,11 +4431,8 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "pro-gate-accessibility3")
     }
 
-    /// #961: the paywall is one of the sheets the owner named directly ("the
-    /// paywall and everything"). `pro-gate.primary` sits outside the sheet's
-    /// own `ScrollView` (it is pinned below it at this, non-accessibility,
-    /// Dynamic Type size), so a drag started there reaches the sheet's
-    /// drag-to-dismiss recognizer instead of just scrolling the offer copy.
+    /// #961: dismiss the fitted drawer with a downward drag from its upper
+    /// scene, where the native sheet's dismissal gesture is reachable.
     func testProGatePaywallSlidesDownToDismissWhenDismissible() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
 
@@ -4443,19 +4440,20 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["pro-gate.primary"].waitForExistence(timeout: 3))
 
-        // Drag from the title text, not a button — starting the touch on a
-        // Button hands the gesture to its own tap/highlight tracking before
-        // the sheet's interactive-dismiss pan ever sees it, the same reason
-        // ListingReviewDrawer's dismiss test drags from the drawer container
-        // rather than one of its controls.
-        let start = title.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0)
+        let close = app.buttons["pro-gate.not-now"]
+        XCTAssertTrue(close.exists)
+        let window = app.windows.firstMatch
+        // Start beside the close control, in the noninteractive scene. The
+        // heading now sits near the bottom of the fitted drawer; a drag from
+        // there to the screen edge cannot traverse its dismissal distance.
+        let start = window.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: window.frame.width / 2, dy: close.frame.midY - window.frame.minY)
         )
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
         start.press(forDuration: 0.05, thenDragTo: end)
 
-        XCTAssertFalse(
-            title.waitForExistence(timeout: 3),
+        XCTAssertTrue(
+            title.waitForNonExistence(timeout: 3),
             "A swipe-down must dismiss the paywall when it is dismissible."
         )
     }
@@ -4468,6 +4466,7 @@ final class SnapListUITests: XCTestCase {
             purchase.tap()
             let check = app.buttons["pro-gate.check-again"]
             XCTAssertTrue(check.waitForExistence(timeout: 4), fixture)
+            addScreenshot(named: "pro-gate-\(fixture)-pending")
             XCTAssertFalse(app.descendants(matching: .any)["pro-gate.confirming"].exists)
             XCTAssertFalse(app.buttons["Subscribe"].exists)
             let restore = app.buttons["pro-gate.restore-purchase"]
@@ -4495,6 +4494,7 @@ final class SnapListUITests: XCTestCase {
                 check.tap()
             }
             XCTAssertTrue(app.staticTexts["SnapList Pro is on"].waitForExistence(timeout: 4))
+            addScreenshot(named: "pro-gate-\(fixture)-verified")
             XCTAssertFalse(app.buttons["pro-gate.check-again"].exists)
             app.buttons["pro-gate.primary"].tap()
             XCTAssertFalse(app.staticTexts["pro-gate.title"].waitForExistence(timeout: 1))
