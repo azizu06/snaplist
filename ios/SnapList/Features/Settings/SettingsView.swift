@@ -31,6 +31,14 @@ struct SettingsView: View {
     @State private var ebayConnection: EbayConnectionStatus?
     @State private var ebayConnectionLoadPhase =
         SettingsSellingPresentation.LoadPhase.loading
+    @State private var showsEbayDisconnectConfirmation = false
+    @State private var showsEbayConnect = false
+#if DEBUG
+    /// `--settings-proof=SET-01`'s stateful stand-in, shared by this screen's
+    /// own read and disconnect and by the connect screen it opens, so a
+    /// disconnect here and a reconnect there are one round trip.
+    @State private var hubProofEbayAdapter = EbaySettingsFixtureAdapter()
+#endif
     @State private var analyticsConsentState: SettingsAnalyticsConsentState
     @State private var subscriptionScope: SettingsSubscriptionAccountScope
     private var subscriptionLoadPhase: SettingsSubscriptionPresentation.LoadPhase {
@@ -132,63 +140,42 @@ struct SettingsView: View {
                 }
 
                 settingsSectionHeader("SELLING")
+                // eBay is the only marketplace SnapList posts to, so its
+                // account lives here rather than behind a "Connected
+                // marketplaces" row: the account, any policy problem, and
+                // the one control that applies to it.
                 settingsCard {
                     settingsCardRow {
-                        // Only a confirmed connection is a real destination —
-                        // "Checking"/"Not connected"/"Not available" stay the
-                        // plain value row they always were, offering no
-                        // disconnect (#865).
-                        if sellingPresentation.isConnected {
-                            NavigationLink {
-                                EbayConnectionSettingsView(
-                                    makeStore: makeEbayConnectionSettingsStore,
-                                    forceReducedMotion: false
-                                )
-                                .onDisappear {
-                                    Task {
-                                        guard !isSettingsHubProof else { return }
-                                        await loadEbayConnection()
-                                    }
-                                }
-                            } label: {
-                                // A plain trailing chevron beside `valueRow`,
-                                // not folded into it: `valueRow` has no
-                                // chevron parameter on purpose (#812) because
-                                // most of its callers are dead ends. This is
-                                // the one caller with a real destination, so
-                                // the chevron is composed here instead.
-                                HStack {
-                                    valueRow(
-                                        "Connected marketplaces",
-                                        sellingPresentation.marketplaceValue
-                                    )
-                                    Image(systemName: "chevron.right")
-                                        .foregroundStyle(.tertiary)
-                                        .accessibilityHidden(true)
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("settings.selling.marketplaces")
-                            .accessibilityHint("Opens your connected eBay account")
-                            .activationSpotlightTarget(.settingsMarketplaces)
-                        } else {
-                            valueRow(
-                                "Connected marketplaces",
-                                sellingPresentation.marketplaceValue
-                            )
+                        SettingsEbayAccountRow(presentation: sellingPresentation)
                             .accessibilityIdentifier("settings.selling.marketplaces")
                             .activationSpotlightTarget(.settingsMarketplaces)
-                        }
                     }
-                    settingsCardDivider
                     if let hint = sellingPresentation.hint {
+                        settingsCardDivider
                         settingsCardRow {
                             SettingsSellingHintRow(hint: hint)
                         }
-                        settingsCardDivider
                     }
+                    ebayActionRow
+                }
+                .confirmationDialog(
+                    "Disconnect eBay account \(sellingPresentation.accountTitle)?",
+                    isPresented: $showsEbayDisconnectConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Disconnect", role: .destructive) {
+                        Task { await disconnectEbay() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    // Verbatim at every entry point (#865), including the
+                    // disclosure that this does not revoke on eBay's side.
+                    Text(
+                        "Listings already on eBay stay there and keep selling, but SnapList will not be able to see or change them.\n\nTo review which apps can use your eBay account, open your eBay account settings."
+                    )
+                }
+
+                settingsCard {
                     settingsCardRow {
                         valueRow("Photos", "Selected photos")
                             .accessibilityIdentifier("settings.selling.photos")
@@ -199,6 +186,7 @@ struct SettingsView: View {
                             .accessibilityIdentifier("settings.selling.notifications")
                     }
                 }
+                .padding(.top, 12)
 
                 if SettingsSubscriptionVisibility(
                     identity: profile.identity,
@@ -334,9 +322,17 @@ struct SettingsView: View {
         } message: {
             Text("SnapList could not load the plan. Try again in a moment.")
         }
-        .task {
-            guard !isSettingsHubProof else { return }
-            await loadEbayConnection()
+        .task { await loadEbayConnection() }
+        .navigationDestination(isPresented: $showsEbayConnect) {
+            EbayConnectionSettingsView(
+                makeStore: makeEbayConnectionSettingsStore,
+                forceReducedMotion: false,
+                onConnected: { showsEbayConnect = false }
+            )
+        }
+        .onChange(of: showsEbayConnect) { _, isShown in
+            guard !isShown else { return }
+            Task { await loadEbayConnection() }
         }
         // Keyed on the account: Settings can stay on the navigation stack
         // while the seller signs out and into another account, and the card
@@ -644,16 +640,6 @@ struct SettingsView: View {
         if let sellingFixturePresentation {
             return sellingFixturePresentation
         }
-        if isSettingsHubProof {
-            return SettingsSellingPresentation(
-                connection: EbayConnectionStatus(
-                    connected: true,
-                    ebayUsername: "JordanHale",
-                    policySetup: nil
-                ),
-                loadPhase: .loaded
-            )
-        }
         return SettingsSellingPresentation(
             connection: ebayConnection,
             loadPhase: ebayConnectionLoadPhase
@@ -893,10 +879,84 @@ struct SettingsView: View {
             return
         }
         do {
-            ebayConnection = try await ebayPublishService.connection()
+            ebayConnection = try await ebayService.connection()
             ebayConnectionLoadPhase = .loaded
         } catch {
             ebayConnectionLoadPhase = .failed
+        }
+    }
+
+    /// The production service, or SET-01's stateful stand-in (see
+    /// `hubProofEbayAdapter`).
+    private var ebayService: any EbayPublishFeatureServing {
+#if DEBUG
+        if isSettingsHubProof { return hubProofEbayAdapter }
+#endif
+        return ebayPublishService
+    }
+
+    private func disconnectEbay() async {
+        do {
+            _ = try await ebayService.disconnect()
+        } catch {
+            ebayConnectionLoadPhase = .failed
+            return
+        }
+        await loadEbayConnection()
+    }
+
+    @ViewBuilder
+    private var ebayActionRow: some View {
+        switch sellingPresentation.action {
+        case .none:
+            EmptyView()
+        case .retry:
+            settingsCardDivider
+            settingsCardRow {
+                Button("Try again") {
+                    ebayConnectionLoadPhase = .loading
+                    Task { await loadEbayConnection() }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("settings.ebay.retry")
+            }
+        case .connect:
+            settingsCardDivider
+            settingsCardRow {
+                // A presentation flag rather than a `NavigationLink`: the
+                // shell's stack is path-bound, where `dismiss()` from a
+                // link's destination does not pop, so Settings owns the pop.
+                Button {
+                    showsEbayConnect = true
+                } label: {
+                    HStack {
+                        Text("Connect eBay")
+                            .foregroundStyle(SnapListColorToken.action.color)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("settings.ebay.connect")
+            }
+        case .disconnect:
+            settingsCardDivider
+            settingsCardRow {
+                Button(role: .destructive) {
+                    showsEbayDisconnectConfirmation = true
+                } label: {
+                    Text("Disconnect eBay")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.destructiveText.color)
+                .accessibilityIdentifier("settings.ebay.disconnect")
+            }
         }
     }
 
@@ -922,10 +982,9 @@ struct SettingsView: View {
     private func makeEbayConnectionSettingsStore() -> EbayConnectionSettingsStore {
 #if DEBUG
         if isSettingsHubProof {
-            let adapter = EbaySettingsFixtureAdapter()
             return EbayConnectionSettingsStore(
-                service: adapter,
-                oauth: EbaySettingsFixtureOAuthRunner(adapter: adapter)
+                service: hubProofEbayAdapter,
+                oauth: EbaySettingsFixtureOAuthRunner(adapter: hubProofEbayAdapter)
             )
         }
 #endif

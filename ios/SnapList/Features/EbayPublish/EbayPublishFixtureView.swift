@@ -5,6 +5,17 @@ import SwiftUI
 enum EbayPublishFixtureData {
     static let listingTitle =
         "Sony DualSense wireless controller, white"
+
+    /// Four ordered photos, decoded through the same contract as a real
+    /// listing. `example.com` photos render the approved fixture asset
+    /// (`ListingReviewImage`), so the connect card pages with no network.
+    static let listingPhotos: [ListingReviewPhoto] = {
+        let json = (0..<4).map {
+            #"{"ordinal":\#($0),"url":"https://example.com/ebay-fixture/\#($0).jpg"}"#
+        }
+        let data = Data("[\(json.joined(separator: ","))]".utf8)
+        return (try? JSONDecoder().decode([ListingReviewPhoto].self, from: data)) ?? []
+    }()
 }
 
 /// Fixed context carried by the DEBUG-only eBay v5 fixture adapter.
@@ -249,6 +260,10 @@ struct EbayPublishFixtureHostView: View {
                 store: store,
                 forceReducedMotion: forceReducedMotion,
                 listingTitle: EbayPublishFixtureData.listingTitle,
+                // `example.com` photos render the approved fixture asset
+                // (`ListingReviewImage`), so the pager pages with no network.
+                listingPhotos: EbayPublishFixtureData.listingPhotos,
+                listingPrice: 58,
                 resultThumbnailSource: .approvedFixtureAsset(
                     "FirstValueController"
                 ),

@@ -1,5 +1,48 @@
 import SwiftUI
 
+/// The eBay account row at the top of Settings' Selling section: the
+/// marketplace mark, the account, and one quiet status line. Status stays
+/// secondary grey in every state, so the section's only color is the red
+/// Disconnect control beneath it.
+struct SettingsEbayAccountRow: View {
+    let presentation: SettingsSellingPresentation
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image("MarketplaceMarkEbay")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 30)
+                .frame(width: 44, height: 44)
+                .background(
+                    SnapListColorToken.quietFill.color,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(presentation.accountTitle)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                if let status = presentation.status {
+                    Text(status)
+                        .snapListTypography(.status)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        let account = "eBay, \(presentation.accountTitle)"
+        guard let status = presentation.status else { return account }
+        return "\(account), \(status)"
+    }
+}
+
 /// The Selling section's eBay policy hint row (issue #694).
 ///
 /// The row combines its children so VoiceOver reads the warning and its link as
@@ -43,7 +86,7 @@ struct SettingsSellingHintRow: View {
 struct SettingsSellingHintPolicyAction: ViewModifier {
     /// One string for the visible link and the VoiceOver action, so a sighted
     /// seller and a VoiceOver seller are told about the same destination.
-    static let label = "Open business policies on eBay"
+    static let label = "Open shipping and return policies on eBay"
 
     let helpURL: URL?
     @Environment(\.openURL) private var openURL
