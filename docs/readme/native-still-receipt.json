@@ -12,7 +12,7 @@
       "beat": 1,
       "source_seconds": 8.5,
       "png": "native-01-shoe-capture.png",
-      "sha256": "57d2b5b058310daac3d1f488a149d6dcf401ea9e7483471f172718d96ddef504",
+      "sha256": "eeb4ee73dd86f7c30d08f7a68eb37fac5fb3167299fe033f7123ac131e232994",
       "status_bar_crop": null,
       "dimensions": [
         1206,
@@ -21,13 +21,27 @@
       "privacy_inspected": true,
       "cursor_free": true,
       "known_bug_free": true,
-      "output": "phone-capture.webp"
+      "output": "phone-capture.webp",
+      "source_png_sha256": "57d2b5b058310daac3d1f488a149d6dcf401ea9e7483471f172718d96ddef504",
+      "status_bar_replacement": {
+        "band": [
+          0,
+          0,
+          1206,
+          180
+        ],
+        "time": "9:41",
+        "island": "standard",
+        "signal_wifi_battery": "full",
+        "recording_indicator": false,
+        "background": "srgb(170,169,172)"
+      }
     },
     {
       "beat": 2,
       "source_seconds": 85.0,
       "png": "native-02-pro-on-sandbox.png",
-      "sha256": "033ca8d120296db417758f1a925f645c08cd6e095c7972f75a892846f45d39cd",
+      "sha256": "b3a6939aa9cd5eff2a393426173163241e8d3ab376b344e239f84555bf2d26c8",
       "status_bar_crop": null,
       "dimensions": [
         1206,
@@ -36,13 +50,27 @@
       "privacy_inspected": true,
       "cursor_free": true,
       "known_bug_free": true,
-      "output": "scout-pro.webp"
+      "output": "scout-pro.webp",
+      "source_png_sha256": "033ca8d120296db417758f1a925f645c08cd6e095c7972f75a892846f45d39cd",
+      "status_bar_replacement": {
+        "band": [
+          0,
+          0,
+          1206,
+          180
+        ],
+        "time": "9:41",
+        "island": "standard",
+        "signal_wifi_battery": "full",
+        "recording_indicator": false,
+        "background": "srgb(196,195,198)"
+      }
     },
     {
       "beat": 4,
       "source_seconds": 352.8,
       "png": "native-03-to-list.png",
-      "sha256": "f0c16045f77a6429c8eec1039f4972074ad4b9c007da10a00a22b3adc5567fe1",
+      "sha256": "93a9aaca82a2d720971a80a2e2c3c3b95a19c54a6b48a58564da81b7a12f05ca",
       "status_bar_crop": null,
       "dimensions": [
         1206,
@@ -51,13 +79,27 @@
       "privacy_inspected": true,
       "cursor_free": true,
       "known_bug_free": true,
-      "output": "phone-to-list.webp"
+      "output": "phone-to-list.webp",
+      "source_png_sha256": "f0c16045f77a6429c8eec1039f4972074ad4b9c007da10a00a22b3adc5567fe1",
+      "status_bar_replacement": {
+        "band": [
+          0,
+          0,
+          1206,
+          180
+        ],
+        "time": "9:41",
+        "island": "standard",
+        "signal_wifi_battery": "full",
+        "recording_indicator": false,
+        "background": "srgb(255,255,255)"
+      }
     },
     {
       "beat": 5,
       "source_seconds": 207.5,
       "png": "native-04-listing-sold-comps.png",
-      "sha256": "6f9a9e395c3bdf519d061b8bd30e8c84ff7a76d364e3cb57052e24fbbbab505d",
+      "sha256": "7de092b7920f7fd221f1965d8546c885aecee999c52987cff2c6a4103972ce84",
       "status_bar_crop": null,
       "dimensions": [
         1206,
@@ -66,13 +108,27 @@
       "privacy_inspected": true,
       "cursor_free": true,
       "known_bug_free": true,
-      "output": "phone-listing-review.webp"
+      "output": "phone-listing-review.webp",
+      "source_png_sha256": "6f9a9e395c3bdf519d061b8bd30e8c84ff7a76d364e3cb57052e24fbbbab505d",
+      "status_bar_replacement": {
+        "band": [
+          0,
+          0,
+          1206,
+          180
+        ],
+        "time": "9:41",
+        "island": "standard",
+        "signal_wifi_battery": "full",
+        "recording_indicator": false,
+        "background": "srgb(234,231,230)"
+      }
     },
     {
       "beat": 6,
       "source_seconds": 301.7,
       "png": "native-05-posted-to-ebay.png",
-      "sha256": "3a03fe61e6175906d296da9295df5d7b0700bb7e1d94bb5a31897c0104c446c2",
+      "sha256": "87a260861b39291418ce51a64f60430d49549c1aec5ca044a1477d60ef3d3beb",
       "status_bar_crop": null,
       "dimensions": [
         1206,
@@ -81,13 +137,27 @@
       "privacy_inspected": true,
       "cursor_free": true,
       "known_bug_free": true,
-      "output": "phone-ebay-posted.webp"
+      "output": "phone-ebay-posted.webp",
+      "source_png_sha256": "3a03fe61e6175906d296da9295df5d7b0700bb7e1d94bb5a31897c0104c446c2",
+      "status_bar_replacement": {
+        "band": [
+          0,
+          0,
+          1206,
+          180
+        ],
+        "time": "9:41",
+        "island": "standard",
+        "signal_wifi_battery": "full",
+        "recording_indicator": false,
+        "background": "srgb(255,255,255)"
+      }
     },
     {
       "beat": 7,
-      "source_seconds": 321.0,
+      "source_seconds": 412.0,
       "png": "native-06-flips-live.png",
-      "sha256": "8c365ea08034e50305cd151c5a1793cdbc12aab4936d3edb9e10f8ce16dbef8f",
+      "sha256": "9f48ef55abc766d7d54e7b63486261716903abc414e0b5f1aa21ff0bec3516c7",
       "status_bar_crop": null,
       "dimensions": [
         1206,
@@ -96,13 +166,27 @@
       "privacy_inspected": true,
       "cursor_free": true,
       "known_bug_free": true,
-      "output": "phone-flips.webp"
+      "output": "phone-flips.webp",
+      "source_png_sha256": "5b093cd170c24f96d49ced14c79039c60edda0b2fd8562e233b2ad88afc1396f",
+      "status_bar_replacement": {
+        "band": [
+          0,
+          0,
+          1206,
+          180
+        ],
+        "time": "9:41",
+        "island": "standard",
+        "signal_wifi_battery": "full",
+        "recording_indicator": false,
+        "background": "srgb(255,255,255)"
+      }
     },
     {
       "beat": 8,
       "source_seconds": 378.0,
       "png": "native-07-facebook-share.png",
-      "sha256": "42f2e2d85cd4a422725de4c9691b73e32af69748eb4129e27883e69bfa8f1f6b",
+      "sha256": "c8208dee16a795515984718831df2816ca74da233e8a2ecfe02e045cfc3f2164",
       "status_bar_crop": null,
       "dimensions": [
         1206,
@@ -111,7 +195,24 @@
       "privacy_inspected": true,
       "cursor_free": true,
       "known_bug_free": true,
-      "output": "phone-sharing.webp"
+      "output": "phone-sharing.webp",
+      "source_png_sha256": "42f2e2d85cd4a422725de4c9691b73e32af69748eb4129e27883e69bfa8f1f6b",
+      "status_bar_replacement": {
+        "band": [
+          0,
+          0,
+          1206,
+          180
+        ],
+        "time": "9:41",
+        "island": "standard",
+        "signal_wifi_battery": "full",
+        "recording_indicator": false,
+        "background": "srgb(197,197,197)"
+      }
     }
-  ]
+  ],
+  "status_bar_svg_sha256": "d2e7be84a4493a762e87cc2291ff421e3b171bda3eee6fd27aad2b70c7325cd5",
+  "status_bar_font_sha256": "d72db21f9242aedd6b917d8549ad5921766b24d5f8d0becfda2ff4c620b3c2e0",
+  "presentation_edit": "Only the top 180px status band is replaced; app pixels below it are unchanged."
 }

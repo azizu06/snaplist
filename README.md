@@ -33,7 +33,7 @@
 <p align="center">
   <img src="docs/readme/phone-ebay-posted.webp" width="220" alt="Native eBay post success: Jordan 3 shoes are marked Live on eBay.">
   &nbsp;
-  <img src="docs/readme/phone-flips.webp" width="220" alt="Native Flips: the posted Jordan 3 shoes appear with a real photo and October 1 date.">
+  <img src="docs/readme/phone-flips.webp" width="220" alt="Native Flips: the mouse and posted Jordan 3 shoes appear with real photos, October 1 dates, and the navigation dock.">
   &nbsp;
   <img src="docs/readme/phone-sharing.webp" width="220" alt="Native Facebook Marketplace sharing drawer: a Logitech mouse at $44.95, two photos, and text/photo handoff steps; all destinations show Not started.">
 </p>

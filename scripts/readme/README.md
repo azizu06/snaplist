@@ -8,9 +8,12 @@ or third-party mockup. It is a presentation enclosure, not a photo of hardware.
 Every output is a transparent 480 × 996 WebP, with the same device geometry,
 rounded screen aperture, bezel, side buttons and camera island. The image is
 encoded at quality 88 with lossless alpha and must be smaller than 250,000 bytes.
-The source status bar and app content remain intact. The camera island occupies
-the hardware cutout area; no names, prices, item content or UI states are painted
-into the screen.
+App content remains intact. The current source PNGs first pass through
+`normalize-stills.py`, which replaces only the measured 180px native status-bar
+band with 9:41, full signal/Wi-Fi/battery and a normal-size island. This original
+presentation chrome is explicitly disclosed in the provenance receipt. The
+camera island occupies the hardware cutout area; item content and UI states
+below the band are not painted into the screen.
 
 ```sh
 brew install imagemagick
