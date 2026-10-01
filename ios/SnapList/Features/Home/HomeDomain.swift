@@ -293,13 +293,13 @@ enum TrophyWallProcessingRowActivation: Hashable {
     /// simply is not a control.
     case none
     /// #1116: accepted, analyzing and retrying rows are tappable. They open a
-    /// plain "Still working on this item" state in place, not a new
+    /// plain "Still working" state in place, not a new
     /// destination, so the seller is never left tapping something inert.
     case stillWorking
 
-    static let stillWorkingTitle = "Still working on this item"
+    static let stillWorkingTitle = "Still working"
     static let stillWorkingMessage =
-        "SnapList is still putting your listing together. It will show up as Ready to review here when it's done."
+        "It'll show as Ready to review when done."
 }
 
 struct TrophyWallProcessingRow: Identifiable, Hashable {

@@ -2105,9 +2105,9 @@ final class PhotoReviewIntake {
     // only what is true: this photo did not land, and nothing the seller already had
     // moved or disappeared.
     fileprivate static let additionFailureMessage =
-        "Photo could not be added. Nothing else changed."
+        "Couldn’t add the photo. Nothing else changed."
     fileprivate static let replacementFailureMessage =
-        "Photo could not be replaced. Nothing else changed."
+        "Couldn’t replace the photo. Nothing else changed."
 
     private func applyThroughNativeIntake<Item: CaptureLibraryPhotoLoading>(
         _ items: [Item],
@@ -3219,7 +3219,7 @@ struct PhotoReviewSaveFailure: Equatable {
     var body: String {
         switch state {
         case .firstRejection:
-            "SnapList could not save the photos on this screen. This is a problem on this device, not something you did. No credit was used."
+            "This device couldn’t save them. Not something you did. No credit was used."
         case .rejectedAgain:
             "Nothing more will recover them. Discard them to continue."
         }

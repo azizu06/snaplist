@@ -420,7 +420,7 @@ final class SnapListUITests: XCTestCase {
 
         let deletionConsequences = app.descendants(matching: .any)["settings.state.del-01"]
         XCTAssertTrue(deletionConsequences.waitForExistence(timeout: 3), app.debugDescription)
-        app.buttons["Continue to delete my account"].tap()
+        app.buttons["Continue"].tap()
 
         let reauthentication = app.descendants(matching: .any)["settings.state.del-02"]
         XCTAssertTrue(reauthentication.waitForExistence(timeout: 3), app.debugDescription)
@@ -509,7 +509,7 @@ final class SnapListUITests: XCTestCase {
 
             let title = app.staticTexts["Delete account"]
             let back = app.buttons["Settings"]
-            let pageTitle = app.staticTexts["Delete your SnapList account"]
+            let pageTitle = app.staticTexts["What gets deleted"]
             XCTAssertTrue(title.waitForExistence(timeout: 3), app.debugDescription)
             XCTAssertTrue(back.exists, app.debugDescription)
             XCTAssertTrue(pageTitle.exists, app.debugDescription)
@@ -1128,7 +1128,7 @@ final class SnapListUITests: XCTestCase {
             "--reset-capture-draft"
         ])
 
-        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Camera unavailable"].waitForExistence(timeout: 3))
         addScreenshot(named: "CAPTURE-CAMERA-UNAVAILABLE.png")
         let library = app.buttons["scan.choose-library"]
         XCTAssertEqual(app.buttons.matching(identifier: "scan.choose-library").count, 1)
@@ -1140,7 +1140,7 @@ final class SnapListUITests: XCTestCase {
         library.tap()
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 3))
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Camera unavailable"].waitForExistence(timeout: 2))
     }
 
     func testRestoredDraftResumesBeforeTheFreshLauncherCanOverwriteIt() {
@@ -3505,8 +3505,8 @@ final class SnapListUITests: XCTestCase {
 
     func testApprovedScanCameraRecoveryStatesUseExactCopyAndHonestActions() {
         let unavailable = launch(extraArguments: ["--visual-state=CAM-V1"])
-        XCTAssertTrue(unavailable.staticTexts["Camera is not available"].waitForExistence(timeout: 2))
-        XCTAssertTrue(unavailable.staticTexts["Add photos from your library instead."].exists)
+        XCTAssertTrue(unavailable.staticTexts["Camera unavailable"].waitForExistence(timeout: 2))
+        XCTAssertTrue(unavailable.staticTexts["Use your library instead."].exists)
         XCTAssertTrue(unavailable.buttons["scan.choose-library"].exists)
         XCTAssertFalse(unavailable.buttons["scan.open-settings"].exists)
         XCTAssertFalse(unavailable.buttons["scan.flash"].exists)
@@ -3515,10 +3515,10 @@ final class SnapListUITests: XCTestCase {
         unavailable.terminate()
 
         let denied = launch(extraArguments: ["--visual-state=CAM-V2"])
-        XCTAssertTrue(denied.staticTexts["SnapList cannot use the camera"].waitForExistence(timeout: 2))
+        XCTAssertTrue(denied.staticTexts["Camera access is off"].waitForExistence(timeout: 2))
         XCTAssertTrue(
             denied.staticTexts[
-                "Allow camera access in Settings, or add photos from your library."
+                "Turn it on in Settings, or use your library."
             ].exists
         )
         XCTAssertTrue(denied.buttons["scan.choose-library"].exists)
@@ -3748,7 +3748,7 @@ final class SnapListUITests: XCTestCase {
         )
         XCTAssertEqual(
             app.staticTexts["photo-review.save-failure.body"].label,
-            "SnapList could not save the photos on this screen. This is a problem on this device, not something you did. No credit was used."
+            "This device couldn’t save them. Not something you did. No credit was used."
         )
         XCTAssertEqual(
             app.otherElements["photo-review.save-failure.photos"].label,
@@ -4882,7 +4882,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(scoutLine.count, 1, app.debugDescription)
         XCTAssertEqual(
             scoutLine.firstMatch.label,
-            "Scout keeps working in the background."
+            "Scout keeps working."
         )
         XCTAssertFalse(app.staticTexts["An example — nothing is running yet"].exists)
         XCTAssertEqual(app.activityIndicators.count, 0, app.debugDescription)
@@ -4959,7 +4959,7 @@ final class SnapListUITests: XCTestCase {
         let window = app.windows.firstMatch
         let scrollView = app.scrollViews["first-value-onboarding.scroll"]
         let draftHeader = app.descendants(matching: .any)[
-            "Your draft is ready. Four fields, written from your photos."
+            "Your draft is ready. Written from your photos."
         ]
         let titleRow = app.descendants(matching: .any)[
             "Title. Sony DualSense wireless controller, white."

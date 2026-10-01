@@ -227,15 +227,15 @@ private enum ScanCameraRecoveryMode: Equatable {
 
     var title: String {
         switch self {
-        case .unavailable: "Camera is not available"
-        case .denied: "SnapList cannot use the camera"
+        case .unavailable: "Camera unavailable"
+        case .denied: "Camera access is off"
         }
     }
 
     var body: String {
         switch self {
-        case .unavailable: "Add photos from your library instead."
-        case .denied: "Allow camera access in Settings, or add photos from your library."
+        case .unavailable: "Use your library instead."
+        case .denied: "Turn it on in Settings, or use your library."
         }
     }
 }

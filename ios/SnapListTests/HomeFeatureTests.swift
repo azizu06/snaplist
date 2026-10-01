@@ -1491,7 +1491,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let row = try makeAcceptedProcessingRow(localCoverPhotoData: nil)
 
         XCTAssertEqual(row.activation, TrophyWallProcessingRowActivation.stillWorking)
-        XCTAssertEqual(TrophyWallProcessingRowActivation.stillWorkingTitle, "Still working on this item")
+        XCTAssertEqual(TrophyWallProcessingRowActivation.stillWorkingTitle, "Still working")
         let message = TrophyWallProcessingRowActivation.stillWorkingMessage.lowercased()
         for banned in ["queue", "worker", "lease", "provider", "pipeline"] {
             XCTAssertFalse(message.contains(banned), banned)

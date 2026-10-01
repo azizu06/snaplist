@@ -523,7 +523,7 @@ struct FirstValueOnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Your draft is ready").font(.title3.weight(.semibold))
-                    Text("Four fields, written from your photos")
+                    Text("Written from your photos")
                         .font(.subheadline).foregroundStyle(SnapListColorToken.textSecondary.color)
                 }
                 Spacer()
@@ -531,7 +531,7 @@ struct FirstValueOnboardingView: View {
             .padding(12)
             .background(SnapListColorToken.onboardingHighlightFill.color, in: RoundedRectangle(cornerRadius: 16))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Your draft is ready. Four fields, written from your photos.")
+            .accessibilityLabel("Your draft is ready. Written from your photos.")
 
             VStack(spacing: 0) {
                 draftEditableRow(
@@ -562,7 +562,7 @@ struct FirstValueOnboardingView: View {
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
-                Text("Not right? One redo on the same photos is included.")
+                Text("Not right? One redo included.")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .padding(.leading, -14)
@@ -594,7 +594,7 @@ struct FirstValueOnboardingView: View {
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
-                Text("Scout keeps working in the background.")
+                Text("Scout keeps working.")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .padding(.leading, 10)

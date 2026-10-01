@@ -127,7 +127,7 @@ struct ItemSpecificsEditorView: View {
     ) -> some View {
         ListingReviewDrawer(
             title: target.name,
-            commitLabel: "Continue to guided correction",
+            commitLabel: "Fix item",
             commitIdentifier: "listing-review.specific.correction",
             close: { drawer = nil },
             commit: {

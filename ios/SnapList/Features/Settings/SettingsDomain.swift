@@ -45,31 +45,31 @@ enum SettingsSignOutCopy {
     static let confirm = "Sign out"
     static let cancel = "Stay signed in"
 
-    static let effectTitle = "What happens on this iPhone"
+    static let effectTitle = "On this iPhone"
     static let effects = [
-        "Photos and a voice note you have not submitted yet, and this iPhone's copy of anything it is holding for an item, are removed from this iPhone.",
-        "Flips goes back to the guest view, and your items stop showing here.",
+        "Unsent photos, voice notes, and this iPhone's copy of any item are removed.",
+        "Flips switches to the guest view.",
     ]
 
-    static let unchangedTitle = "What this does not change"
+    static let unchangedTitle = "Stays the same"
     static let unchanged = [
         "Your account stays. This is not account deletion.",
-        "Items you have already sent stay on your account, and signing back in brings them back. This iPhone's copy of anything it is holding for an item does not come back.",
-        "Your subscription is unchanged.",
+        "Sent items stay on your account, so signing back in brings them back. This iPhone's item copy does not.",
+        "Your subscription stays.",
     ]
 
     static let deletionIsElsewhere =
-        "Deleting your account is a separate action in Settings."
+        "Account deletion is separate."
     /// Shown when local removal never ran, so nothing has happened yet.
     static let failed =
-        "Signing out didn't finish, so you are still signed in. Try again."
+        "Sign-out didn't finish. You're still signed in. Try again."
 
     /// Shown when local removal already committed and Clerk then refused to
     /// end the session. `failed` implies nothing has happened, which is no
     /// longer true here — the photos, voice note, and item copy the
     /// `effects` bullet promised are already gone, not merely pending.
     static let sessionNotEnded =
-        "Your photos and voice note, and this iPhone's copy of anything it was holding for an item, are already removed. Signing out didn't finish, so you are still signed in. Try again to finish."
+        "Unsent photos, voice notes, and this iPhone's copy of any item are already removed, but you're still signed in. Try again."
 
     /// `nil` for `.signedOut`, which shows no failure text at all.
     static func failureCopy(for outcome: SettingsSignOutOutcome) -> String? {
@@ -181,14 +181,14 @@ struct SettingsFlow: Equatable {
 
     var localRemovalUnchangedFacts: [String] {
         let common = [
-            "An item you already submitted keeps being worked on.",
+            "Sent items keep processing.",
             identity == .guest
-                ? "A free item you have used stays used."
-                : "An AI item you have spent stays spent and does not return to your allowance."
+                ? "A used free item stays used."
+                : "Spent AI items are not refunded."
         ]
         guard identity == .guest else { return common }
         return common + [
-            "A finished result stays recoverable until it expires, and after that it is gone whether or not you use this."
+            "A finished result stays until it expires."
         ]
     }
 
@@ -342,17 +342,17 @@ enum SettingsEmailCodeDeliveryState: Equatable {
     func lead(email: String) -> String {
         switch self {
         case .sending:
-            "Deleting an account is permanent, so SnapList is sending a 6-digit code to \(email) to confirm it is you."
+            "Sending a 6-digit code to \(email)."
         case .sent:
-            "Deleting an account is permanent, so SnapList sent a 6-digit code to \(email). Enter it to confirm it is you."
+            "Enter the 6-digit code sent to \(email)."
         case .failed:
-            "Deleting an account is permanent, so SnapList needs a 6-digit code sent to \(email) to confirm it is you."
+            "A 6-digit code to \(email) confirms it’s you."
         }
     }
 
     func failureCopy(email: String) -> String? {
         guard self == .failed else { return nil }
-        return "SnapList could not send a code to \(email). Nothing has been deleted. You can try again."
+        return "Couldn’t send a code to \(email). Nothing was deleted. Try again."
     }
 }
 
@@ -863,32 +863,32 @@ enum SettingsDeletionSubscriptionTruth: Equatable {
     var longCopy: String {
         switch self {
         case .billing:
-            "SnapList Pro is billed by Apple, and only Apple can cancel it. Deleting this account does not cancel it and does not refund it. Cancel it in the App Store, before or after you delete."
+            "Apple bills SnapList Pro. Deleting your account doesn’t cancel or refund it. Cancel it in the App Store."
         case .ended:
-            "No subscription is billing on this Apple Account now. Deleting this account does not change that, and there is nothing for Apple to cancel."
+            "Nothing is billing on this Apple Account. Nothing to cancel."
         case .included:
-            "There is no SnapList Pro subscription on this Apple Account. The allowance belongs to the account and ends with it. If a subscription is ever started, Apple bills and cancels it, and deleting a SnapList account would not cancel it."
+            "No SnapList Pro subscription on this Apple Account. Your included allowance ends with the account."
         case .none:
-            "There is no SnapList Pro subscription on this Apple Account. If one is ever started, Apple bills and cancels it, and deleting a SnapList account would not cancel it."
+            "No SnapList Pro subscription on this Apple Account."
         case .ambiguous:
-            "SnapList cannot read your subscription state right now. If a subscription is billing, Apple keeps billing it until it is cancelled in the App Store. Check it in the App Store, before or after you delete."
+            "Can’t read your subscription right now. Any active one keeps billing until cancelled in the App Store."
         case .unknown:
-            "SnapList cannot confirm whether a subscription exists on this Apple Account. Apple bills and cancels SnapList Pro, so check it in the App Store before or after you delete."
+            "Can’t confirm a subscription. Apple bills SnapList Pro, so check the App Store."
         }
     }
 
     var shortCopy: String {
         switch self {
         case .billing:
-            "SnapList Pro keeps billing until you cancel it in the App Store. Deleting this account does not cancel it."
+            "Deleting doesn’t cancel SnapList Pro. Cancel it in the App Store."
         case .ended:
-            "No subscription is billing now, so there is nothing for Apple to cancel."
+            "Nothing is billing. Nothing to cancel."
         case .included, .none:
-            "There is no subscription on this Apple Account, so there is nothing for Apple to cancel."
+            "No subscription to cancel."
         case .ambiguous:
-            "SnapList cannot confirm whether a subscription is billing. Check it in the App Store."
+            "Can’t confirm billing. Check the App Store."
         case .unknown:
-            "SnapList cannot confirm whether a subscription exists. Check it in the App Store."
+            "Can’t confirm a subscription. Check the App Store."
         }
     }
 }

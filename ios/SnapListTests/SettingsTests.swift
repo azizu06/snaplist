@@ -466,7 +466,7 @@ final class SettingsTests: XCTestCase {
     func testSignOutCopyNamesTheLocalItemCopyItActuallyDeletes() {
         XCTAssertTrue(
             SettingsSignOutCopy.effects[0].contains(
-                "this iPhone's copy of anything it is holding for an item"
+                "this iPhone's copy of any item"
             ),
             "effects[0] must name the item copy the transaction deletes, not only photos and a voice note"
         )
@@ -483,7 +483,7 @@ final class SettingsTests: XCTestCase {
 
         XCTAssertTrue(
             SettingsSignOutCopy.sessionNotEnded.contains(
-                "this iPhone's copy of anything it was holding for an item"
+                "this iPhone's copy of any item"
             ),
             "sessionNotEnded understates the same removal effects[0] now names"
         )
@@ -1020,9 +1020,9 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(
             SettingsDeletionConfirmationCopy.factLines(subscriptionTruth: .billing),
             [
-                "It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account.",
-                "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
-                "SnapList Pro keeps billing until you cancel it in the App Store. Deleting this account does not cancel it.",
+                "Confirmed. Nothing is sent until you tap Delete account.",
+                "eBay listings stay live. End them in eBay.",
+                "Deleting doesn’t cancel SnapList Pro. Cancel it in the App Store.",
             ]
         )
     }
@@ -1181,7 +1181,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(sentAddressID, "email_primary")
         XCTAssertEqual(
             state.lead(email: "seller@example.com"),
-            "Deleting an account is permanent, so SnapList sent a 6-digit code to seller@example.com. Enter it to confirm it is you."
+            "Enter the 6-digit code sent to seller@example.com."
         )
     }
 
@@ -1198,7 +1198,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(senderCalled)
         XCTAssertEqual(
             state.failureCopy(email: "seller@example.com"),
-            "SnapList could not send a code to seller@example.com. Nothing has been deleted. You can try again."
+            "Couldn’t send a code to seller@example.com. Nothing was deleted. Try again."
         )
         XCTAssertFalse(
             state.lead(email: "seller@example.com").contains("SnapList sent")

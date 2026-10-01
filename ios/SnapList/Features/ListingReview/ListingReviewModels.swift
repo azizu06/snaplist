@@ -3,11 +3,11 @@ import Foundation
 enum ListingReviewCopy {
     static let startingPriceEstimate = "Starting price estimate"
     static let noVerifiedSoldMatches = "No verified sold matches found."
-    static let staleReview = "This review changed. Reload and try again."
-    static let saveFailed = "Failed to save changes. Please try again."
+    static let staleReview = "This review changed. Reload."
+    static let saveFailed = "Couldn’t save. Try again."
     static let draftPersistenceFailed =
-        "Couldn’t save changes on this phone. Please try again."
-    static let openFailed = "Failed to load this review. Please try again."
+        "Couldn’t save on this phone. Try again."
+    static let openFailed = "Couldn’t load. Try again."
     static let reloadFailed =
         "Couldn’t reload. Your changes are still here."
 }
