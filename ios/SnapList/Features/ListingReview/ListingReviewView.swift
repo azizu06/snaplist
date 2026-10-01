@@ -377,14 +377,15 @@ struct ListingReviewView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(snapshot.identity.label)
-                .font(.callout.weight(.semibold))
+                .font(.title2.weight(.semibold))
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
 
             price(snapshot: snapshot, draft: draft)
                 .id(ListingReviewInlineFocus.price)
-                .padding(.top, 6)
+                .padding(.top, 12)
 
             if !snapshot.verifiedSoldMatches.isEmpty {
                 Divider()
