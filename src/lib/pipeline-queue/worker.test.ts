@@ -144,7 +144,41 @@ function processor(result: PipelineResult = RESULT): DurablePipelineProcessor & 
 }
 
 describe("durable pipeline queue consumer", () => {
-  it("claims one message by default so every run receives the full visibility window", async () => {
+  it("starts every run in a claimed batch before any run finishes", async () => {
+    const queue = queueWith();
+    queue.claim.mockResolvedValue(Array.from({ length: 5 }, (_, index) => ({
+      id: String(41 + index),
+      readCount: 1,
+      enqueuedAt: "2026-07-15T04:00:00.000Z",
+      visibleAt: "2026-07-15T04:05:00.000Z",
+      envelope: { run_id: crypto.randomUUID(), schema_version: 1 },
+    })));
+    const runs = storeWith();
+    runs.acquire = vi.fn<PipelineWorkerStore["acquire"]>(async ({ runId }) => ({
+      kind: "acquired",
+      context: context({ id: runId }),
+    }));
+    let active = 0;
+    let peak = 0;
+    const summary = await consumePipelineQueue({
+      queue,
+      runs,
+      processor: {
+        async process() {
+          active += 1;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          active -= 1;
+          return RESULT;
+        },
+      },
+    }, { batchSize: 5 });
+
+    expect(peak).toBe(5);
+    expect(summary).toEqual({ claimed: 5, succeeded: 5, retrying: 0, failed: 0, skipped: 0 });
+  });
+
+  it("claims up to ten messages by default for a concurrent backup sweep", async () => {
     const queue = queueWith();
 
     await consumePipelineQueue({
@@ -154,9 +188,35 @@ describe("durable pipeline queue consumer", () => {
     });
 
     expect(queue.claim).toHaveBeenCalledWith({
-      limit: 1,
+      limit: 10,
       visibilityTimeoutSeconds: 300,
     });
+  });
+
+  it("waits for healthy siblings before surfacing an infrastructure failure", async () => {
+    const queue = queueWith();
+    queue.claim.mockResolvedValue(Array.from({ length: 2 }, (_, index) => ({
+      id: String(41 + index), readCount: 1,
+      enqueuedAt: "2026-07-15T04:00:00.000Z",
+      visibleAt: "2026-07-15T04:05:00.000Z",
+      envelope: { run_id: crypto.randomUUID(), schema_version: 1 },
+    })));
+    const runs = storeWith();
+    runs.acquire = vi.fn<PipelineWorkerStore["acquire"]>(async ({ runId, messageId }) => {
+      if (messageId === "41") throw new Error("database temporarily unavailable");
+      return { kind: "acquired", context: context({ id: runId }) };
+    });
+    await expect(consumePipelineQueue({
+      queue, runs,
+      processor: {
+        async process() {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return RESULT;
+        },
+      },
+    })).rejects.toThrow("database temporarily unavailable");
+    expect(runs.complete).toHaveBeenCalledOnce();
+    expect(queue.ack).toHaveBeenCalledWith("42");
   });
 
   it("claims one bounded batch, checkpoints, completes durably, then acknowledges", async () => {

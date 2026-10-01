@@ -9,25 +9,34 @@ invoke an HTTP route, deploy a worker, or change a provider.
 
 | Concern | v1 bound | Terminal behavior |
 | --- | ---: | --- |
-| Worker cadence | one invocation/minute | owner-activated only |
-| Scheduled worker claim | 1 message | every run receives the full visibility window |
+| Worker cadence | wake after native acceptance; once-per-minute backup | existing owner-activated cron provides recovery |
+| Worker claim | at most 10 concurrent messages | every run starts with the full visibility window |
 | Invocation duration | 300 seconds | platform terminates the request |
 | Queue visibility / run lease | 300 seconds | expiry permits fenced redelivery |
-| Concurrent scheduled worker invocations | at most 5 by cadence/duration | PGMQ visibility plus run leases fence duplicate work |
+| Concurrent scheduled worker invocations | at most 5 by cadence/duration, up to 50 runs | enqueue wakes add independent invocations; PGMQ and leases fence duplicate work |
 | Run attempts | 3 by default | durable `failed`, safe seller notification, queue ack |
 | Retry delay | 30, 60, then bounded at 900 seconds | same message is deferred, not republished |
 | Maintenance cadence | hourly at minute 17 | owner-activated only |
 | Maintenance batch | 25 jobs | another invocation resumes remaining work |
 | Storage cleanup attempts | 5 | private dead letter, exposed by health |
 
-The five-minute maximum and one-minute cadence permit no more than five
-overlapping single-message worker requests, below Supabase Cron's documented
-recommendation of no more than eight concurrent jobs. Claiming one message per
-request prevents later serial work from inheriting an already-spent visibility
-window. The database does not trust that bound: message visibility, message/run
-pairing, and expiring fencing tokens remain the authoritative concurrency
-controls. The consumer retains an explicit bounded-batch option for deterministic
-partial-completion acceptance, but the scheduled production contract does not use it.
+New native submissions wake the existing worker after durable acceptance, through Next.js `after()`
+and a separate authenticated HTTP request. Configure `SNAPLIST_PUBLIC_ORIGIN` to this API deployment
+and `CRON_SECRET` to the same internal bearer used by the worker. Neither the request Host nor seller
+input chooses the destination. Public HTTPS is required outside local development; redirects are
+refused so the bearer cannot travel to another origin. A missing configuration, network failure,
+non-success response, or interrupted dispatch leaves the accepted message for the existing cron.
+Wake requests carry `x-snaplist-worker-wake: 1` and receive 202 after the authenticated worker has
+registered consumption with its own Next.js `after()` callback. The sender awaits only that admission,
+with a ten-second deadline. Background failures are logged; queue/lease recovery stays with cron.
+Scheduler GET and ordinary POST retain synchronous aggregate responses, including worker 500s.
+
+The five-minute maximum and one-minute backup cadence permit up to five scheduled worker requests,
+each processing at most ten runs concurrently. Wake invocations are additional. This is a planning
+bound, not a global concurrency limiter. Message visibility, message/run pairing, and expiring fencing
+tokens are the authoritative concurrency controls. The consumer waits for every claimed sibling to
+settle before surfacing an infrastructure error. Retries, provider spend caps, admission limits,
+and exactly-once credit accounting retain their existing boundaries.
 
 ## Retention policy
 
@@ -186,9 +195,9 @@ The repository deliberately does not schedule this route as a Vercel cron job.
 [Vercel's plan limits](https://vercel.com/docs/cron-jobs/usage-and-pricing) cap
 Hobby at **one invocation per day** with **±59 minutes** of scheduling
 imprecision, and a sub-daily cron expression **fails deployment** on that plan.
-The worker claims one message per invocation (`PIPELINE_OPERATIONS_POLICY.worker.batchSize`),
-so a Hobby cron would move one accepted run per day — not a drained queue. The
-fixed one-invocation-per-minute cadence above needs Vercel Pro, and ADR-0009
+The backup worker claims at most ten concurrent messages per invocation
+(`PIPELINE_OPERATIONS_POLICY.worker.batchSize`), so a once-daily cron cannot provide timely recovery.
+The one-invocation-per-minute backup cadence above needs Vercel Pro, and ADR-0009
 authorizes no paid plan without an explicit owner-approved upgrade trigger.
 
 The Supabase pg_cron template below already meets the cadence policy at no cost

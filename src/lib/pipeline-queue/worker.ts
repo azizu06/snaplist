@@ -231,7 +231,7 @@ export async function consumePipelineQueue(
     skipped: 0,
   };
 
-  for (const message of messages) {
+  const outcomes = await Promise.allSettled(messages.map(async (message) => {
     const envelope = pipelineQueueEnvelopeSchema.safeParse(message.envelope);
     if (!envelope.success) {
       const raw = rawEnvelopeSchema.safeParse(message.envelope);
@@ -247,7 +247,7 @@ export async function consumePipelineQueue(
       await dependencies.queue.ack(message.id);
       if (rejected) summary.failed += 1;
       else summary.skipped += 1;
-      continue;
+      return;
     }
 
     const acquisition = await dependencies.runs.acquire({
@@ -259,12 +259,12 @@ export async function consumePipelineQueue(
     if (acquisition.kind === "deferred") {
       await dependencies.queue.defer(message.id, acquisition.retryAfterSeconds);
       summary.skipped += 1;
-      continue;
+      return;
     }
     if (acquisition.kind === "terminal" || acquisition.kind === "mismatch") {
       await dependencies.queue.ack(message.id);
       summary.skipped += 1;
-      continue;
+      return;
     }
 
     const { context } = acquisition;
@@ -473,7 +473,12 @@ export async function consumePipelineQueue(
       await dependencies.queue.ack(message.id);
       summary.succeeded += 1;
     }
-  }
+  }));
 
+  // Wait for every sibling before surfacing infrastructure/lease/ack errors.
+  // An early rejection must not let the function return (and freeze) while
+  // another claimed run is still producing its durable listing.
+  const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+  if (rejected?.status === "rejected") throw rejected.reason;
   return summary;
 }

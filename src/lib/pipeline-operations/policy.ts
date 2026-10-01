@@ -1,7 +1,8 @@
 export const PIPELINE_OPERATIONS_POLICY = {
   worker: {
-    batchSize: 1,
+    batchSize: 10,
     cadenceMinutes: 1,
+    // Scheduled cadence/duration bound only; accepted submissions add wakes.
     maxConcurrentInvocations: 5,
     maxAttempts: 3,
     maxDurationSeconds: 300,

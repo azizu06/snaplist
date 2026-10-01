@@ -336,6 +336,7 @@ src/lib/pipeline-queue/log-safe-error.ts
 src/lib/pipeline-queue/memory.ts
 src/lib/pipeline-queue/queue.ts
 src/lib/pipeline-queue/supabase-pgmq.ts
+src/lib/pipeline-queue/wake.ts
 src/lib/pipeline-queue/worker-store.ts
 src/lib/pipeline-queue/worker.ts
 src/lib/pipeline-staging/index.ts

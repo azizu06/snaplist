@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  after,
   createConfiguredMobileItemSubmissionOperations,
   createConfiguredVerifiedGuestPrincipalResolver,
   resolveGuest,
@@ -9,6 +10,7 @@ const {
   supabaseCreateClient,
   verifyToken,
 } = vi.hoisted(() => ({
+  after: vi.fn(),
   createConfiguredMobileItemSubmissionOperations: vi.fn(),
   createConfiguredVerifiedGuestPrincipalResolver: vi.fn(),
   resolveGuest: vi.fn(),
@@ -16,6 +18,11 @@ const {
   submit: vi.fn(),
   supabaseCreateClient: vi.fn(),
   verifyToken: vi.fn(),
+}));
+
+vi.mock("next/server", async (original) => ({
+  ...await original<typeof import("next/server")>(),
+  after,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ verifyToken }));
@@ -41,6 +48,8 @@ const environmentKeys = [
   "SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM",
   "MOBILE_VOICE_SUBMISSION_ENABLED",
   "SNAPLIST_PRO_OPERATOR_USER_IDS",
+  "SNAPLIST_PUBLIC_ORIGIN",
+  "CRON_SECRET",
 ] as const;
 
 /** Records every service-role RPC the route issues on the submission path. */
@@ -145,9 +154,57 @@ beforeEach(() => {
 afterEach(() => {
   for (const key of environmentKeys) delete process.env[key];
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("production mobile item submission route", () => {
+  it("returns durable acceptance before waking a separate authenticated worker", async () => {
+    process.env.SNAPLIST_PUBLIC_ORIGIN = "https://snaplist.example";
+    process.env.CRON_SECRET = "local-worker-secret";
+    const dispatch = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", dispatch);
+
+    const response = await POST(photoSubmission("54130000-0000-4000-8000-000000000010"));
+
+    expect(response.status).toBe(202);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(after).toHaveBeenCalledOnce();
+    await after.mock.calls[0][0]();
+    expect(dispatch).toHaveBeenCalledWith(
+      "https://snaplist.example/api/internal/pipeline-worker",
+      expect.objectContaining({
+        method: "POST",
+        headers: { authorization: "Bearer local-worker-secret", "x-snaplist-worker-wake": "1" },
+        redirect: "error",
+      }),
+    );
+  });
+
+  it("preserves the accepted receipt when the worker wake fails", async () => {
+    process.env.SNAPLIST_PUBLIC_ORIGIN = "https://snaplist.example";
+    process.env.CRON_SECRET = "local-worker-secret";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("dispatch failed")));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const response = await POST(photoSubmission("54130000-0000-4000-8000-000000000011"));
+      await expect(after.mock.calls[0][0]()).resolves.toBeUndefined();
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { runId: "33430000-0000-4000-8000-000000000003" },
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("does not wake a worker for an unauthenticated admission", async () => {
+    const response = await POST(new Request("https://snaplist.example/v1/items/runs", {
+      method: "POST",
+    }));
+    expect(response.status).toBe(401);
+    expect(after).not.toHaveBeenCalled();
+  });
+
   it("keeps voice photos-only until the #386 production gate is enabled", async () => {
     const request = (key: string) => {
       const body = new FormData();
