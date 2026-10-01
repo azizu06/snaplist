@@ -1,0 +1,117 @@
+{
+  "video": "RPReplay_Final1790869944.MP4",
+  "video_sha256": "33eeedaa21a256840e1d83b75f5093404c41fc783c6844352fa09011d35da707",
+  "source_dimensions": [
+    1206,
+    2622
+  ],
+  "edl_sha256": "e9e7a9d3f47b18ac2512b6fb774225e9ff782c79228274e0736b0a99cc91d9aa",
+  "extraction": "ffmpeg -ss SOURCE_SECONDS -i VIDEO -map 0:v:0 -frames:v 1 -threads 1 STILL.png",
+  "stills": [
+    {
+      "beat": 1,
+      "source_seconds": 8.5,
+      "png": "native-01-shoe-capture.png",
+      "sha256": "57d2b5b058310daac3d1f488a149d6dcf401ea9e7483471f172718d96ddef504",
+      "status_bar_crop": null,
+      "dimensions": [
+        1206,
+        2622
+      ],
+      "privacy_inspected": true,
+      "cursor_free": true,
+      "known_bug_free": true,
+      "output": "phone-capture.webp"
+    },
+    {
+      "beat": 2,
+      "source_seconds": 85.0,
+      "png": "native-02-pro-on-sandbox.png",
+      "sha256": "033ca8d120296db417758f1a925f645c08cd6e095c7972f75a892846f45d39cd",
+      "status_bar_crop": null,
+      "dimensions": [
+        1206,
+        2622
+      ],
+      "privacy_inspected": true,
+      "cursor_free": true,
+      "known_bug_free": true,
+      "output": "scout-pro.webp"
+    },
+    {
+      "beat": 4,
+      "source_seconds": 352.8,
+      "png": "native-03-to-list.png",
+      "sha256": "f0c16045f77a6429c8eec1039f4972074ad4b9c007da10a00a22b3adc5567fe1",
+      "status_bar_crop": null,
+      "dimensions": [
+        1206,
+        2622
+      ],
+      "privacy_inspected": true,
+      "cursor_free": true,
+      "known_bug_free": true,
+      "output": "phone-to-list.webp"
+    },
+    {
+      "beat": 5,
+      "source_seconds": 207.5,
+      "png": "native-04-listing-sold-comps.png",
+      "sha256": "6f9a9e395c3bdf519d061b8bd30e8c84ff7a76d364e3cb57052e24fbbbab505d",
+      "status_bar_crop": null,
+      "dimensions": [
+        1206,
+        2622
+      ],
+      "privacy_inspected": true,
+      "cursor_free": true,
+      "known_bug_free": true,
+      "output": "phone-listing-review.webp"
+    },
+    {
+      "beat": 6,
+      "source_seconds": 301.7,
+      "png": "native-05-posted-to-ebay.png",
+      "sha256": "3a03fe61e6175906d296da9295df5d7b0700bb7e1d94bb5a31897c0104c446c2",
+      "status_bar_crop": null,
+      "dimensions": [
+        1206,
+        2622
+      ],
+      "privacy_inspected": true,
+      "cursor_free": true,
+      "known_bug_free": true,
+      "output": "phone-ebay-posted.webp"
+    },
+    {
+      "beat": 7,
+      "source_seconds": 321.0,
+      "png": "native-06-flips-live.png",
+      "sha256": "8c365ea08034e50305cd151c5a1793cdbc12aab4936d3edb9e10f8ce16dbef8f",
+      "status_bar_crop": null,
+      "dimensions": [
+        1206,
+        2622
+      ],
+      "privacy_inspected": true,
+      "cursor_free": true,
+      "known_bug_free": true,
+      "output": "phone-flips.webp"
+    },
+    {
+      "beat": 8,
+      "source_seconds": 378.0,
+      "png": "native-07-facebook-share.png",
+      "sha256": "42f2e2d85cd4a422725de4c9691b73e32af69748eb4129e27883e69bfa8f1f6b",
+      "status_bar_crop": null,
+      "dimensions": [
+        1206,
+        2622
+      ],
+      "privacy_inspected": true,
+      "cursor_free": true,
+      "known_bug_free": true,
+      "output": "phone-sharing.webp"
+    }
+  ]
+}

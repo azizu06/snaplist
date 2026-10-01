@@ -1,87 +1,75 @@
 # Showcase screenshot provenance
 
-The README shows real captures of the native app in one original,
-repository-authored generic iPhone-style presentation frame. Every phone image
-is transparent, 480 × 996 px and displayed at 220 px wide. The frame is illustrative,
-not an Apple marketing asset or a photographed device. The Scout animation is
-unchanged and documented below.
+All seven phone images are stills from the captain's native iPhone screen recording,
+`RPReplay_Final1790869944.MP4` (1206 × 2622, 439.768 seconds). They replace the
+older Mirroring captures. Each uses the same original repository-authored generic
+iPhone-style enclosure, transparent 480 × 996 WebP output and 220 px display width.
+The enclosure is illustrative, not an Apple marketing asset or a photographed device.
+The animated Scout remains unchanged and is documented below.
 
-| Image | Phone worker source in `devpost-screens/mirroring-set/` | Native source commit | What it demonstrates |
+| README image | Shared native PNG | Source time (seconds) | What it shows |
 | --- | --- | --- | --- |
-| `phone-airpods-review.webp` | `final2-03-airpods-review-1179x2556.png` | `6e74fc72dbdb2fa652f14c8e910573b8f7267d51` | Full AirPods Max hero photo, seller-stated identity, editable $148.50 price and the app's pricing wording. |
-| `phone-dualsense-review.webp` | `final2-04-dualsense-review-1179x2556.png` | `6e74fc72dbdb2fa652f14c8e910573b8f7267d51` | Full DualSense hero photo, item identity and editable $149.99 price. |
-| `phone-flips.webp` | `final2-07-flips-populated-1179x2556.png` | `6e74fc72dbdb2fa652f14c8e910573b8f7267d51` | Populated final-build Flips with the posted Jordan photo and October 1 date, without an unavailable tag. |
+| `phone-capture.webp` | `native-01-shoe-capture.png` | 8.5 | Jordan 3 shoes in the capture camera. |
+| `scout-pro.webp` | `native-02-pro-on-sandbox.png` | 85.0 | Actual "SnapList Pro is on" screen during the Apple sandbox demonstration, with Scout and monthly terms. |
+| `phone-to-list.webp` | `native-03-to-list.png` | 352.8 | Two ready items with rendered backpack and mouse thumbnails; no raw item ID title or placeholder. |
+| `phone-listing-review.webp` | `native-04-listing-sold-comps.png` | 207.5 | Jordan 3 review: $155 price, three sold matches, $100–$180 range, sale cards and editable fields. |
+| `phone-ebay-posted.webp` | `native-05-posted-to-ebay.png` | 301.7 | Actual post-success screen, Jordan photo and "Live on eBay" label. |
+| `phone-flips.webp` | `native-06-flips-live.png` | 321.0 | Populated Flips with the posted Jordan photo, after loading completes. |
+| `phone-sharing.webp` | `native-07-facebook-share.png` | 378.0 | Logitech mouse sharing drawer at $44.95 with two photos; Facebook Marketplace, Mercari and Depop all show Not started. |
 
-Raw sources remain in the phone worker's ignored
-`ios/Artifacts/input-keyboard-followup/` folder. Per-source SHA-256 hashes and
-framing receipts are checked into [frame-receipt.json](frame-receipt.json).
+## Capture quality, privacy and evidence
 
-## Capture and evidence limits
+The source timestamps fall within the editor's corresponding `screen` ranges in
+`data/snaplist-demo-edit/edit/edl.json`. They were checked against the walkthrough
+bug log. Selected frames contain no mouse cursor, raw "Item <id>" title, empty
+"No items yet" state, "Can't load" state, "(seller-stated)" suffix, error banner
+or missing item photo. Each source and framed output was visually inspected.
+No readable name, email, account ID, credential or notification is displayed.
+The one-letter profile avatar remains visible where captured.
 
-These are iPhone Mirroring captures of the running app, not native
-high-resolution screenshot attachments. The worker removed the Mac window by
-cropping observed screen bounds: final2 captures 612 × 1332 at +16+76. The
-final2 1179 × 2556 files are scaled exports of those Mirroring crops.
-Original windows/crops are retained locally. The framing tool then preserves
-screen proportions, rounds the aperture and adds the same illustrative device
-body. No mouse cursor or Mirroring pointer is visible in the three selected
-screens. No app UI,
-item photos, prices, marketplace status or evidence was fabricated or painted in.
+The native PNGs are unretouched full-resolution extracts. No status-bar crop was
+needed because no notification is visible. Native recording, microphone/camera,
+time and battery indicators remain source content. Framing resizes proportionally
+and rounds the screen aperture; it does not redraw UI or digitally remove a cursor.
+No source commit or installed-build SHA is inferred from the recording filename.
 
-The phone worker's `final2-walk-099-101-verdicts.json` records the signed final
-Release source and new AirPods/DualSense/Flips exports. It reports that the final
-Jordan Flips tile opened the actual native eBay Active listing at $160 with one
-available and zero sold. The screenshot used here shows the Flips tile; the
-account-bearing eBay proof stays private. Neither Flips nor the live listing
-means the item sold. Historical post-success and sharing screenshots are omitted
-because they contain Mirroring pointers; their source artifacts remain local.
-This README task did not operate the phone, publish a listing,
-make a purchase or send an external share.
+The Pro-on image is explicitly an Apple sandbox demonstration, not a live Apple
+purchase receipt or permanent price/allowance commitment. The eBay success screen
+shows the app's recorded confirmation; this extraction task did not publish an
+item or independently re-query eBay. Published is distinct from sold. The sharing
+screen shows Not started and is a manual handoff, not an external Facebook,
+Mercari or Depop publish. Pricing wording is reproduced as displayed, without a
+new independent sold-match evaluation. This task did not operate the phone.
 
-Pricing and identity wording are reproduced as displayed by the app; this
-framing task did not independently verify each sold match or product identity.
-These images do not establish an App Store release or live Apple purchase/restore.
+## Reproduce and reuse
 
-## Privacy and image quality
+The seven native PNGs and their receipt are exported to the authorized local
+`~/Desktop/snaplist-clips/stills/` folder for the Devpost worker. The raw recording
+and PNGs are not committed to this repository.
 
-Every selected full-resolution source and final framed output was visually
-inspected for real rendered photos and public-safe content. No name, email,
-account identifier, credential or notification is visible. The one-letter
-profile avatar is retained. All private/account-background images are excluded,
-including newer confirmation/paywall captures that expose the eBay account name.
+[Native still receipt](native-still-receipt.json) records the source-video hash,
+editor EDL hash, source seconds, native dimensions, PNG filenames and hashes.
+To extract an individual still without resizing or filtering:
 
-To list is omitted: the newer ready-list rows have blank thumbnails even though
-AirPods and DualSense photos render in review. Nike Dunk is excluded; Jordan 3
-is the only shoe. Empty/black Flips captures, photo placeholders and diagnostic
-screens are excluded. Every included draft has a real hero photo and price.
-Prepared/shared export packs
-remain distinct from eBay publish and sold status.
+```sh
+ffmpeg -ss SOURCE_SECONDS -i RPReplay_Final1790869944.MP4 \
+  -map 0:v:0 -frames:v 1 -threads 1 STILL.png
+```
 
-## Reproduce the framed images
-
-See [the framing tool instructions](../../scripts/readme/README.md). Copy the
-three selected raw files under their original filenames to ignored
-`ios/Artifacts/readme-input/`, then run from the repository root:
+Copy the selected PNGs under their listed filenames to ignored
+`ios/Artifacts/readme-input/`, then regenerate the README images from the root:
 
 ```sh
 python3 scripts/readme/frame-screens.py \
   --manifest scripts/readme/sources.json --output-dir docs/readme
 ```
 
-The receipt records source, frame and output hashes, crop rectangles, encoder
-version, sizes and dimensions. Raw sources and private test logs remain ignored.
-The older `listing-review.png` and `trophy-wall.png` filenames remain only for
-historical simulator evidence in the [developer guide](../developer-guide.md#screenshot-provenance).
-Those fixture matches are not live sales research or current hero images.
-
-## Cursor-free capture gate
-
-Only the final2 AirPods Max, DualSense and populated Flips sources pass the
-current cursor-free gate. Historical Jordan review, eBay post success, sharing
-and paywall images were removed because they contain Mirroring pointers. They
-may return only after clean recapture with the pointer outside the Mirroring
-window, then full source/output privacy, photo and cursor inspection. The README
-does not digitally erase pointers or fabricate replacement app content.
+[Frame receipt](frame-receipt.json) records the frame, source and output hashes,
+encoder version, byte counts and dimensions. See the
+[framing tool instructions](../../scripts/readme/README.md) for crop validation.
+All older pointer-bearing or placeholder captures are excluded. The old
+`listing-review.png` and `trophy-wall.png` remain only for historical simulator
+evidence in the [developer guide](../developer-guide.md#screenshot-provenance).
 
 ## Scout hero animation
 

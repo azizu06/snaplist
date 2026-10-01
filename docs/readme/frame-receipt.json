@@ -7,28 +7,60 @@
   ],
   "screens": [
     {
-      "source": "final2-03-airpods-review-1179x2556.png",
-      "source_sha256": "4f6f59aa12442758b39a85334154f3b2cc5d5cad54e98a496ce9e23c67eb4a78",
+      "source": "native-01-shoe-capture.png",
+      "source_sha256": "57d2b5b058310daac3d1f488a149d6dcf401ea9e7483471f172718d96ddef504",
       "crop": null,
-      "output": "phone-airpods-review.webp",
-      "bytes": 53936,
-      "output_sha256": "21d7d2a3335bed29faaab85d5ee8c5d667e378f0c1a8057f694e59b9ec6e6fd3"
+      "output": "phone-capture.webp",
+      "bytes": 34408,
+      "output_sha256": "bc4a96f5d5855fea2976336d1e126bf3d6f8821df96e0fe6749292fb93f62d6d"
     },
     {
-      "source": "final2-04-dualsense-review-1179x2556.png",
-      "source_sha256": "8fcec152263ae4ae0df2d0506533bbcf08a1bfb8934becc79e84b2da8a5aceee",
+      "source": "native-02-pro-on-sandbox.png",
+      "source_sha256": "033ca8d120296db417758f1a925f645c08cd6e095c7972f75a892846f45d39cd",
       "crop": null,
-      "output": "phone-dualsense-review.webp",
-      "bytes": 30038,
-      "output_sha256": "0b1d138543e5192229831a27bc178b4fd30d9afcf017dbec5011f287233db502"
+      "output": "scout-pro.webp",
+      "bytes": 33102,
+      "output_sha256": "499c457e7ecb183f2ce5e307f52f0556502a358135eb58cbb759891ffec40527"
     },
     {
-      "source": "final2-07-flips-populated-1179x2556.png",
-      "source_sha256": "eb079e0fa762d63f73f5af0448440e7bf440836c87ac5e5a022d901300e6d6dc",
+      "source": "native-03-to-list.png",
+      "source_sha256": "f0c16045f77a6429c8eec1039f4972074ad4b9c007da10a00a22b3adc5567fe1",
+      "crop": null,
+      "output": "phone-to-list.webp",
+      "bytes": 20128,
+      "output_sha256": "6729cea5dfed33296729a485765cdac2ad71febcf927532cfeedf419f837a0e5"
+    },
+    {
+      "source": "native-04-listing-sold-comps.png",
+      "source_sha256": "6f9a9e395c3bdf519d061b8bd30e8c84ff7a76d364e3cb57052e24fbbbab505d",
+      "crop": null,
+      "output": "phone-listing-review.webp",
+      "bytes": 45806,
+      "output_sha256": "41d7a41777e0f4a3f3a668944b576a6e1a5fd6363f2c68c0e7c03b7f096fc93e"
+    },
+    {
+      "source": "native-05-posted-to-ebay.png",
+      "source_sha256": "3a03fe61e6175906d296da9295df5d7b0700bb7e1d94bb5a31897c0104c446c2",
+      "crop": null,
+      "output": "phone-ebay-posted.webp",
+      "bytes": 26592,
+      "output_sha256": "714434ee5364898c02c2632cbb75243049184610ffe959bf4825735fc622e3b1"
+    },
+    {
+      "source": "native-06-flips-live.png",
+      "source_sha256": "8c365ea08034e50305cd151c5a1793cdbc12aab4936d3edb9e10f8ce16dbef8f",
       "crop": null,
       "output": "phone-flips.webp",
-      "bytes": 20196,
-      "output_sha256": "3f213d5ac7dd65763e48ca517c75c1143adf674d243b3a646b798538e295c490"
+      "bytes": 15102,
+      "output_sha256": "4ef5ebdd5856902205d48b4b8a6d93d89fd6221994048ce8d52ad2b9215bcb22"
+    },
+    {
+      "source": "native-07-facebook-share.png",
+      "source_sha256": "42f2e2d85cd4a422725de4c9691b73e32af69748eb4129e27883e69bfa8f1f6b",
+      "crop": null,
+      "output": "phone-sharing.webp",
+      "bytes": 34270,
+      "output_sha256": "54cc4b483b01d919b1fa237ed9dabf146c07e5513961f0a0f069339f2f46683a"
     }
   ]
 }

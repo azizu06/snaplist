@@ -1,16 +1,32 @@
 {
   "screens": [
     {
-      "source": "../../ios/Artifacts/readme-input/final2-03-airpods-review-1179x2556.png",
-      "output": "phone-airpods-review.webp"
+      "source": "../../ios/Artifacts/readme-input/native-01-shoe-capture.png",
+      "output": "phone-capture.webp"
     },
     {
-      "source": "../../ios/Artifacts/readme-input/final2-04-dualsense-review-1179x2556.png",
-      "output": "phone-dualsense-review.webp"
+      "source": "../../ios/Artifacts/readme-input/native-02-pro-on-sandbox.png",
+      "output": "scout-pro.webp"
     },
     {
-      "source": "../../ios/Artifacts/readme-input/final2-07-flips-populated-1179x2556.png",
+      "source": "../../ios/Artifacts/readme-input/native-03-to-list.png",
+      "output": "phone-to-list.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/native-04-listing-sold-comps.png",
+      "output": "phone-listing-review.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/native-05-posted-to-ebay.png",
+      "output": "phone-ebay-posted.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/native-06-flips-live.png",
       "output": "phone-flips.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/native-07-facebook-share.png",
+      "output": "phone-sharing.webp"
     }
   ]
 }
