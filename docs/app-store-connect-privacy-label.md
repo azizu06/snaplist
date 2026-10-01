@@ -49,7 +49,7 @@ to prevent. Search the form by the data-type name instead.
 - **Photos or Videos** — the one to five item photos the seller submits. They are
   uploaded to private per-tenant Storage and read by the vision and listing
   models.
-- **Audio Data** — the optional voice note, at most fifteen seconds. It is
+- **Audio Data** — the optional voice note, at most forty-five seconds. It is
   uploaded, transcribed, and then deleted; the transcript follows the item.
 - **Other User Content** — the drafted listing itself: title, description, item
   specifics, condition, and the seller's edits to them.

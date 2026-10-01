@@ -932,7 +932,7 @@ describe("feature explorer semantics", () => {
 
     expect(bodies).toHaveLength(5);
     expect(bodies.every((body) => body.length >= 90 && body.length <= 120)).toBe(true);
-    expect(bodies.filter((body) => /optional voice note.*15 seconds/i.test(body))).toHaveLength(1);
+    expect(bodies.filter((body) => /optional voice note.*45 seconds/i.test(body))).toHaveLength(1);
     expect(site.FEATURE_STEPS.find((step) => step.id === "photo-review")?.body).toMatch(/replace|remove/i);
     expect(bodies.join(" ")).toMatch(/handoff you finish/i);
   });

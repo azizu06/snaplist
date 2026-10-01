@@ -52,7 +52,7 @@ const storedVoiceReceiptSchema = z
     storage_path: z.string().min(1).max(1_024),
     content_sha256: z.string().regex(/^[0-9a-f]{64}$/),
     byte_length: z.number().int().positive().max(MAX_MOBILE_ITEM_VOICE_BYTES),
-    duration_ms: z.number().int().positive().max(15_000),
+    duration_ms: z.number().int().positive().max(45_000),
     locale: z.string().min(1).max(255).nullable(),
     media_type: z.literal("audio/wav"),
   })

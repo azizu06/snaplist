@@ -249,7 +249,7 @@ async function resolveSellerContext(
     if (
       receipt.mediaType !== "audio/wav" ||
       bytes.byteLength !== receipt.byteLength ||
-      bytes.byteLength > 524_288 ||
+      bytes.byteLength > 1_572_864 ||
       digest !== receipt.contentSha256 ||
       mobileSubmissionVoiceDurationMs(bytes) !== receipt.durationMs
     ) {

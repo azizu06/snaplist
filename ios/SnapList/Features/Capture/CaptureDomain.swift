@@ -31,13 +31,13 @@ enum CapturePhotoLimits {
 /// rides in the same multipart body and is uncompressed 16 kHz mono PCM, capped
 /// at `ItemRunSubmissionVoice.maximumByteLength`:
 ///
-///     photos     5 x 655360 = 3276800
-///     voice                 =  524288
+///     photos     5 x 524288 = 2621440
+///     voice                 = 1572864
 ///     envelope              =    2048
 ///                             ---------
-///                               3803136
+///                               4196352
 ///
-/// which is 84.5% of 4500000 and leaves 696864 bytes of headroom against a
+/// which is 93.3% of 4500000 and leaves 303648 bytes of headroom against a
 /// ceiling whose exact value is only known to sit between the measured 4 MB
 /// pass and 6 MB rejection.
 ///
@@ -57,7 +57,7 @@ enum CapturePhotoLimits {
 /// on a brand tag or serial number cost more identification accuracy than fewer
 /// pixels of the same subject do.
 enum CapturePhotoBudget {
-    static let maximumPhotoBytes = 640 * 1024
+    static let maximumPhotoBytes = 512 * 1024
     static let maximumRequestBodyBytes = 4_500_000
     /// Multipart boundaries and part headers for a full five-photo submission
     /// with voice, locale, guest recovery, and cost basis. Measured at 1410

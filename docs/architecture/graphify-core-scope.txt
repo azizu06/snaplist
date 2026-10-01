@@ -555,6 +555,7 @@ supabase/migrations/20260909120000_operator_pro_allowance.sql
 supabase/migrations/20260921000000_sold_comp_usage_reasons.sql
 supabase/migrations/20260924220123_guest_recovery_expiry_remapped_photo_scrub.sql
 supabase/migrations/20260930190000_revenuecat_scoped_sandbox_grant.sql
+supabase/migrations/20261001071500_expand_voice_note_to_45_seconds.sql
 supabase/migrations/20261001073019_queue_stall_recovery.sql
 tsconfig.json
 vercel.json

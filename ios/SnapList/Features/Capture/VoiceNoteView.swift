@@ -2,12 +2,11 @@ import SwiftUI
 import UIKit
 
 /// The one track both the recording countdown and the saved note's playback
-/// row draw: a fixed bar count spanning the 15 s cap, so the two never
+/// row draw: a fixed bar count spanning the 45 s cap, so the two never
 /// disagree about how many bars represent a full take.
 enum VoiceNoteWaveformGeometry {
-    static let trackBarCount = VoiceWaveformBarPolicy.barCount(
-        duration: VoiceNotePresentation.maximumDuration
-    )
+    // Preserve the approved panel's density as the time allowance grows.
+    static let trackBarCount = 75
 
     static var emptyLiveMeterSamples: [Double] {
         Array(repeating: 0, count: trackBarCount)
@@ -20,7 +19,7 @@ enum VoiceNoteWaveformGeometry {
     static func updatingLiveMeterSamples(
         with levels: [Double],
         elapsed: TimeInterval,
-        secondsPerBar: TimeInterval = VoiceWaveformBarPolicy.secondsPerBar,
+        secondsPerBar: TimeInterval = VoiceNotePresentation.maximumDuration / Double(trackBarCount),
         in samples: [Double]
     ) -> [Double] {
         guard !levels.isEmpty, !samples.isEmpty, secondsPerBar > 0 else {
@@ -1036,7 +1035,7 @@ private struct VoiceNoteSheetActionStyle: ButtonStyle {
 /// One fixed-width track, drawn once, for both the recording countdown and
 /// the saved note's playback row. While recording, bars fill left to right at
 /// a fixed pitch and the unrecorded remainder draws as dim placeholder dots —
-/// the fill doubles as a countdown against the 15 s cap. During playback the
+/// the fill doubles as a countdown against the 45 s cap. During playback the
 /// same bars split into an accent-tinted run behind the head and a dim run
 /// ahead of it.
 private struct VoiceNoteWaveform: View {

@@ -27,9 +27,10 @@ processing. They are excluded from the demo path and this Standard-cost comparis
 time-limited offer is stated to continue at least through November 21, 2026.
 
 Voice defaults to GPT-Transcribe at $0.0045/minute; the rollback mini-transcribe is
-$0.003/minute. A maximum
-15-second note costs approximately $0.000750 versus $0.001125. The switch is owner-approved; the original screening contained no audio quality/latency
-evidence, so the hosted rollout still needs a real voice smoke. Embeddings remain
+$0.003/minute. A maximum 45-second note costs approximately $0.003375 with
+GPT-Transcribe or $0.002250 with mini-transcribe. The switch is owner-approved; the
+original screening contained no audio quality/latency evidence, so the hosted rollout
+still needs a real voice smoke. Embeddings remain
 text-embedding-3-small at $0.02/M tokens with the 1536-dimension lock; optional retrieval is off
 by default.
 

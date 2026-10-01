@@ -23,7 +23,7 @@
 
 ## From photo to flip
 
-1. **Snap it.** Take one to five photos. Add an optional voice note of up to fifteen seconds for details the camera might miss.
+1. **Snap it.** Take one to five photos. Add an optional voice note of up to forty-five seconds for details the camera might miss.
 2. **Get a draft.** AI identifies the item and writes a title, description, condition, and item details. Everything stays editable.
 3. **Check the price.** SnapList researches comparable eBay sales and shows the matches it can verify. If reliable matches are unavailable, you still get a clearly labeled starting estimate. Set your own price at any time.
 4. **Keep going.** Start the next item while earlier items process in parallel. **To list** keeps the ones waiting for review together, so you can work through several items without waiting between each one.

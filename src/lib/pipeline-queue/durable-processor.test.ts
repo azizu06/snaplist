@@ -113,6 +113,7 @@ async function persistTestCheckpoint(
 }
 
 function verifiedVoiceHarness(options: {
+  durationMs?: number;
   checkpoint?: PipelineWorkerCheckpoint;
   pipeline?: TestStages;
   receipt?: Partial<VoiceReceipt>;
@@ -122,7 +123,10 @@ function verifiedVoiceHarness(options: {
   recordTerminalOutcome?: DurableVisionPipelineProcessorOptions["recordTerminalOutcome"];
   reserveTranscription?: DurableVisionPipelineProcessorOptions["reserveTranscription"];
 } = {}) {
-  const fixture = createVerifiedVoiceFixture({ receipt: options.receipt });
+  const fixture = createVerifiedVoiceFixture({
+    receipt: options.receipt,
+    durationMs: options.durationMs,
+  });
   const pipeline = options.pipeline ?? stages();
   const download = vi.fn(
     options.download ?? (async () => fixture.bytes),
@@ -298,6 +302,27 @@ describe("durable vision pipeline processor", () => {
     // Whatever is checkpointed still carries no transcript and no raw audio.
     expect(JSON.stringify(saved)).not.toContain("scratch on left hinge");
     expect(JSON.stringify(saved)).not.toContain("audio/wav");
+  });
+
+  it("carries a verified 45-second note through vision, pricing and listing", async () => {
+    const voice = verifiedVoiceHarness({ durationMs: 45_000 });
+    await voice.processor.process({
+      context: voice.context,
+      onCheckpoint: persistTestCheckpoint,
+    });
+    expect(voice.transcribe).toHaveBeenCalledWith(
+      expect.objectContaining({ durationMs: 45_000 }),
+    );
+    for (const stage of [voice.pipeline.identify, voice.pipeline.price, voice.pipeline.generate]) {
+      expect(stage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sellerContext: expect.objectContaining({
+            text: "scratch on left hinge",
+            verification: "unverified",
+          }),
+        }),
+      );
+    }
   });
 
   it("blocks the adapter when the transcription reservation is refused (#1120)", async () => {

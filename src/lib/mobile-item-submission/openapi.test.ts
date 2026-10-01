@@ -77,8 +77,8 @@ describe("mobile item submission OpenAPI", () => {
           "mediaType",
         ],
         properties: {
-          byteLength: { maximum: 524288 },
-          durationMs: { maximum: 15000 },
+          byteLength: { maximum: 1572864 },
+          durationMs: { maximum: 45000 },
           mediaType: { const: "audio/wav" },
         },
       });

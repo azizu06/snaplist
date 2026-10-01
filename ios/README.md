@@ -37,7 +37,7 @@ package must supply new state IDs and visual acceptance references before implem
 ## Current product boundary
 
 - **Scan** owns recoverable intake for one to five ordered photos and optional voice context capped
-  at fifteen seconds. The one-to-five photo path shipped through #352; durable voice intake and
+  at forty-five seconds. The one-to-five photo path shipped through #352; durable voice intake and
   photos-only fallback shipped through #351 and #774.
 - Processing continues asynchronously after durable server acceptance. Seller UI uses plain-language
   states and never exposes queue, worker, lease, or provider terminology.

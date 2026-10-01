@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { canonicalizeScoutGuidanceLocale } from "@/lib/scout-guidance/contract";
 
-export const MAX_MOBILE_ITEM_VOICE_BYTES = 512 * 1024;
-export const MAX_MOBILE_ITEM_VOICE_DURATION_MS = 15_000;
+export const MAX_MOBILE_ITEM_VOICE_BYTES = 1536 * 1024;
+export const MAX_MOBILE_ITEM_VOICE_DURATION_MS = 45_000;
 export const MOBILE_ITEM_VOICE_MEDIA_TYPE = "audio/wav" as const;
 
 export interface PreparedMobileSubmissionVoice {

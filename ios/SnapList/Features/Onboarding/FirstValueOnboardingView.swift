@@ -451,7 +451,7 @@ struct FirstValueOnboardingView: View {
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Optional. Voice note, 9 seconds of a possible 15. Play. \(FirstValueOnboardingCopy.voiceNoteQuote)")
+            .accessibilityLabel("Optional. Voice note, 9 seconds of a possible 45. Play. \(FirstValueOnboardingCopy.voiceNoteQuote)")
         }
     }
 

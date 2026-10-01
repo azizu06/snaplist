@@ -74,7 +74,7 @@ describe("lean native design authority contract", () => {
       scan: {
         ordered_photo_count: { minimum: 1, maximum: 5 },
         optional_voice_context: true,
-        voice_duration_seconds_maximum: 15,
+        voice_duration_seconds_maximum: 45,
         clears_after: "durable_server_acceptance",
         processing: "asynchronous",
       },
@@ -352,7 +352,7 @@ describe("lean native design authority contract", () => {
     ].join("\n");
 
     for (const requiredClaim of [
-      /Scan/, /Trophy Wall/, /Settings/, /one to five/i, /fifteen seconds/i,
+      /Scan/, /Trophy Wall/, /Settings/, /one to five/i, /forty-five seconds/i,
       /superseded/i, /no SwiftUI implementation authorization/i,
       /Inbox/i, /generic analytics/i, /post-sale/i, /bulk\/haul/i,
       /barcode-only/i, /garment measurements/i, /autonomous marketplace actions/i,

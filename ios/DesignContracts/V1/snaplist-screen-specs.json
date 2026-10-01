@@ -3,7 +3,7 @@
   "status": "awaiting_redirected_high_fidelity_design",
   "swiftuiImplementationAuthorized": false,
   "requiredFamilies": [
-    {"family": "scan", "authority": "one to five ordered photos plus optional voice context capped at fifteen seconds; asynchronous after durable acceptance"},
+    {"family": "scan", "authority": "one to five ordered photos plus optional voice context capped at forty-five seconds; asynchronous after durable acceptance"},
     {"family": "trophy_wall", "authority": "chronological local/server projection with truthful public states"},
     {"family": "settings", "authority": "opens from profile avatar; not a primary destination"},
     {"family": "listing_review", "authority": "coherent editable identity, condition, copy, effective price, confidence, and evidence"},

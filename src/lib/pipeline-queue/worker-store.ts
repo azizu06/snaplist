@@ -78,8 +78,8 @@ const workerContextSchema = z.object({
           version: z.literal(1),
           storagePath: z.string().min(1).max(1_024),
           contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
-          byteLength: z.number().int().positive().max(524_288),
-          durationMs: z.number().int().positive().max(15_000),
+          byteLength: z.number().int().positive().max(1_572_864),
+          durationMs: z.number().int().positive().max(45_000),
           locale: z.string().min(1).max(255).nullable(),
           mediaType: z.literal("audio/wav"),
         })

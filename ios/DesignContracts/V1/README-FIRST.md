@@ -10,7 +10,7 @@ Current product authority:
 
 - exactly two primary destinations: **Scan** and **Trophy Wall**;
 - Settings from the profile avatar;
-- one to five ordered photos plus optional voice context capped at fifteen seconds;
+- one to five ordered photos plus optional voice context capped at forty-five seconds;
 - asynchronous processing after durable acceptance, expressed in plain seller language;
 - first usable listing before signup/paywall;
 - eBay as the only direct-publish destination;

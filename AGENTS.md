@@ -26,7 +26,7 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   **Flips** (finished items). Its dock companion **To list** holds items still in progress. Both
   names are reseller words; "Trophy Wall" and "Processing" are retired names, so never reintroduce
   them in UI, copy, or docs. Settings opens from the profile avatar. Scan accepts one to five ordered photos
-  and at most one optional voice note capped at fifteen seconds. Processing is asynchronous, but
+  and at most one optional voice note capped at forty-five seconds. Processing is asynchronous, but
   seller-facing states use plain language and never expose queue, worker, lease, or provider terms.
 - **AI-item credits settle on durable value.** The first usable listing and first seller-confirmed
   eBay publish are free. SnapList Pro gates complete AI item run #2 and uses a configurable monthly
@@ -276,3 +276,10 @@ Rules:
   legitimate small corrections that ride the PR. Split only when size,
   independence, or blast radius makes the PR unsafe or unreviewable. Review
   never expands product or architecture scope.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

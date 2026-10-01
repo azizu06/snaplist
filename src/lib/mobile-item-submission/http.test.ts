@@ -93,7 +93,7 @@ describe("POST /v1/items/runs", () => {
     const hiddenParts = [
       {
         headers: ['Content-Disposition: attachment; name="sellerCommand"'],
-        body: new Uint8Array(512 * 1024 + 1),
+        body: new Uint8Array(1536 * 1024 + 1),
       },
       {
         headers: ["Content-Type: text/plain"],
@@ -263,7 +263,7 @@ describe("POST /v1/items/runs", () => {
     body.append(
       "voiceContext",
       new File(
-        [new Uint8Array(512 * 1024 + 1).buffer],
+        [new Uint8Array(1536 * 1024 + 1).buffer],
         "overflow.wav",
         { type: "audio/wav" },
       ),
