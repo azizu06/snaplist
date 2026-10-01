@@ -456,6 +456,10 @@ final class ListingReviewUITests: XCTestCase {
             app.buttons["listing-review.ebay-publish"].exists,
             "A confirmed posting must not offer to publish again."
         )
+        // eBay owns a posted listing, so SnapList's copy reads only: an edit
+        // here would never reach the live posting.
+        XCTAssertFalse(app.textFields["listing-review.price"].isEnabled)
+        XCTAssertFalse(app.buttons["listing-review.secondary"].exists)
         scrollUntilClearOfFooter(
             viewOnEbay,
             footerTopEdge: app.buttons["listing-review.done"],
