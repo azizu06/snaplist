@@ -1,6 +1,6 @@
 # Selected H paywall drawer
 
-The selected design is hybrid H: Scout at a seller's packing counter, with the localized StoreKit plan presented as a taped packing slip. The drawer fits its content at standard text sizes. Accessibility sizes use a scrolling full-height sheet. Pending and verified confirmation retain the same plan, with distinct Scout poses and stamped status.
+The selected design is hybrid H: Scout at a seller's packing counter, with the localized StoreKit plan presented as a taped packing slip. The drawer fits its content at standard text sizes and scrolls when its natural content exceeds the available native sheet viewport. Accessibility sizes use a scrolling full-height sheet. Pending and verified confirmation retain the same plan, with distinct Scout poses and stamped status.
 
 ## Design authority and research receipt
 
@@ -40,3 +40,13 @@ Focused simulator and unit results, exact source head, and Graphify receipt are 
 Resume validation: 104 focused unit tests and ten production UI tests passed on the owned iPhone 17 Pro simulator (iOS 26.5), with result bundle `ios/Artifacts/paywall-h-focused.xcresult`. The original swipe test went RED; a disappearance wait alone stayed RED; dragging from the upper scene went GREEN. The title's new bottom position left the old gesture too little travel. No production gesture handler was added. The fitted detent also stopped adding a second bottom inset. Native captures revealed stamp crowding of the renewal row; the stamp now reserves its own paper area, with a focused confirmation delta check.
 
 Release configuration contract, token routing, test-runner contract, and the 237-selector shard inventory passed. The initial unsigned simulator invocation failed before reaching the UI because Clerk keychain access needs signing; normal simulator signing fixed the harness. The MCP cold-build call timed out while its underlying build continued; the completed build was preserved and subsequent bounded tests used direct `xcodebuild` with diagnostic collection disabled. No no-mistakes run, independent reviewer delegation, or long UI shard was used under the task's explicit fast path.
+
+## Short-height overflow follow-up
+
+[Long plans hide purchase terms](https://github.com/azizu06/snaplist/pull/1178#discussion_r4151994524): **fix**. At normal text size, a DEBUG-only fixture caps the actual mounted native drawer to a 360-point detent on the owned 402×874 simulator and supplies a longer synthetic product title and 12-month renewal metadata. It uses the production `ProGateSheet`, layout, native gestures, and footer; no product catalog or purchase is changed.
+
+Before the fix, three upward drags left the plan frame exactly unchanged: `(23.19, 573.87, 355.62, 186.33)`. Subscribe remained hittable at y=820.23 while the title truncated and the legal row fell beyond the screen. The renewal row itself was visible in this particular pre-fix capture; the reproduced defect is the constrained, non-scrolling layout and unreachable full plan/legal disclosure, rather than a claim that every short layout hides that row. A 460-point cap still fit the terms, so the repro was reduced to the smaller available viewport. The normal unmodified drawer passed the control clearance check.
+
+The narrow counterfactual keeps the native cap and adds an actual bounded viewport, natural wrapped-content measurement, and an overflow-only scroll path. The existing safe-area inset reserves the footer at its natural height. After the change, scrolling exposes the price and complete renewal line above Subscribe, with Restore, Terms, and Privacy reachable and the footer stationary. Normal fitted drawers retain the non-scrolling path and native downward dismissal. No custom screen-height estimate, billing logic, or production plan is introduced.
+
+RED result: `ios/Artifacts/paywall-h-overflow-red3.xcresult`. Initial GREEN: `ios/Artifacts/paywall-h-overflow-green.xcresult` (overflow, normal clearance, native dismissal). Synthetic before/after captures are exported under `ios/Artifacts/paywall-h-overflow-green-attachments/`. Final rebased checks and Graphify source receipt are recorded on the same direct PR.

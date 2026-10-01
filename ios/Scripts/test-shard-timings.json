@@ -270,6 +270,7 @@
     "SnapListUITests/ListingReviewUITests/testEditingPriceHasOneKeyboardDoneAndRestoresWorkflowDoneAfterDismissal": 15.242,
     "SnapListUITests/ListingReviewUITests/testFocusedPriceStaysVisibleAboveTheKeyboardWhileEditing": 14.733,
     "SnapListUITests/ListingReviewUITests/testConditionAndTypeAreEditableInlineWithoutOpeningSpecifics": 30.909,
-    "SnapListUITests/ListingReviewUITests/testSingleLineTitleUsesACompactCaptionedTouchTarget": 26.609
+    "SnapListUITests/ListingReviewUITests/testSingleLineTitleUsesACompactCaptionedTouchTarget": 26.609,
+    "SnapListUITests/SnapListUITests/testProGateShortSheetScrollsLongMetadataAboveTheReservedFooter": 11.455
   }
 }

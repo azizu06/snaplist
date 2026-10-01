@@ -404,13 +404,15 @@ final class ProGateStore {
 
 #if DEBUG
 extension ProGateStore {
-    static func fixture(_ fixture: ProGateFixtureState) -> ProGateStore {
+    static func fixture(_ fixture: ProGateFixtureState, longMetadata: Bool = false) -> ProGateStore {
         let product = SubscriptionProductMetadata(
             id: "fixture-monthly",
-            localizedTitle: "SnapList Pro",
+            localizedTitle: longMetadata
+                ? "SnapList Pro – Abonnement für monatliche KI-Angebote und bearbeitbare Verkaufsentwürfe"
+                : "SnapList Pro",
             localizedDescription: "Fixture",
             localizedPrice: "$9.99",
-            billingPeriod: .init(value: 1, unit: .month)
+            billingPeriod: .init(value: longMetadata ? 12 : 1, unit: .month)
         )
         if fixture.exercisesPurchase {
             return ProGateStore(

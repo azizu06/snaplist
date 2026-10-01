@@ -4331,6 +4331,53 @@ final class SnapListUITests: XCTestCase {
         XCTAssertLessThanOrEqual(plan.frame.maxY, primary.frame.minY, receipt)
     }
 
+    /// A short native sheet with long synthetic StoreKit metadata at the
+    /// standard text size must scroll the renewal slip clear of Subscribe.
+    /// No purchase is made; the real sheet/footer/layout path is mounted.
+    func testProGateShortSheetScrollsLongMetadataAboveTheReservedFooter() {
+        let app = launch(extraArguments: [
+            "--pro-gate-fixture=PAY-01",
+            "--pro-gate-short-long-metadata",
+        ])
+        let plan = app.descendants(matching: .any)["pro-gate.plan"]
+        let primary = app.buttons["pro-gate.primary"]
+        XCTAssertTrue(plan.waitForExistence(timeout: 3))
+        XCTAssertTrue(primary.waitForExistence(timeout: 3))
+        XCTAssertTrue(primary.isHittable)
+        XCTAssertTrue((plan.value as? String)?.contains("12 months until canceled") == true)
+        let initialPlan = plan.frame
+        let initialFooter = primary.frame
+        let top = app.windows.firstMatch.frame.maxY - 330
+        addScreenshot(named: "pro-gate-short-long-before-scroll")
+
+        for _ in 0..<3 {
+            let window = app.windows.firstMatch
+            let start = window.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: window.frame.midX, dy: primary.frame.minY - 24)
+            )
+            let end = window.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: window.frame.midX, dy: top)
+            )
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        let receipt = "initialPlan=\(initialPlan), plan=\(plan.frame), footer=\(primary.frame)"
+        let geometry = XCTAttachment(string: receipt)
+        geometry.name = "pro-gate-short-long-geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        addScreenshot(named: "pro-gate-short-long-after-scroll")
+        XCTAssertLessThan(plan.frame.minY, initialPlan.minY - 50, receipt)
+        XCTAssertLessThanOrEqual(plan.frame.maxY, primary.frame.minY, receipt)
+        XCTAssertEqual(primary.frame.minY, initialFooter.minY, accuracy: 2, receipt)
+        XCTAssertTrue(primary.isHittable)
+        XCTAssertTrue(app.buttons["pro-gate.restore-purchase"].isHittable)
+        for identifier in ["pro-gate.terms-of-service", "pro-gate.privacy-policy"] {
+            let legal = app.buttons[identifier]
+            XCTAssertTrue(legal.isHittable)
+            XCTAssertLessThanOrEqual(legal.frame.maxY, app.windows.firstMatch.frame.maxY)
+        }
+    }
+
     func testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
 

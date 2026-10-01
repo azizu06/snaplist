@@ -40,6 +40,11 @@ struct ProGateSheet: View {
     let fallbackToPhotoReview: () -> Void
     var context: ProGateSheetContext = .itemGate
 
+#if DEBUG
+    // Caps the actual native sheet in the fixture, without replacing its layout.
+    var fixtureHeightLimit: CGFloat?
+#endif
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AccessibilityFocusState private var headingFocused: Bool
@@ -71,22 +76,32 @@ struct ProGateSheet: View {
     }
 
     var body: some View {
-        Group {
-            if isAccessibilitySize {
-                ScrollView {
+        GeometryReader { viewport in
+            Group {
+                if isAccessibilitySize {
+                    ScrollView {
+                        sheetContent
+                        actionStack
+                            .padding(.horizontal, SnapListMetrics.screenGutter)
+                            .padding(.top, 8)
+                            .padding(.bottom, 20)
+                    }
+                    .scrollIndicators(.visible)
+                } else if contentHeight > viewport.size.height + 2 {
+                    // UIKit caps the requested detent to the available native
+                    // sheet height. Scroll only when the intrinsic content
+                    // exceeds that actual viewport, after reserving the footer.
+                    ScrollView {
+                        sheetContent
+                    }
+                    .scrollIndicators(.visible)
+                } else {
+                    // Fitted drawers keep their native downward dismissal.
                     sheetContent
-                    actionStack
-                        .padding(.horizontal, SnapListMetrics.screenGutter)
-                        .padding(.top, 8)
-                        .padding(.bottom, 20)
+                        .frame(maxHeight: .infinity, alignment: .top)
                 }
-                .scrollIndicators(.visible)
-            } else {
-                // The drawer fits this content exactly, so there is nothing
-                // to scroll and a downward drag belongs to the drawer itself.
-                sheetContent
-                    .frame(maxHeight: .infinity, alignment: .top)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         // The footer pins via `safeAreaInset`, the same primitive
         // `floatingDock(...)` uses for the app-wide dock: it floats the footer
@@ -97,6 +112,7 @@ struct ProGateSheet: View {
                 actionStack
                     .padding(.horizontal, SnapListMetrics.screenGutter)
                     .padding(.top, 10)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(SnapListColorToken.canvas.color)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                         Self.settle(&footerHeight, to: $0)
@@ -142,6 +158,9 @@ struct ProGateSheet: View {
                 .padding(.top, 20)
                 .padding(.bottom, 8)
         }
+        // Measure natural wrapped content even when the native sheet cannot
+        // grow to its requested detent. Compression would hide the overflow.
+        .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
             Self.settle(&contentHeight, to: $0)
         }
@@ -155,6 +174,11 @@ struct ProGateSheet: View {
         guard !isAccessibilitySize, contentHeight > 0, footerHeight > 0 else {
             return .large
         }
+#if DEBUG
+        if let fixtureHeightLimit {
+            return .height(min(contentHeight + footerHeight, fixtureHeightLimit))
+        }
+#endif
         return .height(contentHeight + footerHeight)
     }
 
@@ -230,6 +254,7 @@ struct ProGateSheet: View {
             Text(verbatim: "\(product.localizedTitle) · \(product.proGatePlanName)".uppercased())
                 .font(.system(size: slipHeaderSize, weight: .bold, design: .monospaced))
                 .tracking(1)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(SnapListColorToken.proGateSlipLabel.color)
                 .padding(.bottom, 4)
             slipRow("Price") {
@@ -798,7 +823,10 @@ struct ProGateFixtureHostView: View {
 
     init(fixture: ProGateFixtureState) {
         self.fixture = fixture
-        _store = State(initialValue: ProGateStore.fixture(fixture))
+        _store = State(initialValue: ProGateStore.fixture(
+            fixture,
+            longMetadata: ProcessInfo.processInfo.arguments.contains("--pro-gate-short-long-metadata")
+        ))
     }
 
     var body: some View {
@@ -814,14 +842,22 @@ struct ProGateFixtureHostView: View {
             if fixture.exercisesPurchase { _ = await store.prepare() }
         }
         .sheet(isPresented: fixtureBinding) {
-            ProGateSheet(
-                store: store,
-                startListing: { _ = store.consumeResumeIntent() },
-                fallbackToPhotoReview: {},
-                context: fixture.sheetContext
-            )
+            fixtureSheet
             .dynamicTypeSize(dynamicTypeSize)
         }
+    }
+
+    private var fixtureSheet: ProGateSheet {
+        var sheet = ProGateSheet(
+            store: store,
+            startListing: { _ = store.consumeResumeIntent() },
+            fallbackToPhotoReview: {},
+            context: fixture.sheetContext
+        )
+        if ProcessInfo.processInfo.arguments.contains("--pro-gate-short-long-metadata") {
+            sheet.fixtureHeightLimit = 360
+        }
+        return sheet
     }
 
     private var fixtureBinding: Binding<Bool> {
