@@ -165,7 +165,8 @@ final class ProGateStoreTests: XCTestCase {
         XCTAssertTrue(store.isAwaitingAppStore)
         XCTAssertFalse(store.isDismissible)
         await store.purchase()
-        XCTAssertEqual(await subscriptions.purchaseCount, 1, "A second tap must not start another purchase.")
+        let purchaseCount = await subscriptions.purchaseCount
+        XCTAssertEqual(purchaseCount, 1, "A second tap must not start another purchase.")
 
         await subscriptions.finishPurchase()
         await purchase.value

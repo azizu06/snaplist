@@ -2352,7 +2352,8 @@ final class TrophyWallDomainTests: XCTestCase {
             TrophyWallView.presentation(
                 hasSettledTiles: false,
                 collectionOutcome: .unavailable,
-                refreshRecovery: .recovering
+                refreshRecovery: .recovering,
+                refreshMaySettleItems: false
             ).collectionMessage
         )
         XCTAssertNil(
@@ -2368,7 +2369,8 @@ final class TrophyWallDomainTests: XCTestCase {
             TrophyWallView.presentation(
                 hasSettledTiles: false,
                 collectionOutcome: .unavailable,
-                refreshRecovery: .exhausted
+                refreshRecovery: .exhausted,
+                refreshMaySettleItems: false
             ).collectionMessage?.heading,
             "Can't load Flips"
         )
