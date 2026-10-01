@@ -159,10 +159,23 @@ struct TrophyWallView: View {
                 offlineNotice: nil,
                 refreshUnavailableNotice: nil,
                 collectionMessage: TrophyWallProcessingView
-                    .unavailableCollectionMessage
+                    .claimsCollectionFailure(
+                        collectionOutcome,
+                        refreshRecovery: refreshRecovery
+                    ) ? unavailableCollectionMessage : nil
             )
         }
     }
+
+    /// Flips names its own destination. Borrowing To list's sentence told a
+    /// seller on Flips that To list was the thing that failed.
+    static let unavailableCollectionMessage = TrophyWallProcessingView
+        .CollectionMessage(
+            heading: "Can't load Flips",
+            action: .tryAgain(label: "Try again"),
+            scoutImageName: "ScoutRetryReview",
+            scoutAccessibilityLabel: "Scout, the SnapList camera helper"
+        )
 
     @ViewBuilder
     private var wallBody: some View {
@@ -881,7 +894,10 @@ struct TrophyWallProcessingView: View {
                 disclosureAccessibilityLabel: nil,
                 offlineNotice: nil,
                 refreshUnavailableNotice: nil,
-                collectionMessage: collectionMessage(for: collectionOutcome),
+                collectionMessage: collectionMessage(
+                    for: collectionOutcome,
+                    refreshRecovery: refreshRecovery
+                ),
                 activity: nil
             )
         }
@@ -965,7 +981,8 @@ struct TrophyWallProcessingView: View {
     }
 
     private static func collectionMessage(
-        for outcome: TrophyWallCollectionOutcome
+        for outcome: TrophyWallCollectionOutcome,
+        refreshRecovery: TrophyWallCollectionRefreshRecovery
     ) -> CollectionMessage? {
         switch outcome {
         case .unknown:
@@ -976,7 +993,28 @@ struct TrophyWallProcessingView: View {
         case .offline, .unavailable:
             // Without a saved row there is no cached truth to keep, so both
             // reachability failures collapse to the same recovery state.
-            unavailableCollectionMessage
+            claimsCollectionFailure(outcome, refreshRecovery: refreshRecovery)
+                ? unavailableCollectionMessage
+                : nil
+        }
+    }
+
+    /// A refused first load is not yet a failure the seller is told about
+    /// while SnapList is still retrying it on its own. On a cold launch the
+    /// first attempt routinely races session restore; claiming failure then
+    /// flashed "Can't load" over a list that loaded a moment later. An offline
+    /// device does not heal by retrying, so it is still said at once.
+    static func claimsCollectionFailure(
+        _ outcome: TrophyWallCollectionOutcome,
+        refreshRecovery: TrophyWallCollectionRefreshRecovery
+    ) -> Bool {
+        switch outcome {
+        case .offline:
+            true
+        case .unavailable:
+            refreshRecovery != .recovering
+        case .unknown, .loaded:
+            false
         }
     }
 

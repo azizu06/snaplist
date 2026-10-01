@@ -2298,6 +2298,65 @@ final class TrophyWallDomainTests: XCTestCase {
         }
     }
 
+    /// bugs.md #17: a cold launch's first collection request races session
+    /// restore. That request proves nothing, so neither screen may flash a
+    /// load failure while the client is still waiting on the session or still
+    /// retrying, and Flips names itself when it does fail.
+    func testColdLaunchLoadsWithoutFlashingAFailureBeforeTheSessionRestores()
+        async {
+        let store = TrophyWallTestFixture().makeStore(cards: [])
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [
+                .failure(BearerTokenProviderError.sessionAbsent),
+                .failure(RunAPIError.authenticationRequired),
+                .page(TrophyWallRunHistoryPage(entries: [], nextCursor: nil)),
+            ]
+        )
+
+        await store.refreshCollection(using: repository)
+        XCTAssertEqual(store.collectionOutcome, .unknown)
+        XCTAssertEqual(store.collectionRefreshRecovery, .idle)
+
+        await store.recoverCollection(using: repository) { _ in }
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        XCTAssertEqual(repository.requestedPages.count, 3)
+
+        XCTAssertNil(
+            TrophyWallView.presentation(
+                hasSettledTiles: false,
+                collectionOutcome: .unavailable,
+                refreshRecovery: .recovering
+            ).collectionMessage
+        )
+        XCTAssertNil(
+            TrophyWallProcessingView.presentation(
+                from: [],
+                collectionOutcome: .unavailable,
+                refreshRecovery: .recovering,
+                availableHeight: 844,
+                isExpanded: false
+            ).collectionMessage
+        )
+        XCTAssertEqual(
+            TrophyWallView.presentation(
+                hasSettledTiles: false,
+                collectionOutcome: .unavailable,
+                refreshRecovery: .exhausted
+            ).collectionMessage?.heading,
+            "Can't load Flips"
+        )
+        XCTAssertEqual(
+            TrophyWallProcessingView.presentation(
+                from: [],
+                collectionOutcome: .unavailable,
+                refreshRecovery: .exhausted,
+                availableHeight: 844,
+                isExpanded: false
+            ).collectionMessage?.heading,
+            "Can't load To list"
+        )
+    }
+
     func testEmptyProcessingStateAppearsOnlyAfterSuccessfulCollectionTruth() async {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: [])
@@ -2856,7 +2915,7 @@ final class TrophyWallDomainTests: XCTestCase {
     /// and recovery group the pushed Processing screen already ships.
     func testWallRendersItsOwnOfflineAndUnavailableGroupInsteadOfABlankCanvas()
         async {
-        let unavailable = TrophyWallProcessingView.unavailableCollectionMessage
+        let unavailable = TrophyWallView.unavailableCollectionMessage
         let offlineNotice = TrophyWallProcessingView.offlineNoticeText
         let cases: [(
             name: String,
@@ -2969,9 +3028,13 @@ final class TrophyWallDomainTests: XCTestCase {
         for renderCase in renderCases {
             let store = TrophyWallTestFixture().makeStore(cards: [])
             let repository = ScriptedTrophyWallRunHistoryRepository(
-                results: [.failure(renderCase.error)]
+                results: Array(
+                    repeating: .failure(renderCase.error),
+                    count: TrophyWallCollectionRecoveryPolicy
+                        .maximumAutomaticAttempts
+                )
             )
-            await store.refreshCollection(using: repository)
+            await store.recoverCollection(using: repository) { _ in }
             let host = HostedTrophyWallTestWindow(
                 rootView: TrophyWallView(
                     store: store,
