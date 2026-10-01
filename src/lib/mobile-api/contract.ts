@@ -263,7 +263,13 @@ export const mobileRunSchema = z
       })
       .strict(),
     item: z
-      .object({ title: z.string().min(1), photoCount: z.number().int().nonnegative() })
+      .object({
+        title: z.string().min(1),
+        photoCount: z.number().int().nonnegative(),
+        // Signed URL of the first photo, so a row still in progress (no
+        // delivery yet) can draw the seller's own photo.
+        coverPhotoUrl: z.string().url().optional(),
+      })
       .strict()
       .nullable()
       .optional(),

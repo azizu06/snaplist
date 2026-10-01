@@ -1347,6 +1347,35 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(image.size, CGSize(width: 12, height: 12))
     }
 
+    /// A run that only the server knows about (another launch, or a refresh
+    /// after the staged copy is gone) has no delivery yet, so the row's photo
+    /// comes from the item's own signed cover URL.
+    @MainActor
+    func testInProgressProcessingRowDrawsTheServersCoverPhotoWhenNothingIsStaged() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let coverURL = "https://media.snaplist.dev/signed/front.jpg"
+        store.ingest(
+            historyPage: try fixture.historyPage(
+                status: .running,
+                stage: .identifying,
+                terminalOutcome: nil,
+                itemCoverPhotoURL: coverURL
+            ),
+            principalScope: fixture.principal
+        )
+
+        let row = try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(row.coverPhotoURL, URL(string: coverURL))
+        guard case .remote(let url) = TrophyWallProcessingRowPhoto
+            .content(for: row) else {
+            return XCTFail("A row with only a server photo must draw it.")
+        }
+        XCTAssertEqual(url, URL(string: coverURL))
+    }
+
     /// Two ways the bytes are genuinely absent: a run this device never staged,
     /// and bytes that no longer decode. Both keep the slot the wall already
     /// draws instead of an empty image well.
@@ -4287,7 +4316,8 @@ private struct TrophyWallTestFixture {
         historyOrderAt: Date? = nil,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
         retentionCleanedAt: String? = nil,
-        deliveryState: String? = nil
+        deliveryState: String? = nil,
+        itemCoverPhotoURL: String? = nil
     ) throws -> TrophyWallRunHistoryPage {
         let run = try decodedRunDetail(
             runID: runID,
@@ -4300,7 +4330,8 @@ private struct TrophyWallTestFixture {
             canStartNewCapture: canStartNewCapture,
             lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
             retentionCleanedAt: retentionCleanedAt,
-            deliveryState: deliveryState
+            deliveryState: deliveryState,
+            itemCoverPhotoURL: itemCoverPhotoURL
         )
         return TrophyWallRunHistoryPage(
             entries: [
@@ -4329,7 +4360,8 @@ private struct TrophyWallTestFixture {
         canOpenReview: Bool = false,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
         retentionCleanedAt: String? = nil,
-        deliveryState: String? = nil
+        deliveryState: String? = nil,
+        itemCoverPhotoURL: String? = nil
     ) throws -> DurableRun {
         let listingIDJSON = listingID.map { "\"\($0.uuidString.lowercased())\"" } ?? "null"
         let terminalOutcomeJSON = terminalOutcome.map { "\"\($0.rawValue)\"" } ?? "null"
@@ -4344,6 +4376,9 @@ private struct TrophyWallTestFixture {
         } ?? "null"
         let deliveryJSON = deliveryState.map {
             ",\n          \"delivery\": { \"state\": \"\($0)\" }"
+        } ?? ""
+        let itemCoverJSON = itemCoverPhotoURL.map {
+            ", \"coverPhotoUrl\": \"\($0)\""
         } ?? ""
         let json = """
         {
@@ -4365,7 +4400,7 @@ private struct TrophyWallTestFixture {
             "completedAt": null,
             "retentionCleanedAt": \(retentionCleanedAtJSON)
           },
-          "item": { "title": "Server canonical title", "photoCount": 3 },
+          "item": { "title": "Server canonical title", "photoCount": 3\(itemCoverJSON) },
           "requiredInput": null,
           "terminalOutcome": \(terminalOutcomeJSON),
           "safeFailure": \(safeFailureJSON),

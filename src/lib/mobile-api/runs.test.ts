@@ -381,6 +381,46 @@ describe("mobile durable-run operations", () => {
     expect(readDeliveryProjections).toHaveBeenCalledExactlyOnceWith([ITEM_ID]);
   });
 
+  it("hands every history run its signed cover photo, delivered or still in progress", async () => {
+    const historyRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+      status: "succeeded",
+      stage: "completed",
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage: vi.fn().mockResolvedValue({
+          data: [historyRow],
+          error: null,
+        }),
+        signCoverPhotoUrls: vi.fn().mockResolvedValue(
+          new Map([
+            [
+              "user_native/items/front.jpg",
+              "https://media.snaplist.dev/signed/front.jpg",
+            ],
+          ]),
+        ),
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 20,
+    });
+
+    const run = page.entries[0]?.run;
+    expect(run?.delivery).toBeUndefined();
+    expect(run?.item?.coverPhotoUrl).toBe(
+      "https://media.snaplist.dev/signed/front.jpg",
+    );
+  });
+
   it("projects a current assisted pack as prepared without claiming it was shared", async () => {
     const historyRow = runHistoryProjectionRow({
       runId: RUN_ID,
