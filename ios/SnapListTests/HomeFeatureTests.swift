@@ -2561,11 +2561,39 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         defer { host.close() }
 
-        await host.settle()
-        await waitForTrophyWallCondition {
-            repository.requestedPages.count == 1
-                && store.collectionOutcome == .unavailable
+        // Each unavailable refresh runs a full bounded recovery cycle. Waiting
+        // for its first request races the automatic retry timer under CI load,
+        // and Try again is only available after recovery is exhausted.
+        let attempts = TrophyWallCollectionRecoveryPolicy.maximumAutomaticAttempts
+        func waitForRecovery(
+            expectedRequests: Int,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async {
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(5))
+            while clock.now < deadline,
+                  !(repository.requestedPages.count == expectedRequests
+                    && store.collectionOutcome == .unavailable
+                    && store.collectionRefreshRecovery == .exhausted) {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(
+                repository.requestedPages.count, expectedRequests,
+                file: file, line: line
+            )
+            XCTAssertEqual(
+                store.collectionOutcome, .unavailable,
+                file: file, line: line
+            )
+            XCTAssertEqual(
+                store.collectionRefreshRecovery, .exhausted,
+                file: file, line: line
+            )
         }
+
+        await host.settle()
+        await waitForRecovery(expectedRequests: attempts)
         let initialTaskID = driver.refreshState.taskID(trophyWallReturns: 0)
 
         XCTAssertFalse(driver.refreshState.observePrincipal(nil))
@@ -2584,9 +2612,7 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertNotEqual(principalTaskID, initialTaskID)
 
         await host.settle()
-        await waitForTrophyWallCondition {
-            repository.requestedPages.count == 2
-        }
+        await waitForRecovery(expectedRequests: attempts * 2)
 
         let renderedWall = try XCTUnwrap(
             findModifiedContent(root.feature.body, as: TrophyWallView.self)
@@ -2596,9 +2622,7 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertNotEqual(retryTaskID, principalTaskID)
 
         await host.settle()
-        await waitForTrophyWallCondition {
-            repository.requestedPages.count == 3
-        }
+        await waitForRecovery(expectedRequests: attempts * 3)
     }
 
     /// #1129: Scan used to be a tab, and selecting Trophy Wall again is what
