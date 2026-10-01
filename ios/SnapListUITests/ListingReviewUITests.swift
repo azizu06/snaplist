@@ -289,7 +289,7 @@ final class ListingReviewUITests: XCTestCase {
         app.buttons["listing-review.done"].tap()
 
         let changedAlert = app.alerts[
-            "This review changed. Reload and try again."
+            "This review changed. Reload."
         ]
         XCTAssertTrue(changedAlert.waitForExistence(timeout: 6))
         changedAlert.buttons["Reload"].tap()
@@ -326,7 +326,7 @@ final class ListingReviewUITests: XCTestCase {
         let expectations = [
             (
                 fixture: "save-failure",
-                copy: "Failed to save changes. Please try again.",
+                copy: "Couldn’t save. Try again.",
                 offersRetry: true
             ),
             (

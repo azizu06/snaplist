@@ -297,9 +297,9 @@ enum TrophyWallProcessingRowActivation: Hashable {
     /// destination, so the seller is never left tapping something inert.
     case stillWorking
 
-    static let stillWorkingTitle = "Still working on this item"
+    static let stillWorkingTitle = "Still working"
     static let stillWorkingMessage =
-        "SnapList is still putting your listing together. It will show up as Ready to review here when it's done."
+        "It'll show as Ready to review when done."
 }
 
 struct TrophyWallProcessingRow: Identifiable, Hashable {

@@ -3771,7 +3771,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             intake.recovery,
             PhotoReviewIntakeRecovery(
-                message: "Photo could not be added. Nothing else changed.",
+                message: "Couldn’t add the photo. Nothing else changed.",
                 focus: .addButton
             )
         )
@@ -3896,7 +3896,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             failure.body,
-            "SnapList could not save the photos on this screen. This is a problem on this device, not something you did. No credit was used."
+            "This device couldn’t save them. Not something you did. No credit was used."
         )
         XCTAssertEqual(failure.primaryActionTitle, "Try saving again")
         XCTAssertEqual(failure.secondaryActionTitle, "Discard these photos")
@@ -10026,7 +10026,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             intake.recovery,
             PhotoReviewIntakeRecovery(
-                message: "Photo could not be added. Nothing else changed.",
+                message: "Couldn’t add the photo. Nothing else changed.",
                 focus: .addButton
             )
         )
@@ -10055,7 +10055,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             intake.recovery,
             PhotoReviewIntakeRecovery(
-                message: "Photo could not be replaced. Nothing else changed.",
+                message: "Couldn’t replace the photo. Nothing else changed.",
                 focus: .replaceButton(photoID: photoB.id)
             )
         )

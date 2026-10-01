@@ -718,7 +718,7 @@ final class HomeUITests: XCTestCase {
     }
 
     /// #1116: an analyzing/retrying row used to be inert. Tapping it now opens
-    /// a plain "Still working on this item" state — no destination, no queue
+    /// a plain "Still working" state — no destination, no queue
     /// vocabulary — and dismissing it leaves Processing where it was.
     func testProcessingRetryingRowOpensPlainStillWorkingState() {
         let app = XCUIApplication()
@@ -738,7 +738,7 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         row.tap()
 
-        let alert = app.alerts["Still working on this item"]
+        let alert = app.alerts["Still working"]
         XCTAssertTrue(alert.waitForExistence(timeout: 3))
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "PROC-1116-still-working"

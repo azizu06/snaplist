@@ -166,7 +166,6 @@ final class SettingsTests: XCTestCase {
             Set(deletionClaims),
             [
                 SettingsSignOutCopy.deletionIsElsewhere,
-                "Your account stays. This is not account deletion.",
             ],
             "a sign-out screen may point at deletion, never announce one"
         )
@@ -1020,9 +1019,9 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(
             SettingsDeletionConfirmationCopy.factLines(subscriptionTruth: .billing),
             [
-                "It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account.",
-                "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
-                "SnapList Pro keeps billing until you cancel it in the App Store. Deleting this account does not cancel it.",
+                "Confirmed. Nothing is sent until you tap Delete account.",
+                "eBay listings stay live. End them in eBay.",
+                "Deleting doesn’t cancel SnapList Pro. Cancel it in the App Store.",
             ]
         )
     }
@@ -1181,7 +1180,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(sentAddressID, "email_primary")
         XCTAssertEqual(
             state.lead(email: "seller@example.com"),
-            "Deleting an account is permanent, so SnapList sent a 6-digit code to seller@example.com. Enter it to confirm it is you."
+            "Enter the 6-digit code sent to seller@example.com."
         )
     }
 
@@ -1198,7 +1197,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(senderCalled)
         XCTAssertEqual(
             state.failureCopy(email: "seller@example.com"),
-            "SnapList could not send a code to seller@example.com. Nothing has been deleted. You can try again."
+            "Couldn’t send a code to seller@example.com. Nothing was deleted. Try again."
         )
         XCTAssertFalse(
             state.lead(email: "seller@example.com").contains("SnapList sent")

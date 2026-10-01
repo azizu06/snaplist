@@ -64,7 +64,7 @@ final class AccountDeletionUITests: XCTestCase {
             app.descendants(matching: .any)["settings.state.del-05a"]
                 .waitForExistence(timeout: 10)
         )
-        XCTAssertTrue(app.buttons["Check the server again"].exists)
+        XCTAssertTrue(app.buttons["Check again"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["settings.state.del-08"].exists)
     }
 
@@ -82,7 +82,7 @@ final class AccountDeletionUITests: XCTestCase {
             app.descendants(matching: .any)["settings.state.del-05a"]
                 .waitForExistence(timeout: 10)
         )
-        XCTAssertFalse(app.buttons["Check the server again"].exists)
+        XCTAssertFalse(app.buttons["Check again"].exists)
         XCTAssertFalse(app.buttons["Try again"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["settings.state.del-08"].exists)
     }

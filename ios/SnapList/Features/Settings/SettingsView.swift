@@ -252,7 +252,7 @@ struct SettingsView: View {
                                 }
                             )
                         } else {
-                            Text("No unsent photos or voice notes")
+                            Text("Nothing unsent")
                                 .foregroundStyle(.secondary)
                                 .accessibilityIdentifier("settings.local-empty")
                         }
@@ -1039,7 +1039,7 @@ struct SettingsLocalRemovalRow: View {
             SettingsLocalRemovalView(isGuest: isGuest, remove: remove)
         } label: {
             HStack {
-                Text("Remove unsent photos and voice notes")
+                Text("Remove unsent items")
                 Spacer()
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.tertiary)
@@ -1246,13 +1246,13 @@ private struct SettingsLocalRemovalView: View {
     @State private var removing = false
 
     var body: some View {
-        SettingsExplanationPage(title: "Remove unsent photos and voice notes") {
-            SettingsFactSection(title: "What is removed from this iPhone", bullets: [
-                "Photos and a voice note you have not submitted yet, and this iPhone’s copy of anything it is holding for an item.",
-                "Items still waiting to be sent will leave To list."
+        SettingsExplanationPage(title: "Remove unsent items") {
+            SettingsFactSection(title: "What’s removed", bullets: [
+                "Unsent photos and voice notes, and this iPhone’s item copies.",
+                "Unsent items leave To list."
             ])
             SettingsFactSection(
-                title: "What this does not change",
+                title: "Stays the same",
                 bullets: SettingsFlow(
                     identity: isGuest ? .guest : .member(method: .apple, email: ""),
                     hasLocalData: true
@@ -1260,15 +1260,15 @@ private struct SettingsLocalRemovalView: View {
                 usesBullets: false
             )
             Text(isGuest
-                ? "This covers SnapList’s copies on this iPhone. Claiming an account is what makes anything else manageable."
-                : "This covers SnapList’s copies on this iPhone. Deleting your account is a separate action in Settings.")
+                ? "Only this iPhone’s copies. An account manages the rest."
+                : "Only this iPhone’s copies. Account deletion is separate.")
                 .foregroundStyle(.secondary)
         }
         .navigationTitle("This iPhone")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             SettingsActionTray(
-                primary: "Remove from this iPhone",
+                primary: "Remove",
                 secondary: "Keep it",
                 destructive: true,
                 disabled: removing,
@@ -1444,8 +1444,8 @@ private struct SettingsDeletionConsequencesView: View {
         VStack(spacing: 0) {
             SettingsDeletionHeader(back: safeExit)
             SettingsExplanationPage(
-                title: "Delete your SnapList account",
-                lead: "Read what this does before you continue. You can still stop at every step.",
+                title: "What gets deleted",
+                lead: "You can stop at any step.",
                 titleFont: .system(.title3, weight: .bold),
                 leadFont: .system(.callout),
                 horizontalPadding: 25,
@@ -1455,12 +1455,12 @@ private struct SettingsDeletionConsequencesView: View {
                 contentSectionSpacing: 15
             ) {
                 SettingsFactSection(
-                    title: "What is deleted",
+                    title: "",
                     bullets: [
-                        "Your SnapList account and how you sign in",
-                        "Your items, photos, drafts, voice notes and runs",
-                        "Your price research and anything SnapList generated for you",
-                        "Your eBay connection, removed from SnapList"
+                        "Your account and sign-in",
+                        "Items, photos, drafts, voice notes",
+                        "Price research and generated listings",
+                        "Your eBay connection"
                     ],
                     bulletColor: SnapListColorToken.destructiveText.color,
                     rowFont: .system(.subheadline),
@@ -1472,8 +1472,8 @@ private struct SettingsDeletionConsequencesView: View {
                 SettingsDeletionBoundarySection(
                     subscriptionCopy: subscriptionTruth.longCopy
                 )
-                Button("Manage subscription in the App Store") { managesSubscription = true }
-                Text("Nothing is deleted yet. The next step confirms it is you.")
+                Button("Manage subscription") { managesSubscription = true }
+                Text("Nothing is deleted yet.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
@@ -1482,10 +1482,9 @@ private struct SettingsDeletionConsequencesView: View {
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
         .safeAreaInset(edge: .bottom) {
             SettingsActionTray(
-                primary: "Continue to delete my account",
+                primary: "Continue",
                 secondary: "Keep my account",
                 destructive: true,
-                note: "One more step after this, and it is not the deletion.",
                 primaryAction: { presentsReauthentication = true },
                 secondaryAction: safeExit
             )
@@ -1544,7 +1543,7 @@ private struct SettingsReauthenticationView: View {
         SettingsExplanationPage(
             title: "Confirm it’s you",
             lead: profile.method == .apple
-                ? "Deleting an account is permanent, so SnapList asks the system to confirm you before it sends anything."
+                ? "Apple confirms it’s you. Nothing is sent yet."
                 : emailCodeDelivery.lead(email: profile.email)
         ) {
             if let failureCopy = emailCodeDelivery.failureCopy(
@@ -1554,24 +1553,24 @@ private struct SettingsReauthenticationView: View {
                     .padding().background(SnapListColorToken.neutralFill.color, in: RoundedRectangle(cornerRadius: 14))
                     .accessibilityFocused($errorFocused)
             } else if failed {
-                Text("That did not confirm it was you. Nothing has been deleted. You can try again.")
+                Text("Not confirmed. Nothing was deleted. Try again.")
                     .padding().background(SnapListColorToken.neutralFill.color, in: RoundedRectangle(cornerRadius: 14))
                     .accessibilityFocused($errorFocused)
             }
             if profile.method == .apple {
                 SettingsFactSection(title: "Signed in with Apple", bullets: [
-                    "Apple asks you to confirm. SnapList never sees a password, and this step alone deletes nothing."
+                    "SnapList never sees your password."
                 ], usesBullets: false)
             } else if emailCodeDelivery == .sent {
                 SettingsEmailCodeField(
                     code: $code,
                     isFocused: $codeFocused
                 )
-                Text("Tap the boxes to enter the code. Resend is available after a minute.")
+                Text("You can resend the code after a minute.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Text("Nothing has been deleted. Leaving this screen keeps your account exactly as it is.")
+            Text("Nothing is deleted yet.")
                 .foregroundStyle(.secondary)
         }
         .navigationTitle("Confirm it’s you")
@@ -1767,8 +1766,8 @@ private struct SettingsDeletionTailHost: View {
 
  DEL-07f has no golden. The package's DEL-07 assumed clearing succeeds, and a
  device that will not give up its copies needs a state that says so rather than
- borrowing DEL-06, whose two bullets ("Nothing on this iPhone has been cleared",
- "could not confirm") would both be false here.
+ borrowing DEL-06, whose lines ("Nothing on this iPhone was cleared",
+ "Couldn’t confirm") would both be false here.
  */
 private struct SettingsDeletionTailView: View {
     let phase: AccountDeletionPhase
@@ -1801,83 +1800,78 @@ private struct SettingsDeletionTailView: View {
     private var heading: String {
         switch phase {
         case .confirming, .requesting: "Deleting your account"
-        case .unfinished: "This deletion has not finished"
-        case .stalled(.needsAttention): "This deletion stopped partway"
-        case .stalled(.keyConflict): "SnapList cannot continue this deletion"
-        case .stalled(.appNotConfigured): "This build cannot delete accounts"
-        case .failed: "The deletion did not finish"
+        case .unfinished: "Not finished yet"
+        case .stalled(.needsAttention): "Deletion stopped partway"
+        case .stalled(.keyConflict): "Can’t continue deletion"
+        case .stalled(.appNotConfigured): "Deletion unavailable"
+        case .failed: "Deletion didn’t finish"
         case .reverificationExpired: "Confirm it is you again"
         case .clearingDevice: "Clearing this iPhone"
-        case .deviceNotCleared: "This iPhone was not fully cleared"
-        case .deleted: "Your account is deleted"
+        case .deviceNotCleared: "iPhone not fully cleared"
+        case .deleted: "Account deleted"
         }
     }
 
     private var lead: String {
         switch phase {
         case .confirming, .requesting:
-            "SnapList sent the request and is waiting for the server to report."
+            "Waiting for the server."
         case .unfinished:
-            "SnapList sent your request and has not been told it finished."
+            "Sent, but not confirmed yet."
         case .stalled(.needsAttention):
-            "Your deletion started and stopped partway. Asking the server again may finish it."
+            "Checking again may finish it."
         case .stalled(.keyConflict):
-            "The server is already working on a deletion for this account that this iPhone cannot continue."
+            "Another deletion is already running for this account."
         case .stalled(.appNotConfigured):
-            "This copy of SnapList was built without a way to reach the deletion service, so no request was sent."
+            "This build can’t reach the deletion service. Nothing was sent."
         case .failed:
-            "SnapList could not confirm that the server finished deleting this account."
+            "Couldn’t confirm the server finished."
         case .reverificationExpired:
-            "Too much time passed since you confirmed your identity, so the server would not accept the request."
+            "Too much time passed since you confirmed."
         case .clearingDevice:
-            "The server reported that the deletion finished. SnapList is removing what is stored on this device."
+            "Removing data on this iPhone."
         case .deviceNotCleared:
-            "Your account is deleted. Some of what SnapList stored on this iPhone is still here."
+            "Your account is deleted. Some data remains on this iPhone."
         case .deleted:
-            "The server reported the deletion as finished and this iPhone has been cleared. You are signed out."
+            "This iPhone is cleared. You’re signed out."
         }
     }
 
     private var bullets: [String] {
         switch phase {
         case .confirming, .requesting:
-            ["Nothing on this iPhone is cleared until the server reports that it finished."]
+            ["Nothing on this iPhone is cleared until then."]
         case .unfinished:
             [
-                "SnapList can ask the server for the current state.",
-                "Nothing on this iPhone has been cleared.",
+                "Nothing on this iPhone was cleared.",
             ]
         case .stalled(.needsAttention):
             [
-                "Some of your account may already be deleted, including your sign-in.",
-                "Nothing on this iPhone has been cleared.",
+                "Part of your account, including sign-in, may be deleted.",
+                "Nothing on this iPhone was cleared.",
             ]
         case .stalled(.keyConflict):
             [
-                "Nothing on this iPhone has been cleared.",
-                "Your account may still be deleted by the request already running.",
+                "Nothing on this iPhone was cleared.",
+                "The running request may still delete your account.",
             ]
         case .stalled(.appNotConfigured):
             [
-                "Nothing has been deleted and nothing on this iPhone has been cleared.",
-                "Your account is unchanged.",
+                "Nothing was deleted or cleared.",
             ]
         case .failed:
             [
-                "Nothing on this iPhone has been cleared.",
-                "You can try again, or leave and come back to it.",
+                "Nothing on this iPhone was cleared.",
             ]
         case .reverificationExpired:
             [
-                "Nothing has been deleted and nothing on this iPhone has been cleared.",
-                "Confirming your identity again returns you to the last step.",
+                "Nothing was deleted or cleared.",
             ]
         case .clearingDevice:
-            ["This step begins only after the server reported. It never runs beside the request."]
+            ["Server deletion finished."]
         case .deviceNotCleared:
             [
-                "Your account and its data are gone from SnapList’s servers.",
-                "You are still signed in on this iPhone so that you can try the removal again.",
+                "You stay signed in so you can retry.",
             ]
         case .deleted(let retainedRecords):
             // Only what the server actually reported as retained. The packaged
@@ -1895,7 +1889,7 @@ private struct SettingsDeletionTailView: View {
             EmptyView()
         case .unfinished:
             SettingsActionTray(
-                primary: "Check the server again",
+                primary: "Check again",
                 secondary: "Not now",
                 destructive: false,
                 primaryAction: retry,
@@ -1907,7 +1901,7 @@ private struct SettingsDeletionTailView: View {
             // answer, and the seller's data is already gone by the time they
             // read this. Taking the control away would strand them.
             SettingsActionTray(
-                primary: "Check the server again",
+                primary: "Check again",
                 secondary: "Not now",
                 destructive: false,
                 primaryAction: retry,
@@ -1941,10 +1935,9 @@ private struct SettingsDeletionTailView: View {
             )
         case .deviceNotCleared:
             SettingsActionTray(
-                primary: "Try removing it again",
+                primary: "Try again",
                 secondary: "Not now",
                 destructive: false,
-                note: "Leaving now keeps you signed in so this can be finished later.",
                 primaryAction: retry,
                 secondaryAction: leave
             )
@@ -1955,7 +1948,6 @@ private struct SettingsDeletionTailView: View {
                 primary: "Done",
                 secondary: nil,
                 destructive: false,
-                note: "Done returns to the signed-out entry.",
                 primaryAction: leave,
                 secondaryAction: leave
             )
@@ -1970,9 +1962,9 @@ private extension AccountErasureRetainedRecord {
     var sellerFacingCopy: String {
         switch self {
         case .ebayLiveListing:
-            "A listing you published is still live on eBay. SnapList does not own it and cannot end it, so end it in eBay."
+            "A listing is still live on eBay. End it there."
         case .hostedTranscriptionProviderCopy:
-            "A transcription provider still holds its own copy of a voice note. SnapList has asked for its removal and cannot confirm it."
+            "A transcription provider still holds a voice note copy. Removal was requested but can’t be confirmed."
         }
     }
 }
@@ -1984,8 +1976,8 @@ private extension AccountErasureRetainedRecord {
 enum SettingsDeletionConfirmationCopy {
     static func factLines(subscriptionTruth: SettingsDeletionSubscriptionTruth) -> [String] {
         [
-            "It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account.",
-            "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
+            "Confirmed. Nothing is sent until you tap Delete account.",
+            "eBay listings stay live. End them in eBay.",
             subscriptionTruth.shortCopy,
         ]
     }
@@ -2002,7 +1994,7 @@ private struct SettingsDeletionConfirmationView: View {
     var body: some View {
         SettingsExplanationPage(
             title: "Delete this account?",
-            lead: "This is the last step. It deletes your SnapList account, your items, your photos and your drafts, and removes your eBay connection from SnapList."
+            lead: "This permanently deletes your account, items, photos, drafts, and eBay connection."
         ) {
             SettingsFactSection(
                 title: "",
@@ -2015,16 +2007,10 @@ private struct SettingsDeletionConfirmationView: View {
         .safeAreaInset(edge: .bottom) {
             // The destructive control the screen's own copy promises. Until
             // #385 this tray offered only "Keep my account", so a seller who
-            // read "This is the last step." and reauthenticated with a real
-            // credential had no way to finish and nothing happened.
+            // reauthenticated with a real credential had no way to finish and
+            // nothing happened. The packaged footnote above it went with the
+            // minimal-text pass; the fact line already says the tap sends it.
             VStack(spacing: 12) {
-                // Packaged DEL-03 footnote, and true of this build: the tap is
-                // the only thing that sends the request.
-                Text("Keep my account is the safe way out and it works right up to the tap.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, SnapListMetrics.screenGutter)
                 SettingsActionTray(
                     primary: "Delete account",
                     secondary: "Keep my account",
@@ -2182,18 +2168,18 @@ private struct SettingsDeletionBoundarySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6.5) {
-            Text("WHAT THIS DOES NOT DO")
+            Text("NOT DELETED")
                 .font(.caption.weight(.semibold))
                 .tracking(1)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 0) {
                 boundary(
-                    title: "It does not end your eBay listings",
-                    body: "Listings you already published stay on eBay and keep selling. Deleting this account removes the eBay connection from SnapList, so SnapList can no longer see or change them. Ending a listing is done in eBay."
+                    title: "Your eBay listings",
+                    body: "They stay live on eBay. SnapList loses access, so end them in eBay."
                 )
                 Divider()
                 boundary(
-                    title: "It does not cancel SnapList Pro",
+                    title: "SnapList Pro",
                     body: subscriptionCopy
                 )
             }
