@@ -1470,8 +1470,10 @@ private actor LocalCaptureImageLoader {
     private let cache = NSCache<NSString, UIImage>()
 
     init() {
-        cache.countLimit = 4
-        cache.totalCostLimit = 24 * 1024 * 1024
+        // Five hero pages plus each size of their thumbnails stay decoded
+        // together, so a swipe never re-reads a photo from disk mid-swipe.
+        cache.countLimit = 20
+        cache.totalCostLimit = 64 * 1024 * 1024
     }
 
     func load(url: URL, maximumPixelSize: Int) -> UIImage? {

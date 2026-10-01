@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import UIKit
 import XCTest
 @testable import SnapList
@@ -2093,6 +2094,19 @@ final class ListingReviewConditionTests: XCTestCase {
         )
         XCTAssertEqual(decoded, .forParts)
         XCTAssertEqual(decoded.sellerLabel, "For Parts")
+    }
+}
+
+final class SnapListPhotoPagerTests: XCTestCase {
+    private typealias Pager = SnapListPhotoPager<Int, Int, SwiftUI.EmptyView>
+
+    func testASettledSwipeSelectsTheShownPage() {
+        XCTAssertEqual(Pager.settledPage(2, pages: [0, 1, 2]), 2)
+    }
+
+    func testAScrollWithNoPageOrAnUnknownPageKeepsTheSelection() {
+        XCTAssertNil(Pager.settledPage(nil, pages: [0, 1, 2]))
+        XCTAssertNil(Pager.settledPage(3, pages: [0, 1, 2]))
     }
 }
 

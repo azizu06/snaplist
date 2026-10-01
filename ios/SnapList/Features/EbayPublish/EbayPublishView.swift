@@ -1517,24 +1517,14 @@ private struct EbayListingPhotoCard<Fallback: View>: View {
             fallback()
         } else {
             ZStack {
-                TabView(selection: $selectedOrdinal) {
-                    ForEach(photos, id: \.ordinal) { photo in
-                        ListingReviewImage(
-                            url: photo.url,
-                            fallbackSystemImage: "photo",
-                            pipeline: imagePipeline,
-                            maxPixelDimension: ListingReviewImagePipeline.heroMaxPixelDimension
-                        )
-                        .frame(maxWidth: .infinity)
-                        .frame(height: Self.photoHeight)
-                        .clipped()
-                        .tag(photo.ordinal)
-                        .accessibilityLabel(
-                            "Photo \(photo.ordinal + 1) of \(photos.count)"
-                        )
-                    }
+                ListingReviewPagingHero(
+                    photos: photos,
+                    selectedOrdinal: $selectedOrdinal,
+                    height: Self.photoHeight,
+                    pipeline: imagePipeline
+                ) { photo in
+                    "Photo \(photo.ordinal + 1) of \(photos.count)"
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
 
                 if photos.count > 1 {
                     Text("\(selectedOrdinal + 1) of \(photos.count)")

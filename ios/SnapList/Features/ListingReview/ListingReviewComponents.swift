@@ -678,29 +678,16 @@ struct ListingReviewPhotoPager: View {
     private var hero: some View {
         let radius = PhotoReviewV5VisualContract.heroRadius
         return ZStack(alignment: .bottom) {
-            TabView(selection: $selectedOrdinal) {
-                ForEach(photos, id: \.ordinal) { photo in
-                    ListingReviewImage(
-                        url: photo.url,
-                        fallbackSystemImage: "photo",
-                        pipeline: imagePipeline,
-                        maxPixelDimension: ListingReviewImagePipeline.heroMaxPixelDimension
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(height: PhotoReviewV5VisualContract.heroHeight)
-                    .clipped()
-                    .tag(photo.ordinal)
-                    .accessibilityLabel(
-                        photo.ordinal == 0
-                            ? "Photo 1 of \(photos.count), cover"
-                            : "Photo \(photo.ordinal + 1) of \(photos.count)"
-                    )
-                    .accessibilityValue(
-                        photo.ordinal == selectedOrdinal ? "Current page" : ""
-                    )
-                }
+            ListingReviewPagingHero(
+                photos: photos,
+                selectedOrdinal: $selectedOrdinal,
+                height: PhotoReviewV5VisualContract.heroHeight,
+                pipeline: imagePipeline
+            ) { photo in
+                photo.ordinal == 0
+                    ? "Photo 1 of \(photos.count), cover"
+                    : "Photo \(photo.ordinal + 1) of \(photos.count)"
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
 
             // #896: a gallery reports its count with dots. The dots stay
             // silent for VoiceOver because every photo above already
@@ -764,6 +751,41 @@ struct ListingReviewPhotoPager: View {
         .accessibilityAddTraits(
             photo.ordinal == selectedOrdinal ? .isSelected : []
         )
+    }
+}
+
+/// Listing Review's and the eBay connect card's photos in the shared
+/// `SnapListPhotoPager`, each page a remote photo filling the carousel.
+struct ListingReviewPagingHero: View {
+    let photos: [ListingReviewPhoto]
+    @Binding var selectedOrdinal: Int
+    let height: CGFloat
+    let pipeline: ListingReviewImagePipeline
+    let accessibilityLabel: (ListingReviewPhoto) -> String
+
+    var body: some View {
+        SnapListPhotoPager(
+            items: photos,
+            id: \.ordinal,
+            selection: Binding(
+                get: { selectedOrdinal },
+                set: { if let ordinal = $0 { selectedOrdinal = ordinal } }
+            ),
+            height: height
+        ) { photo in
+            ListingReviewImage(
+                url: photo.url,
+                fallbackSystemImage: "photo",
+                pipeline: pipeline,
+                maxPixelDimension: ListingReviewImagePipeline.heroMaxPixelDimension
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .accessibilityLabel(accessibilityLabel(photo))
+            .accessibilityValue(
+                photo.ordinal == selectedOrdinal ? "Current page" : ""
+            )
+        }
     }
 }
 

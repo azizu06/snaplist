@@ -4069,27 +4069,19 @@ struct PhotoReviewView: View {
     private func hero(width: CGFloat, height: CGFloat) -> some View {
         if !store.photos.isEmpty {
             ZStack(alignment: .bottom) {
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 0) {
-                        ForEach(
-                            Array(store.photos.enumerated()),
-                            id: \.element.id
-                        ) { index, photo in
-                            heroPage(
-                                photo: photo,
-                                index: index,
-                                width: width,
-                                height: height
-                            )
-                            .id(photo.id)
-                        }
-                    }
-                    .scrollTargetLayout()
+                SnapListPhotoPager(
+                    items: Array(store.photos.enumerated()),
+                    id: \.element.id,
+                    selection: heroScrollPosition,
+                    height: height
+                ) { index, photo in
+                    heroPage(
+                        photo: photo,
+                        index: index,
+                        width: width,
+                        height: height
+                    )
                 }
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: heroScrollPosition)
-                .scrollIndicators(.hidden)
-                .scrollDisabled(store.photos.count <= 1)
                 .frame(width: width, height: height)
 
                 if let selectedIndex = store.photos.firstIndex(

@@ -101,3 +101,65 @@ private struct SnapListPageDotsVoice: ViewModifier {
         }
     }
 }
+
+/// The one swipeable photo carousel: Photo Review's hero, Listing Review's
+/// photos and the eBay connect card all page through this, so a swipe feels
+/// the same everywhere. It is #1073's paging horizontal `ScrollView`, not a
+/// page-style `TabView`, which nested inside a vertical scroll view fought its
+/// drag and jumped on release.
+///
+/// Every page is built up front rather than lazily (a listing holds at most
+/// five photos), so a page's image is already decoded when the finger brings it
+/// on screen instead of loading mid-swipe, and every page takes the scroll
+/// view's full width and the given height whether or not its image has
+/// arrived, so nothing shifts while swiping.
+struct SnapListPhotoPager<Item, ID: Hashable, Page: View>: View {
+    let items: [Item]
+    let id: KeyPath<Item, ID>
+    /// The page on screen. A swipe writes the page it settles on; changing it
+    /// from outside (a thumbnail tap) pages the carousel there.
+    let selection: Binding<ID?>
+    let height: CGFloat
+    @ViewBuilder let page: (Item) -> Page
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 0) {
+                ForEach(items, id: id) { item in
+                    page(item)
+                        .containerRelativeFrame(.horizontal)
+                        .frame(height: height)
+                        .id(item[keyPath: id])
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: settledSelection)
+        .scrollIndicators(.hidden)
+        .scrollDisabled(items.count <= 1)
+        .frame(height: height)
+    }
+
+    private var settledSelection: Binding<ID?> {
+        Binding(
+            get: { selection.wrappedValue },
+            set: { proposed in
+                if let settled = Self.settledPage(
+                    proposed,
+                    pages: items.map { $0[keyPath: id] }
+                ) {
+                    selection.wrappedValue = settled
+                }
+            }
+        )
+    }
+
+    /// The page a settled scroll lands on, or nil when the scroll view reports
+    /// no page or one this carousel does not show, so the selection never
+    /// points at a photo that isn't there.
+    static func settledPage(_ proposed: ID?, pages: [ID]) -> ID? {
+        guard let proposed, pages.contains(proposed) else { return nil }
+        return proposed
+    }
+}
