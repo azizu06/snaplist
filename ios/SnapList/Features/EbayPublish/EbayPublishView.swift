@@ -1467,7 +1467,7 @@ private struct EbayListingPhotoCard<Fallback: View>: View {
                     Text("\(selectedOrdinal + 1) of \(photos.count)")
                         .snapListTypography(.metadata)
                         .monospacedDigit()
-                        .foregroundStyle(.white)
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(.black.opacity(SnapListPageDots.Metrics.scrimOpacity), in: Capsule())
