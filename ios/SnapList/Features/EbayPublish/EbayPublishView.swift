@@ -587,21 +587,16 @@ struct EbayPublishView: View {
     private var confirmationThumbnail: some View {
         switch resultThumbnailSource {
         case .authoritative(let url):
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .accessibilityLabel("Listing photo for \(listingTitle)")
-                        .accessibilityIdentifier(
-                            "ebay-publish.confirmation.listing-thumbnail"
-                        )
-                case .empty, .failure:
-                    neutralConfirmationThumbnail
-                @unknown default:
-                    neutralConfirmationThumbnail
-                }
+            CoverPhotoRemoteImage(url: url) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+                    .accessibilityLabel("Listing photo for \(listingTitle)")
+                    .accessibilityIdentifier(
+                        "ebay-publish.confirmation.listing-thumbnail"
+                    )
+            } placeholder: {
+                neutralConfirmationThumbnail
             }
         case .neutral:
             neutralConfirmationThumbnail
@@ -1311,15 +1306,10 @@ private struct GuestClaimListingCard: View {
     private var thumbnail: some View {
         switch projection.thumbnail {
         case .authoritative(let url):
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .empty, .failure:
-                    neutralThumbnail
-                @unknown default:
-                    neutralThumbnail
-                }
+            CoverPhotoRemoteImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                neutralThumbnail
             }
         case .neutral:
             neutralThumbnail
@@ -2118,17 +2108,12 @@ private struct EbayResultActionScreen: View {
     private var thumbnail: some View {
         switch thumbnailSource {
         case .authoritative(let url):
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .empty, .failure:
-                    neutralThumbnail
-                @unknown default:
-                    neutralThumbnail
-                }
+            CoverPhotoRemoteImage(url: url) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+            } placeholder: {
+                neutralThumbnail
             }
         case .neutral:
             neutralThumbnail

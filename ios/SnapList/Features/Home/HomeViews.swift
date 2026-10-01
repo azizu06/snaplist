@@ -475,15 +475,24 @@ private struct TrophyWallSettledTileView: View {
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .clipped()
                 } placeholder: {
-                    fallback
+                    // The tile's own fill holds the space while the photo
+                    // loads; a name drawn here only flashed under the date.
+                    Color.clear
                 }
             } else {
                 fallback
+                    .frame(
+                        width: proxy.size.width,
+                        height: proxy.size.height,
+                        alignment: .bottom
+                    )
             }
         }
         .accessibilityHidden(true)
     }
 
+    /// Sits at the bottom of the tile: `GeometryReader` places its content at
+    /// the top leading corner, under the date chip, which the name overlapped.
     private var fallback: some View {
         Text(tile.itemName)
             .snapListTypography(.status)
@@ -1602,42 +1611,55 @@ private extension TrophyWallProcessingAction {
 
 // MARK: - Cover photo cache
 
-/// Decoded cover photos shared by Flips tiles and To list rows for the session.
-/// `AsyncImage` keeps nothing between appearances, so every visit to Flips
-/// started each tile blank and fetched its photo again. The server re-signs
-/// these URLs on every refresh, so the token in the query changes while the
-/// storage object behind the path does not; the key drops the query.
+/// Decoded item photos shared for the session by Flips tiles, To list rows,
+/// Listing Review, and the eBay publish screens. `AsyncImage` keeps nothing
+/// between appearances, so every visit started each photo blank and fetched it
+/// again. The server re-signs these URLs on every refresh, so the token in the
+/// query changes while the storage object behind the path does not; the key
+/// drops the query.
 final class CoverPhotoImageCache: @unchecked Sendable {
     static let shared = CoverPhotoImageCache()
 
+    /// Points × 3 for the widest tile or thumbnail the shared view fills.
+    static let maxPixelDimension: CGFloat = 800
+
     private let storage = NSCache<NSString, UIImage>()
 
-    init(countLimit: Int = 200) {
+    init(countLimit: Int = 150, totalCostLimit: Int = 160 * 1_024 * 1_024) {
         storage.countLimit = countLimit
+        storage.totalCostLimit = totalCostLimit
     }
 
-    static func key(for url: URL) -> String {
-        guard var components = URLComponents(
+    /// `variant` separates decodes of one photo at different sizes.
+    static func key(for url: URL, variant: String? = nil) -> String {
+        var base = url.absoluteString
+        if var components = URLComponents(
             url: url,
             resolvingAgainstBaseURL: false
-        ) else {
-            return url.absoluteString
+        ) {
+            components.query = nil
+            components.fragment = nil
+            base = components.string ?? base
         }
-        components.query = nil
-        components.fragment = nil
-        return components.string ?? url.absoluteString
+        guard let variant else { return base }
+        return base + "#" + variant
     }
 
-    func image(for url: URL) -> UIImage? {
-        storage.object(forKey: Self.key(for: url) as NSString)
+    func image(for url: URL, variant: String? = nil) -> UIImage? {
+        storage.object(forKey: Self.key(for: url, variant: variant) as NSString)
     }
 
-    func insert(_ image: UIImage, for url: URL) {
-        storage.setObject(image, forKey: Self.key(for: url) as NSString)
+    func insert(_ image: UIImage, for url: URL, variant: String? = nil) {
+        let pixels = image.size.width * image.scale * image.size.height * image.scale
+        storage.setObject(
+            image,
+            forKey: Self.key(for: url, variant: variant) as NSString,
+            cost: Int(pixels) * 4
+        )
     }
 }
 
-/// A remote cover photo that draws a photo already decoded this session in the
+/// A remote item photo that draws a photo already decoded this session in the
 /// first frame and fetches only on a miss. Shaped like `AsyncImage` so callers
 /// keep their own sizing and clipping.
 struct CoverPhotoRemoteImage<Content: View, Placeholder: View>: View {
@@ -1671,12 +1693,17 @@ struct CoverPhotoRemoteImage<Content: View, Placeholder: View>: View {
     }
 
     private func load() async {
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
-              let decoded = UIImage(data: data) else {
+        guard let data = try? await ListingReviewImagePipeline.download(url),
+              let image = try? await Task.detached(priority: .userInitiated, operation: {
+                  try ListingReviewImagePipeline.downsample(
+                      data,
+                      maxPixelDimension: CoverPhotoImageCache.maxPixelDimension
+                  )
+              }).value
+        else {
             return
         }
-        let prepared = await decoded.byPreparingForDisplay() ?? decoded
-        cache.insert(prepared, for: url)
-        loaded = (CoverPhotoImageCache.key(for: url), prepared)
+        cache.insert(image, for: url)
+        loaded = (CoverPhotoImageCache.key(for: url), image)
     }
 }

@@ -4636,6 +4636,21 @@ final class CoverPhotoImageCacheTests: XCTestCase {
 
         XCTAssertNil(cache.image(for: signedURL(path: "user/other/0.jpg", token: "a")))
     }
+
+    func testReviewSizedDecodeIsHeldApartFromTheTileDecode() {
+        let cache = CoverPhotoImageCache()
+        let tile = image()
+        let hero = image()
+        let url = signedURL(path: "user/run/0.jpg", token: "a")
+        cache.insert(tile, for: url)
+        cache.insert(hero, for: url, variant: "review-1300")
+
+        XCTAssertTrue(cache.image(for: url) === tile)
+        XCTAssertTrue(
+            cache.image(for: signedURL(path: "user/run/0.jpg", token: "b"), variant: "review-1300") === hero
+        )
+        XCTAssertNil(cache.image(for: url, variant: "review-200"))
+    }
 }
 
 /// Publishing from To list and tapping Go to Flips arrives while the refresh

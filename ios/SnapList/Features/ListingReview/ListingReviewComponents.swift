@@ -881,11 +881,28 @@ struct ListingReviewImage: View {
 #endif
     }
 
+    private var sizeVariant: String {
+        "review-\(Int(maxPixelDimension))"
+    }
+
+    /// A photo this session already decoded, drawn in the first frame instead
+    /// of a spinner: this size if held, else the Flips/To list decode of the
+    /// same photo until this size arrives.
+    private func cachedImage(for url: URL) -> UIImage? {
+        CoverPhotoImageCache.shared.image(for: url, variant: sizeVariant)
+            ?? CoverPhotoImageCache.shared.image(for: url)
+    }
+
     @ViewBuilder
     private var remoteImage: some View {
         if let url {
+            let shown: Phase = {
+                if case .loaded = phase { return phase }
+                if let cached = cachedImage(for: url) { return .loaded(cached) }
+                return phase
+            }()
             Group {
-                switch phase {
+                switch shown {
                 case .loaded(let image):
                     if let fitCornerRadius {
                         Image(uiImage: image)
@@ -906,10 +923,15 @@ struct ListingReviewImage: View {
             // Keyed on the URL, so a cell reused for another photo starts over
             // and a load that finishes for a URL no longer shown is dropped.
             .task(id: url) {
+                if let sized = CoverPhotoImageCache.shared.image(for: url, variant: sizeVariant) {
+                    phase = .loaded(sized)
+                    return
+                }
                 phase = .loading
                 do {
                     let image = try await (pipeline ?? ownPipeline)
                         .image(for: url, maxPixelDimension: maxPixelDimension)
+                    CoverPhotoImageCache.shared.insert(image, for: url, variant: sizeVariant)
                     phase = .loaded(image)
                 } catch is CancellationError {
                     return
