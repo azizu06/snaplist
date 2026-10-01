@@ -12,14 +12,14 @@
 <p align="center"><img src="docs/readme/scout-barcode.gif" width="180" alt="Scout, SnapList’s camera mascot, scanning a barcode on a cardboard parcel in a looping animation."></p>
 
 <p align="center">
-  <img src="docs/readme/phone-listing-review.webp" width="220" alt="Jordan 3 listing review: four real shoe photos and an editable $160 price.">
-  &nbsp;
   <img src="docs/readme/phone-airpods-review.webp" width="220" alt="AirPods Max listing review: a full headphone photo, seller-stated identity, and an editable $148.50 price.">
   &nbsp;
   <img src="docs/readme/phone-dualsense-review.webp" width="220" alt="DualSense listing review: a real controller photo and an editable $149.99 price.">
+  &nbsp;
+  <img src="docs/readme/phone-flips.webp" width="220" alt="Populated Flips: the posted Jordan 3 item appears with its real photo and October 1 date.">
 </p>
 
-<p align="center"><sub>Real item photos, editable drafts. Captured from the native iPhone app in matching presentation frames.<br><a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
+<p align="center"><sub>AirPods Max, DualSense, and a finished Jordan 3 listing. Real photos captured from the native iPhone app in matching presentation frames.<br><a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 ## From photo to flip
 
@@ -31,14 +31,10 @@
 6. **See your Flips.** Finished items collect in a chronological view. An export marked prepared or shared stays distinct from an eBay publish; neither is a claim that the item sold.
 
 <p align="center">
-  <img src="docs/readme/phone-ebay-posted.webp" width="220" alt="Jordan 3 posted to eBay: the app confirms the listing is live and offers View on eBay.">
-  &nbsp;
   <img src="docs/readme/phone-flips.webp" width="220" alt="Populated Flips: the posted Jordan 3 item appears with its real photo and October 1 date.">
-  &nbsp;
-  <img src="docs/readme/phone-sharing.webp" width="220" alt="Jordan 3 sharing drawer: $160, four photos, text copy, photo save, marketplace links, and all destinations marked Not started.">
 </p>
 
-<p align="center"><sub>Confirmed eBay posting → Flips. Other marketplaces use a guided handoff; this sharing drawer shows Not started.<br><a href="docs/readme/README.md">Capture sources and dates</a>.</sub></p>
+<p align="center"><sub>A finished Jordan 3 listing appears in Flips with its real photo.<br><a href="docs/readme/README.md">Capture sources and dates</a>.</sub></p>
 
 The first usable listing comes **before signup or a paywall**. Try the result on your own item before deciding to keep listing.
 
@@ -46,7 +42,6 @@ The first usable listing comes **before signup or a paywall**. Try the result on
 
 Scout meets you at a packing counter when you want more AI listings. The plan appears on a taped packing slip: price, renewal terms, Subscribe, and Restore, with Terms and Privacy close at hand.
 
-<p align="center"><img src="docs/readme/scout-pro.webp" width="220" alt="Scout Pro on iPhone: a saved item, packing-counter artwork, monthly plan, Subscribe, Restore, Terms and Privacy."><br><sub>Scout’s packing-counter paywall. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 | Free first item | SnapList Pro |
 | --- | --- |
