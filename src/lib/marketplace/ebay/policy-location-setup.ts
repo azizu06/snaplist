@@ -114,6 +114,10 @@ const POLICY_HELP_URLS: Record<string, string> = {
   EBAY_US: "https://www.bizpolicy.ebay.com/businesspolicy/manage",
 };
 
+export function ebayPolicyHelpUrl(marketplaceId: string): string | null {
+  return POLICY_HELP_URLS[marketplaceId] ?? null;
+}
+
 export const EBAY_POLICY_SETUP_UNAVAILABLE_MESSAGE =
   "SnapList could not read your eBay shipping, payment, and return policies. "
   + "Check your eBay connection, then try publishing again.";

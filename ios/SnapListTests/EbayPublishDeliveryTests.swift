@@ -577,6 +577,95 @@ final class EbayPublishDeliveryTests: XCTestCase {
         XCTAssertEqual(requests.publishStatusRequestCount, 1)
     }
 
+    /// Drives load + confirm against a server whose POST publish answers with
+    /// `status`/`body`, and returns the flow plus how many status GETs ran.
+    private func flowAfterPublishAnswers(
+        status: Int,
+        body: String
+    ) async -> (EbayPublishFlowStore, Int) {
+        let listingID = UUID(uuidString: "69900000-0000-4000-8000-0000000000a1")!
+        let revision = UUID(uuidString: "69900000-0000-4000-8000-0000000000a2")!
+        let requests = EbayPublishRequestRecorder()
+        let session = makeSession { request in
+            requests.record(request)
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/listings/\(listingID.uuidString.lowercased())/ebay/publish"):
+                return Self.response(
+                    status: 200,
+                    json: """
+                    {"data":{"listingId":"\(listingID.uuidString.lowercased())","outcome":"not_published","ebayListingId":null,"ebayOfferId":null,"alreadyPublished":false}}
+                    """
+                )
+            case ("GET", "/v1/listings/\(listingID.uuidString.lowercased())/ebay/preflight"):
+                return Self.response(
+                    status: 200,
+                    json: """
+                    {"data":{"listingId":"\(listingID.uuidString.lowercased())","title":"Listing","description":"Seller draft.","effectivePrice":{"amount":58.25,"label":"What will be listed"},"photoCount":1,"marketplace":"EBAY_US","ebayCondition":"USED_VERY_GOOD","itemSpecifics":{},"reviewRevision":"\(revision.uuidString.lowercased())","connection":{"connected":true,"ebayUsername":"seller"},"publishEligibility":{"enabled":false,"eligible":false}}}
+                    """
+                )
+            case ("POST", "/v1/listings/\(listingID.uuidString.lowercased())/ebay/publish"):
+                return Self.response(status: status, json: body)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let flow = EbayPublishFlowStore(
+            listingID: listingID,
+            service: EbayPublishAPIClient(
+                baseURL: URL(string: "https://snaplist.dev")!,
+                tokenProvider: EbayPublishTestBearer(),
+                session: session
+            ),
+            oauth: EbayOAuthFixtureRunner(result: .connected),
+            attemptStore: MemoryEbayPublishAttemptStore()
+        )
+        await flow.load()
+        await flow.confirmPublish()
+        return (flow, requests.publishStatusRequestCount)
+    }
+
+    func testEbaySetupRefusalShowsWhatIsMissingWithAButtonToFixItNotAnUnknownOutcome() async {
+        let (flow, statusReads) = await flowAfterPublishAnswers(
+            status: 422,
+            body: """
+            {"error":{"code":"invalid_request","message":"Your eBay account has more than one inventory location.","details":{"reason":"ebay_policy_setup_required","setupState":"selectionRequired","helpUrl":"https://www.bizpolicy.ebay.com/businesspolicy/manage"}}}
+            """
+        )
+
+        let helpURL = URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
+        XCTAssertEqual(
+            flow.screen,
+            .result(.ebaySetupRequired(
+                message: "Your eBay account has more than one inventory location.",
+                helpURL: helpURL
+            ))
+        )
+        let copy = EbayResultCopy(
+            state: .ebaySetupRequired(message: "m", helpURL: helpURL)
+        )
+        XCTAssertEqual(copy.headline, "Finish your eBay setup.")
+        XCTAssertEqual(copy.primary, "Open eBay setup")
+        XCTAssertEqual(copy.secondary, "Go to Flips")
+        XCTAssertEqual(statusReads, 1)
+    }
+
+    func testDefiniteNonValidationRefusalsAreNeverTheAmbiguousOutcome() async {
+        for status in [400, 403, 404, 412, 428] {
+            let (flow, statusReads) = await flowAfterPublishAnswers(
+                status: status,
+                body: #"{"error":{"code":"forbidden","message":"eBay delivery requires an account."}}"#
+            )
+            XCTAssertEqual(
+                flow.screen,
+                .result(.sellerFixableRefusal(
+                    message: "eBay delivery requires an account."
+                )),
+                "HTTP \(status) must be a definite refusal"
+            )
+            XCTAssertEqual(statusReads, 1, "HTTP \(status) must not poll for an outcome")
+        }
+    }
+
     func testPreflightCarriesTheServerEffectivePriceAndMappedListingTruth() async throws {
         let listingID = UUID(
             uuidString: "37700000-0000-4000-8000-000000000014"

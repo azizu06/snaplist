@@ -149,7 +149,8 @@ enum EbayPublishSensoryFeedbackPolicy {
         }
         switch currentState {
         case .published: return .success
-        case .unavailable, .sellerFixableRefusal, .ebaySideChanged: return .error
+        case .unavailable, .sellerFixableRefusal, .ebaySetupRequired, .ebaySideChanged:
+            return .error
         case .publishing, .outcomeNotYetKnown: return nil
         }
     }
@@ -593,6 +594,7 @@ struct EbayPublishView: View {
                 switch state {
                 case .unavailable: Task { await store.retryPublish() }
                 case .ebaySideChanged: Task { await store.checkConnection() }
+                case .ebaySetupRequired(_, let helpURL?): openURL(helpURL)
                 default: goToTrophyWall()
                 }
             },
@@ -1799,6 +1801,15 @@ struct EbayResultCopy {
                 "This listing was not posted.", "Not posted",
                 message,
                 nil, "Go to Flips", nil, "seller-fixable-refusal", .neutral
+            )
+        case .ebaySetupRequired(let message, let helpURL):
+            (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
+                "Finish your eBay setup.", "Not posted",
+                message,
+                "Nothing was sent to eBay. Your listing is saved.",
+                helpURL == nil ? "Go to Flips" : "Open eBay setup",
+                helpURL == nil ? nil : "Go to Flips",
+                "ebay-setup-required", .neutral
             )
         case .outcomeNotYetKnown:
             (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (

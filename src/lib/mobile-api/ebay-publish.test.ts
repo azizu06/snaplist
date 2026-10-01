@@ -895,9 +895,90 @@ describe("mobile eBay publish boundary", () => {
         message:
           "Your eBay account has no return policy for EBAY_US. "
           + "Add it in eBay, then try publishing again.",
+        details: {
+          reason: "ebay_policy_setup_required",
+          setupState: "setupRequired",
+          helpUrl: "https://www.bizpolicy.ebay.com/businesspolicy/manage",
+        },
       },
     });
     expect(adapter.requests).toEqual([]);
+  });
+
+  it("answers an ambiguous inventory location with a definite actionable reason before any eBay write", async () => {
+    const fixture = publishFixtureClient();
+    fixture.connectionState.current!.policy_location_bindings = {};
+    const adapter = new MockEbayAdapter({
+      policyLocationCandidates: {
+        fulfillmentPolicies: [
+          { id: "fulfillment-1", label: "Fulfillment", providerDefault: false },
+        ],
+        paymentPolicies: [
+          { id: "payment-1", label: "Payment", providerDefault: false },
+        ],
+        returnPolicies: [
+          { id: "return-1", label: "Return", providerDefault: false },
+        ],
+        inventoryLocations: [
+          { id: "warehouse-a", label: "Warehouse A", providerDefault: false },
+          { id: "warehouse-b", label: "Warehouse B", providerDefault: false },
+        ],
+      },
+    });
+    const handler = ebayHandler({
+      adapter,
+      client: fixture.client,
+      requestId: "request-selection-required",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "invalid_request",
+        details: {
+          reason: "ebay_policy_setup_required",
+          setupState: "selectionRequired",
+        },
+      },
+    });
+    expect(adapter.requests).toEqual([]);
+  });
+
+  it("publishes with the one SnapList-created location when the seller has several", async () => {
+    const fixture = publishFixtureClient();
+    fixture.connectionState.current!.policy_location_bindings = {};
+    const adapter = new MockEbayAdapter({
+      policyLocationCandidates: {
+        fulfillmentPolicies: [
+          { id: "fulfillment-1", label: "Fulfillment", providerDefault: false },
+        ],
+        paymentPolicies: [
+          { id: "payment-1", label: "Payment", providerDefault: false },
+        ],
+        returnPolicies: [
+          { id: "return-1", label: "Return", providerDefault: false },
+        ],
+        inventoryLocations: [
+          { id: "SellRaze", label: "SellRaze", providerDefault: false },
+          { id: "snaplist-orlando", label: "snaplist-orlando", providerDefault: false },
+        ],
+      },
+    });
+    const handler = ebayHandler({
+      adapter,
+      client: fixture.client,
+      requestId: "request-snaplist-location",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+
+    expect(response.status).toBe(200);
+    expect(adapter.requests).toHaveLength(1);
+    expect(adapter.requests[0]).toMatchObject({
+      merchantLocationKey: "snaplist-orlando",
+    });
   });
 
   it("uses the one canonical not-connected copy the setup service exports", async () => {

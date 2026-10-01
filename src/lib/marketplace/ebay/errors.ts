@@ -26,6 +26,24 @@ export class PublishValidationError extends Error {
 }
 
 /**
+ * The seller's eBay account lacks (or has too many of) a business policy or
+ * inventory location, so nothing was sent to eBay. The fix is on eBay, so the
+ * mobile API answers 422 with a machine-readable `reason` and the page that
+ * owns the fix instead of leaving the client to parse prose.
+ */
+export class EbayPolicySetupRequiredError extends PublishValidationError {
+  constructor(
+    message: string,
+    readonly setupState: "setupRequired" | "selectionRequired",
+    readonly helpUrl: string | null,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = "EbayPolicySetupRequiredError";
+  }
+}
+
+/**
  * The ONE actionable message every publish surface (server action, API route,
  * activity feed) shows for an eBay auth failure. The seller's fix is always the
  * same — reconnect in Settings — so the copy is a constant, not per-caller prose.

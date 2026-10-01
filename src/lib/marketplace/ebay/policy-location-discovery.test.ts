@@ -177,6 +177,63 @@ describe("discoverAndBindEbayPolicyLocation", () => {
     });
   });
 
+  it("binds the one SnapList-created inventory location among several", async () => {
+    const store = new TenantStore(ACCOUNT_GENERATION_A, GENERATION_A);
+    const locations = fixture("seller-a");
+    locations.inventoryLocations = [
+      candidate("SellRaze", "SellRaze"),
+      candidate("snaplist-orlando", "snaplist-orlando"),
+    ];
+
+    const result = await discoverAndBindEbayPolicyLocation({
+      marketplaceId: "EBAY_US",
+      adapter: fixtureAdapter(ACCOUNT_GENERATION_A, locations),
+      store,
+    });
+
+    expect(result.state).toBe("ready");
+    expect(result.inventoryLocation).toMatchObject({
+      state: "bound",
+      selectedId: "snaplist-orlando",
+    });
+    expect(result.inventoryLocation.candidates).toHaveLength(2);
+  });
+
+  it("still requires a choice when several locations are SnapList-created", async () => {
+    const store = new TenantStore(ACCOUNT_GENERATION_A, GENERATION_A);
+    const locations = fixture("seller-a");
+    locations.inventoryLocations = [
+      candidate("snaplist-orlando", "Orlando"),
+      candidate("snaplist-tampa", "Tampa"),
+    ];
+
+    const result = await discoverAndBindEbayPolicyLocation({
+      marketplaceId: "EBAY_US",
+      adapter: fixtureAdapter(ACCOUNT_GENERATION_A, locations),
+      store,
+    });
+
+    expect(result.state).toBe("selectionRequired");
+    expect(result.inventoryLocation).toMatchObject({ selectedId: null });
+  });
+
+  it("never infers a SnapList owner for policies from their ids", async () => {
+    const store = new TenantStore(ACCOUNT_GENERATION_A, GENERATION_A);
+    const policies = fixture("seller-a");
+    policies.fulfillmentPolicies = [
+      candidate("snaplist-ship", "SnapList ship"),
+      candidate("other-ship", "Other"),
+    ];
+
+    const result = await discoverAndBindEbayPolicyLocation({
+      marketplaceId: "EBAY_US",
+      adapter: fixtureAdapter(ACCOUNT_GENERATION_A, policies),
+      store,
+    });
+
+    expect(result.state).toBe("selectionRequired");
+  });
+
   it("rejects discovery completed after the seller reconnects", async () => {
     const store = new TenantStore(ACCOUNT_GENERATION_A, GENERATION_A);
     const adapter: EbayPolicyLocationDiscoveryAdapter = {
