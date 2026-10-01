@@ -1059,8 +1059,11 @@ private struct TrophyWallProcessingActivityView: View {
             )
 
             Text(activity.text)
-                .snapListTypography(.body)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(SnapListColorToken.actionDeep.color)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(SnapListColorToken.actionTint.color, in: .capsule)
 
             Spacer(minLength: 0)
         }
