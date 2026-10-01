@@ -67,6 +67,27 @@ describe("classifySoldComp", () => {
     expect(match.reasons).not.toContain("variant-conflict");
   });
 
+  it.each([
+    { model: "DualSense Spider-Man Limited Edition" },
+    { resolvedName: "DualSense Spider-Man Limited Edition" },
+    { model: "DualSense", specs: ["Spider-Man Limited Edition"] },
+  ])("rejects a different named edition from canonical identity %j", identity => {
+    const match = classifySoldComp(
+      candidate("Sony DualSense Wolverine Limited Edition", "Pre-Owned"),
+      { brand: "Sony", condition: "good", ...identity },
+    );
+    expect(match.classification).toBe("reject");
+    expect(match.reasons).toContain("variant-conflict");
+  });
+
+  it("preserves a known edition across punctuation and title word-order differences", () => {
+    const match = classifySoldComp(
+      candidate("Sony DualSense Limited Edition Spider Man", "Pre-Owned"),
+      { brand: "Sony", model: "DualSense", specs: ["Spider-Man Limited Edition"], condition: "good" },
+    );
+    expect(match.classification).not.toBe("reject");
+  });
+
   it("accepts equivalent generation and storage expressions as an anchor", () => {
     const signal: ItemSignal = {
       brand: "Amazon",

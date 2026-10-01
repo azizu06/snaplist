@@ -68,6 +68,17 @@ describe("bounded demo sold research", () => {
     })).toBeNull();
   });
 
+  it("does not substitute a differently named limited edition during family research", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValue({
+      status: "SUCCEEDED",
+      items: [sale("Sony PS5 DualSense Marvel’s Wolverine Limited Edition", 149.99, 1)],
+    });
+    expect(await provider(runActor).price({
+      brand: "Sony", model: "DualSense", category: "Wireless controller", condition: "good",
+      specs: ["Marvel’s Spider-Man Limited Edition"],
+    })).toBeNull();
+  });
+
   it("broadens precise MacBook research twice, preserving screen size and labeling configuration differences", async () => {
     const runActor = vi.fn<RunApifySoldActor>().mockResolvedValueOnce({ status: "SUCCEEDED", items: [] })
       .mockResolvedValueOnce({ status: "SUCCEEDED", items: [sale("Apple MacBook Pro 14-inch 16GB", 900, 1), sale("Apple MacBook Pro 14-inch 16GB", 1000, 2)] })

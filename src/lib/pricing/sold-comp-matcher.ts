@@ -331,8 +331,16 @@ export function unsupportedSoldEdition(
   comp: SoldCompCandidate,
   signal: ItemSignal,
 ): boolean {
-  return PREMIUM_EDITION_RE.test(normalizeComparableText(comp.title ?? ""))
-    && !PREMIUM_EDITION_RE.test(identityText(signal));
+  const title = normalizeComparableText(comp.title ?? "");
+  if (!PREMIUM_EDITION_RE.test(title)) return false;
+  const editions = identifiedSoldEditionSpecs(signal);
+  if (editions.length === 0) return true;
+  // A known Spider-Man edition cannot authorize a Wolverine sale merely
+  // because both say "limited edition". Allow word-order/punctuation changes.
+  const observed = new Set(title.split(" "));
+  return editions.some(edition =>
+    normalizeComparableText(edition).split(" ").some(token => !observed.has(token)),
+  );
 }
 
 function containsPhrase(text: string, phrase: string): boolean {
