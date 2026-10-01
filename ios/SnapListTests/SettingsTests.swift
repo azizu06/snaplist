@@ -166,6 +166,7 @@ final class SettingsTests: XCTestCase {
             Set(deletionClaims),
             [
                 SettingsSignOutCopy.deletionIsElsewhere,
+                "Your account stays. This is not account deletion.",
             ],
             "a sign-out screen may point at deletion, never announce one"
         )
@@ -465,7 +466,7 @@ final class SettingsTests: XCTestCase {
     func testSignOutCopyNamesTheLocalItemCopyItActuallyDeletes() {
         XCTAssertTrue(
             SettingsSignOutCopy.effects[0].contains(
-                "this iPhone's copy of anything it is holding for an item"
+                "this iPhone's copy of any item"
             ),
             "effects[0] must name the item copy the transaction deletes, not only photos and a voice note"
         )
@@ -482,7 +483,7 @@ final class SettingsTests: XCTestCase {
 
         XCTAssertTrue(
             SettingsSignOutCopy.sessionNotEnded.contains(
-                "this iPhone's copy of anything it was holding for an item"
+                "this iPhone's copy of any item"
             ),
             "sessionNotEnded understates the same removal effects[0] now names"
         )

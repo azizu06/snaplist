@@ -339,7 +339,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(confirmation.waitForExistence(timeout: 3), app.debugDescription)
         // The seller is told the account survives before they commit, not after.
         XCTAssertTrue(
-            app.staticTexts["Your account stays."]
+            app.staticTexts["Your account stays. This is not account deletion."]
                 .waitForExistence(timeout: 3),
             app.debugDescription
         )

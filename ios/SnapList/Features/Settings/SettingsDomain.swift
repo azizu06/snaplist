@@ -47,14 +47,14 @@ enum SettingsSignOutCopy {
 
     static let effectTitle = "On this iPhone"
     static let effects = [
-        "Unsent photos, voice notes, and this iPhone's item copies are removed.",
+        "Unsent photos, voice notes, and this iPhone's copy of any item are removed.",
         "Flips switches to the guest view.",
     ]
 
     static let unchangedTitle = "Stays the same"
     static let unchanged = [
-        "Your account stays.",
-        "Sent items return when you sign back in.",
+        "Your account stays. This is not account deletion.",
+        "Sent items stay on your account, so signing back in brings them back. This iPhone's item copy does not.",
         "Your subscription stays.",
     ]
 
@@ -69,7 +69,7 @@ enum SettingsSignOutCopy {
     /// longer true here — the photos, voice note, and item copy the
     /// `effects` bullet promised are already gone, not merely pending.
     static let sessionNotEnded =
-        "Unsent photos and item copies are removed, but you're still signed in. Try again."
+        "Unsent photos, voice notes, and this iPhone's copy of any item are already removed, but you're still signed in. Try again."
 
     /// `nil` for `.signedOut`, which shows no failure text at all.
     static func failureCopy(for outcome: SettingsSignOutOutcome) -> String? {
