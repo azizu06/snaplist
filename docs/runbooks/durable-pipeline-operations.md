@@ -273,20 +273,30 @@ select id, name from vault.secrets where name like 'snaplist_pipeline_%';
 select vault.update_secret('<id-from-above>', '<new value>');
 ```
 
+The included-offer device fence has its own worker. Existing installations that
+activated the two pipeline jobs before that worker shipped must also execute the
+`snaplist-included-offer-worker` schedule block in the template. Reuse the two
+existing Vault entries; do not recreate or rotate secrets to add this job.
+Without it, authenticated free-offer claims remain `queued`, even while the
+pipeline worker responds successfully with zero claimed messages.
+
 **6. Verify it is actually firing.** Wait two minutes, then run all three. Each
 has a specific pass condition:
 
 ```sql
--- (a) Both jobs registered and active.
+-- (a) All three jobs registered and active.
 select jobid, jobname, schedule, active from cron.job
-where jobname like 'snaplist-pipeline-%';
+where jobname like 'snaplist-pipeline-%'
+   or jobname = 'snaplist-included-offer-worker';
 --     expect snaplist-pipeline-worker '* * * * *' and
 --            snaplist-pipeline-maintenance '17 * * * *', both active = t
+--            snaplist-included-offer-worker '* * * * *', active = t
 
 -- (b) The schedule is executing without SQL errors.
 select j.jobname, d.status, d.start_time, d.return_message
 from cron.job_run_details d join cron.job j on j.jobid = d.jobid
 where j.jobname like 'snaplist-pipeline-%'
+   or j.jobname = 'snaplist-included-offer-worker'
 order by d.start_time desc limit 10;
 --     expect one 'succeeded' worker row per minute
 --     'failed' here means the SQL never left Postgres; read return_message
@@ -296,12 +306,20 @@ order by d.start_time desc limit 10;
 select id, status_code, created, left(content, 120) as body
 from net._http_response order by id desc limit 10;
 --     expect JSON bodies: {"claimed":...} / {"queueMessagesDeleted":...}
+--            included-offer: {"acked":[],"erasing":[],"expired":[],"opened":[...]}
 --     HTML (a <!DOCTYPE html> body, tens of KB) = redirected to /login
 --     status_code 0 or a populated error_msg = the origin was unreachable
 ```
 
 Then confirm real work moves: submit one item and watch it leave `queued` on its
 own, with no manual `curl`.
+
+For the included offer, confirm queue `read_ct` advances and the waiting claim
+reaches `awaiting_device_token`. A fresh DeviceCheck token still comes from the
+native client; scheduling cannot safely reserve an offer or set Apple's bit on
+the client's behalf. Claim selection uses oldest visibility time, so a deferred
+abandoned claim yields to already-waiting sellers while retaining its retry.
+The global writer lease and open-rendezvous check still serialize Apple writes.
 
 **7. Watch** queue age, retries, terminal failures, cleanup dead letters,
 database size, Storage, egress, invocations, and compute.
@@ -311,6 +329,7 @@ Rollback is non-destructive:
 ```sql
 select cron.unschedule('snaplist-pipeline-worker');
 select cron.unschedule('snaplist-pipeline-maintenance');
+select cron.unschedule('snaplist-included-offer-worker');
 ```
 
 Keep the queue, runs, Vault entries, and object cleanup jobs until the owner has
