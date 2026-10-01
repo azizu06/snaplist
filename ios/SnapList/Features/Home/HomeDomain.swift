@@ -317,6 +317,9 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
     /// actionless without being active AI analysis.
     let isAnalyzing: Bool
     let localCoverPhotoData: Data?
+    /// The server's signed copy of the first photo, drawn when the device holds
+    /// no staged bytes (a run accepted on another launch or device).
+    let coverPhotoURL: URL?
     let accessibilityLabel: String
     let accessibilityIdentifier: String
 
@@ -360,6 +363,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
         id = card.identity
         self.itemName = itemName
         localCoverPhotoData = card.localCoverPhotoData
+        coverPhotoURL = card.coverPhotoURL
 
         switch card.state {
         case .pendingUpload:
@@ -1196,6 +1200,7 @@ final class TrophyWallStore {
                     itemName: runDetail.item?.title,
                     listingID: runDetail.listingID,
                     coverPhotoURL: runDetail.delivery?.coverPhotoURL
+                        ?? runDetail.item?.coverPhotoURL
                 )
             )
         }
@@ -1251,7 +1256,8 @@ final class TrophyWallStore {
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 itemName: runDetail.item?.title,
                 listingID: runDetail.listingID,
-                coverPhotoURL: runDetail.delivery?.coverPhotoURL,
+                coverPhotoURL: runDetail.delivery?.coverPhotoURL
+                    ?? runDetail.item?.coverPhotoURL,
                 localCoverPhotoData: acceptedHandoff.localCoverPhotoData
             )
         )

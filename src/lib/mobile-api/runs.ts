@@ -325,6 +325,7 @@ function projectCanonicalRun(
   userId: string,
   delivery?: DeliveryProjection,
   draftTitle?: string | null,
+  coverPhotoUrl?: string,
 ): MobileRun {
   if (run.user_id !== userId) {
     throw new MobileRunUnavailableError("Run detail crossed the verified tenant boundary");
@@ -366,6 +367,7 @@ function projectCanonicalRun(
     item: {
       title: itemLabel(item.attributes, item.id, draftTitle),
       photoCount: item.photos.length,
+      ...(coverPhotoUrl ? { coverPhotoUrl } : {}),
     },
     requiredInput: null,
     terminalOutcome,
@@ -497,8 +499,11 @@ export function createMobileRunOperations(
       const deliveryRows = z.array(deliveryProjectionRowSchema).parse(
         rawDeliveryRows,
       );
-      const runs = pageRows.map((row) =>
-        projectCanonicalRun(
+      const runs = pageRows.map((row) => {
+        const coverPhotoUrl = row.item_projection.photos[0]
+          ? coverPhotoUrls.get(row.item_projection.photos[0])
+          : undefined;
+        return projectCanonicalRun(
           row.run_projection,
           row.item_projection,
           row.retry_projection,
@@ -508,9 +513,7 @@ export function createMobileRunOperations(
             row.item_projection,
             deliveryRows,
             input.userId,
-            row.item_projection.photos[0]
-              ? coverPhotoUrls.get(row.item_projection.photos[0])
-              : undefined,
+            coverPhotoUrl,
           ),
           draftListingTitle(
             deliveryRows.filter(
@@ -520,8 +523,9 @@ export function createMobileRunOperations(
             ),
             row.run_projection.listing_id,
           ),
-        )
-      );
+          coverPhotoUrl,
+        );
+      });
       const boundary = rows.length > input.limit ? pageRows.at(-1) : undefined;
 
       return mobileRunCollectionSchema.parse({

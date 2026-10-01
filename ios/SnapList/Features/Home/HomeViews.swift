@@ -1144,10 +1144,9 @@ struct TrophyWallCollectionMessageView: View {
     }
 }
 
-/// The leading slot on a processing row. Until the run reaches delivery the
-/// server has no cover photo to hand back, so the only photo of this item that
-/// exists anywhere is the one the seller staged on this phone; the row carries
-/// those bytes rather than a staged path, because the intake is deleted the
+/// The leading slot on a processing row. The photo the seller staged on this
+/// phone wins while the device still holds it, otherwise the server's signed
+/// cover photo draws; the row carries the staged bytes rather than a staged path, because the intake is deleted the
 /// moment the run is accepted and a path under the scope-digest directory stops
 /// resolving when that digest changes (#855). Bytes that are absent or no longer
 /// decode leave the slot exactly as the wall drew it before.
@@ -1160,17 +1159,21 @@ struct TrophyWallProcessingRowPhoto: View {
     /// on `UIImage.isEqual:`, which is not a documented value comparison.
     enum Content {
         case staged(UIImage)
+        case remote(URL)
         case placeholder
     }
 
     let row: TrophyWallProcessingRow
 
     static func content(for row: TrophyWallProcessingRow) -> Content {
-        guard let data = row.localCoverPhotoData,
-              let image = UIImage(data: data) else {
-            return .placeholder
+        if let data = row.localCoverPhotoData,
+           let image = UIImage(data: data) {
+            return .staged(image)
         }
-        return .staged(image)
+        if let url = row.coverPhotoURL {
+            return .remote(url)
+        }
+        return .placeholder
     }
 
     var body: some View {
@@ -1190,6 +1193,21 @@ struct TrophyWallProcessingRowPhoto: View {
                         .clipShape(
                             .rect(cornerRadius: Self.cornerRadiusPoints)
                         )
+                case .remote(let url):
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(
+                                width: Self.sidePoints,
+                                height: Self.sidePoints
+                            )
+                            .clipShape(
+                                .rect(cornerRadius: Self.cornerRadiusPoints)
+                            )
+                    } placeholder: {
+                        EmptyView()
+                    }
                 case .placeholder:
                     EmptyView()
                 }

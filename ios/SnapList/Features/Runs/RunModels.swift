@@ -87,21 +87,27 @@ struct RunTimestamps: Decodable, Equatable, Sendable {
 struct RunItemTruth: Decodable, Equatable, Sendable {
     let title: String
     let photoCount: Int
+    /// Signed URL of the item's first photo, present while the run is still in
+    /// progress so a To list row can draw it before any delivery exists.
+    let coverPhotoURL: URL?
 
-    init(title: String, photoCount: Int) {
+    init(title: String, photoCount: Int, coverPhotoURL: URL? = nil) {
         self.title = title
         self.photoCount = photoCount
+        self.coverPhotoURL = coverPhotoURL
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case title
         case photoCount
+        case coverPhotoURL = "coverPhotoUrl"
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.runContractContainer(keyedBy: CodingKeys.self)
         title = try values.decode(String.self, forKey: .title)
         photoCount = try values.decode(Int.self, forKey: .photoCount)
+        coverPhotoURL = try values.decodeIfPresent(URL.self, forKey: .coverPhotoURL)
         try values.require(!title.isEmpty, forKey: .title)
         try values.require(photoCount >= 0, forKey: .photoCount)
     }
