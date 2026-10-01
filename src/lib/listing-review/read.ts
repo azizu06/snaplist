@@ -210,6 +210,15 @@ export interface ListingReviewDataClient {
     data: unknown;
     error: ListingReviewDataError | null;
   }>;
+  /**
+   * The same projection for a listing eBay has confirmed as published. The
+   * draft read above excludes posted listings so every edit path stays bound
+   * to drafts; this read lets the seller still open what SnapList wrote.
+   */
+  readPublishedReview?(runId: string, bearerToken: string): PromiseLike<{
+    data: unknown;
+    error: ListingReviewDataError | null;
+  }>;
   readReviewRevisions(itemId: string, bearerToken: string): PromiseLike<{
     data: unknown;
     error: ListingReviewDataError | null;
@@ -375,8 +384,20 @@ export function createListingReviewReader(
           "Listing Review read failed.",
         );
       }
-      if (result.data == null) return null;
-      const raw = rawReviewSchema.safeParse(result.data);
+      let data = result.data;
+      if (data == null && dataClient.readPublishedReview) {
+        // A posted listing is an addition to the run, not part of its
+        // contract: when this read is unavailable (for example before its
+        // migration reaches an environment) the run still answers without a
+        // review, exactly as it did before posted listings could open.
+        const published = await dataClient.readPublishedReview(
+          input.runId,
+          readToken,
+        );
+        data = published.error ? null : published.data;
+      }
+      if (data == null) return null;
+      const raw = rawReviewSchema.safeParse(data);
       if (!raw.success) {
         throw new ListingReviewProjectionError(
           "Listing Review result is malformed.",
@@ -452,6 +473,14 @@ export function createConfiguredSupabaseListingReviewReader(input: {
     async readReview(runId, bearerToken) {
       return supabaseClient(input, bearerToken).rpc(
         "get_mobile_listing_review",
+        {
+          p_run_id: runId,
+        },
+      );
+    },
+    async readPublishedReview(runId, bearerToken) {
+      return supabaseClient(input, bearerToken).rpc(
+        "get_mobile_published_listing_review",
         {
           p_run_id: runId,
         },

@@ -679,3 +679,66 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
     expect(cancel).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /v1/runs/:id published Listing Review", () => {
+  function publishedOnlyClient(
+    published: { data: unknown; error: { message: string } | null },
+  ): ListingReviewDataClient {
+    return {
+      ...dataClient(),
+      readReview: vi.fn().mockResolvedValue({ data: null, error: null }),
+      readPublishedReview: vi.fn().mockResolvedValue(published),
+    };
+  }
+
+  it("opens the same SnapList listing for a listing already posted to eBay", async () => {
+    const reviewClient = publishedOnlyClient({
+      data: rawReview(),
+      error: null,
+    });
+    const response = await handler({
+      principal: { kind: "clerk", userId: USER_ID },
+      reviewClient,
+    })(
+      new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}`, {
+        headers: { authorization: "Bearer clerk-bearer" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        legalActions: { canOpenReview: true },
+        review: {
+          binding: { runId: RUN_ID, listingId: LISTING_ID },
+          listing: {
+            title: "Sony WH-1000XM4 Noise-Canceling Headphones",
+          },
+        },
+      },
+    });
+    expect(reviewClient.readPublishedReview).toHaveBeenCalledWith(
+      RUN_ID,
+      "clerk-bearer",
+    );
+  });
+
+  it("keeps the run readable without a review when the posted read is unavailable", async () => {
+    const response = await handler({
+      principal: { kind: "clerk", userId: USER_ID },
+      reviewClient: publishedOnlyClient({
+        data: null,
+        error: { message: "function does not exist" },
+      }),
+    })(
+      new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}`, {
+        headers: { authorization: "Bearer clerk-bearer" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.legalActions.canOpenReview).toBe(false);
+    expect(body.data.review).toBeUndefined();
+  });
+});

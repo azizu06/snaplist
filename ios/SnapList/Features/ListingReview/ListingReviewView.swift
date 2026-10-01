@@ -275,9 +275,15 @@ struct ListingReviewView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         stateBanner
 
-                        identityAndPricing(snapshot: snapshot, draft: draft)
+                        // A posted listing shows what SnapList wrote, but
+                        // eBay now owns it: edits here would never reach the
+                        // live posting, so the fields read only.
+                        Group {
+                            identityAndPricing(snapshot: snapshot, draft: draft)
 
-                        details(snapshot: snapshot, draft: draft)
+                            details(snapshot: snapshot, draft: draft)
+                        }
+                        .disabled(ownEbayPostingURL != nil)
 
                         if let ownEbayPostingURL {
                             viewOnEbayEntry(ownEbayPostingURL)
@@ -943,7 +949,7 @@ struct ListingReviewView: View {
             // did. Fix item stays — it opens guided correction, a materially
             // different action from typing in place — but without it Done is
             // the only thing left for the footer to offer.
-            if correctionAvailability == .offered {
+            if correctionAvailability == .offered, ownEbayPostingURL == nil {
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(spacing: 10) {
                         secondaryButton

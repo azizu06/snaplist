@@ -135,8 +135,9 @@ struct ProcessingActionExecutor: ProcessingActionExecuting {
         }
     }
 
-    /// Review reads only unpublished drafts, so a tile for a listing already
-    /// live on eBay lands here. Only eBay's confirmed publication of that
+    /// A posted listing normally opens Listing Review read-only. Where the
+    /// server cannot read it yet, a tile for a listing already live on eBay
+    /// lands here. Only eBay's confirmed publication of that
     /// listing yields a destination; anything else stays refused.
     private func openEbayPosting(runID: UUID) async -> ProcessingActionOutcome? {
         guard let ebayPublishService,
