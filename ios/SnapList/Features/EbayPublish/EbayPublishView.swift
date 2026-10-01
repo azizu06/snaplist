@@ -94,6 +94,8 @@ struct EbayPublishJourneyHost: View {
                     store: flowStore,
                     forceReducedMotion: forceReducedMotion,
                     listingTitle: listingTitle,
+                    listingPhotos: listingSnapshot.photos,
+                    listingPrice: listingSnapshot.pricing.effectivePrice,
                     resultThumbnailSource: coverPhotoURL.map {
                         .authoritative($0)
                     } ?? .neutral,
@@ -158,6 +160,10 @@ struct EbayPublishView: View {
     @Bindable var store: EbayPublishFlowStore
     let forceReducedMotion: Bool
     let listingTitle: String
+    /// The saved listing's ordered photos and effective price, so the
+    /// connect path keeps the item in view (#1159 follow-up, B2+).
+    let listingPhotos: [ListingReviewPhoto]
+    let listingPrice: Decimal?
     let resultThumbnailSource: EbayResultThumbnailSource
     let backToListing: () -> Void
     let goToTrophyWall: () -> Void
@@ -173,7 +179,6 @@ struct EbayPublishView: View {
             case .connection(let state): connection(state)
             case .confirmation(let state): confirmation(state)
             case .result(let state): result(state)
-            case .account: account
             }
         }
         .background(SnapListColorToken.canvas.color)
@@ -226,13 +231,6 @@ struct EbayPublishView: View {
                     .accessibilityIdentifier("ebay-publish.back")
                 }
             }
-            if usesApprovedConnectVisuals {
-                ToolbarItem(placement: .principal) {
-                    Text("Connect eBay")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                }
-            }
         }
         .sensoryFeedback(trigger: store.screen) { previous, current in
             EbayPublishSensoryFeedbackPolicy.resultFeedback(
@@ -252,7 +250,6 @@ struct EbayPublishView: View {
         case .result(.published): "Posted to eBay"
         case .result(.outcomeNotYetKnown): "Checking with eBay"
         case .result: "Not posted"
-        case .account: "eBay account"
         }
     }
 
@@ -263,8 +260,10 @@ struct EbayPublishView: View {
         }
     }
 
+    /// Every connection state is the same B2+ screen: the listing card and
+    /// the path to eBay carry the title, so the bar holds only the way back.
     private var usesApprovedConnectVisuals: Bool {
-        if case .connection(.notConnected) = store.screen {
+        if case .connection = store.screen {
             true
         } else {
             false
@@ -303,101 +302,54 @@ struct EbayPublishView: View {
     }
 
     private func connection(_ state: EbayConnectionViewState) -> some View {
-        let copy = EbayConnectionCopy(state: state)
-        return EbayCenteredActionScreen(
-            headingFocusTarget: EbayPublishHeadingFocusTarget(
-                screen: .connection(state)
-            ),
-            headline: copy.headline,
-            detail: copy.body,
-            statements: state == .notConnected ? [
-                "SnapList prepares the listing. You confirm before anything posts.",
-                "You sign in on eBay’s own page. SnapList never sees your eBay password.",
-                "You can remove this connection at any time.",
-            ] : [],
-            systemImage: state == .notConnected
-                ? nil
-                : state == .connected ? "checkmark.circle.fill" : "link",
-            primary: copy.primary,
-            secondary: copy.secondary,
-            forceReducedMotion: reduceMotion,
-            usesApprovedConnectVisuals: state == .notConnected,
-            primaryAction: {
-                switch state {
-                case .connected: store.reviewBeforePosting()
-                default: Task { await store.connect() }
-                }
-            },
-            secondaryAction: {
-                switch state {
-                case .connecting: store.cancelConnection()
-                case .connected: store.manageConnection()
-                default: backToListing()
-                }
-            }
+        let copy = EbayConnectionCopy(
+            state: state,
+            username: store.connectedUsername
         )
-    }
-
-    private func confirmation(
-        _ state: EbayConfirmationViewState
-    ) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if let banner = confirmationBanner(state) {
-                    EbayNoticeCard(
-                        title: banner.title,
-                        detail: banner.body,
-                        caution: true
-                    )
-                    .accessibilityIdentifier("ebay-publish.confirmation.banner")
-                }
-
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
                 EbayPublishFocusedHeading(
-                    text: confirmationHeading(state),
+                    text: copy.headline,
                     target: EbayPublishHeadingFocusTarget(
-                        screen: .confirmation(state)
+                        screen: .connection(state)
                     )
                 )
-                    .snapListTypography(.displayTitle)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .snapListTypography(.displayTitle)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .fixedSize(horizontal: false, vertical: true)
 
-                if let preflight = store.preflight {
-                    destinationCard(preflight)
-                    fieldsCard(preflight)
-                    consent(state)
+                EbayListingPhotoCard(
+                    photos: listingPhotos,
+                    title: listingTitle,
+                    price: listingPrice.map(EbayPublishCurrency.string)
+                ) {
+                    confirmationThumbnail
                 }
+
+                EbayConnectPath(
+                    steps: copy.steps,
+                    accountTitle: copy.accountTitle,
+                    accountConnected: state == .connected,
+                    reduceMotion: reduceMotion
+                )
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.vertical, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 16)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
-                if state == .refreshFailed {
-                    SnapListPrimaryButton(
-                        title: "Try loading current details",
-                        forceReducedMotion: reduceMotion
-                    ) { Task { await store.retryPreflight() } }
-                } else if state == .missingFields {
-                    SnapListPrimaryButton(
-                        title: "Finish this listing",
-                        forceReducedMotion: reduceMotion,
-                        action: backToListing
-                    )
-                } else if state == .connectionLost {
-                    SnapListPrimaryButton(
-                        title: "Reconnect eBay",
-                        forceReducedMotion: reduceMotion
-                    ) { Task { await store.connect() } }
-                } else {
-                    if state == .ready {
-                        EbayConfirmationPrimaryButton(
-                            title: "Post to eBay"
-                        ) { Task { await store.confirmPublish() } }
-                    } else {
-                        SnapListPrimaryButton(
-                            title: "Post to eBay as \(accountName)",
-                            forceReducedMotion: reduceMotion
-                        ) { Task { await store.confirmPublish() } }
+                if let primary = copy.primary {
+                    EbayConnectPrimaryButton(title: primary) {
+                        switch state {
+                        case .connected: store.reviewBeforePosting()
+                        default: Task { await store.connect() }
+                        }
+                    }
+                }
+                if let secondary = copy.secondary {
+                    SnapListSecondaryButton(title: secondary) {
+                        store.cancelConnection()
                     }
                 }
             }
@@ -408,23 +360,169 @@ struct EbayPublishView: View {
         }
     }
 
-    private func destinationCard(
+    private func confirmation(
+        _ state: EbayConfirmationViewState
+    ) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                EbayPublishFocusedHeading(
+                    text: confirmationHeading(state),
+                    target: EbayPublishHeadingFocusTarget(
+                        screen: .confirmation(state)
+                    )
+                )
+                    .snapListTypography(.displayTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let banner = confirmationBanner(state) {
+                    EbayNoticeCard(
+                        title: banner.title,
+                        detail: banner.body,
+                        caution: true
+                    )
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("ebay-publish.confirmation.banner")
+                }
+
+                if let preflight = store.preflight {
+                    destinationSection(preflight)
+                    fieldsSection(preflight)
+                    Text("Shipping and returns come from your eBay account.")
+                        .snapListTypography(.status)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.vertical, 20)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 8) {
+                switch state {
+                case .refreshFailed:
+                    SnapListPrimaryButton(
+                        title: "Try again",
+                        forceReducedMotion: reduceMotion
+                    ) { Task { await store.retryPreflight() } }
+                case .missingFields:
+                    SnapListPrimaryButton(
+                        title: "Finish this listing",
+                        forceReducedMotion: reduceMotion,
+                        action: backToListing
+                    )
+                case .connectionLost:
+                    SnapListPrimaryButton(
+                        title: "Reconnect eBay",
+                        forceReducedMotion: reduceMotion
+                    ) { Task { await store.connect() } }
+                case .ready, .listingChanged, .accountChanged:
+                    // One action. The account it posts as sits in the
+                    // "Posting to" row, and a changed account or listing
+                    // says so in the banner above.
+                    EbayConfirmationPrimaryButton(
+                        title: "Post to eBay"
+                    ) { Task { await store.confirmPublish() } }
+                }
+            }
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.vertical, 10)
+            .background(SnapListColorToken.canvas.color)
+            .overlay(alignment: .top) { Divider() }
+        }
+    }
+
+    private func destinationSection(
         _ preflight: EbayPublishPreflight
     ) -> some View {
-        HStack(spacing: 12) {
-            confirmationThumbnail
-                .frame(width: 52, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 3) {
+        EbayListSection(title: "Posting to") {
+            HStack(spacing: 12) {
+                Image("MarketplaceMarkEbay")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 40)
+                    .accessibilityHidden(true)
+                Spacer(minLength: 8)
                 Text(
-                    "\(EbayPublishPresentation.marketplace(preflight.marketplace)), as \(accountName)"
+                    "\(accountName) · \(EbayPublishPresentation.marketplace(preflight.marketplace))"
                 )
                 .snapListTypography(.rowTitle)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
+            .padding(.vertical, 12)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "Posting to eBay as \(accountName), \(EbayPublishPresentation.marketplace(preflight.marketplace))"
+            )
+            .accessibilityIdentifier("ebay-publish.confirmation.destination")
         }
-        .ebayCard()
+    }
+
+    private func fieldsSection(_ preflight: EbayPublishPreflight) -> some View {
+        EbayListSection(title: "What eBay receives") {
+            HStack(spacing: 12) {
+                confirmationThumbnail
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Text(preflight.title)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 10)
+            Divider()
+            EbayValueRow(
+                label: "Price",
+                value: EbayPublishCurrency.string(
+                    preflight.effectivePrice.amount
+                )
+            )
+            Divider()
+            EbayValueRow(
+                label: "Condition",
+                value: EbayPublishPresentation.condition(
+                    preflight.ebayCondition
+                )
+            )
+            Divider()
+            EbayValueRow(
+                label: "Photos",
+                value: "\(preflight.photoCount), in this order"
+            )
+            Divider()
+            EbayDisclosureRow(
+                title: "Item specifics and description",
+                summary: nil,
+                expanded: $showsOutboundDetails
+            ) {
+                Text("ITEM SPECIFICS")
+                    .snapListTypography(.metadata)
+                    .foregroundStyle(SnapListColorToken.textTertiary.color)
+                if preflight.itemSpecifics.isEmpty {
+                    Text("Not added")
+                } else {
+                    ForEach(preflight.itemSpecifics.keys.sorted(), id: \.self) { key in
+                        EbayValueRow(
+                            label: key,
+                            value: preflight.itemSpecifics[key]?.joined(separator: ", ") ?? ""
+                        )
+                    }
+                }
+                Text("DESCRIPTION")
+                    .snapListTypography(.metadata)
+                    .foregroundStyle(SnapListColorToken.textTertiary.color)
+                    .padding(.top, 24)
+                Text(preflight.description)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .textSelection(.enabled)
+            }
+            .padding(.vertical, 2)
+        }
     }
 
     @ViewBuilder
@@ -471,82 +569,6 @@ struct EbayPublishView: View {
         .accessibilityHidden(true)
     }
 
-    private func fieldsCard(_ preflight: EbayPublishPreflight) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("WHAT EBAY RECEIVES")
-                .snapListTypography(.metadata)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-                .padding(.bottom, 10)
-            EbayValueRow(label: "Title", value: preflight.title)
-            Divider()
-            EbayValueRow(
-                label: "Condition",
-                value: EbayPublishPresentation.condition(
-                    preflight.ebayCondition
-                )
-            )
-            Divider()
-            EbayValueRow(
-                label: "Photos",
-                value: "\(preflight.photoCount) photos, in this order"
-            )
-            Divider()
-            EbayValueRow(
-                label: "Price to list",
-                value: EbayPublishCurrency.string(
-                    preflight.effectivePrice.amount
-                )
-            )
-            Divider()
-            EbayDisclosureRow(
-                title: "Item specifics and description",
-                summary: nil,
-                expanded: $showsOutboundDetails
-            ) {
-                Text("ITEM SPECIFICS")
-                    .snapListTypography(.metadata)
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                if preflight.itemSpecifics.isEmpty {
-                    Text("Not added")
-                } else {
-                    ForEach(preflight.itemSpecifics.keys.sorted(), id: \.self) { key in
-                        EbayValueRow(
-                            label: key,
-                            value: preflight.itemSpecifics[key]?.joined(separator: ", ") ?? ""
-                        )
-                    }
-                }
-                Text("DESCRIPTION")
-                    .snapListTypography(.metadata)
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                    .padding(.top, 24)
-                Text(preflight.description)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .textSelection(.enabled)
-            }
-        }
-        .ebayCard()
-    }
-
-    @ViewBuilder
-    private func consent(_ state: EbayConfirmationViewState) -> some View {
-        if state == .missingFields {
-            consentText("Nothing is posted from this screen.")
-        } else if state == .accountChanged {
-            consentText(
-                "This posts a live listing to eBay under \(accountName), not \(store.preparedUsername ?? "the previous account")."
-            )
-        }
-    }
-
-    private func consentText(_ text: String) -> some View {
-        Text(text)
-            .snapListTypography(.status)
-            .foregroundStyle(SnapListColorToken.textSecondary.color)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("ebay-publish.confirmation.consent")
-    }
-
     private func result(_ state: EbayResultViewState) -> some View {
         let copy = EbayResultCopy(state: state)
         return EbayResultActionScreen(
@@ -585,38 +607,53 @@ struct EbayPublishView: View {
         )
     }
 
-    private var account: some View {
-        EbayAccountScreenView(
-            connectedUsername: store.connectedUsername,
-            disconnect: { await store.disconnect() }
-        )
-    }
-
     private func confirmationBanner(
         _ state: EbayConfirmationViewState
     ) -> (title: String, body: String)? {
         switch state {
         case .ready: nil
         case .listingChanged: (
-            "This listing changed since you reviewed it",
-            "Nothing was sent to eBay. The details below are the current version. Confirm again to post it."
+            "Listing changed",
+            "Nothing was sent. Check the details, then post."
         )
         case .refreshFailed: (
-            "Current listing details could not be loaded",
-            "Nothing was sent to eBay. Posting stays blocked until SnapList can load and confirm the latest version."
+            "Couldn't load details",
+            "Nothing was sent. Posting is off until the details load."
         )
         case .missingFields: (
-            "This listing is not ready to post",
-            "eBay needs a title before this listing can go up. Add what is missing on the listing, then come back here."
+            "Listing not finished",
+            "eBay needs \(missingFieldsSummary). Nothing posts from here."
         )
         case .connectionLost: (
-            "This connection no longer works",
-            "Reconnect to post this listing. Your listing and these details are saved, and you will come back to this screen."
+            "Connection expired",
+            "Reconnect to post. Your listing and these details are saved."
         )
         case .accountChanged: (
-            "A different eBay account is connected",
-            "This listing was prepared for \(store.preparedUsername ?? "the previous account"). Confirm again to post it to \(accountName) instead."
+            "Different eBay account",
+            "This posts as \(accountName), not \(store.preparedUsername ?? "the previous account")."
         )
+        }
+    }
+
+    /// Names what eBay is missing, from the same three fields
+    /// `EbayPublishFlowStore` checks before it allows posting.
+    private var missingFieldsSummary: String {
+        guard let preflight = store.preflight else { return "a few more details" }
+        var missing: [String] = []
+        if preflight.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            missing.append("a title")
+        }
+        if preflight.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            missing.append("a description")
+        }
+        if preflight.photoCount == 0 {
+            missing.append("a photo")
+        }
+        switch missing.count {
+        case 0: return "a few more details"
+        case 1: return missing[0]
+        default:
+            return missing.dropLast().joined(separator: ", ") + " and " + missing[missing.count - 1]
         }
     }
 
@@ -624,75 +661,12 @@ struct EbayPublishView: View {
         _ state: EbayConfirmationViewState
     ) -> String {
         switch state {
-        case .refreshFailed: "Current listing details are unavailable."
-        case .missingFields: "This listing is not ready to post."
+        case .refreshFailed: "Details unavailable"
+        case .missingFields: "Not ready to post"
         default: "Post this to eBay?"
         }
     }
 
-}
-
-/// The connected-account screen, extracted so it can be reached from a
-/// second entry point (Settings, #865) without duplicating it. The item
-/// publish journey (`EbayPublishView.account`) and the Settings-scoped
-/// eBay connection screen both instantiate this directly; behavior,
-/// copy, and accessibility identifiers are identical from either entry
-/// point. `disconnect` is listing-independent on both callers'
-/// underlying stores, so this view carries no listing context.
-@MainActor
-struct EbayAccountScreenView: View {
-    let connectedUsername: String?
-    let disconnect: () async -> Void
-
-    @State private var showsDisconnectConfirmation = false
-
-    private var accountName: String {
-        connectedUsername ?? "your account"
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Your eBay account")
-                    .snapListTypography(.displayTitle)
-                    .accessibilityAddTraits(.isHeader)
-                EbayNoticeCard(
-                    title: "Connected as \(accountName)",
-                    detail: "SnapList can post listings to this account.",
-                    caution: false
-                )
-                Text("Payment, shipping and returns are set on your eBay account.")
-                    .snapListTypography(.body)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(SnapListColorToken.actionTint.color)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                SnapListDestructiveButton(title: "Disconnect eBay account") {
-                    showsDisconnectConfirmation = true
-                }
-                .accessibilityIdentifier("ebay-account.disconnect")
-            }
-            .padding(SnapListMetrics.screenGutter)
-        }
-        .accessibilityIdentifier("ebay-publish.account")
-        // This exact wording (including the "does not revoke on eBay's
-        // side" disclosure) is the one text the issue requires stays
-        // verbatim at every entry point (#865).
-        .confirmationDialog(
-            "Disconnect eBay account \(accountName)?",
-            isPresented: $showsDisconnectConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Disconnect", role: .destructive) {
-                Task { await disconnect() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "Listings already on eBay stay there and keep selling, but SnapList will not be able to see or change them.\n\nTo review which apps can use your eBay account, open your eBay account settings."
-            )
-        }
-    }
 }
 
 @MainActor
@@ -1305,64 +1279,399 @@ private actor GuestClaimQualifiedSessionHandler:
     }
 }
 
-private struct EbayConnectionCopy {
+/// B2+ connect and return copy (#1159 follow-up). One heading, the three
+/// steps of the path to eBay, and one action. A retry state marks the step
+/// it stopped at and says nothing was posted, instead of a paragraph.
+struct EbayConnectionCopy {
     let headline: String
-    let body: String
+    let steps: [EbayConnectStep]
+    let accountTitle: String
     let primary: String?
     let secondary: String?
     let identifier: String
 
-    init(state: EbayConnectionViewState) {
+    init(state: EbayConnectionViewState, username: String? = nil) {
+        let account = username?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let accountName = account?.isEmpty == false ? account! : nil
+
+        func path(
+            signIn: EbayConnectStep.Phase,
+            signInDetail: String = "SnapList never sees your password",
+            allow: EbayConnectStep.Phase = .upcoming,
+            allowDetail: String = "Turn it off any time in Settings",
+            post: EbayConnectStep.Phase = .upcoming
+        ) -> [EbayConnectStep] {
+            [
+                EbayConnectStep(title: "Sign in on eBay", detail: signInDetail, phase: signIn),
+                EbayConnectStep(title: "Let SnapList post", detail: allowDetail, phase: allow),
+                EbayConnectStep(
+                    title: "Review and post",
+                    detail: "Nothing posts until you tap Post",
+                    phase: post
+                ),
+            ]
+        }
+
+        accountTitle = state == .connected
+            ? accountName ?? "Your eBay account"
+            : "Your eBay account"
         switch state {
         case .notConnected:
-            (headline, body, primary, secondary, identifier) = (
-                "Connect your eBay account.",
-                "SnapList needs your permission before it can put a listing on eBay for you.",
-                "Continue to eBay", nil, "not-connected"
+            (headline, primary, secondary, identifier) = (
+                "Post to eBay", "Continue to eBay", nil, "not-connected"
             )
+            steps = path(signIn: .active)
         case .connecting:
-            (headline, body, primary, secondary, identifier) = (
-                "Finish signing in on eBay.",
-                "SnapList is waiting for eBay to confirm. Nothing has been connected yet.",
-                nil, "Cancel", "connecting"
+            (headline, primary, secondary, identifier) = (
+                "Finish on eBay", nil, "Cancel", "connecting"
             )
+            steps = path(signIn: .waiting, signInDetail: "Waiting for eBay")
         case .connected:
-            (headline, body, primary, secondary, identifier) = (
-                "Your eBay account is connected.",
-                "Your listing is ready to review before it goes to eBay.",
-                "Review before posting", "Manage connection", "connected"
+            (headline, primary, secondary, identifier) = (
+                accountName.map { "Connected as \($0)" } ?? "Connected to eBay",
+                "Review before posting", nil, "connected"
             )
+            steps = path(signIn: .done, allow: .done, post: .active)
         case .reconnectNeeded:
-            (headline, body, primary, secondary, identifier) = (
-                "This connection no longer works.",
-                "Reconnect your eBay account to publish this listing. Your listing is saved and nothing was posted.",
-                "Reconnect eBay", "Back to my listing", "reconnect-needed"
+            (headline, primary, secondary, identifier) = (
+                "Reconnect eBay", "Reconnect eBay", nil, "reconnect-needed"
+            )
+            steps = path(
+                signIn: .warning,
+                signInDetail: "Connection expired. Nothing posted."
             )
         case .declined:
-            (headline, body, primary, secondary, identifier) = (
-                "You did not grant access.",
-                "Your listing is saved and nothing was posted. You can connect later, and the listing stays in To list until you do.",
-                "Continue to eBay", "Back to my listing", "declined"
+            (headline, primary, secondary, identifier) = (
+                "Post to eBay", "Continue to eBay", nil, "declined"
+            )
+            steps = path(
+                signIn: .done,
+                allow: .warning,
+                allowDetail: "Access not granted. Nothing posted."
             )
         case .cancelled:
-            (headline, body, primary, secondary, identifier) = (
-                "The connection was not finished.",
-                "Your listing is saved and nothing was sent to eBay. Pick this up whenever you want.",
-                "Continue to eBay", "Back to my listing", "cancelled"
+            (headline, primary, secondary, identifier) = (
+                "Post to eBay", "Continue to eBay", nil, "cancelled"
+            )
+            steps = path(
+                signIn: .warning,
+                signInDetail: "Sign in not finished. Nothing posted."
             )
         case .timedOut:
-            (headline, body, primary, secondary, identifier) = (
-                "That sign in took too long.",
-                "No account was connected and your listing is saved. Start the sign in again and finish it on eBay’s page.",
-                "Continue to eBay", "Back to my listing", "timed-out"
+            (headline, primary, secondary, identifier) = (
+                "Post to eBay", "Continue to eBay", nil, "timed-out"
+            )
+            steps = path(
+                signIn: .warning,
+                signInDetail: "Sign in timed out. Nothing posted."
             )
         case .failed:
-            (headline, body, primary, secondary, identifier) = (
-                "Something went wrong connecting.",
-                "Your listing is saved and nothing was posted. This is usually temporary, so try again in a moment.",
-                "Continue to eBay", "Back to my listing", "failed"
+            (headline, primary, secondary, identifier) = (
+                "Post to eBay", "Continue to eBay", nil, "failed"
+            )
+            steps = path(
+                signIn: .warning,
+                signInDetail: "eBay didn't connect. Nothing posted."
             )
         }
+    }
+}
+
+struct EbayConnectStep: Equatable {
+    enum Phase: Equatable {
+        case done
+        case active
+        case waiting
+        case warning
+        case upcoming
+    }
+
+    let title: String
+    let detail: String
+    let phase: Phase
+}
+
+/// The listing being posted, kept in view on the connect path: an inset
+/// card, never edge to edge, whose photos page with a "1 of 4" counter.
+private struct EbayListingPhotoCard<Fallback: View>: View {
+    let photos: [ListingReviewPhoto]
+    let title: String
+    let price: String?
+    @ViewBuilder let fallback: () -> Fallback
+
+    @State private var selectedOrdinal = 0
+    @State private var imagePipeline = ListingReviewImagePipeline()
+
+    private static var photoHeight: CGFloat { 248 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            photo
+                .frame(height: Self.photoHeight)
+                .frame(maxWidth: .infinity)
+                .background(SnapListColorToken.quietFill.color)
+                .clipped()
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(title)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if let price {
+                    Text(price)
+                        .snapListTypography(.cardTitle)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                }
+            }
+            .padding(14)
+        }
+        .background(SnapListColorToken.canvas.color)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(SnapListColorToken.hairline.color)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ebay-publish.connection.listing")
+    }
+
+    @ViewBuilder
+    private var photo: some View {
+        if photos.isEmpty {
+            fallback()
+        } else {
+            ZStack {
+                TabView(selection: $selectedOrdinal) {
+                    ForEach(photos, id: \.ordinal) { photo in
+                        ListingReviewImage(
+                            url: photo.url,
+                            fallbackSystemImage: "photo",
+                            pipeline: imagePipeline,
+                            maxPixelDimension: ListingReviewImagePipeline.heroMaxPixelDimension
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: Self.photoHeight)
+                        .clipped()
+                        .tag(photo.ordinal)
+                        .accessibilityLabel(
+                            "Photo \(photo.ordinal + 1) of \(photos.count)"
+                        )
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+
+                if photos.count > 1 {
+                    Text("\(selectedOrdinal + 1) of \(photos.count)")
+                        .snapListTypography(.metadata)
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(SnapListPageDots.Metrics.scrimOpacity), in: Capsule())
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .accessibilityHidden(true)
+                        .accessibilityIdentifier("ebay-publish.connection.photo-counter")
+                    SnapListPageDots(
+                        pageCount: photos.count,
+                        selectedIndex: selectedOrdinal
+                    )
+                    .padding(.bottom, SnapListPageDots.Metrics.bottomInset)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+        }
+    }
+}
+
+/// The vertical path to eBay: three steps that end at the seller's eBay
+/// account. Each step marks its own phase, so the return from eBay's sign
+/// in reads as the same screen with steps ticking off.
+private struct EbayConnectPath: View {
+    let steps: [EbayConnectStep]
+    let accountTitle: String
+    let accountConnected: Bool
+    let reduceMotion: Bool
+
+    private static var markerSize: CGFloat { 28 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                stepRow(step, number: index + 1)
+            }
+            accountTile
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("ebay-publish.connection.path")
+    }
+
+    private func stepRow(_ step: EbayConnectStep, number: Int) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            marker(step.phase, number: number)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(
+                        step.phase == .upcoming
+                            ? SnapListColorToken.textSecondary.color
+                            : SnapListColorToken.inkPrimary.color
+                    )
+                Text(step.detail)
+                    .snapListTypography(.status)
+                    .foregroundStyle(
+                        step.phase == .warning
+                            ? SnapListColorToken.caution.color
+                            : SnapListColorToken.textSecondary.color
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 3)
+            .padding(.bottom, 18)
+            Spacer(minLength: 0)
+        }
+        // The connector runs the full height of the row, however tall its
+        // text grows, down to the next marker or the account tile.
+        .background(alignment: .topLeading) {
+            Rectangle()
+                .fill(
+                    step.phase == .done
+                        ? SnapListColorToken.ebayAccent.color
+                        : SnapListColorToken.hairline.color
+                )
+                .frame(width: 2)
+                .padding(.top, Self.markerSize + 2)
+                .padding(.bottom, 2)
+                .padding(.leading, Self.markerSize / 2 - 1)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(number) of \(steps.count), \(step.title). \(step.detail)")
+        .accessibilityValue(Self.phaseLabel(step.phase))
+        .accessibilityIdentifier("ebay-publish.connection.step-\(number)")
+    }
+
+    @ViewBuilder
+    private func marker(_ phase: EbayConnectStep.Phase, number: Int) -> some View {
+        let size = Self.markerSize
+        switch phase {
+        case .done:
+            Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: size, height: size)
+                .background(SnapListColorToken.ebayAccent.color, in: Circle())
+        case .active:
+            Text("\(number)")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.ebayAccent.color)
+                .frame(width: size, height: size)
+                .background(SnapListColorToken.canvas.color, in: Circle())
+                .overlay { Circle().stroke(SnapListColorToken.ebayAccent.color, lineWidth: 2) }
+        case .waiting:
+            Group {
+                if reduceMotion {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(SnapListColorToken.ebayAccent.color)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .frame(width: size, height: size)
+            .background(SnapListColorToken.canvas.color, in: Circle())
+            .overlay { Circle().stroke(SnapListColorToken.ebayAccent.color, lineWidth: 2) }
+        case .warning:
+            Image(systemName: "exclamationmark")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(SnapListColorToken.caution.color)
+                .frame(width: size, height: size)
+                .background(SnapListColorToken.cautionFill.color, in: Circle())
+        case .upcoming:
+            Text("\(number)")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
+                .frame(width: size, height: size)
+                .background(SnapListColorToken.canvas.color, in: Circle())
+                .overlay { Circle().stroke(SnapListColorToken.hairline.color, lineWidth: 2) }
+        }
+    }
+
+    private var accountTile: some View {
+        HStack(spacing: 12) {
+            Image("MarketplaceMarkEbay")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 38)
+                .frame(width: 52, height: 40)
+                .background(
+                    SnapListColorToken.canvas.color,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .accessibilityHidden(true)
+            Text(accountTitle)
+                .snapListTypography(.rowTitle)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if accountConnected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(SnapListColorToken.ebayAccent.color)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(10)
+        .background(
+            SnapListColorToken.quietFill.color,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            accountConnected ? "eBay account \(accountTitle), connected" : "Your eBay account"
+        )
+        .accessibilityIdentifier("ebay-publish.connection.account")
+    }
+
+    private static func phaseLabel(_ phase: EbayConnectStep.Phase) -> String {
+        switch phase {
+        case .done: "Done"
+        case .active: "Next"
+        case .waiting: "Waiting"
+        case .warning: "Needs attention"
+        case .upcoming: "Not started"
+        }
+    }
+}
+
+/// A native grouped section: a small caption above one inset card of rows.
+private struct EbayListSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .snapListTypography(.metadata)
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
+                .padding(.horizontal, 4)
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(SnapListColorToken.canvas.color)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(SnapListColorToken.hairline.color)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.top, 14)
     }
 }
 
@@ -1387,10 +1696,6 @@ struct EbayPublishHeadingFocusTarget: Hashable {
             identifier = "ebay-publish.result.\(copy.identifier)"
             isLiveRegion = true
             transitionIdentity = "result.\(copy.identifier)"
-        case .account:
-            identifier = "ebay-publish.account"
-            isLiveRegion = false
-            transitionIdentity = "account"
         }
     }
 
@@ -1513,137 +1818,6 @@ struct EbayResultCopy {
     }
 }
 
-private struct EbayCenteredActionScreen: View {
-    let headingFocusTarget: EbayPublishHeadingFocusTarget
-    let headline: String
-    let detail: String
-    var statements: [String] = []
-    var chip: String?
-    var chipVariant: SnapListChipVariant = .neutral
-    let systemImage: String?
-    let primary: String?
-    let secondary: String?
-    let forceReducedMotion: Bool
-    var usesApprovedConnectVisuals = false
-    let primaryAction: () -> Void
-    let secondaryAction: () -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if usesApprovedConnectVisuals {
-                    // #1116: the eBay wordmark fills the approved 164pt slot,
-                    // as the marketplace rows use theirs.
-                    Image("MarketplaceMarkEbay")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 56)
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: 164,
-                            alignment: .bottomLeading
-                        )
-                        .accessibilityHidden(true)
-                } else {
-                    Spacer(minLength: 16)
-                }
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 36, weight: .semibold))
-                        .foregroundStyle(SnapListColorToken.action.color)
-                        .accessibilityHidden(true)
-                }
-                if let chip {
-                    SnapListChip(chip, variant: chipVariant)
-                }
-                EbayPublishFocusedHeading(
-                    text: headline,
-                    target: headingFocusTarget
-                )
-                    .snapListTypography(.displayTitle)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(detail)
-                    .snapListTypography(.body)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !statements.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(Array(statements.enumerated()), id: \.offset) {
-                            index, statement in
-                            HStack(alignment: .top, spacing: 12) {
-                                if usesApprovedConnectVisuals {
-                                    Circle()
-                                        .fill(SnapListColorToken.ebayAccent.color)
-                                        .frame(width: 5, height: 5)
-                                        .padding(.top, 6)
-                                        .accessibilityHidden(true)
-                                } else {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(
-                                            SnapListColorToken.action.color
-                                        )
-                                        .accessibilityHidden(true)
-                                }
-                                Text(statement)
-                                    .snapListTypography(.status)
-                                    .foregroundStyle(
-                                        SnapListColorToken.textSecondary.color
-                                    )
-                                    .fixedSize(
-                                        horizontal: false,
-                                        vertical: true
-                                    )
-                                Spacer(minLength: 0)
-                            }
-                            .padding(
-                                .vertical,
-                                usesApprovedConnectVisuals ? 10 : 12
-                            )
-                            if index < statements.count - 1 {
-                                Divider()
-                            }
-                        }
-                    }
-                    .ebayCard()
-                }
-                Spacer(minLength: 16)
-            }
-            .frame(maxWidth: .infinity, minHeight: 440, alignment: .leading)
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
-                if let primary {
-                    if usesApprovedConnectVisuals {
-                        EbayConnectPrimaryButton(
-                            title: primary,
-                            action: primaryAction
-                        )
-                    } else {
-                        SnapListPrimaryButton(
-                            title: primary,
-                            forceReducedMotion: forceReducedMotion,
-                            action: primaryAction
-                        )
-                    }
-                }
-                if let secondary {
-                    SnapListSecondaryButton(
-                        title: secondary,
-                        action: secondaryAction
-                    )
-                }
-            }
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.top, usesApprovedConnectVisuals ? 8 : 10)
-            .padding(.bottom, usesApprovedConnectVisuals ? 0 : 10)
-            .background(SnapListColorToken.canvas.color)
-            .overlay(alignment: .top) { Divider() }
-        }
-    }
-}
-
 private struct EbayConnectPrimaryButton: View {
     let title: String
     let action: () -> Void
@@ -1660,7 +1834,11 @@ private struct EbayConnectPrimaryButton: View {
         .buttonStyle(.plain)
         .background(SnapListColorToken.ebayAccent.color)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .accessibilityIdentifier("button.primary.continue-to-ebay")
+        // Same `button.primary.<title>` scheme as `SnapListPrimaryButton`,
+        // e.g. `button.primary.continue-to-ebay`.
+        .accessibilityIdentifier(
+            "button.primary." + title.lowercased().split(separator: " ").joined(separator: "-")
+        )
     }
 }
 

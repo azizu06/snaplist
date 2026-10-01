@@ -7,9 +7,9 @@ import SwiftUI
 /// reachable exclusively from the per-item publish journey. This file is the
 /// Settings-scoped, listing-independent entry point: a small store built on
 /// the same `connection()`/`disconnect()`/`createOAuthSession()` seams
-/// `EbayPublishFlowStore` already uses for its own connect/disconnect, and a
-/// view that renders the identical, reused `EbayAccountScreenView` once
-/// connected.
+/// `EbayPublishFlowStore` already uses for its own connect, and a connect
+/// screen that returns to Settings once connected. The connected account and
+/// its Disconnect control live inline in Settings' Selling section.
 ///
 /// `EbayPublishFlowStore` itself stays untouched: its OAuth success path
 /// requires a real `listingID` (`service.preflight(listingID:)`), which does
@@ -109,6 +109,7 @@ struct EbayConnectionSettingsView: View {
 
     @State private var store: EbayConnectionSettingsStore
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.dismiss) private var dismiss
 
     private var reduceMotion: Bool { systemReduceMotion || forceReducedMotion }
 
@@ -124,19 +125,21 @@ struct EbayConnectionSettingsView: View {
                 checking
             case .notConnected, .connecting:
                 notConnected
-            case .connected(let username):
-                EbayAccountScreenView(
-                    connectedUsername: username,
-                    disconnect: { await store.disconnect() }
-                )
+            case .connected:
+                // Settings shows the connected account inline, so a
+                // connected state only ever means "go back there".
+                checking
             case .notAvailable:
                 notAvailable
             }
         }
         .background(SnapListColorToken.canvas.color)
-        .navigationTitle("eBay account")
+        .navigationTitle("Connect eBay")
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.load() }
+        .onChange(of: store.state) { _, state in
+            if case .connected = state { dismiss() }
+        }
     }
 
     private var checking: some View {

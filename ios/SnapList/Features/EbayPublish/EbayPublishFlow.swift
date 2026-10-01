@@ -36,7 +36,6 @@ enum EbayPublishScreen: Equatable, Sendable {
     case connection(EbayConnectionViewState)
     case confirmation(EbayConfirmationViewState)
     case result(EbayResultViewState)
-    case account
 }
 
 enum EbayOAuthResult: String, Equatable, Sendable {
@@ -302,21 +301,6 @@ final class EbayPublishFlowStore {
     func reviewBeforePosting() {
         guard preflight != nil else { return }
         screen = .confirmation(confirmationState())
-    }
-
-    func manageConnection() {
-        screen = .account
-    }
-
-    func disconnect() async {
-        do {
-            let status = try await service.disconnect()
-            connectedUsername = status.ebayUsername
-            preparedUsername = nil
-            screen = .connection(.notConnected)
-        } catch {
-            screen = .connection(.failed)
-        }
     }
 
     func confirmPublish() async {

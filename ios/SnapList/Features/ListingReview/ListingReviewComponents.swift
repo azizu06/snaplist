@@ -823,7 +823,7 @@ final class ListingReviewImagePipeline {
     }
 }
 
-private struct ListingReviewImage: View {
+struct ListingReviewImage: View {
     let url: URL?
     let fallbackSystemImage: String
     var placeholderFill: Color = SnapListColorToken.quietFill.color
