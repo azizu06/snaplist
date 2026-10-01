@@ -2,73 +2,40 @@ import SwiftUI
 import UIKit
 
 enum ProGateCopy {
-    static let offerTitle = "This item needs SnapList Pro"
-    static let offerStatement = "You made one AI listing for free."
+    static let offerTitle = "Keep listing with Pro"
     static let plansTitle = "SnapList Pro"
-    static let plansStatement = "Pro gives you AI listings every month."
-    static let whatProDoes = "What Pro does"
-    static let allowance = "AI listings every month"
-    static let allowanceUnknown =
-        "Counted from your billing date. SnapList sets the monthly amount."
-    static let keepsWork = "Your work stays yours"
-    static let keepsWorkDetail = "Drafts and listings stay if you cancel."
-    static let cancelAnytime = "Cancel anytime"
-    static let cancelAnytimeDetail = "Manage it in your Apple Account settings."
-    static let reassuranceTitle = "What happens if you don’t subscribe"
-    static let reassuranceSaved =
-        "This item stays saved with its photos, their order, and your voice note. You can subscribe later and pick it back up."
-    static let reassuranceUnused =
-        "No AI listing was used and nothing was charged."
-    static let purchaseFailed =
-        "That purchase did not go through. Nothing was charged. You can try again or restore a purchase."
-    static let nothingToRestore =
-        "No SnapList Pro subscription was found on this Apple Account. If you bought it with a different Apple Account, sign in with that one and try again."
-    static let confirmingTitle = "Confirming your subscription"
-    static let pendingTitle = "Subscription not confirmed yet"
-    static let pendingStatement =
-        "SnapList hasn’t confirmed Pro on this account yet. Check again or restore your purchase. You can close this screen safely."
-    static let confirmingStatement =
-        "SnapList turns Pro on after the App Store and your SnapList account both confirm the purchase."
-    static let confirmingSubline =
-        "Your item is still saved. Nothing has been used."
-    static let plansConfirmingSubline = "Nothing has been used yet."
+    static let offerSaved = "Saved."
+    static let wantMore = "Want more AI listings?"
+    static let slipIncludes = "AI listings every month"
+    static let purchaseFailedLead = "Didn’t go through."
+    static let purchaseFailed = "Nothing was charged."
+    static let nothingToRestore = "No Pro subscription on this Apple Account."
+    static let confirmingTitle = "Confirming"
+    static let confirmingBubble = "Checking your account."
+    static let pendingTitle = "Not confirmed yet"
+    static let pendingBubble = "Still checking."
+    static let pendingStatement = "Don’t buy again. Check again or restore."
     static let purchaseReadyTitle = "SnapList Pro is on"
-    static let purchaseReadyStatement =
-        "Your subscription is confirmed on this account. This item can go through AI now."
     static let restoreReadyTitle = "SnapList Pro is already on"
-    static let restoreReadyStatement =
-        "Your SnapList Pro subscription is active on this Apple Account. This item can go through AI now."
-    static let plansPurchaseReadyStatement =
-        "Your subscription is confirmed on this account."
-    static let plansRestoreReadyStatement =
-        "Your SnapList Pro subscription is active on this Apple Account."
-    static let readySubline =
-        "Your monthly amount is in Settings under Subscription."
-    static let plansReadySubline =
-        "Your monthly amount appears under Subscription."
     static let intakeNeedsPro =
         "This item is saved. It needs SnapList Pro to go through AI."
 }
 
 /// Where the paywall was opened from. The item gate interrupts a second AI
-/// run and talks about that saved item; Settings opens the same offer on
+/// run for an item that is already saved; Settings opens the same offer on
 /// purpose, so it has no item to reassure about or resume.
 enum ProGateSheetContext: Equatable {
     case itemGate
     case settingsPlans
 }
 
-struct ProGateListingSummary {
-    let title: String
-    let condition: String
-    let price: String
-    let image: UIImage?
-}
-
+/// The paywall as a packing scene: Scout on a seller's counter with one short
+/// line, and the plan as a taped packing slip whose stamp shows the purchase
+/// state. Text stays minimal on purpose: one title, at most one line, and the
+/// actions. The slip's Renews row carries the App Review 3.1.2 renewal terms.
 @MainActor
 struct ProGateSheet: View {
     @Bindable var store: ProGateStore
-    let listingSummary: ProGateListingSummary?
     let startListing: () -> Void
     let fallbackToPhotoReview: () -> Void
     var context: ProGateSheetContext = .itemGate
@@ -76,49 +43,66 @@ struct ProGateSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AccessibilityFocusState private var headingFocused: Bool
-    @ScaledMetric(relativeTo: .title2) private var titleSize: CGFloat = 26
-    @ScaledMetric(relativeTo: .body) private var bodySize: CGFloat = 16
-    @ScaledMetric(relativeTo: .footnote) private var detailSize: CGFloat = 13
-    @ScaledMetric(relativeTo: .subheadline) private var labelSize: CGFloat = 14
-    @ScaledMetric(relativeTo: .body) private var valueSize: CGFloat = 15
-    @ScaledMetric(relativeTo: .title3) private var listingPriceSize: CGFloat = 20
-    @ScaledMetric(relativeTo: .title2) private var planPriceSize: CGFloat = 24
+    @ScaledMetric(relativeTo: .title2) private var titleSize: CGFloat = 24
+    @ScaledMetric(relativeTo: .body) private var bodySize: CGFloat = 15
+    @ScaledMetric(relativeTo: .subheadline) private var bubbleSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .footnote) private var slipSize: CGFloat = 12
+    @ScaledMetric(relativeTo: .caption) private var slipHeaderSize: CGFloat = 10
+    @ScaledMetric(relativeTo: .title3) private var slipPriceSize: CGFloat = 19
+    @ScaledMetric(relativeTo: .footnote) private var stampSize: CGFloat = 14
     @ScaledMetric(relativeTo: .headline) private var actionSize: CGFloat = 17
     @ScaledMetric(relativeTo: .subheadline) private var plainActionSize: CGFloat = 15
-    @ScaledMetric(relativeTo: .title2) private var badgeSize: CGFloat = 52
-    @ScaledMetric(relativeTo: .body) private var benefitIconSize: CGFloat = 32
+    @ScaledMetric(relativeTo: .footnote) private var quietActionSize: CGFloat = 13
+
+    private static let heroHeight: CGFloat = 224
+    private static let slipOverlap: CGFloat = 34
+
+    /// Measured so the drawer fits its content at standard text sizes instead
+    /// of opening to an empty full-height sheet.
+    @State private var contentHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                stateBody
-            }
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.top, 28)
-            .padding(.bottom, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if dynamicTypeSize.isAccessibilitySize {
-                actionStack
-                    .padding(.horizontal, SnapListMetrics.screenGutter)
-                    .padding(.top, 8)
-                    .padding(.bottom, 20)
+        Group {
+            if isAccessibilitySize {
+                ScrollView {
+                    sheetContent
+                    actionStack
+                        .padding(.horizontal, SnapListMetrics.screenGutter)
+                        .padding(.top, 8)
+                        .padding(.bottom, 20)
+                }
+                .scrollIndicators(.visible)
+            } else {
+                // The drawer fits this content exactly, so there is nothing
+                // to scroll and a downward drag belongs to the drawer itself.
+                sheetContent
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
         }
-        .scrollIndicators(.visible)
         // The footer pins via `safeAreaInset`, the same primitive
-        // `floatingDock(...)` uses for the app-wide dock: it both floats the
-        // footer over the scroll view and reserves that exact height as
-        // scroll-content safe area, so the content stops above it instead of
-        // sitting beside it in a shrunk VStack sibling.
+        // `floatingDock(...)` uses for the app-wide dock: it floats the footer
+        // over the content and reserves that exact height as safe area, so
+        // the content stops above it instead of behind it.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !dynamicTypeSize.isAccessibilitySize {
-                pinnedFooter
+            if !isAccessibilitySize {
+                actionStack
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                    .padding(.top, 10)
+                    .background(SnapListColorToken.canvas.color)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        footerHeight = $0
+                    }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if case .offer = store.state {
+                closeControl
             }
         }
         .background(SnapListColorToken.canvas.color)
-        .presentationDetents([.large])
+        .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.62), value: store.state)
+        .presentationDetents([detent])
         .presentationContentInteraction(.scrolls)
         .presentationCornerRadius(SnapListMetrics.sheetRadius)
         .presentationDragIndicator(store.isDismissible ? .visible : .hidden)
@@ -130,328 +114,264 @@ struct ProGateSheet: View {
         }
     }
 
-    private var pinnedFooter: some View {
-        VStack(spacing: 0) {
-            Divider()
-                .overlay(SnapListColorToken.divider.color)
-            actionStack
+    private var isAccessibilitySize: Bool { dynamicTypeSize.isAccessibilitySize }
+
+    private var sheetContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            hero
+            if isAccessibilitySize, let bubble = bubbleContent {
+                scoutBubble(bubble)
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                    .padding(.top, 12)
+            }
+            if let product = store.offeredProduct {
+                slip(product)
+                    .padding(.horizontal, 18)
+                    .padding(.top, isAccessibilitySize ? 16 : -Self.slipOverlap)
+            }
+            heading
                 .padding(.horizontal, SnapListMetrics.screenGutter)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
+                .padding(.top, 20)
+                .padding(.bottom, 8)
         }
-        .background(SnapListColorToken.canvas.color)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+            contentHeight = $0
+        }
     }
 
-    // MARK: - Header
+    /// Accessibility sizes keep the full-height sheet so nothing is cut off;
+    /// otherwise the drawer is exactly as tall as the scene, slip, title and
+    /// actions, plus the home-indicator inset the footer sits above.
+    private var detent: PresentationDetent {
+        guard !isAccessibilitySize, contentHeight > 0, footerHeight > 0 else {
+            return .large
+        }
+        return .height(contentHeight + footerHeight + 34)
+    }
 
-    private var header: some View {
-        VStack(alignment: headerAlignment, spacing: 14) {
-            headerBadge
+    // MARK: - Hero
+
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image(scene.assetName)
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity)
+                .frame(height: heroHeight)
+                .clipped()
+                .accessibilityHidden(true)
+            Image(scoutPose)
+                .resizable()
+                .scaledToFit()
+                .frame(height: isAccessibilitySize ? 132 : 150)
+                .padding(.leading, 16)
+                .padding(.bottom, isAccessibilitySize ? 8 : Self.slipOverlap + 6)
+                .id(scoutPose)
+                .transition(reduceMotion ? .opacity : .scale(scale: 0.85).combined(with: .opacity))
+                .accessibilityHidden(true)
+        }
+        .frame(height: heroHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .overlay(alignment: .topTrailing) {
+            if !isAccessibilitySize, let bubble = bubbleContent {
+                scoutBubble(bubble)
+                    .frame(maxWidth: 196, alignment: .leading)
+                    .padding(.top, 58)
+                    .padding(.trailing, 16)
+            }
+        }
+    }
+
+    private var heroHeight: CGFloat {
+        isAccessibilitySize ? 176 : Self.heroHeight
+    }
+
+    private func scoutBubble(_ bubble: BubbleContent) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(bubble.lead)
+                .font(.system(size: bubbleSize + 1, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            if let detail = bubble.detail {
+                Text(detail)
+                    .font(.system(size: bubbleSize))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(
+            SnapListColorToken.canvas.color,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .shadow(
+            color: SnapListColorToken.inkPrimary.color.opacity(0.14),
+            radius: 12,
+            y: 6
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(bubble.identifier)
+    }
+
+    // MARK: - Packing slip
+
+    private func slip(_ product: SubscriptionProductMetadata) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(verbatim: "\(product.localizedTitle) · \(product.proGatePlanName)".uppercased())
+                .font(.system(size: slipHeaderSize, weight: .bold, design: .monospaced))
+                .tracking(1)
+                .foregroundStyle(SnapListColorToken.proGateSlipLabel.color)
+                .padding(.bottom, 4)
+            slipRow("Price") {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(verbatim: product.localizedPrice)
+                        .font(.system(size: slipPriceSize, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    if let unit = product.proGatePerUnit {
+                        Text(unit)
+                            .font(.system(size: slipSize, weight: .medium))
+                            .foregroundStyle(SnapListColorToken.proGateSlipLabel.color)
+                    }
+                }
+            }
+            slipRule
+            slipRow("Includes") { slipValue(ProGateCopy.slipIncludes) }
+            slipRule
+            slipRow("Renews") { slipValue(product.proGateRenewsLine) }
+            ProGateBarcode()
+                .frame(width: 112, height: 20)
+                .padding(.top, 10)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 16)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            SnapListColorToken.canvas.color,
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(SnapListColorToken.proGateSlipEdge.color, lineWidth: 1)
+        }
+        .shadow(
+            color: SnapListColorToken.proGateSlipInk.color.opacity(0.2),
+            radius: 14,
+            y: 10
+        )
+        .overlay(alignment: .top) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(SnapListColorToken.action.color.opacity(0.82))
+                .frame(width: 64, height: 18)
+                .rotationEffect(.degrees(-3))
+                .offset(y: -9)
+                .accessibilityHidden(true)
+        }
+        .overlay(alignment: .bottomTrailing) { stamp }
+        .rotationEffect(.degrees(isAccessibilitySize ? 0 : 1.2))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(product.localizedTitle), \(product.proGatePlanName), \(product.proGatePriceDisplay)"
+        )
+        .accessibilityValue("\(ProGateCopy.slipIncludes). Renews \(product.proGateRenewsLine).")
+        .accessibilityIdentifier("pro-gate.plan")
+    }
+
+    @ViewBuilder
+    private func slipRow<Value: View>(
+        _ label: String,
+        @ViewBuilder value: () -> Value
+    ) -> some View {
+        let caption = Text(label)
+            .font(.system(size: slipSize, design: .monospaced))
+            .foregroundStyle(SnapListColorToken.proGateSlipLabel.color)
+        if isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 2) {
+                caption
+                value()
+            }
+            .padding(.vertical, 6)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                caption.frame(width: 72, alignment: .leading)
+                value()
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    private func slipValue(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: slipSize, design: .monospaced))
+            .foregroundStyle(SnapListColorToken.proGateSlipInk.color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var slipRule: some View {
+        Line()
+            .stroke(
+                SnapListColorToken.proGateSlipRule.color,
+                style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+            )
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var stamp: some View {
+        if let stamp = stampContent {
+            Text(stamp.text)
+                .font(.system(size: stampSize, weight: .heavy))
+                .tracking(1.4)
+                .foregroundStyle(stamp.color)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    SnapListColorToken.canvas.color.opacity(0.85),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(
+                            stamp.color,
+                            style: StrokeStyle(lineWidth: 2.5, dash: stamp.dashed ? [5, 3] : [])
+                        )
+                }
+                .rotationEffect(.degrees(-14))
+                .padding(12)
+                .id(stamp.text)
+                .transition(
+                    reduceMotion ? .opacity : .scale(scale: 1.8).combined(with: .opacity)
+                )
+                .accessibilityHidden(true)
+        }
+    }
+
+    // MARK: - Heading
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: titleSize, weight: .bold))
                 .tracking(-0.4)
-                .multilineTextAlignment(headerTextAlignment)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("pro-gate.title")
                 .accessibilityFocused($headingFocused)
-        }
-        .frame(maxWidth: .infinity, alignment: headerFrameAlignment)
-    }
-
-    @ViewBuilder
-    private var headerBadge: some View {
-        switch store.state {
-        case .offer:
-            badge(symbol: "sparkles")
-        case .verificationPending:
-            badge(symbol: "clock")
-        case .confirming:
-            ZStack {
-                Circle().fill(SnapListColorToken.actionTint.color)
-                if reduceMotion {
-                    Image(systemName: "hourglass")
-                        .font(.system(size: badgeSize * 0.4, weight: .semibold))
-                        .foregroundStyle(SnapListColorToken.action.color)
-                } else {
-                    ProgressView()
-                        .controlSize(.large)
-                        .tint(SnapListColorToken.action.color)
-                }
-            }
-            .frame(width: badgeSize * 1.3, height: badgeSize * 1.3)
-            .accessibilityHidden(true)
-        case .ready:
-            ZStack {
-                Circle().fill(SnapListColorToken.actionTint.color)
-                Image(systemName: "checkmark")
-                    .font(.system(size: badgeSize * 0.5, weight: .bold))
-                    .foregroundStyle(SnapListColorToken.action.color)
-            }
-            .frame(width: badgeSize * 1.3, height: badgeSize * 1.3)
-            .accessibilityHidden(true)
-        case .hidden:
-            EmptyView()
-        }
-    }
-
-    private func badge(symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: badgeSize * 0.44, weight: .semibold))
-            .foregroundStyle(SnapListColorToken.action.color)
-            .frame(width: badgeSize, height: badgeSize)
-            .background(
-                SnapListColorToken.actionTint.color,
-                in: RoundedRectangle(cornerRadius: badgeSize * 0.3, style: .continuous)
-            )
-            .accessibilityHidden(true)
-    }
-
-    // MARK: - State body
-
-    @ViewBuilder
-    private var stateBody: some View {
-        switch store.state {
-        case .offer(_, let advisory, _):
-            Text(offerStatement)
-                .font(.system(size: bodySize))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, -8)
-                .accessibilityIdentifier("pro-gate.statement")
-            if let advisory {
-                advisoryCard(advisory)
-            }
-            if let listingSummary, context == .itemGate {
-                listingCard(listingSummary)
-            }
-            benefits
-            if context == .itemGate {
-                reassurance
-            }
-        case .confirming, .verificationPending:
-            centeredStatement(
-                store.state == .verificationPending
-                    ? ProGateCopy.pendingStatement
-                    : ProGateCopy.confirmingStatement,
-                subline: context == .itemGate
-                    ? ProGateCopy.confirmingSubline
-                    : ProGateCopy.plansConfirmingSubline
-            )
-        case .ready(let source):
-            centeredStatement(
-                readyStatement(source),
-                subline: context == .itemGate
-                    ? ProGateCopy.readySubline
-                    : ProGateCopy.plansReadySubline
-            )
-        case .hidden:
-            EmptyView()
-        }
-    }
-
-    private func centeredStatement(_ statement: String, subline: String) -> some View {
-        VStack(spacing: 8) {
-            Text(statement)
-                .font(.system(size: bodySize))
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            Text(subline)
-                .font(.system(size: detailSize))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-        }
-        .multilineTextAlignment(.center)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity)
-        .padding(.top, -6)
-    }
-
-    private var benefits: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionLabel(ProGateCopy.whatProDoes)
-                .accessibilityIdentifier("pro-gate.what-pro-does")
-
-            VStack(spacing: 0) {
-                benefitRow(
-                    symbol: "sparkles",
-                    title: ProGateCopy.allowance,
-                    detail: ProGateCopy.allowanceUnknown
-                )
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("pro-gate.allowance-row")
-                benefitDivider
-                benefitRow(
-                    symbol: "tray.full",
-                    title: ProGateCopy.keepsWork,
-                    detail: ProGateCopy.keepsWorkDetail
-                )
-                .accessibilityElement(children: .combine)
-                benefitDivider
-                benefitRow(
-                    symbol: "arrow.uturn.backward.circle",
-                    title: ProGateCopy.cancelAnytime,
-                    detail: ProGateCopy.cancelAnytimeDetail
-                )
-                .accessibilityElement(children: .combine)
-            }
-            .background(
-                SnapListColorToken.groupingFill.color,
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
-        }
-    }
-
-    private var benefitDivider: some View {
-        Divider()
-            .overlay(SnapListColorToken.proGateReassuranceDivider.color)
-            .padding(.leading, 16 + benefitIconSize + 12)
-    }
-
-    private func benefitRow(symbol: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: benefitIconSize * 0.46, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.action.color)
-                .frame(width: benefitIconSize, height: benefitIconSize)
-                .background(
-                    SnapListColorToken.canvas.color,
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                )
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: valueSize, weight: .semibold))
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                Text(detail)
-                    .font(.system(size: detailSize))
+            if store.state == .verificationPending {
+                Text(ProGateCopy.pendingStatement)
+                    .font(.system(size: bodySize))
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("pro-gate.statement")
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-    }
-
-    private var reassurance: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionLabel(ProGateCopy.reassuranceTitle)
-            VStack(alignment: .leading, spacing: 10) {
-                reassuranceLine(symbol: "checkmark.circle", text: ProGateCopy.reassuranceSaved)
-                reassuranceLine(symbol: "creditcard", text: ProGateCopy.reassuranceUnused)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
-            }
-        }
-    }
-
-    private func reassuranceLine(symbol: String, text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: detailSize, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(.system(size: detailSize))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func sectionLabel(_ label: String) -> some View {
-        Text(label)
-            .font(.system(size: labelSize, weight: .semibold))
-            .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    private func listingCard(_ listing: ProGateListingSummary) -> some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 10) {
-                    listingImage(listing.image)
-                    listingText(listing)
-                }
-            } else {
-                HStack(spacing: 13) {
-                    listingImage(listing.image)
-                    listingText(listing)
-                }
-            }
-        }
-        .padding(8)
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "Your AI listing, \(listing.title), \(listing.condition), \(listing.price)"
-        )
-    }
-
-    @ViewBuilder
-    private func listingImage(_ image: UIImage?) -> some View {
-        if let image {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(
-                    width: dynamicTypeSize.isAccessibilitySize ? 118 : 72,
-                    height: dynamicTypeSize.isAccessibilitySize ? 118 : 72
-                )
-                .clipShape(.rect(cornerRadius: 10))
-                .accessibilityLabel("Photo from your AI listing")
-        }
-    }
-
-    private func listingText(
-        _ listing: ProGateListingSummary
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(listing.title)
-                .font(.system(size: bodySize, weight: .semibold))
-            Text(listing.condition)
-                .font(.system(size: detailSize))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-            Text(listing.price)
-                .font(.system(size: listingPriceSize, weight: .bold))
-                .monospacedDigit()
-                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func advisoryCard(_ advisory: ProGateStore.Advisory) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: advisory == .purchaseDidNotComplete
-                  ? "exclamationmark.circle"
-                  : "info.circle")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.caution.color)
-                .accessibilityHidden(true)
-            Text(advisory == .purchaseDidNotComplete
-                 ? ProGateCopy.purchaseFailed
-                 : ProGateCopy.nothingToRestore)
-                .font(.system(size: detailSize))
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
-        .background(
-            SnapListColorToken.cautionFill.color,
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("pro-gate.advisory")
     }
 
     // MARK: - Actions
@@ -459,53 +379,35 @@ struct ProGateSheet: View {
     @ViewBuilder
     private var actionStack: some View {
         switch store.state {
-        case .offer(let product, _, let isRestoring):
-            VStack(spacing: 0) {
-                planTile(product)
-                Text(product.proGateRenewalStatement)
-                    .font(.system(size: detailSize))
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-                    .accessibilityIdentifier("pro-gate.renewal")
+        case .offer(_, _, let isRestoring):
+            VStack(spacing: 2) {
                 proGatePrimaryButton("Subscribe") {
                     Task { await store.purchase() }
                 }
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(spacing: 6) {
-                        restoreControl(isRestoring: isRestoring)
-                        declineControl
-                    }
-                    .padding(.top, 4)
-                } else {
-                    HStack(spacing: 12) {
-                        restoreControl(isRestoring: isRestoring)
-                        declineControl
-                    }
-                    .padding(.top, 2)
-                }
-                ProGateLegalFooter()
+                quietRow(isRestoring: isRestoring)
             }
         case .confirming:
-            busyLabel("Confirming", size: bodySize)
+            busyLabel("Checking", size: plainActionSize)
                 .frame(maxWidth: .infinity, minHeight: SnapListMetrics.primaryButtonHeight)
                 .background(
                     SnapListColorToken.mutedSurface.color,
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    in: Capsule()
                 )
                 .padding(.bottom, 16)
                 .accessibilityIdentifier("pro-gate.confirming")
         case .verificationPending:
-            VStack(spacing: 8) {
+            VStack(spacing: 2) {
                 proGatePrimaryButton("Check again") {
                     Task { await store.refreshPendingVerification() }
                 }
                 .accessibilityIdentifier("pro-gate.check-again")
-                restoreControl(isRestoring: false)
-                plainButton("Close", identifier: "pro-gate.close") {
-                    store.dismiss()
+                HStack(spacing: 12) {
+                    plainButton("Restore purchase", identifier: "pro-gate.restore-purchase") {
+                        restore()
+                    }
+                    plainButton("Close", identifier: "pro-gate.close") {
+                        store.dismiss()
+                    }
                 }
             }
         case .ready:
@@ -519,69 +421,69 @@ struct ProGateSheet: View {
         }
     }
 
-    /// The single plan the store returned, drawn as the selected option so
-    /// the price the seller is agreeing to sits directly above `Subscribe`.
-    /// Every value here is StoreKit's localized product metadata.
-    private func planTile(_ product: SubscriptionProductMetadata) -> some View {
-        let tile = Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    planName(product)
-                    planPrice(product)
-                }
+    /// Restore and the two legal documents share one quiet row under
+    /// Subscribe, so the decision is the only thing that reads loudly.
+    @ViewBuilder
+    private func quietRow(isRestoring: Bool) -> some View {
+        let restoreControl = Group {
+            if isRestoring {
+                busyLabel("Checking", size: quietActionSize)
             } else {
-                HStack(alignment: .center, spacing: 12) {
-                    planName(product)
-                    Spacer(minLength: 8)
-                    planPrice(product)
+                Button(action: restore) {
+                    Text("Restore")
+                        .font(.system(size: quietActionSize, weight: .medium))
+                        .frame(
+                            minWidth: ProGateLegalFooter.minimumTarget,
+                            minHeight: ProGateLegalFooter.minimumTarget
+                        )
+                        .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .accessibilityLabel("Restore purchase")
+                .accessibilityIdentifier("pro-gate.restore-purchase")
             }
         }
-        return tile
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                SnapListColorToken.actionTint.color.opacity(0.55),
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(SnapListColorToken.action.color, lineWidth: 1.5)
+        if isAccessibilitySize {
+            VStack(spacing: 0) {
+                restoreControl
+                ProGateLegalFooter()
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                "\(product.localizedTitle), \(product.proGatePlanName), \(product.proGatePriceDisplay)"
-            )
-            .accessibilityIdentifier("pro-gate.plan")
-    }
-
-    private func planName(_ product: SubscriptionProductMetadata) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.action.color)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: product.localizedTitle)
-                    .font(.system(size: valueSize, weight: .semibold))
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                Text(product.proGatePlanName)
-                    .font(.system(size: detailSize))
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+        } else {
+            HStack(spacing: 2) {
+                restoreControl
+                ProGateLegalFooter.separator(size: quietActionSize)
+                ProGateLegalFooter()
             }
         }
     }
 
-    private func planPrice(_ product: SubscriptionProductMetadata) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 3) {
-            Text(verbatim: product.localizedPrice)
-                .font(.system(size: planPriceSize, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            if let unit = product.proGatePerUnit {
-                Text(unit)
-                    .font(.system(size: detailSize, weight: .medium))
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+    private var closeControl: some View {
+        Button {
+            store.dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .frame(width: 30, height: 30)
+                .background(SnapListColorToken.canvas.color.opacity(0.9), in: Circle())
+                .frame(
+                    width: ProGateLegalFooter.minimumTarget,
+                    height: ProGateLegalFooter.minimumTarget
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 10)
+        .padding(.trailing, 10)
+        .accessibilityLabel("Not now")
+        .accessibilityIdentifier("pro-gate.not-now")
+    }
+
+    private func restore() {
+        Task {
+            if await store.restore() == .fallbackToPhotoReview {
+                fallbackToPhotoReview()
             }
         }
     }
@@ -611,36 +513,11 @@ struct ProGateSheet: View {
             Text(label)
                 .font(.system(size: plainActionSize, weight: .semibold))
                 .foregroundStyle(SnapListColorToken.action.color)
-                .frame(maxWidth: .infinity, minHeight: 46)
+                .frame(maxWidth: .infinity, minHeight: ProGateLegalFooter.minimumTarget)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(identifier)
-    }
-
-    @ViewBuilder
-    private func restoreControl(isRestoring: Bool) -> some View {
-        if isRestoring {
-            busyLabel("Checking", size: plainActionSize)
-                .frame(maxWidth: .infinity)
-        } else {
-            plainButton(
-                "Restore purchase",
-                identifier: "pro-gate.restore-purchase"
-            ) {
-                Task {
-                    if await store.restore() == .fallbackToPhotoReview {
-                        fallbackToPhotoReview()
-                    }
-                }
-            }
-        }
-    }
-
-    private var declineControl: some View {
-        plainButton("Not now", identifier: "pro-gate.not-now") {
-            store.dismiss()
-        }
     }
 
     private func busyLabel(_ label: String, size: CGFloat) -> some View {
@@ -656,7 +533,7 @@ struct ProGateSheet: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Copy
+    // MARK: - State presentation
 
     private var title: String {
         switch store.state {
@@ -672,37 +549,85 @@ struct ProGateSheet: View {
         }
     }
 
-    private var offerStatement: String {
-        context == .itemGate ? ProGateCopy.offerStatement : ProGateCopy.plansStatement
-    }
+    private enum Scene {
+        case counter, pending, success
 
-    /// The offer reads top-down like a document; the confirming and ready
-    /// states are a single outcome, so they center on it.
-    private var isOutcomeState: Bool {
-        switch store.state {
-        case .confirming, .verificationPending, .ready: true
-        case .offer, .hidden: false
+        var assetName: String {
+            switch self {
+            case .counter: "ProGateCounterScene"
+            case .pending: "ProGatePendingScene"
+            case .success: "ProGateSuccessScene"
+            }
         }
     }
 
-    private var headerAlignment: HorizontalAlignment {
-        isOutcomeState ? .center : .leading
+    private var scene: Scene {
+        switch store.state {
+        case .offer, .hidden: .counter
+        case .confirming, .verificationPending: .pending
+        case .ready: .success
+        }
     }
 
-    private var headerTextAlignment: TextAlignment {
-        isOutcomeState ? .center : .leading
+    private var scoutPose: String {
+        switch store.state {
+        case .offer(_, .some, _), .verificationPending: "ScoutUncertain"
+        case .offer, .hidden: "FirstValueScoutONB03"
+        case .confirming: "ScoutAnalyzing"
+        case .ready: "ActivationScoutACT04"
+        }
     }
 
-    private var headerFrameAlignment: Alignment {
-        isOutcomeState ? .center : .leading
+    private struct BubbleContent {
+        let lead: String
+        var detail: String?
+        var identifier = "pro-gate.scout-bubble"
     }
 
-    private func readyStatement(_ source: ProGateStore.ReadySource) -> String {
-        switch (context, source) {
-        case (.itemGate, .purchase): ProGateCopy.purchaseReadyStatement
-        case (.itemGate, _): ProGateCopy.restoreReadyStatement
-        case (.settingsPlans, .purchase): ProGateCopy.plansPurchaseReadyStatement
-        case (.settingsPlans, _): ProGateCopy.plansRestoreReadyStatement
+    private var bubbleContent: BubbleContent? {
+        switch store.state {
+        case .offer(_, .purchaseDidNotComplete, _):
+            BubbleContent(
+                lead: ProGateCopy.purchaseFailedLead,
+                detail: ProGateCopy.purchaseFailed,
+                identifier: "pro-gate.advisory"
+            )
+        case .offer(_, .nothingToRestore, _):
+            BubbleContent(lead: ProGateCopy.nothingToRestore, identifier: "pro-gate.advisory")
+        case .offer:
+            context == .itemGate
+                ? BubbleContent(lead: ProGateCopy.offerSaved, detail: ProGateCopy.wantMore)
+                : BubbleContent(lead: ProGateCopy.wantMore)
+        case .confirming: BubbleContent(lead: ProGateCopy.confirmingBubble)
+        case .verificationPending: BubbleContent(lead: ProGateCopy.pendingBubble)
+        case .ready, .hidden: nil
+        }
+    }
+
+    private struct StampContent {
+        let text: String
+        let color: Color
+        let dashed: Bool
+    }
+
+    private var stampContent: StampContent? {
+        switch store.state {
+        case .confirming:
+            StampContent(
+                text: "CHECKING",
+                color: SnapListColorToken.proGateSlipLabel.color,
+                dashed: true
+            )
+        case .verificationPending:
+            StampContent(
+                text: "NOT CONFIRMED",
+                color: SnapListColorToken.proGateSlipLabel.color,
+                dashed: true
+            )
+        case .ready:
+            StampContent(text: "PRO ON", color: SnapListColorToken.action.color, dashed: false)
+        case .offer, .hidden:
+            nil
         }
     }
 
@@ -714,51 +639,84 @@ struct ProGateSheet: View {
     }
 }
 
-/// The paywall's Terms/Privacy disclosure (issue #812). App Review 3.1.2
-/// requires both documents reachable wherever the auto-renewing subscription
-/// is offered, and `.offer` is the only `ProGateStore.State` that offers one.
-struct ProGateLegalFooter: View {
-    @Environment(\.openURL) private var openURL
-    @ScaledMetric(relativeTo: .caption) private var footerSize: CGFloat = 12
+private struct Line: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
+    }
+}
+
+/// Decorative bars at the foot of the packing slip.
+private struct ProGateBarcode: View {
+    private static let bars: [CGFloat] = [2, 1, 1, 3, 1, 2, 2, 1, 3, 1, 1, 2, 1, 3, 2, 1, 1, 2, 3, 1, 2, 1, 1, 3]
 
     var body: some View {
-        HStack(spacing: 6) {
-            link(.termsOfService, identifier: "pro-gate.terms-of-service")
-            Text("·")
-                .font(.system(size: footerSize))
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-            link(.privacyPolicy, identifier: "pro-gate.privacy-policy")
+        Canvas { context, size in
+            let unit = size.width / Self.bars.reduce(0) { $0 + $1 + 1 }
+            var x: CGFloat = 0
+            for (index, bar) in Self.bars.enumerated() {
+                let width = bar * unit
+                if index.isMultiple(of: 2) {
+                    context.fill(
+                        Path(CGRect(x: x, y: 0, width: width, height: size.height)),
+                        with: .color(SnapListColorToken.proGateSlipInk.color.opacity(0.75))
+                    )
+                }
+                x += width + unit
+            }
+        }
+    }
+}
+
+/// The paywall's Terms/Privacy links (issue #812). App Review 3.1.2 requires
+/// both documents reachable wherever the auto-renewing subscription is
+/// offered, and `.offer` is the only `ProGateStore.State` that offers one.
+struct ProGateLegalFooter: View {
+    @Environment(\.openURL) private var openURL
+    @ScaledMetric(relativeTo: .footnote) private var footerSize: CGFloat = 13
+
+    /// Pads past the 44pt floor because a fitted (non-full) sheet floats
+    /// inset from the screen edges and draws its content slightly scaled, so
+    /// the measured on-screen target, not just the requested frame, must
+    /// clear 44pt; see `testProGateOfferLegalFooterOpensTermsAndPrivacy`.
+    static let minimumTarget = SnapListMetrics.minimumTouchTarget + 4
+
+    var body: some View {
+        HStack(spacing: 2) {
+            link("Terms", destination: .termsOfService, identifier: "pro-gate.terms-of-service")
+            Self.separator(size: footerSize)
+            link("Privacy", destination: .privacyPolicy, identifier: "pro-gate.privacy-policy")
         }
     }
 
-    /// Matches `HomeViews.swift`'s trophy-wall header buttons: `.frame` alone
-    /// only grows layout space, not the hit-tested/accessibility region for a
-    /// `.buttonStyle(.plain)` button — `.contentShape(.rect)` is what makes
-    /// that region actually cover the frame. Not padding sized to add up to
-    /// 44 at the base font either, since that stops summing to 44 once
-    /// `footerSize` scales for Dynamic Type.
-    ///
-    /// `minimumLegalLinkHeight` pads a few points past the 44pt floor so the
-    /// measured on-screen target (not just the requested frame) clears it
-    /// this close to the sheet's bottom edge; see
-    /// `testProGateOfferLegalFooterOpensTermsAndPrivacy`.
-    private static let minimumLegalLinkHeight = SnapListMetrics.minimumTouchTarget + 4
+    static func separator(size: CGFloat) -> some View {
+        Text("·")
+            .font(.system(size: size))
+            .foregroundStyle(SnapListColorToken.textTertiary.color)
+            .accessibilityHidden(true)
+    }
 
-    private func link(_ destination: LegalDestination, identifier: String) -> some View {
+    /// `.frame` alone only grows layout space, not the hit-tested region for a
+    /// `.buttonStyle(.plain)` button; `.contentShape(.rect)` makes that region
+    /// cover the frame at every Dynamic Type size.
+    private func link(
+        _ label: String,
+        destination: LegalDestination,
+        identifier: String
+    ) -> some View {
         Button {
             openURL(destination.url)
         } label: {
-            Text(destination.label)
-                .underline()
-                .font(.system(size: footerSize))
-                .frame(
-                    minWidth: SnapListMetrics.minimumTouchTarget,
-                    minHeight: Self.minimumLegalLinkHeight
-                )
+            Text(label)
+                .font(.system(size: footerSize, weight: .medium))
+                .frame(minWidth: Self.minimumTarget, minHeight: Self.minimumTarget)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .foregroundStyle(SnapListColorToken.textSecondary.color)
+        .accessibilityLabel(destination.label)
         .accessibilityIdentifier(identifier)
     }
 }
@@ -787,34 +745,31 @@ private extension SubscriptionProductMetadata {
         }
     }
 
-    /// The short unit drawn beside the price ("/ month"); nil when the period
-    /// is not a single unit, where the plan name already carries it.
+    /// The short unit drawn beside the price ("a month"); nil when the period
+    /// is not a single unit, where the slip header already carries it.
     var proGatePerUnit: String? {
         guard billingPeriod.value == 1 else { return nil }
         switch billingPeriod.unit {
-        case .day: return "/ day"
-        case .week: return "/ week"
-        case .month: return "/ month"
-        case .year: return "/ year"
+        case .day: return "a day"
+        case .week: return "a week"
+        case .month: return "a month"
+        case .year: return "a year"
         }
     }
 
     /// App Review Guideline 3.1.2 requires the auto-renewing subscription's
-    /// billing period be stated next to the purchase action, along with the
-    /// fact that it renews until canceled. SnapList's only configured product
-    /// is monthly (`NativeSubscriptionConfiguration.monthlyProductID`); this
-    /// stays keyed off the live `billingPeriod` instead of hardcoding "month"
-    /// so it stays correct if a different period is ever configured.
-    var proGateRenewalStatement: String {
+    /// billing period and its renew-until-canceled terms beside the purchase
+    /// action. The slip's Renews row carries them, keyed off the live
+    /// `billingPeriod` rather than a hardcoded "month".
+    var proGateRenewsLine: String {
         switch (billingPeriod.value, billingPeriod.unit) {
-        case (1, .day): "Renews automatically every day until canceled · Billed by Apple"
-        case (1, .week): "Renews automatically every week until canceled · Billed by Apple"
-        case (1, .month): "Renews automatically every month until canceled · Billed by Apple"
-        case (1, .year): "Renews automatically every year until canceled · Billed by Apple"
+        case (1, .day): "Daily until canceled, via Apple"
+        case (1, .week): "Weekly until canceled, via Apple"
+        case (1, .month): "Monthly until canceled, via Apple"
+        case (1, .year): "Yearly until canceled, via Apple"
         default:
-            localizedBillingPeriod().map {
-                "Renews automatically every \($0) until canceled · Billed by Apple"
-            } ?? "Renews automatically until canceled · Billed by Apple"
+            localizedBillingPeriod().map { "Every \($0) until canceled, via Apple" }
+                ?? "Until canceled, via Apple"
         }
     }
 }
@@ -846,7 +801,6 @@ struct ProGateFixtureHostView: View {
         .sheet(isPresented: fixtureBinding) {
             ProGateSheet(
                 store: store,
-                listingSummary: .fixture,
                 startListing: { _ = store.consumeResumeIntent() },
                 fallbackToPhotoReview: {},
                 context: fixture.sheetContext
@@ -880,12 +834,4 @@ private extension ProGateFixtureState {
     }
 }
 
-private extension ProGateListingSummary {
-    static let fixture = ProGateListingSummary(
-        title: "Tan leather tote bag, medium",
-        condition: "Good condition",
-        price: "$48",
-        image: UIImage(systemName: "bag.fill")
-    )
-}
 #endif

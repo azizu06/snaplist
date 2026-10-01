@@ -12,7 +12,6 @@ enum SnapListColorToken: String, CaseIterable {
     case quietFill = "#F3F4F6"
     case groupingFill = "#F7F7F7"
     case hairline = "#ECEDEF"
-    case proGateReassuranceDivider = "#E6E7EA"
     case divider = "#F1F2F4"
     case caution = "#9A6A1B"
     case cautionFill = "#FBF3E7"
@@ -20,6 +19,12 @@ enum SnapListColorToken: String, CaseIterable {
     case primerBubbleFill = "#EEF3FE"
     case inProgressFill = "#F7F9FC"
     case inProgressBorder = "#E3E8F2"
+    /// The paywall's packing slip: kraft ink, its field labels, the dashed
+    /// rule between rows, and the paper edge.
+    case proGateSlipInk = "#3A3226"
+    case proGateSlipLabel = "#8A7A60"
+    case proGateSlipRule = "#E3D9C8"
+    case proGateSlipEdge = "#EFE7DA"
 
     // MARK: - Routed bypass tokens (#830)
     //

@@ -4314,30 +4314,21 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
-    /// #978: the pinned footer used to sit beside the scroll view as a
-    /// `VStack` sibling, whose shrunk scroll frame cut the first
-    /// `WHAT PRO DOES` row mid-sentence behind the price block once scrolled
-    /// into view. The footer now floats over a full-height scroll view via
-    /// `safeAreaInset`, the same primitive `floatingDock(...)` uses, so
-    /// scrolling the row into view clears the footer instead of rendering
-    /// behind it — matching how `testFloatingDockDoesNotCoverTheLastRow...`
-    /// proves the Settings/Trophy Wall dock clearance.
-    func testProGateOfferFirstBenefitRowClearsThePriceBlockOnceScrolledIntoView() {
+    /// #978 kept the paywall's content from rendering behind its pinned
+    /// footer. The drawer now fits its content, so the packing slip that
+    /// carries the price and renewal terms must sit fully above Subscribe
+    /// without any scrolling.
+    func testProGateOfferSlipSitsAboveTheSubscribeFooter() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
 
-        let row = app.descendants(matching: .any)["pro-gate.allowance-row"]
-        let price = app.descendants(matching: .any)["pro-gate.plan"]
-        XCTAssertTrue(row.waitForExistence(timeout: 3))
-        XCTAssertTrue(price.waitForExistence(timeout: 3))
+        let plan = app.descendants(matching: .any)["pro-gate.plan"]
+        let primary = app.buttons["pro-gate.primary"]
+        XCTAssertTrue(plan.waitForExistence(timeout: 3))
+        XCTAssertTrue(primary.waitForExistence(timeout: 3))
 
-        for _ in 0..<12 {
-            guard row.frame.maxY > price.frame.minY else { break }
-            app.swipeUp()
-        }
-
-        let receipt = "row=\(row.frame), price=\(price.frame)"
-        addScreenshot(named: "PROGATE-BENEFIT-ROW-CLEARANCE-402x874.png")
-        XCTAssertLessThanOrEqual(row.frame.maxY, price.frame.minY, receipt)
+        let receipt = "plan=\(plan.frame), primary=\(primary.frame)"
+        addScreenshot(named: "PROGATE-SLIP-CLEARANCE-402x874.png")
+        XCTAssertLessThanOrEqual(plan.frame.maxY, primary.frame.minY, receipt)
     }
 
     func testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable() {
@@ -4345,17 +4336,14 @@ final class SnapListUITests: XCTestCase {
 
         let title = app.staticTexts["pro-gate.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 3))
-        XCTAssertEqual(title.label, "This item needs SnapList Pro")
+        XCTAssertEqual(title.label, "Keep listing with Pro")
+        let plan = app.descendants(matching: .any)["pro-gate.plan"]
+        XCTAssertEqual(plan.label, "SnapList Pro, Monthly, $9.99 per month")
+        // App Review 3.1.2: the renew-until-canceled terms ride on the slip
+        // beside the price instead of a separate line of fine print.
         XCTAssertEqual(
-            app.staticTexts["pro-gate.what-pro-does"].label,
-            "What Pro does"
-        )
-        XCTAssertTrue(
-            app.staticTexts["What happens if you don’t subscribe"].exists
-        )
-        XCTAssertEqual(
-            app.descendants(matching: .any)["pro-gate.plan"].label,
-            "SnapList Pro, Monthly, $9.99 per month"
+            plan.value as? String,
+            "AI listings every month. Renews Monthly until canceled, via Apple."
         )
 
         for control in [
@@ -4424,10 +4412,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThan(title.frame.height, standardTitleHeight * 1.5)
 
         let primary = app.buttons["pro-gate.primary"]
-        // The decision controls sit below the plan tile and Subscribe, so
-        // scroll until the last of them is reachable, not just the first.
-        let decline = app.buttons["pro-gate.not-now"]
-        for _ in 0..<6 where !decline.isHittable {
+        // Subscribe and Restore sit below the slip in the scroll view, so
+        // scroll until the last of them is reachable; Not now is the close
+        // control pinned to the sheet's corner.
+        let restore = app.buttons["pro-gate.restore-purchase"]
+        for _ in 0..<8 where !restore.isHittable {
             app.swipeUp()
         }
         XCTAssertTrue(app.descendants(matching: .any)["pro-gate.plan"].exists)
