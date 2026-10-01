@@ -1035,11 +1035,17 @@ final class TrophyWallStore {
                historyOrderKey < currentState.orderKey {
                 return
             }
+            // An unchanged refresh is dropped, unless it carries a cover photo
+            // the row does not hold yet: the server only gained that field after
+            // some rows were first drawn, and the order key does not move for it.
             if let currentState = canonicalHistoryStates[acceptedRun.runID],
                historyOrderKey == currentState.orderKey,
-               cards.first(where: {
+               let current = cards.first(where: {
                    $0.identity == .run(acceptedRun.runID)
-               })?.state == acceptedRun.state {
+               }),
+               current.state == acceptedRun.state,
+               acceptedRun.coverPhotoURL == nil
+                   || acceptedRun.coverPhotoURL == current.coverPhotoURL {
                 return
             }
             canonicalHistoryStates[acceptedRun.runID] = .visible(historyOrderKey)
