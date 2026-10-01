@@ -647,8 +647,7 @@ export function createApifySoldPricingProvider(
   );
   const halfLifeDays = positiveNumber(
     options.halfLifeDays ?? process.env.EBAY_SOLD_HALFLIFE_DAYS,
-    selectFreshComps,
-  SOLD_HALFLIFE_DAYS_DEFAULT,
+    SOLD_HALFLIFE_DAYS_DEFAULT,
   );
   const circuitFailureThreshold = positiveInteger(
     options.circuitFailureThreshold,
