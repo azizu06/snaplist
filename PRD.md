@@ -16,14 +16,16 @@ editable, priced listing with minimal friction.
 
 ## Solution
 
-SnapList is a native **Scan-to-Trophy-Wall** product with exactly two primary destinations:
+SnapList is a native **Scan-to-Flips** product with exactly two primary destinations:
 
 - **Scan** — capture one to five ordered photos and, optionally, one voice note of at most fifteen
   seconds. Submit once; after durable server acceptance, Scan clears so another item can begin while
   processing continues asynchronously.
-- **Trophy Wall** — the one chronological place for local pending intake and canonical server truth:
-  accepted, analyzing, ready to review, needs retry, published to eBay, and export pack
-  prepared/shared. Settings opens from the profile avatar.
+- **Flips** — the chronological place for finished items: published to eBay and export pack
+  prepared/shared. Its companion **To list**, opened from the dock, holds everything still in
+  progress: local pending intake, accepted, analyzing, ready to review, and needs retry. Both use
+  reseller words a seller already knows. Settings opens from the profile avatar. (Flips and To list
+  were named Trophy Wall and Processing until the owner renamed them.)
 
 The seller receives one coherent, editable listing with identity, condition, copy, price
 recommendation, confidence, and honest evidence. The first usable listing appears before signup or a
@@ -32,7 +34,7 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 
 ### Locked lean MVP contract
 
-- Native SwiftUI is the launch client. Primary navigation is exactly **Scan** and **Trophy Wall**;
+- Native SwiftUI is the launch client. Primary navigation is exactly **Scan** and **Flips**;
   Settings opens from the profile avatar.
 - Intake contains one to five ordered photos and at most one optional voice note capped at fifteen
   seconds. Voice failure degrades to photos-only processing.
@@ -72,8 +74,8 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
    that retry cannot duplicate the item.
 6. As a seller, I want Scan to clear only after durable acceptance, so that I can safely begin another
    item while the accepted item processes asynchronously.
-7. As a seller, I want Trophy Wall to merge local pending intake with canonical server IDs without
-   duplication, so that there is one truthful place to return.
+7. As a seller, I want To list and Flips to merge local pending intake with canonical server IDs
+   without duplication, so that there is one truthful place to return.
 8. As a seller, I want progress described as accepted, analyzing, ready to review, or needs retry, so
    that infrastructure vocabulary never leaks into the product.
 9. As a first-time seller, I want one complete usable listing from my own item before signup or
@@ -125,7 +127,7 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 - The existing durable Pipeline remains the only analysis path. Supabase Queues carry the strict
   `{ run_id, schema_version }` wake-up envelope; the tenant-owned `pipeline_runs` record is product
   truth. Queue authority is not tenant-domain authority.
-- Seller-facing clients map durable truth to plain-language Trophy Wall states. They do not display
+- Seller-facing clients map durable truth to plain-language To list and Flips states. They do not display
   queue terms or fabricate progress.
 - Issue #352 implements mobile one-to-five submission across verified upload, durable acceptance,
   worker recovery, and review projection. Older four-photo contracts are historical records, not
@@ -192,10 +194,11 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 
 ### Information architecture
 
-- Primary destinations are exactly **Scan** and **Trophy Wall**. Settings opens from the profile
-  avatar. No third primary tab or activity center may be inferred.
-- Trophy Wall is a compact chronological projection, not an inventory analytics, messaging, order,
-  fulfillment, or performance dashboard.
+- Primary destinations are exactly **Scan** and **Flips**. **To list** is Flips' in-progress
+  companion in the dock, not a new destination family. Settings opens from the profile avatar. No
+  other primary tab or activity center may be inferred.
+- Flips and To list are compact chronological projections, not inventory analytics, messaging,
+  order, fulfillment, or performance dashboards.
 - Scout may provide quiet, state-bound, deterministic guidance. It cannot fabricate progress, block
   actions, or replace a static Reduced Motion fallback.
 
@@ -210,7 +213,7 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
   completion without garment-measurement composition.
 - Pricing tests cover conditional retrieval expansion, maximum five verified matches, deterministic
   ranking, canonical evidence parity, and complete draft generation with no trustworthy comps.
-- Trophy Wall tests cover tenant isolation, deterministic local/server merge, truthful state
+- To list and Flips tests cover tenant isolation, deterministic local/server merge, truthful state
   convergence, retry visibility, progressive disclosure, accessibility, and honest export wording.
 - Marketplace tests use mock adapters to prove explicit confirmation, exact-once eBay mutation, and
   that prepared/shared export packs never become direct publish claims.

@@ -8,7 +8,7 @@ final class AppNavigationTests: XCTestCase {
     /// stops compiling when one appears — the assertion is a build failure, not a
     /// runtime expectation someone can update away.
     func testDockCarriesExactlyTheTwoApprovedPrimaryDestinations() {
-        XCTAssertEqual(PrimaryTab.allCases.map(\.title), ["Scan", "Trophy Wall"])
+        XCTAssertEqual(PrimaryTab.allCases.map(\.title), ["Scan", "Flips"])
         XCTAssertEqual(PrimaryTab.allCases.count, 2)
 
         for tab in PrimaryTab.allCases {
@@ -802,7 +802,7 @@ final class AppNavigationTests: XCTestCase {
         let slots = DockSlotPolicy.slots(processingCount: 0)
 
         XCTAssertEqual(slots, [.primary(.scan), .primary(.trophyWall), .processing])
-        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "Processing")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "To list")
     }
 
     func testProcessingSlotIsSelectedOnlyWhileTheProcessingScreenIsOnTop() {
@@ -820,9 +820,9 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(DockSlot.primary(.scan).accessibilityIdentifier, "dock.scan")
         XCTAssertEqual(DockSlot.primary(.trophyWall).accessibilityIdentifier, "dock.trophy-wall")
         XCTAssertNotEqual(DockSlot.processing.systemImage(isSelected: false), "clock")
-        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "Processing")
-        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 1), "Processing, 1 new item")
-        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 4), "Processing, 4 new items")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "To list")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 1), "To list, 1 new item")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 4), "To list, 4 new items")
     }
 
     @MainActor

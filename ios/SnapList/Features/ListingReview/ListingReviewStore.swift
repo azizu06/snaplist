@@ -413,7 +413,7 @@ final class ListingReviewStore {
             return .stayed
         }
         guard isDirty else {
-            if !silent { announcement = "Done. Back to Processing review." }
+            if !silent { announcement = "Done. Back to To list." }
             return .dismissedWithoutWrite
         }
         guard let scope = activeScope else {
@@ -532,7 +532,7 @@ final class ListingReviewStore {
                 snapshot.binding.advancingReviewRevision(to: receipt.reviewRevision)
             )
             phase = .ready
-            if !silent { announcement = "Saved. Back to Processing review." }
+            if !silent { announcement = "Saved. Back to To list." }
             return .saved(receipt)
         } catch ListingReviewClientError.refused(let refusal) {
             guard phase == .saving else { return .stayed }

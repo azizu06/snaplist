@@ -61,7 +61,7 @@ struct TrophyWallView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Text("Trophy Wall")
+                Text("Flips")
                     .font(.system(size: titleSize, weight: .bold))
                     .tracking(-0.5)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
@@ -602,19 +602,19 @@ struct TrophyWallProcessingView: View {
     static let refreshUnavailableNoticeIdentifier =
         "trophy.processing.refresh-unavailable"
     private static let emptyCollectionMessage = CollectionMessage(
-        heading: "Nothing is processing.",
+        heading: "Nothing to list.",
         action: .scan(label: "Scan an item"),
         scoutImageName: "ScoutReassurance",
         scoutAccessibilityLabel: scoutAccessibilityLabel
     )
     static let unavailableCollectionMessage = CollectionMessage(
-        heading: "Processing unavailable",
+        heading: "Can't load To list",
         action: .tryAgain(label: "Try again"),
         scoutImageName: "ScoutRetryReview",
         scoutAccessibilityLabel: scoutAccessibilityLabel
     )
 
-    @ScaledMetric(relativeTo: .title2) private var titleSize = 24
+    @ScaledMetric(relativeTo: .title) private var titleSize = 28
     @ScaledMetric(relativeTo: .callout) private var disclosureSize = 14
     @AccessibilityFocusState private var isDisclosureFocused: Bool
     @State private var isExpanded = false
@@ -623,7 +623,8 @@ struct TrophyWallProcessingView: View {
     let rows: [TrophyWallProcessingRow]
     let collectionOutcome: TrophyWallCollectionOutcome
     let refreshRecovery: TrophyWallCollectionRefreshRecovery
-    let onBack: () -> Void
+    let accountInitials: String
+    let openAccount: () -> Void
     let openRoute: (HomeRoute) -> Void
     let onAction: (TrophyWallProcessingAction) async -> ProcessingActionOutcome
     let onScan: () -> Void
@@ -640,7 +641,8 @@ struct TrophyWallProcessingView: View {
         rows: [TrophyWallProcessingRow],
         collectionOutcome: TrophyWallCollectionOutcome = .unknown,
         refreshRecovery: TrophyWallCollectionRefreshRecovery = .idle,
-        onBack: @escaping () -> Void,
+        accountInitials: String,
+        openAccount: @escaping () -> Void,
         openRoute: @escaping (HomeRoute) -> Void,
         onAction: @escaping (TrophyWallProcessingAction) async -> ProcessingActionOutcome,
         onScan: @escaping () -> Void,
@@ -651,7 +653,8 @@ struct TrophyWallProcessingView: View {
         self.rows = rows
         self.collectionOutcome = collectionOutcome
         self.refreshRecovery = refreshRecovery
-        self.onBack = onBack
+        self.accountInitials = accountInitials
+        self.openAccount = openAccount
         self.openRoute = openRoute
         self.onAction = onAction
         self.onScan = onScan
@@ -660,36 +663,11 @@ struct TrophyWallProcessingView: View {
         self.forceReducedMotion = forceReducedMotion
     }
 
-    /// The seller's one way to ask Processing for fresh status. It reports
-    /// while it works and refuses a second ask until that one finishes, so the
-    /// screen never claims to be doing two things at once (#897).
-    private var refreshControl: some View {
-        Button {
-            Task { await refreshHost.refresh(onRefresh) }
-        } label: {
-            Group {
-                switch refreshHost.state {
-                case .idle:
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 17, weight: .medium))
-                case .refreshing:
-                    ProgressView()
-                }
-            }
-            .frame(
-                width: SnapListMetrics.minimumTouchTarget,
-                height: SnapListMetrics.minimumTouchTarget
-            )
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .disabled(refreshHost.state == .refreshing)
-        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-        .accessibilityLabel("Refresh")
-        .accessibilityValue(
-            refreshHost.state == .refreshing ? "Refreshing" : ""
-        )
-        .accessibilityIdentifier("trophy.processing.refresh")
+    /// The seller's manual way to ask To list for fresh status: pull down on
+    /// the rows, or the Refresh accessibility action. Both go through the one
+    /// host, which refuses a second ask until the first finishes (#897).
+    private func refresh() async {
+        await refreshHost.refresh(onRefresh)
     }
 
     var body: some View {
@@ -703,10 +681,30 @@ struct TrophyWallProcessingView: View {
             )
 
             VStack(spacing: 0) {
-                HStack(spacing: 4) {
-                    Button(action: onBack) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 18, weight: .semibold))
+                // Same header as Flips: title at left, account at right, no back
+                // button because the dock is the way around.
+                HStack(spacing: 6) {
+                    Text("To list")
+                        .font(.system(size: titleSize, weight: .bold))
+                        .tracking(-0.5)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .accessibilityAddTraits(.isHeader)
+                        // Pull to refresh is a gesture VoiceOver users may
+                        // not find, so the same ask rides on the heading.
+                        .accessibilityAction(named: "Refresh") {
+                            Task { await refresh() }
+                        }
+                        .accessibilityIdentifier("trophy.processing.title")
+
+                    Spacer(minLength: 0)
+
+                    Button(action: openAccount) {
+                        Text(accountInitials)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                            .frame(width: 36, height: 36)
+                            .background(SnapListColorToken.hairline.color)
+                            .clipShape(.circle)
                             .frame(
                                 width: SnapListMetrics.minimumTouchTarget,
                                 height: SnapListMetrics.minimumTouchTarget
@@ -714,21 +712,12 @@ struct TrophyWallProcessingView: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .accessibilityLabel("Back to Trophy Wall")
-                    .accessibilityIdentifier("trophy.processing.back")
-
-                    Text("Processing")
-                        .font(.system(size: titleSize, weight: .bold))
-                        .tracking(-0.5)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-
-                    Spacer(minLength: 0)
-
-                    refreshControl
+                    .accessibilityLabel("Account, opens Settings")
+                    .accessibilityIdentifier("trophy.processing.account")
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 10)
+                .padding(.leading, 19)
+                .padding(.trailing, 16)
+                .padding(.bottom, 12)
 
                 if let offlineNotice = presentation.offlineNotice {
                     TrophyWallNoticeStripView(
@@ -840,6 +829,7 @@ struct TrophyWallProcessingView: View {
                         )
                     }
                     .scrollIndicators(.hidden)
+                    .refreshable { await refresh() }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

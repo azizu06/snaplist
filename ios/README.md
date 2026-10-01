@@ -4,7 +4,7 @@
 duplicate the TypeScript/Supabase server.
 
 > **Product authority changed in epic #349.** The current lean MVP has exactly two primary
-> destinations, **Scan** and **Trophy Wall**, with Settings opened from the profile avatar. The
+> destinations, **Scan** and **Flips** (with its in-progress companion **To list**), with Settings opened from the profile avatar. The
 > existing five-tab shell and broad V1 state families are retained implementation history, not
 > authority for new work. No SwiftUI recomposition is authorized until the redirected versioned
 > high-fidelity package and owning issue are approved.
@@ -41,8 +41,8 @@ package must supply new state IDs and visual acceptance references before implem
   photos-only fallback shipped through #351 and #774.
 - Processing continues asynchronously after durable server acceptance. Seller UI uses plain-language
   states and never exposes queue, worker, lease, or provider terminology.
-- **Trophy Wall** is the compact local/server chronological projection; it is not Home, Listings,
-  Inbox, Insights, an activity center, or a separate Runs destination.
+- **Flips** and **To list** are the compact local/server chronological projections; they are not
+  Home, Listings, Inbox, Insights, an activity center, or a separate Runs destination.
 - The first usable listing precedes signup/paywall.
 - eBay is the only direct-publish destination and requires explicit seller confirmation through the
   adapter. Facebook Marketplace, Mercari, and Depop receive prepared/shared export packs only.

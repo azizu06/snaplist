@@ -34,7 +34,7 @@ export const WHY = {
 } as const;
 
 /**
- * Trophy Wall section copy.
+ * To list and Flips section copy (formerly Trophy Wall).
  *
  * v6 wrote this section around selling: `Watch the pile get smaller.` and `See
  * every item you have sold in one place`. Nothing in this repository ever writes
@@ -44,7 +44,7 @@ export const WHY = {
  * place showing each item's real state. See the #191 PR body.
  */
 export const TROPHY_WALL = {
-  title: "Trophy Wall",
+  title: "To list, then Flips",
   body: "See each item move from analysis to an editable draft, then a prepared handoff or an eBay result you confirmed.",
   states: ["Analyzing", "Ready to review", "Published to eBay"],
 } as const;

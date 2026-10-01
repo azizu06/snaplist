@@ -48,7 +48,7 @@ enum SettingsSignOutCopy {
     static let effectTitle = "What happens on this iPhone"
     static let effects = [
         "Photos and a voice note you have not submitted yet, and this iPhone's copy of anything it is holding for an item, are removed from this iPhone.",
-        "Trophy Wall goes back to the guest view, and your items stop showing here.",
+        "Flips goes back to the guest view, and your items stop showing here.",
     ]
 
     static let unchangedTitle = "What this does not change"

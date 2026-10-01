@@ -286,7 +286,7 @@ describe("marketing destinations", () => {
       expect($(card).attr("class")).not.toMatch(/(?:^|\\s)(?:sm:|lg:)?col-span-/);
     });
 
-    expect(cards.map((_, card) => $(card).find("h3").text()).get()).toContain("Trophy Wall");
+    expect(cards.map((_, card) => $(card).find("h3").text()).get()).toContain("To list, then Flips");
   });
 
   it("uses a three-column, equal-card Why-choose grid on tablet and desktop", () => {

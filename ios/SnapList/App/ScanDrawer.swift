@@ -243,7 +243,7 @@ extension CaptureFlowModel {
 /// "Analysing" rather than a queue or worker word: the seller-facing states
 /// never name the machinery.
 enum AppShellSubmissionCompletionCopy {
-    static let announcement = "Item added to Trophy Wall. Analysing."
+    static let announcement = "Item added to To list. Analysing."
 }
 
 /// Raised by drawer content while a drawer of its own is open over it, such

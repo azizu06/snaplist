@@ -2172,8 +2172,8 @@ final class TrophyWallDomainTests: XCTestCase {
     ) -> String? {
         switch outcome {
         case .unknown: nil
-        case .loaded: "Nothing is processing."
-        case .offline, .unavailable: "Processing unavailable"
+        case .loaded: "Nothing to list."
+        case .offline, .unavailable: "Can't load To list"
         }
     }
 
@@ -2212,7 +2212,7 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(
             loaded.collectionMessage,
             TrophyWallProcessingView.CollectionMessage(
-                heading: "Nothing is processing.",
+                heading: "Nothing to list.",
                 action: .scan(label: "Scan an item"),
                 scoutImageName: "ScoutReassurance",
                 scoutAccessibilityLabel: "Scout, the SnapList camera helper"
@@ -2291,7 +2291,7 @@ final class TrophyWallDomainTests: XCTestCase {
             ]
         )
         let expectedMessage = TrophyWallProcessingView.CollectionMessage(
-            heading: "Processing unavailable",
+            heading: "Can't load To list",
             action: .tryAgain(label: "Try again"),
             scoutImageName: "ScoutRetryReview",
             scoutAccessibilityLabel: "Scout, the SnapList camera helper"
@@ -2924,7 +2924,7 @@ final class TrophyWallDomainTests: XCTestCase {
             (
                 "proved empty",
                 .init(
-                    heading: "Nothing is processing.",
+                    heading: "Nothing to list.",
                     action: .scan(label: "Scan an item"),
                     scoutImageName: "ScoutReassurance",
                     scoutAccessibilityLabel: "Scout"
@@ -3317,7 +3317,8 @@ private final class TrophyWallProcessingTestHost {
                 TrophyWallProcessingView(
                     rows: rows,
                     collectionOutcome: collectionOutcome,
-                    onBack: {},
+                    accountInitials: "AZ",
+                    openAccount: {},
                     openRoute: openRoute,
                     onAction: { _ in .rejected },
                     onScan: {},

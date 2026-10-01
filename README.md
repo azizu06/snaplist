@@ -16,11 +16,11 @@
 <p align="center">
   <img src="docs/readme/listing-review.png" width="300" alt="SnapList listing review on iPhone: a Sony DualSense Controller for PlayStation 5, an editable $58 price, and a verified sold matches row reading 5 sold, $54 to $62, above Fix item and Done actions.">
   &nbsp;&nbsp;
-  <img src="docs/readme/trophy-wall.png" width="300" alt="SnapList Trophy Wall on iPhone: a chronological grid of scanned items with date chips, and the two-destination dock at the bottom.">
+  <img src="docs/readme/trophy-wall.png" width="300" alt="SnapList Flips on iPhone: a chronological grid of finished items with date chips, and the dock at the bottom.">
 </p>
 
 <p align="center">
-  <sub>Listing review and Trophy Wall, captured unedited from the SwiftUI app in the iOS simulator on repository fixture data. See <a href="#screenshot-provenance">screenshot provenance</a>.</sub>
+  <sub>Listing review and Flips, captured unedited from the SwiftUI app in the iOS simulator on repository fixture data. See <a href="#screenshot-provenance">screenshot provenance</a>.</sub>
 </p>
 
 ---
@@ -56,7 +56,7 @@ flowchart TB
     subgraph client["iOS · SwiftUI"]
         direction LR
         Scan["Scan<br/>1–5 photos + optional voice"]
-        Wall["Trophy Wall<br/>plain-language states"]
+        Wall["To list + Flips<br/>plain-language states"]
         SK["StoreKit + RevenueCat"]
     end
 
@@ -284,12 +284,13 @@ builds a throwaway Postgres from the branch's own migrations and runs the pgTAP 
 ## Screenshot provenance
 
 Both images are unedited `xcrun simctl io screenshot` captures of a Debug build on a throwaway
-iPhone 17 simulator (iOS 26.5), downscaled to 420 px wide and re-encoded. No compositing, retouching,
+iPhone 17 simulator (iOS 26.5), downscaled to 420 px wide and re-encoded. The Flips image was
+recaptured the same way on an iPhone 17 Pro simulator after Trophy Wall was renamed Flips. No compositing, retouching,
 or mockup frames.
 
 `docs/readme/trophy-wall.png` — launched directly with the flags
 [`HomeVisualRegressionTests`](ios/SnapListUITests/HomeVisualRegressionTests.swift) uses for the
-approved settled Trophy Wall state:
+approved settled Flips state:
 
 ```
 --visual-state=HOME-01 --zero-network-fixtures --reset-onboarding-progress --reduced-motion
@@ -297,7 +298,7 @@ approved settled Trophy Wall state:
 
 `docs/readme/listing-review.png` — captured while
 `SnapListUITests/ListingReviewUITests/testZeroAndFiveEvidenceStayTruthfulAndSoldDetailReturnsToInvoker`
-drove the app, since listing review is reached by opening a Trophy Wall tile. Its launch flags:
+drove the app, since listing review is reached by opening a Flips tile. Its launch flags:
 
 ```
 --visual-state=HOME-01 --zero-network-fixtures --reset-onboarding-progress \

@@ -153,7 +153,7 @@ final class TrophyWallCollectionMessageScoutTests: XCTestCase {
 
         XCTAssertTrue(wallEmpty.showsEmptyView)
         XCTAssertEqual(TrophyWallView.emptyWallScout, .uncertainty)
-        XCTAssertEqual(processingEmpty.collectionMessage?.heading, "Nothing is processing.")
+        XCTAssertEqual(processingEmpty.collectionMessage?.heading, "Nothing to list.")
         XCTAssertNotEqual(processingEmpty.collectionMessage?.scout, TrophyWallView.emptyWallScout)
     }
 
@@ -173,7 +173,7 @@ final class TrophyWallCollectionMessageScoutTests: XCTestCase {
             )
 
             XCTAssertFalse(wall.showsEmptyView, "\(outcome)")
-            XCTAssertNotEqual(processing.collectionMessage?.heading, "Nothing is processing.", "\(outcome)")
+            XCTAssertNotEqual(processing.collectionMessage?.heading, "Nothing to list.", "\(outcome)")
             if outcome == .unknown {
                 XCTAssertNil(processing.collectionMessage)
                 XCTAssertNil(wall.collectionMessage)

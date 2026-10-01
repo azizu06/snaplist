@@ -930,7 +930,8 @@ struct AppShellView: View {
         if configuration.fixture == .trophyProcessing {
             ProcessingListingReviewSurface(
                 store: TrophyWallProcessingLaunchFixture.store,
-                onBack: {},
+                accountInitials: SettingsProfile.current(configuration: configuration).initials,
+                openAccount: { router.navigate(to: .settings) },
                 openRoute: { router.navigate(to: .home($0)) },
                 onScan: startNewItem,
                 goToTrophyWall: returnToTrophyWall,
@@ -1078,6 +1079,8 @@ struct AppShellView: View {
                 TrophyWallProcessingDestinationView(
                     store: trophyWallStore,
                     repository: trophyWallHistoryRepository,
+                    accountInitials: SettingsProfile.current(configuration: configuration).initials,
+                    openAccount: { router.navigate(to: .settings) },
                     runStore: runStore,
                     listingReviewStore: listingReviewStore,
                     correctionAvailability:
@@ -2752,10 +2755,10 @@ struct TrophyWallFeatureView: View {
 
 @MainActor
 private struct TrophyWallProcessingDestinationView: View {
-    @Environment(\.dismiss) private var dismiss
-
     @Bindable var store: TrophyWallStore
     let repository: any TrophyWallRunHistoryRepository
+    let accountInitials: String
+    let openAccount: () -> Void
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
     let correctionAvailability: ListingReviewCorrectionAvailability
@@ -2771,7 +2774,8 @@ private struct TrophyWallProcessingDestinationView: View {
     var body: some View {
         ProcessingListingReviewSurface(
             store: store,
-            onBack: { dismiss() },
+            accountInitials: accountInitials,
+            openAccount: openAccount,
             openRoute: openRoute,
             onScan: onScan,
             goToTrophyWall: goToTrophyWall,
@@ -2801,7 +2805,8 @@ private struct ProcessingListingReviewSurface: View {
     @Environment(\.appDependencies) private var dependencies
 
     @Bindable var store: TrophyWallStore
-    let onBack: () -> Void
+    let accountInitials: String
+    let openAccount: () -> Void
     let openRoute: (HomeRoute) -> Void
     let onScan: () -> Void
     let goToTrophyWall: () -> Void
@@ -2839,7 +2844,8 @@ private struct ProcessingListingReviewSurface: View {
             rows: store.processingRows,
             collectionOutcome: store.collectionOutcome,
             refreshRecovery: store.collectionRefreshRecovery,
-            onBack: onBack,
+            accountInitials: accountInitials,
+            openAccount: openAccount,
             openRoute: openRoute,
             onAction: { action in
                 let executor = ProcessingActionExecutor(
