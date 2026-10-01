@@ -9,7 +9,7 @@ All four showcase images are captures of the running SwiftUI app, resized and re
 | `phone-flips.jpg` | Same phone/build; `14-final-neutral-flips.png` | The empty finished-items destination and Scout; no sold/published history is implied. |
 | `scout-pro.png` | iPhone 17 Pro simulator, iOS 26.5; paywall worker capture `paywall-h-offer-baseline.png`, from the merged H paywall work | The actual Scout paywall in its saved-item context, with fixture photos/product metadata. **$9.99 is fixture data**, not a public price commitment or a purchase receipt. |
 
-The phone sources were supplied by the phone worker under `ios/Artifacts/input-keyboard-followup/phone-visual-56ed7610/`; the simulator source was supplied under `ios/Artifacts/` by the paywall worker. These local source artifacts remain ignored. This README task did not operate the phone or make a purchase.
+The phone sources were supplied by the phone worker under `ios/Artifacts/input-keyboard-followup/phone-visual-56ed7610/`; the simulator source was supplied under `ios/Artifacts/` by the paywall worker. These local source artifacts remain ignored. This README task did not operate the phone or make a purchase. These screenshots do not establish a live App Store purchase or restore.
 
 The three phone images retain the iPhone Mirroring frame, status bar, and pointer/focus decoration. They are stored at 560 px high; the paywall is 780 px high. Only item content and a one-letter avatar are visible in the phone selections; no name, email, address, account ID, notification, or credential is displayed.
 

@@ -17,7 +17,7 @@
   <img src="docs/readme/phone-flips.jpg" width="220" alt="Real iPhone Flips screen: Scout invites you to scan your first item, above the three-button dock.">
 </p>
 
-<p align="center"><sub>Real app, real iPhone. To list → review → Flips.<br>Flips is shown empty; the keyboard price is an estimate, with no verified sold matches. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
+<p align="center"><sub>Real app, real iPhone. To list → review → Flips.<br><a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 ## From photo to flip
 
@@ -34,7 +34,7 @@ The first usable listing comes **before signup or a paywall**. Try the result on
 
 Scout meets you at a packing counter when you want more AI listings. The plan appears on a taped packing slip: price, renewal terms, Subscribe, and Restore, with Terms and Privacy close at hand.
 
-<p align="center"><img src="docs/readme/scout-pro.png" width="290" alt="SnapList Pro simulator screenshot: Scout at a packing counter, a monthly plan on a taped slip, Subscribe, Restore, Terms and Privacy."><br><sub>Actual SwiftUI paywall with simulator fixture data. The displayed price is a test value.</sub></p>
+<p align="center"><img src="docs/readme/scout-pro.png" width="290" alt="SnapList Pro simulator screenshot: Scout at a packing counter, a monthly plan on a taped slip, Subscribe, Restore, Terms and Privacy."><br><sub>Scout’s packing-counter paywall. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 | Free first item | SnapList Pro |
 | --- | --- |
@@ -44,9 +44,9 @@ Scout meets you at a packing counter when you want more AI listings. The plan ap
 
 **The server confirms access.** RevenueCat subscription events update the verified Pro entitlement and billing period. A successful purchase screen alone cannot unlock AI credits. The app has confirming and pending states, and can resume the saved item once access is verified.
 
-**Credits count useful results.** A credit settles when an editable, priced draft is saved. Technical retries and recovery reuse it; a failure before that point restores it. Pro's monthly count is configurable while real usage costs are measured, so this README promises neither unlimited listings nor a fixed allowance.
+**Credits count useful results.** A credit settles when an editable, priced draft is saved. Technical retries and recovery reuse it; a failure before that point restores it. Pro’s monthly allowance is configurable while real usage costs are measured.
 
-The integration is implemented and covered by purchase/restore fixtures and server contract tests. These screenshots do not establish a live App Store purchase or restore.
+The integration is implemented and covered by purchase/restore fixtures and server contract tests.
 
 ## Built for the parts that matter
 
