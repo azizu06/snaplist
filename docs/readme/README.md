@@ -18,3 +18,29 @@ The review image retains the iPhone Mirroring frame, status bar, and pointer/foc
 Only item content and a one-letter avatar are visible in the selected root/review screens; no name, email, address, account ID, notification, or credential is displayed. No Subscribe or Restore action was taken for the paywall capture.
 
 The older `listing-review.png` and `trophy-wall.png` filenames remain for the historical simulator evidence described in the [developer guide](../developer-guide.md#screenshot-provenance). Those fixture matches are not live sales research and are not the current hero images.
+
+## Scout hero animation
+
+`scout-barcode.gif` is an offscreen frame render of the app's accepted transparent
+`ios/SnapList/Resources/FirstValueOnboarding/032-seedance-barcode-scan.webm`
+animation at source commit `408bddc0`. `TrophyWallScout.barcodeScan` in
+`ios/SnapList/Features/Home/HomeScoutMotion.swift` selects this clip and its
+alpha-preserving MOV runtime derivative for empty Flips. No mascot motion was
+redrawn or generated for the README. No simulator or physical phone was used.
+The app plays this home-state clip once; the README repeats it indefinitely.
+
+The GIF preserves transparency and the complete scan action, crops only the
+transparent margins, and uses a shared 128-color palette. It is 240 × 255 px,
+65 frames / 4.06 seconds at approximately 16 fps, and 1,483,536 bytes. Its compact
+centered placement keeps the existing screenshots immediately beneath the hero.
+The barcode is mascot illustration, not a promise of barcode-only capture.
+
+Regenerate from the repository root with FFmpeg (the explicit libvpx decoder
+preserves the WebM alpha channel):
+
+```sh
+ffmpeg -y -v error -c:v libvpx-vp9 \
+  -i ios/SnapList/Resources/FirstValueOnboarding/032-seedance-barcode-scan.webm \
+  -filter_complex '[0:v]fps=16,crop=784:834:100:50,scale=240:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:reserve_transparent=1:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:alpha_threshold=128' \
+  -loop 0 docs/readme/scout-barcode.gif
+```
