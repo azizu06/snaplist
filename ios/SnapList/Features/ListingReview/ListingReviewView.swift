@@ -42,6 +42,8 @@ struct ListingReviewView: View {
     let goToTrophyWall: () -> Void
     let startNewItem: () -> Void
     var activationInteraction: () -> Void = {}
+    /// The seller marked this run shared to another marketplace.
+    var exportShared: (UUID) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -1017,7 +1019,11 @@ struct ListingReviewView: View {
             summary: assistedExportSummary ?? presentation.summary,
             service: dependencies.assistedExportService,
             funnelAnalytics: dependencies.funnelAnalytics,
-            refreshPack: refreshAssistedExportPack
+            refreshPack: refreshAssistedExportPack,
+            onShared: {
+                guard let runID = store.snapshot?.binding.runID else { return }
+                exportShared(runID)
+            }
         )
         .dynamicTypeSize(dynamicTypeSize)
     }

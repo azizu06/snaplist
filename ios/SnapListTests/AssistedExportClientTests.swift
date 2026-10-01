@@ -253,10 +253,13 @@ final class AssistedExportClientTests: XCTestCase {
         await store.load()
         store.toggle(.mercari)
         await store.recordHandoff(.copiedListingText, for: .mercari)
+        var sharedNotices = 0
+        store.onShared = { sharedNotices += 1 }
 
         await store.confirmShared(for: .mercari)
         XCTAssertEqual(store.actionMessage, AssistedExportCopy.actionFailed)
         XCTAssertEqual(store.domain.handoff(for: .mercari), .prepared)
+        XCTAssertEqual(sharedNotices, 0)
 
         await store.confirmShared(for: .mercari)
 
@@ -264,6 +267,16 @@ final class AssistedExportClientTests: XCTestCase {
             store.domain.handoff(for: .mercari),
             .shared(at: AssistedExportConflictOnceService.sharedAt)
         )
+        // Only the recorded receipt moves the item to Flips; the conflict did not.
+        XCTAssertEqual(sharedNotices, 1)
+    }
+
+    /// The Facebook app reads `/marketplace/create/item` as a Marketplace
+    /// search for "item", so the handoff opens Marketplace home instead.
+    func testFacebookHandoffOpensMarketplaceHomeNotASearch() {
+        let url = AssistedExportDestination.facebookMarketplace.sellerHandoffURL
+        XCTAssertEqual(url.absoluteString, "https://www.facebook.com/marketplace/")
+        XCTAssertFalse(url.absoluteString.contains("item"))
     }
 
     /// Devin #1132 (3): closing the guide while the durable write is pending

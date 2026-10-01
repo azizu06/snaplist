@@ -1234,6 +1234,32 @@ final class TrophyWallStore {
         releasePersistedCoverPhoto(forRun: runID)
     }
 
+    /// The seller just marked this run shared to another marketplace. Move it
+    /// to Flips now instead of leaving it in To list as ready to review until
+    /// the next canonical refresh arrives; that refresh still has the last word.
+    func applyExportShared(runID: UUID) {
+        guard let index = cards.firstIndex(where: { $0.identity == .run(runID) }),
+              cards[index].state != .publishedToEbay,
+              cards[index].state != .exportPrepared
+        else {
+            return
+        }
+
+        let card = cards[index]
+        cards[index] = TrophyWallCard.accepted(
+            principalScope: card.principalScope,
+            runID: runID,
+            state: .exportPrepared,
+            itemName: card.itemName,
+            coverPhotoURL: card.coverPhotoURL,
+            coverPhotoAssetName: card.coverPhotoAssetName,
+            coverPhotoCrop: card.coverPhotoCrop,
+            localCoverPhotoData: card.localCoverPhotoData,
+            lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
+            orderKey: card.orderKey
+        )
+    }
+
     func ingest(
         historyPage: TrophyWallRunHistoryPage,
         principalScope requestedPrincipalScope: TrophyWallPrincipalScope
