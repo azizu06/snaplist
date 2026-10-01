@@ -557,6 +557,9 @@ struct SettingsView: View {
     /// server so it never shows Pro before the server granted it, and always
     /// shows it once it has.
     private func plansDismissed() {
+        if let granted = plansStore?.verifiedEntitlement {
+            subscriptionScope.remember(granted)
+        }
         plansStore = nil
         if plansFallbackPending {
             plansFallbackPending = false
@@ -659,7 +662,8 @@ struct SettingsView: View {
         }
         return SettingsSubscriptionPresentation(
             state: subscriptionStore.state,
-            loadPhase: subscriptionLoadPhase
+            loadPhase: subscriptionLoadPhase,
+            lastKnown: subscriptionScope.lastVerified
         )
     }
 

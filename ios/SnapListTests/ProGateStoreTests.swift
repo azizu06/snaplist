@@ -145,6 +145,36 @@ final class ProGateStoreTests: XCTestCase {
         XCTAssertEqual(subscriptionCalls.purchase, 1)
     }
 
+    /// Demo finding: Apple's purchase sheet slid away on the first tap because
+    /// the paywall restyled to `Confirming` underneath it. The offer must stay
+    /// as it was, locked, until the App Store answers.
+    func testOfferStaysUnchangedAndLockedWhileTheAppStoreSheetIsUp() async {
+        let api = ProGateMobileAPIStub(
+            entitlements: [.includedUsed, .activeStoreKit],
+            configuration: .configured
+        )
+        let subscriptions = ProGateSuspendedPurchaseClient(products: [product])
+        let store = makeStore(api: api, subscriptions: subscriptions)
+        _ = await store.prepare()
+        let offer = store.state
+
+        let purchase = Task { await store.purchase() }
+        await subscriptions.waitUntilPurchaseStarted()
+
+        XCTAssertEqual(store.state, offer)
+        XCTAssertTrue(store.isAwaitingAppStore)
+        XCTAssertFalse(store.isDismissible)
+        await store.purchase()
+        let purchaseCount = await subscriptions.purchaseCount
+        XCTAssertEqual(purchaseCount, 1, "A second tap must not start another purchase.")
+
+        await subscriptions.finishPurchase()
+        await purchase.value
+        XCTAssertFalse(store.isAwaitingAppStore)
+        XCTAssertEqual(store.state, .ready(source: .purchase))
+        XCTAssertEqual(store.verifiedEntitlement?.status, .active)
+    }
+
     func testSlowVerificationStopsLoadingAndDismissRejectsTheLateGrant() async {
         let api = ProGateMobileAPIStub(entitlements: [.includedUsed, .activeStoreKit], configuration: .configured)
         let store = ProGateStore(
@@ -807,5 +837,37 @@ private extension AiItemEntitlementEnvelope {
             ),
             meta: .init(requestId: "fixture-entitlement")
         )
+    }
+}
+
+private actor ProGateSuspendedPurchaseClient: SubscriptionClient {
+    private let products: [SubscriptionProductMetadata]
+    private var purchase: CheckedContinuation<Void, Never>?
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var purchaseCount = 0
+
+    init(products: [SubscriptionProductMetadata]) { self.products = products }
+
+    func configure(_ configuration: NativeSubscriptionConfiguration) async throws {}
+    func loadProducts() async throws -> [SubscriptionProductMetadata] { products }
+    func restore() async throws -> SubscriptionAdvisoryOutcome { .nothingToRestore }
+    func purchase(productID: String) async throws -> SubscriptionAdvisoryOutcome {
+        purchaseCount += 1
+        await withCheckedContinuation { continuation in
+            purchase = continuation
+            waiters.forEach { $0.resume() }
+            waiters.removeAll()
+        }
+        return .awaitingServerVerification
+    }
+
+    func waitUntilPurchaseStarted() async {
+        if purchase != nil { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func finishPurchase() {
+        purchase?.resume()
+        purchase = nil
     }
 }

@@ -44,6 +44,15 @@ final class ProGateStore {
     typealias Sleep = @Sendable (Duration) async -> Void
 
     fileprivate(set) var state: State = .hidden
+    /// True while Apple's purchase sheet is up. The offer stays on screen,
+    /// unchanged, until StoreKit answers: resizing or restyling the paywall
+    /// underneath Apple's sheet can dismiss that sheet, which made the seller
+    /// tap Subscribe twice. `Confirming` starts once the App Store has
+    /// answered and only the server check remains.
+    private(set) var isAwaitingAppStore = false
+    /// The server reading that granted Pro, so a screen behind the paywall
+    /// can show it at once instead of its older reading.
+    private(set) var verifiedEntitlement: ServerVerifiedSubscription?
     private(set) var intakeAdvisory: IntakeAdvisory?
 
     private let mobileAPIClient: any MobileAPIClient
@@ -87,7 +96,7 @@ final class ProGateStore {
     }
 
     var isDismissible: Bool {
-        state != .confirming
+        state != .confirming && !isAwaitingAppStore
     }
 
     var belongsToCurrentAccount: Bool {
@@ -138,6 +147,7 @@ final class ProGateStore {
         guard isCurrent(preparationID) else { return .fallbackToPhotoReview }
 
         if Self.serverPermitsResume(entitlement) {
+            verifiedEntitlement = entitlement
             state = .ready(source: .existingSubscription)
             return .presented
         }
@@ -177,14 +187,15 @@ final class ProGateStore {
     }
 
     func purchase() async {
-        guard belongsToCurrentAccount,
+        guard belongsToCurrentAccount, !isAwaitingAppStore,
               case .offer(let product, _, false) = state else { return }
         let verificationID = UUID()
         pendingVerification = .purchase
         pendingVerificationID = verificationID
-        state = .confirming
+        isAwaitingAppStore = true
         startDeadline(verificationID)
         await subscriptionStore.purchase(productID: product.id)
+        isAwaitingAppStore = false
         guard isCurrent(verificationID) else { return }
 
         switch subscriptionStore.state {
@@ -198,6 +209,7 @@ final class ProGateStore {
                 isRestoring: false
             )
         case .pending, .awaitingServerVerification:
+            if case .offer = state { state = .confirming }
             await verifyPendingEntitlement(verificationID: verificationID)
         case .failed:
             deadlineTask?.cancel()
@@ -289,6 +301,7 @@ final class ProGateStore {
     }
 
     private var canRestore: Bool {
+        if isAwaitingAppStore { return false }
         if case .offer(_, _, false) = state { return true }
         return state == .verificationPending
     }
@@ -333,6 +346,7 @@ final class ProGateStore {
             if let entitlement,
                Self.serverPermitsResume(entitlement) {
                 subscriptionStore.applyServerVerification(entitlement)
+                verifiedEntitlement = entitlement
                 state = .ready(source: pendingVerification)
                 self.pendingVerification = nil
                 pendingVerificationID = nil

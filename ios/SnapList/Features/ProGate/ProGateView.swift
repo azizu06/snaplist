@@ -120,7 +120,7 @@ struct ProGateSheet: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if case .offer = store.state {
+            if case .offer = store.state, !store.isAwaitingAppStore {
                 closeControl
             }
         }
@@ -403,6 +403,9 @@ struct ProGateSheet: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("pro-gate.title")
                 .accessibilityFocused($headingFocused)
+                // Swap the title outright. Animated, the old and new titles
+                // crossfade on top of each other mid-spring.
+                .transaction { $0.animation = nil }
             if store.state == .verificationPending {
                 Text(ProGateCopy.pendingStatement)
                     .font(.system(size: bodySize))
@@ -424,6 +427,9 @@ struct ProGateSheet: View {
                 proGatePrimaryButton("Subscribe") {
                     Task { await store.purchase() }
                 }
+                // Same size and label while Apple's sheet is up; any layout
+                // change underneath it can dismiss that sheet.
+                .disabled(store.isAwaitingAppStore)
                 quietRow(isRestoring: isRestoring)
             }
         case .confirming:
