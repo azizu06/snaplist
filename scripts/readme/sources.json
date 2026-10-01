@@ -1,16 +1,28 @@
 {
   "screens": [
     {
-      "source": "../../ios/Artifacts/readme-input/to-list-1790835303-1179x2556.png",
-      "output": "phone-to-list.webp"
-    },
-    {
       "source": "../../ios/Artifacts/readme-input/shoes-ready-review-hero-phone.png",
       "output": "phone-listing-review.webp"
     },
     {
-      "source": "../../ios/Artifacts/readme-input/shoes-review-comp-cards-1-2-phone.png",
-      "output": "phone-price-evidence.webp"
+      "source": "../../ios/Artifacts/readme-input/final2-03-airpods-review-1179x2556.png",
+      "output": "phone-airpods-review.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/final2-04-dualsense-review-1179x2556.png",
+      "output": "phone-dualsense-review.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/ebay-after-04-posted-success-phone.png",
+      "output": "phone-ebay-posted.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/final2-07-flips-populated-1179x2556.png",
+      "output": "phone-flips.webp"
+    },
+    {
+      "source": "../../ios/Artifacts/readme-input/shoes-sharing-drawer-populated-phone.png",
+      "output": "phone-sharing.webp"
     },
     {
       "source": "../../ios/Artifacts/readme-input/pro-paywall-before-purchase-phone.png",
