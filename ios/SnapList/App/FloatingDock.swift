@@ -89,6 +89,9 @@ struct FloatingDock: View {
     let slots: [DockSlot]
     let selectedSlot: DockSlot
     var processingCount: Int = 0
+    /// Changes once per newly ready, unseen item; the To list glyph bounces
+    /// on each change.
+    var readyNudge: Int = 0
     var scale: CGFloat = DockScrollScalePolicy.fullScale
     let select: (DockSlot) -> Void
 
@@ -172,6 +175,10 @@ struct FloatingDock: View {
         } label: {
             Image(systemName: slot.systemImage(isSelected: isSelected))
                 .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
+                .symbolEffect(
+                    .bounce.up,
+                    value: slot == .processing && !systemReduceMotion ? readyNudge : 0
+                )
                 .foregroundStyle(isSelected ? SnapListColorToken.action.color : SnapListColorToken.textTertiary.color)
                 .frame(
                     width: FloatingDockMetrics.destinationWidth,
@@ -232,6 +239,7 @@ extension View {
         slots: [DockSlot] = DockSlotPolicy.slots(processingCount: 0),
         selectedSlot: DockSlot = .primary(.trophyWall),
         processingCount: Int = 0,
+        readyNudge: Int = 0,
         isVisible: Bool = true,
         scale: CGFloat = DockScrollScalePolicy.fullScale,
         select: @escaping (DockSlot) -> Void
@@ -243,6 +251,7 @@ extension View {
                         slots: slots,
                         selectedSlot: selectedSlot,
                         processingCount: processingCount,
+                        readyNudge: readyNudge,
                         scale: scale,
                         select: select
                     )
@@ -257,6 +266,7 @@ extension View {
                         slots: slots,
                         selectedSlot: selectedSlot,
                         processingCount: processingCount,
+                        readyNudge: readyNudge,
                         scale: scale,
                         select: select
                     )

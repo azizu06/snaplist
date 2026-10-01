@@ -67,6 +67,9 @@ struct AppShellView: View {
     /// wall. A token rather than a Bool the wall has to clear, so two
     /// completions in a row are two distinct requests.
     @State private var trophyWallScrollToTopToken = 0
+    /// Bumped once per newly ready, unseen item so the To list slot bounces
+    /// every time, not only when SwiftUI happens to redraw the badge.
+    @State private var dockReadyNudge = 0
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
     @State private var photoReviewSaveFailure: PhotoReviewSaveFailure?
@@ -712,6 +715,7 @@ struct AppShellView: View {
             slots: DockSlotPolicy.slots(processingCount: dockProcessingCount),
             selectedSlot: DockSlotPolicy.selectedSlot(path: router.selectedPath),
             processingCount: dockProcessingCount,
+            readyNudge: dockReadyNudge,
             isVisible: shellChromeProjection.showsDock,
             scale: dockScrollScale.scale,
             select: { slot in
@@ -729,6 +733,31 @@ struct AppShellView: View {
                 }
             }
         )
+        // The badge only knows what the store last read. Without these the
+        // store re-read the server only when the seller came back to the wall,
+        // so an item finishing while the seller sat on another screen, or while
+        // the app was in the background, never reached the badge.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await trophyWallStore.refreshCollection(using: trophyWallHistoryRepository) }
+        }
+        .task(id: scenePhase == .active && trophyWallStore.hasWorkInFlight) {
+            guard scenePhase == .active, trophyWallStore.hasWorkInFlight else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: TrophyWallInFlightRefreshPolicy.interval)
+                guard !Task.isCancelled else { return }
+                await trophyWallStore.refreshCollection(using: trophyWallHistoryRepository)
+            }
+        }
+        .onChange(of: trophyWallStore.unseenReadyRunIDs) { previous, current in
+            if DockReadyNudgePolicy.shouldNudge(
+                previous: previous,
+                current: current,
+                isShowingToList: router.selectedPath.last == .home(.processing)
+            ) {
+                dockReadyNudge += 1
+            }
+        }
         // With the drawer up, the wall and the dock are behind a scrim: inert
         // to VoiceOver as well as to touch. This covers the dock; the
         // stack's own screens are hidden inside it, in `shell`.

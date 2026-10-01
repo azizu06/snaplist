@@ -253,6 +253,24 @@ enum TrophyWallMotionEnhancementPolicy {
     }
 }
 
+/// When the dock's To list slot nudges: a ready item the seller has not seen
+/// just arrived, and the seller is not already looking at To list.
+enum DockReadyNudgePolicy {
+    static func shouldNudge(
+        previous: Set<UUID>,
+        current: Set<UUID>,
+        isShowingToList: Bool
+    ) -> Bool {
+        !isShowingToList && !current.subtracting(previous).isEmpty
+    }
+}
+
+/// How often the shell re-reads the collection while work is in flight and
+/// the app is in the foreground. Nothing is polled once every row settles.
+enum TrophyWallInFlightRefreshPolicy {
+    static let interval: Duration = .seconds(8)
+}
+
 /// Whether the seller's own refresh request is still in flight.
 enum TrophyWallProcessingRefreshState: Hashable {
     case idle
@@ -698,11 +716,26 @@ final class TrophyWallStore {
     /// What the Processing dock badge counts: items ready to review that the
     /// seller has not yet seen. Work still in flight is not "new".
     var unseenReadyCount: Int {
-        processingRows.reduce(into: 0) { count, row in
-            if case .review(let runID) = row.action, !seenReadyRunIDs.contains(runID) {
-                count += 1
+        unseenReadyRunIDs.count
+    }
+
+    /// The runs behind `unseenReadyCount`. The shell nudges the dock when a
+    /// run joins this set, so the count and the nudge come from one answer.
+    var unseenReadyRunIDs: Set<UUID> {
+        Set(processingRows.compactMap { row in
+            guard case .review(let runID) = row.action,
+                  !seenReadyRunIDs.contains(runID) else {
+                return nil
             }
-        }
+            return runID
+        })
+    }
+
+    /// Whether any row is still being worked on. While this holds the shell
+    /// keeps re-reading the collection, so an item that finishes off-screen
+    /// still reaches the badge.
+    var hasWorkInFlight: Bool {
+        processingRows.contains { $0.activation == .stillWorking }
     }
 
     /// The Processing screen calls this while its rows are on screen. Only a

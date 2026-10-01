@@ -105,6 +105,32 @@ final class TrophyWallSeenReadyBadgeTests: XCTestCase {
         XCTAssertEqual(store.unseenReadyCount, 2)
     }
 
+    /// The shell keeps refreshing only while something is still in flight, so
+    /// an item that finishes while the seller sits on Flips still reaches the
+    /// badge without a manual pull.
+    func testWorkInFlightTracksRowsStillBeingAnalyzed() async {
+        let store = await loadedStore([canonical(1, .readyToReview), canonical(2, .workingPricing)])
+        XCTAssertTrue(store.hasWorkInFlight)
+        XCTAssertEqual(store.unseenReadyRunIDs, [run(1)])
+
+        store.ingest(canonical(2, .readyToReview))
+        XCTAssertFalse(store.hasWorkInFlight)
+        XCTAssertEqual(store.unseenReadyRunIDs, [run(1), run(2)])
+    }
+
+    /// Every newly ready, unseen item nudges the dock exactly once, unless the
+    /// seller is already looking at To list.
+    func testDockNudgesOnEveryNewUnseenReadyItemOffToList() {
+        let a = run(1), b = run(2)
+        XCTAssertTrue(DockReadyNudgePolicy.shouldNudge(previous: [], current: [a], isShowingToList: false))
+        XCTAssertTrue(DockReadyNudgePolicy.shouldNudge(previous: [a], current: [a, b], isShowingToList: false))
+        // Same set again (a refresh that changed nothing) and items leaving the
+        // set (seen) never nudge.
+        XCTAssertFalse(DockReadyNudgePolicy.shouldNudge(previous: [a], current: [a], isShowingToList: false))
+        XCTAssertFalse(DockReadyNudgePolicy.shouldNudge(previous: [a, b], current: [a], isShowingToList: false))
+        XCTAssertFalse(DockReadyNudgePolicy.shouldNudge(previous: [], current: [a], isShowingToList: true))
+    }
+
     func testDisplayingLoadedProcessingClearsTheBadgeAndKeepsFutureArrivals() async {
         let store = await loadedStore([canonical(1, .readyToReview), canonical(2, .workingPricing)])
         store.markDisplayedReadyRowsSeen()
