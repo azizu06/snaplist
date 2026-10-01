@@ -365,7 +365,9 @@ function projectCanonicalRun(
       retentionCleanedAt: run.retention_cleaned_at,
     },
     item: {
-      title: itemLabel(item.attributes, item.id, draftTitle),
+      // An item still being identified has no name yet; the seller sees a
+      // neutral placeholder, never an internal id.
+      title: itemLabel(item.attributes, item.id, draftTitle, "New item"),
       photoCount: item.photos.length,
       ...(coverPhotoUrl ? { coverPhotoUrl } : {}),
     },

@@ -857,6 +857,22 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(router.selectedPath, [.home(.processing)])
     }
 
+    /// Done after a saved submission lands on To list, where the new item is,
+    /// not on Flips, which only holds finished items.
+    @MainActor
+    func testDoneAfterASavedSubmissionLandsOnToList() {
+        let router = AppRouter(initialTab: .scan)
+        router.navigate(to: .settings)
+
+        router.showToListForSubmittedItem()
+
+        XCTAssertEqual(router.selectedPath, [.home(.processing)])
+        XCTAssertEqual(
+            DockSlotPolicy.selectedSlot(path: router.selectedPath),
+            .processing
+        )
+    }
+
     /// "Go to Flips" from eBay publish's result screen. The review is pushed by
     /// its presentation flag, not the shell path, so leaving must drop that
     /// flag before the shell resets its path; otherwise the review stays on

@@ -193,6 +193,9 @@ enum SubmissionFixture: String, Equatable {
     /// route refused it. Named for the answer rather than the status code because
     /// the guest capability's `401` is a different seller outcome entirely (#803).
     case sessionRejected = "session-rejected"
+    /// The server's `storekit-entitlement-unavailable` denial, whose button
+    /// opens Settings rather than the Pro offer.
+    case subscriptionInactive = "subscription-inactive"
 }
 
 enum PhotoReviewSubmissionVisualStateID: String, Equatable {
