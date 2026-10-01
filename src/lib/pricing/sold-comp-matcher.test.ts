@@ -41,6 +41,32 @@ describe("normalizeSoldCompCondition", () => {
 });
 
 describe("classifySoldComp", () => {
+  it.each(["Limited Edition", "Special-Edition", "Collector’s Edition", "Collectors Edition"])(
+    "rejects a %s sale for a standard model even when the generated title hints at that edition",
+    edition => {
+      const signal: ItemSignal = {
+        brand: "Sony", model: "DualSense", condition: "good",
+        visionTitle: `Sony DualSense ${edition}`,
+      };
+      const match = classifySoldComp(candidate(`Sony DualSense ${edition}`, "Pre-Owned"), signal);
+      expect(match.classification).toBe("reject");
+      expect(match.reasons).toContain("variant-conflict");
+    },
+  );
+
+  it.each([
+    { model: "DualSense Limited Edition" },
+    { resolvedName: "DualSense Limited Edition" },
+    { model: "DualSense", specs: ["Marvel’s Wolverine Limited Edition"] },
+  ])("preserves canonical edition identification %j", identity => {
+    const match = classifySoldComp(
+      candidate("Sony DualSense Marvel’s Wolverine Limited Edition", "Pre-Owned"),
+      { brand: "Sony", condition: "good", ...identity },
+    );
+    expect(match.classification).not.toBe("reject");
+    expect(match.reasons).not.toContain("variant-conflict");
+  });
+
   it("accepts equivalent generation and storage expressions as an anchor", () => {
     const signal: ItemSignal = {
       brand: "Amazon",

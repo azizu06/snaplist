@@ -318,6 +318,23 @@ function identityText(signal: ItemSignal): string {
   );
 }
 
+const PREMIUM_EDITION_RE = /\b(?:limited|special|collectors?|collector s) edition\b/;
+
+/** Keep edition identification when research broadens other configuration specs. */
+export function identifiedSoldEditionSpecs(signal: ItemSignal): string[] {
+  return [signal.brand, signal.model, signal.resolvedName, ...(signal.specs ?? [])]
+    .filter((text): text is string => !!text && PREMIUM_EDITION_RE.test(normalizeComparableText(text)));
+}
+
+/** Premium editions need canonical identification, never a generated title hint. */
+export function unsupportedSoldEdition(
+  comp: SoldCompCandidate,
+  signal: ItemSignal,
+): boolean {
+  return PREMIUM_EDITION_RE.test(normalizeComparableText(comp.title ?? ""))
+    && !PREMIUM_EDITION_RE.test(identityText(signal));
+}
+
 function containsPhrase(text: string, phrase: string): boolean {
   return (` ${text} `).includes(` ${phrase} `);
 }
@@ -933,6 +950,10 @@ export function classifySoldComp<T extends SoldCompCandidate>(
     comp.priceDisclosure === "asking-price-not-accepted-amount"
   ) {
     return reject(comp, sellerCondition, compCondition, "accepted-price-unknown");
+  }
+
+  if (unsupportedSoldEdition(comp, signal)) {
+    return reject(comp, sellerCondition, compCondition, "variant-conflict");
   }
 
   const model = modelIdentity(signal);

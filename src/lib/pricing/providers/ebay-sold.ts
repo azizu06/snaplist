@@ -26,6 +26,8 @@ import {
   selectSoldCompEvidence,
   selectVerifiedSoldMatches,
   soldCompRetrievalReason,
+  unsupportedSoldEdition,
+  identifiedSoldEditionSpecs,
   variantQueryTokens,
   type SoldCompEvidence,
 } from "../sold-comp-matcher";
@@ -1187,9 +1189,14 @@ export function soldResearchCategory(signal: ItemSignal): string | null {
 export function finalizeSoldResearchResult<T extends EbaySoldComp>(
   comps: readonly T[], signal: ItemSignal, options: VerifiedSoldFinalizationOptions,
 ): PriceResult | null {
-  const canonical = normalizeEbaySoldCompUrls(comps).filter(c => Number.isFinite(c.price) && c.price > 0) as T[];
+  // Preserve the original item's edition boundary when family/category research
+  // later drops its model/specs. A weaker basis cannot revive a premium mismatch.
+  const canonical = normalizeEbaySoldCompUrls(comps).filter(c =>
+    Number.isFinite(c.price) && c.price > 0 && !unsupportedSoldEdition(c, signal),
+  ) as T[];
   const fresh = options.now == null ? canonical : selectFreshComps(canonical, options.now, options.staleDays);
   const matches = [...selectSoldCompEvidence(fresh, signal).anchors];
+  const editionSpecs = identifiedSoldEditionSpecs(signal);
   const basis = new Map(matches.map(m => [m.comp.url, { kind: "sold-comp", label: null as string | null }]));
   const addBroader = (broaderSignal: ItemSignal, kind: string, label: string, scoreCap: number) => {
     const evidence = selectSoldCompEvidence(fresh, broaderSignal);
@@ -1201,13 +1208,13 @@ export function finalizeSoldResearchResult<T extends EbaySoldComp>(
     }
   };
   if (matches.length < 3 && buildSoldSearchQuery(signal)) {
-    addBroader({ ...signal, specs: [], condition: undefined }, "family-sold-comp", "Model family match", 0.5);
+    addBroader({ ...signal, specs: editionSpecs, condition: undefined }, "family-sold-comp", "Model family match", 0.5);
   }
   const category = soldResearchCategory(signal);
   if (matches.length < 3 && category) {
     // A category supplies relevance for broader research, never seller identity.
     // The same parts/accessory/lot/unknown accepted-price rules remain in force.
-    addBroader({ category, resolvedName: category, condition: undefined, specs: [] },
+    addBroader({ category, resolvedName: category, condition: undefined, specs: editionSpecs },
       "category-sold-comp", "Category comparison", 0.35);
   }
   if (matches.length === 0) return null;
