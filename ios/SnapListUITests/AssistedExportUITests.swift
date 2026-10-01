@@ -65,13 +65,11 @@ final class AssistedExportUITests: XCTestCase {
             "One tap completes its own step."
         )
         XCTAssertEqual(save.label, "Save", "and no other.")
-        XCTAssertTrue(
-            facebook.label.localizedCaseInsensitiveContains("prepared"),
-            "Was: \"\(facebook.label)\""
-        )
+        XCTAssertEqual(facebook.label, "Facebook Marketplace, 1 of 3 done")
 
         save.tap()
         XCTAssertTrue(waitForLabel("Saved", on: save, timeout: loadedTreeTimeout))
+        XCTAssertEqual(facebook.label, "Facebook Marketplace, 2 of 3 done")
         XCTAssertEqual(open.label, "Open")
     }
 

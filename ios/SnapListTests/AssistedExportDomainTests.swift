@@ -257,13 +257,25 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertEqual(guide.completed, [])
     }
 
-    func testSharingAnotherWayHandsEverythingOverSoTheGuideAsksTheQuestion() {
-        let guide = AssistedExportGuide.progress(
-            performed: [.sharedAnotherWay],
-            isShared: false
-        )
+    func testSharingAnotherWayEnablesTheClaimWithoutCompletingDeviceSteps() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.recordHandoff(.sharedAnotherWay, for: .depop)
 
-        XCTAssertEqual(guide.current, .confirmPosted)
+        XCTAssertTrue(domain.offersMarkAsShared(for: .depop))
+        XCTAssertEqual(domain.tabStatusText(for: .depop), "Prepared")
+        XCTAssertEqual(domain.guide(for: .depop).current, .copyText)
+        XCTAssertEqual(domain.guide(for: .depop).completed, [])
+
+        domain.recordHandoff(.savedPhotos, for: .depop)
+        XCTAssertEqual(domain.tabStatusText(for: .depop), "1 of 3 done")
+        XCTAssertEqual(domain.guide(for: .depop).completed, [.savePhotos])
+
+        domain.presentConfirmSheet(for: .depop)
+        XCTAssertEqual(domain.confirmShared(at: Self.julyTwentyFifth), .recorded)
+        XCTAssertEqual(domain.guide(for: .depop).completed, [.savePhotos, .confirmPosted])
+        domain.undoShared()
+        XCTAssertEqual(domain.guide(for: .depop).completed, [.savePhotos])
+        XCTAssertEqual(domain.tabStatusText(for: .depop), "1 of 3 done")
     }
 
     func testASharedClaimFinishesTheGuide() {
@@ -273,7 +285,7 @@ final class AssistedExportDomainTests: XCTestCase {
         )
 
         XCTAssertNil(guide.current)
-        XCTAssertEqual(guide.completed, AssistedExportGuideStep.allCases)
+        XCTAssertEqual(guide.completed, [.copyText, .confirmPosted])
     }
 
     func testClosingAndReopeningTheSheetResumesOnTheRightStep() {
@@ -293,7 +305,7 @@ final class AssistedExportDomainTests: XCTestCase {
         )
     }
 
-    func testTheSharedClaimFinishesTheGuideAndUndoReturnsToTheQuestion() {
+    func testTheSharedClaimFinishesTheGuideAndUndoRestoresOnlyRealDeviceSteps() {
         var domain = AssistedExportDomain(pack: .fixture())
         domain.toggle(.depop)
         domain.recordHandoff(.sharedAnotherWay, for: .depop)
@@ -304,7 +316,8 @@ final class AssistedExportDomainTests: XCTestCase {
 
         domain.undoShared()
 
-        XCTAssertEqual(domain.guide(for: .depop).current, .confirmPosted)
+        XCTAssertEqual(domain.guide(for: .depop).current, .copyText)
+        XCTAssertEqual(domain.guide(for: .depop).completed, [])
     }
 
     func testARebuiltPackRestartsTheGuideBecauseTheTextIsNew() {
@@ -334,7 +347,7 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertEqual(domain.rowStateText(for: .mercari), "Shared Jul 25")
     }
 
-    func testARowIsAnnouncedByNameAndStateAsOneElement() {
+    func testATabIsAnnouncedByNameAndVisibleProgressAsOneElement() {
         var domain = AssistedExportDomain(pack: .fixture())
         XCTAssertEqual(
             domain.accessibilityLabel(for: .facebookMarketplace),
@@ -344,7 +357,18 @@ final class AssistedExportDomainTests: XCTestCase {
         domain.recordHandoff(.openedDestination, for: .facebookMarketplace)
         XCTAssertEqual(
             domain.accessibilityLabel(for: .facebookMarketplace),
-            "Facebook Marketplace, prepared"
+            "Facebook Marketplace, 1 of 3 done"
+        )
+        domain.recordHandoff(.savedPhotos, for: .facebookMarketplace)
+        XCTAssertEqual(
+            domain.accessibilityLabel(for: .facebookMarketplace),
+            "Facebook Marketplace, 2 of 3 done"
+        )
+        domain.presentConfirmSheet(for: .facebookMarketplace)
+        domain.confirmShared(at: Self.julyTwentyFifth)
+        XCTAssertEqual(
+            domain.accessibilityLabel(for: .facebookMarketplace),
+            "Facebook Marketplace, shared"
         )
     }
 

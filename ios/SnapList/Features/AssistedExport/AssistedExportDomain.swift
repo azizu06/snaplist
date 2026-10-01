@@ -166,27 +166,22 @@ enum AssistedExportGuide {
         isShared: Bool
     ) -> AssistedExportGuideProgress {
         let all = AssistedExportGuideStep.allCases
-        if isShared {
-            return AssistedExportGuideProgress(current: nil, completed: all)
-        }
-        // The share sheet carries the text and the photos out in one go, so it
-        // puts the three device steps behind the seller. A server receipt alone
-        // does not: it records that some handoff happened, not which one, so
-        // with no local record of the action nothing is shown as done.
-        let deviceStepsDone = performed.contains(.sharedAnotherWay)
+        // Each device step requires its own successful action record. A share
+        // sheet handoff enables the seller's claim, but neither that handoff
+        // nor the claim proves a clipboard write, photo save, or app open.
         let done: [AssistedExportGuideStep] = all.filter { step in
             switch step {
             case .copyText:
-                return deviceStepsDone || performed.contains(.copiedListingText)
+                return performed.contains(.copiedListingText)
             case .savePhotos:
-                return deviceStepsDone || performed.contains(.savedPhotos)
+                return performed.contains(.savedPhotos)
             case .openDestination:
-                return deviceStepsDone || performed.contains(.openedDestination)
+                return performed.contains(.openedDestination)
             case .confirmPosted:
-                return false
+                return isShared
             }
         }
-        let current = all.first { !done.contains($0) } ?? .confirmPosted
+        let current = isShared ? nil : all.first { !done.contains($0) }
         return AssistedExportGuideProgress(current: current, completed: done)
     }
 }
@@ -357,9 +352,8 @@ struct AssistedExportDomain: Equatable, Sendable {
     }
 
     func accessibilityLabel(for destination: AssistedExportDestination) -> String {
-        // Routed through `rowStateText` rather than re-deriving the same
-        // state: a sighted seller and a VoiceOver seller read one line.
-        "\(destination.displayName), \(rowStateText(for: destination).lowercased())"
+        // Announce the same progress displayed in the marketplace tab.
+        "\(destination.displayName), \(tabStatusText(for: destination).lowercased())"
     }
 
     /// The row's one-line state: Not started, Prepared, or the seller's own
