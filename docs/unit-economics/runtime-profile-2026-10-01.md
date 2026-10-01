@@ -55,9 +55,15 @@ SELLER_CONTEXT_TRANSCRIPTION_MODEL or the effort variables above is set.
 There are no pinned old values to update after merge. No production configuration
 or secret value was changed. Rollback requires an explicit deployment with the overrides.
 
-The PR body is the authoritative rollout receipt: each switched stage needs a
-real call on Vercel preview using the production key, with latency and success.
-A failed stage must retain its previous model. The merge authority must follow
-merge/deploy with a hosted photos-plus-voice listing smoke and total-time receipt.
+The PR body is the authoritative rollout receipt. OPENAI_API_KEY is scoped only
+to Production, so Preview cannot exercise the real key; sensitive values are empty
+in the CLI env pull and cannot provide local access proof. Firstmate approved the
+alternative: after merge/deploy, run one hosted photos-plus-voice listing smoke
+with the real production runtime credentials and record success and total time.
+Use an authenticated test account and POST /v1/items/runs (multipart photo,
+voiceContext WAV, voiceContextLocale), then poll GET /v1/runs/{runId} to durable
+completion and inspect the editable item/listing. The route wakes the existing
+protected pipeline worker. Do not publish to a marketplace. A failed stage uses
+the rollback overrides above and a redeploy.
 The worker does not merge or touch a physical phone. Full quality distributions
 and durable cost telemetry remain future evidence, not claims from one smoke.

@@ -6,7 +6,8 @@ See the [runtime profile and rollout gates](runtime-profile-2026-10-01.md). The
 [live screening report](../benchmarks/model-generations/2026-10-01/REPORT.md)
 contains fixtures, per-stage quality/latency, service terms, provenance and receipts.
 The original screening retained Terra; that historical assessment is superseded by the
-approved profile, subject to production-key preview verification before merge.
+approved profile, subject to hosted verification using the actual production key.
+Preview has no OpenAI key; Firstmate approved the post-merge production smoke route.
 
 ## Current rates
 
