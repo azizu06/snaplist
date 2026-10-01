@@ -2862,6 +2862,36 @@ final class SnapListUITests: XCTestCase {
         staged.terminate()
     }
 
+    /// Removing every staged photo with the strip's X must return the framing
+    /// corners to the exact empty-state frame, not leave them at the shorter
+    /// staged-state height. `dual-wide` matches a device that offers zoom, which
+    /// is what moves the capsule into its own row while photos are staged.
+    func testFramingCornersReturnToEmptyFrameAfterRemovingEveryStagedPhoto() {
+        let empty = launch(extraArguments: ["--visual-state=CAM-02", "--scan-zoom=dual-wide"])
+        let emptyCorners = empty.otherElements["scan.framing-corners"]
+        XCTAssertTrue(emptyCorners.waitForExistence(timeout: 3))
+        let emptyFrame = emptyCorners.frame
+        empty.terminate()
+
+        let staged = launch(extraArguments: ["--visual-state=CAM-03", "--scan-zoom=dual-wide"])
+        let stagedCorners = staged.otherElements["scan.framing-corners"]
+        XCTAssertTrue(stagedCorners.waitForExistence(timeout: 3))
+        for _ in 0..<3 {
+            let remove = staged.buttons["scan.photo-1.remove"]
+            XCTAssertTrue(remove.waitForExistence(timeout: 3))
+            remove.tap()
+        }
+        XCTAssertTrue(staged.buttons["scan.photo-1.remove"].waitForNonExistence(timeout: 3))
+        // Let the 0.18s removal animation settle before reading the frame.
+        _ = staged.otherElements["scan.never-present"].waitForExistence(timeout: 1)
+
+        let receipt = "empty=\(emptyFrame) afterRemoval=\(stagedCorners.frame)"
+        XCTAssertEqual(stagedCorners.frame.minY, emptyFrame.minY, accuracy: 1, receipt)
+        XCTAssertEqual(stagedCorners.frame.maxY, emptyFrame.maxY, accuracy: 1, receipt)
+        XCTAssertEqual(stagedCorners.frame.width, emptyFrame.width, accuracy: 1, receipt)
+        staged.terminate()
+    }
+
     /// #885. Zoom is offered only when the back camera actually pairs an ultra
     /// wide with a wide lens. The simulator has no camera at all, so its honest
     /// result is no control rather than a `.5x` the hardware would refuse.

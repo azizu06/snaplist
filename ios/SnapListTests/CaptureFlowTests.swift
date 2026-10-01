@@ -9,6 +9,17 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    /// The camera's startup phases draw the live surface instead of a black
+    /// spinner, so the shell must hide the dock for them as it does for the
+    /// running feed. Only the recovery surfaces keep it.
+    func testCameraStartupPhasesCountAsTheLiveCameraPreview() {
+        XCTAssertTrue(CapturePhase.idle.isLiveCameraPreview)
+        XCTAssertTrue(CapturePhase.requestingPermission.isLiveCameraPreview)
+        XCTAssertTrue(CapturePhase.camera.isLiveCameraPreview)
+        XCTAssertFalse(CapturePhase.denied.isLiveCameraPreview)
+        XCTAssertFalse(CapturePhase.unavailable.isLiveCameraPreview)
+    }
+
     func testSubmissionFooterFitsItsVisibleActionThroughSavingSavedAndDone() async {
         for dynamicTypeSize in [DynamicTypeSize.large, .accessibility3] {
             for presentation in [
