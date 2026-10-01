@@ -98,7 +98,7 @@ final class EbayConnectionSettingsStore {
 @MainActor
 struct EbayConnectionSettingsView: View {
     // `makeStore` is a factory, not a value: `SettingsView` builds this view
-    // inside a `NavigationLink` destination closure, which SwiftUI can
+    // inside a `navigationDestination` closure, which SwiftUI can
     // re-invoke on every render pass the row is on screen for. Taking the
     // store as a plain parameter re-created it on every one of those passes,
     // which reset `state` to `.checking` before `.task` ever finished loading
@@ -141,10 +141,17 @@ struct EbayConnectionSettingsView: View {
         .background(SnapListColorToken.canvas.color)
         .navigationTitle("Connect eBay")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await store.load() }
-        .onChange(of: store.state) { _, state in
-            if case .connected = state { onConnected() }
+        .task {
+            await store.load()
+            returnToSettingsIfConnected()
         }
+    }
+
+    /// Hand off after the server confirms the connection. A view-state
+    /// observer can miss this transition while navigation updates its child.
+    private func returnToSettingsIfConnected() {
+        guard case .connected = store.state else { return }
+        onConnected()
     }
 
     private var checking: some View {
@@ -186,7 +193,12 @@ struct EbayConnectionSettingsView: View {
                     SnapListPrimaryButton(
                         title: "Connect eBay",
                         forceReducedMotion: reduceMotion,
-                        action: { Task { await store.connect() } }
+                        action: {
+                            Task {
+                                await store.connect()
+                                returnToSettingsIfConnected()
+                            }
+                        }
                     )
                     .accessibilityIdentifier("ebay-connection-settings.connect")
                 }
@@ -206,7 +218,12 @@ struct EbayConnectionSettingsView: View {
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
             SnapListSecondaryButton(
                 title: "Try again",
-                action: { Task { await store.load() } }
+                action: {
+                    Task {
+                        await store.load()
+                        returnToSettingsIfConnected()
+                    }
+                }
             )
             .accessibilityIdentifier("ebay-connection-settings.retry")
         }
