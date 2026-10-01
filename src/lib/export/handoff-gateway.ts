@@ -3,6 +3,7 @@ import type { AssistedExportHandoffGateway } from "@/lib/mobile-api";
 import {
   loadExportHandoffPack,
   markExportShared,
+  prepareExportPackFromSavedDraft,
   recordExportHandoff,
   undoExportShared,
 } from "./handoff";
@@ -25,8 +26,13 @@ export function createSupabaseAssistedExportGateway(
         itemId: input.itemId,
         reviewContentRevision: input.reviewContentRevision,
       }),
-    recordHandoff: (input) =>
-      recordExportHandoff(clientFor(input.bearerToken), input),
+    // The native drawer hands over its saved draft, so that draft becomes the
+    // prepared pack the receipt is guarded against.
+    recordHandoff: async (input) => {
+      const client = clientFor(input.bearerToken);
+      await prepareExportPackFromSavedDraft(client, input);
+      return recordExportHandoff(client, input);
+    },
     markShared: (input) =>
       markExportShared(clientFor(input.bearerToken), input),
     undoShared: (input) =>

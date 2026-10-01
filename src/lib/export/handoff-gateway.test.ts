@@ -18,12 +18,14 @@ import {
  */
 
 const loadExportHandoffPack = vi.hoisted(() => vi.fn());
+const prepareExportPackFromSavedDraft = vi.hoisted(() => vi.fn());
 const recordExportHandoff = vi.hoisted(() => vi.fn());
 const markExportShared = vi.hoisted(() => vi.fn());
 const undoExportShared = vi.hoisted(() => vi.fn());
 
 vi.mock("./handoff", () => ({
   loadExportHandoffPack,
+  prepareExportPackFromSavedDraft,
   recordExportHandoff,
   markExportShared,
   undoExportShared,
@@ -84,7 +86,11 @@ describe("createSupabaseAssistedExportGateway", () => {
     await gateway.markShared(mutation);
     await gateway.undoShared(mutation);
 
+    expect(prepareExportPackFromSavedDraft).toHaveBeenCalledWith(client, mutation);
     expect(recordExportHandoff).toHaveBeenCalledWith(client, mutation);
+    expect(
+      prepareExportPackFromSavedDraft.mock.invocationCallOrder[0],
+    ).toBeLessThan(recordExportHandoff.mock.invocationCallOrder[0]);
     expect(markExportShared).toHaveBeenCalledWith(client, mutation);
     expect(undoExportShared).toHaveBeenCalledWith(client, mutation);
     expect(clientFor).toHaveBeenCalledTimes(3);
