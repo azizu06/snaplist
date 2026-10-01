@@ -2262,7 +2262,8 @@ final class TrophyWallDomainTests: XCTestCase {
             let wall = TrophyWallView.presentation(
                 hasSettledTiles: true,
                 collectionOutcome: expectation.outcome,
-                refreshRecovery: expectation.recovery
+                refreshRecovery: expectation.recovery,
+                refreshMaySettleItems: false
             )
             XCTAssertEqual(wall.offlineNotice, expectation.offlineNotice)
             XCTAssertEqual(
@@ -2955,7 +2956,8 @@ final class TrophyWallDomainTests: XCTestCase {
                 TrophyWallView.presentation(
                     hasSettledTiles: testCase.hasSettledTiles,
                     collectionOutcome: testCase.outcome,
-                    refreshRecovery: .idle
+                    refreshRecovery: .idle,
+                    refreshMaySettleItems: false
                 ),
                 testCase.expected,
                 testCase.name
@@ -4633,5 +4635,30 @@ final class CoverPhotoImageCacheTests: XCTestCase {
         cache.insert(image(), for: signedURL(path: "user/run/0.jpg", token: "a"))
 
         XCTAssertNil(cache.image(for: signedURL(path: "user/other/0.jpg", token: "a")))
+    }
+}
+
+/// Publishing from To list and tapping Go to Flips arrives while the refresh
+/// that moves the item onto the wall is still in flight. The wall's earlier
+/// page proved it empty, but that is no longer true; it must not say so.
+final class TrophyWallPendingSettleTests: XCTestCase {
+    func testWallWithholdsEmptyStateWhileARefreshMaySettleToListItems() {
+        let settling = TrophyWallView.presentation(
+            hasSettledTiles: false,
+            collectionOutcome: .loaded,
+            refreshRecovery: .idle,
+            refreshMaySettleItems: true
+        )
+        XCTAssertFalse(settling.showsEmptyView)
+        XCTAssertFalse(settling.showsGrid)
+        XCTAssertNil(settling.collectionMessage)
+
+        let settled = TrophyWallView.presentation(
+            hasSettledTiles: false,
+            collectionOutcome: .loaded,
+            refreshRecovery: .idle,
+            refreshMaySettleItems: false
+        )
+        XCTAssertTrue(settled.showsEmptyView)
     }
 }

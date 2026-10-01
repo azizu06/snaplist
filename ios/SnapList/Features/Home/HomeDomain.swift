@@ -671,7 +671,7 @@ final class TrophyWallStore {
     private(set) var collectionRefreshRecovery: TrophyWallCollectionRefreshRecovery = .idle
     private var canonicalHistoryStates: [UUID: CanonicalHistoryState]
     private var runIDsByListingID: [UUID: UUID]
-    private var isRefreshingCollection = false
+    private(set) var isRefreshingCollection = false
     private var collectionRequestGeneration = 0
     /// Unavailable until the shell proves who the wall belongs to, and again the
     /// moment that answer changes. A wall that cannot name its principal must

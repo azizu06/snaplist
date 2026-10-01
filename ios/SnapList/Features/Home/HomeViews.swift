@@ -113,10 +113,16 @@ struct TrophyWallView: View {
     /// `refreshRecovery` carries no default on purpose. A default let the wall
     /// itself omit the argument and silently present `.idle`, which made the
     /// notice unreachable in production while every seam test still passed.
+    ///
+    /// `refreshMaySettleItems` is a refresh in flight while To list still holds
+    /// items. Publishing from To list and tapping Go to Flips lands here before
+    /// that refresh moves the item onto the wall, and the earlier page's proved
+    /// emptiness drew "No items yet" for about a second first.
     static func presentation(
         hasSettledTiles: Bool,
         collectionOutcome: TrophyWallCollectionOutcome,
-        refreshRecovery: TrophyWallCollectionRefreshRecovery
+        refreshRecovery: TrophyWallCollectionRefreshRecovery,
+        refreshMaySettleItems: Bool
     ) -> Presentation {
         guard !hasSettledTiles else {
             return Presentation(
@@ -147,7 +153,7 @@ struct TrophyWallView: View {
         case .loaded:
             return Presentation(
                 showsGrid: false,
-                showsEmptyView: true,
+                showsEmptyView: !refreshMaySettleItems,
                 offlineNotice: nil,
                 refreshUnavailableNotice: nil,
                 collectionMessage: nil
@@ -169,7 +175,9 @@ struct TrophyWallView: View {
         let presentation = Self.presentation(
             hasSettledTiles: !store.settledTiles.isEmpty,
             collectionOutcome: store.collectionOutcome,
-            refreshRecovery: store.collectionRefreshRecovery
+            refreshRecovery: store.collectionRefreshRecovery,
+            refreshMaySettleItems: store.isRefreshingCollection
+                && !store.processingRows.isEmpty
         )
 
         if let offlineNotice = presentation.offlineNotice {
