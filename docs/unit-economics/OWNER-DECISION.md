@@ -30,12 +30,19 @@ The only provider cost measured on a representative fixed corpus is the #188 Caf
 
 All token counts, stage route shares, cache-hit rates, failure rates, correction rates, free-activation conversion burden, refund/tax rates, and per-attempt infrastructure values are **dated assumption ranges**. The runtime proof is also deliberately separated: its 25-run air-gapped result is an orchestration lower bound, while the provider-inclusive 120-second/10-active-CPU-second/512-MiB envelope is an assumption awaiting device and provider telemetry ([runtime proof](../architecture/mobile-runtime-hosting-proof.md)).
 
-The generated totals still include one embedding query per attempt because they model the current
-legacy retrieval-first runtime. ADR-0010 makes listing-example retrieval default-off for launch. The
-runtime hardening ticket must set this cost to zero and regenerate the model unless the later disjoint
-on/off evaluation authorizes retrieval.
+The dated July generated totals include one embedding query per attempt. The current runtime makes
+listing-example retrieval default-off under ADR-0010, so this historical component is not current
+default-path spend. Refresh the assumptions with representative telemetry before using these totals
+as a current allowance or launch commitment.
 
-Current public rate cards are linked in the model beside every assumption. In particular, the showcase path uses the repo's GPT-5.5 default at the official [$5/M input, $0.50/M cached input, and $30/M output rates](https://developers.openai.com/api/docs/models/gpt-5.5); the development flip remains Gemini 2.5 Flash at its [current official rates](https://ai.google.dev/gemini-api/docs/pricing). The model does not silently substitute today's Apify card for #188's historical measured spend: the actor now advertises [from $2.50/1,000 results](https://apify.com/caffein.dev/ebay-sold-listings), while this version preserves the actual benchmark cost.
+The machine model preserves its July GPT-5.5 rate and token assumptions; it is not a statement of
+the current runtime default. As of October 1, the OpenAI role registry defaults to GPT-5.6 Terra
+($2/M input, $0.20/M cached input, $12/M output). The
+[October model assessment](./model-generation-assessment-2026-10-01.md) records official 6.x rates,
+live token costs, and why all current defaults are retained for the demo. Its small, model-only
+draft sample does not replace this calculator's durable-listing cost assumptions. The development
+provider remains Gemini; its assumptions and #188's historical Apify spend are likewise preserved
+in the dated machine model rather than silently repriced.
 
 ## Successful-listing COGS
 
