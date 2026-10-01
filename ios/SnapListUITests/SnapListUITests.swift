@@ -2059,6 +2059,39 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
+    /// Check subscription on the Pro-not-active denial opens Settings, where
+    /// the subscription's real state is, not an empty Flips.
+    func testCheckSubscriptionOpensSettingsFromTheDenial() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--submission-fixture=subscription-inactive"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(startListing.waitForExistence(timeout: 3))
+        startListing.tap()
+
+        let denied = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.exists && startListing.label == "Check subscription"
+            },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [denied], timeout: 20), .completed)
+        startListing.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["Settings"].waitForExistence(timeout: 5),
+            "Check subscription must land on Settings."
+        )
+    }
+
     func testRateLimitedSubmissionRendersExactRetainedMessageInLivePhotoReview() {
         let app = XCUIApplication()
         app.launchArguments = [
