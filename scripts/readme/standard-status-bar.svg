@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1206" height="180" viewBox="0 0 1206 180">
+  <!-- Original generic iOS-style presentation chrome, Apache-2.0. -->
+  <rect x="419" y="34" width="368" height="98" rx="49" fill="#030405"/>
+  <circle cx="740" cy="82" r="13" fill="#131923"/>
+  <circle cx="737" cy="79" r="4" fill="#263247"/>
+  <g fill="#111111">
+    <rect x="902" y="94" width="9" height="13" rx="3"/>
+    <rect x="917" y="85" width="9" height="22" rx="3"/>
+    <rect x="932" y="76" width="9" height="31" rx="3"/>
+    <rect x="947" y="67" width="9" height="40" rx="3"/>
+  </g>
+  <path fill="#111111" d="M978,74 C993,58 1017,58 1032,74 L1026,80 C1014,67 996,67 984,80 Z"/>
+  <path fill="#111111" d="M987,86 C997,76 1013,76 1023,86 L1017,92 C1010,86 1000,86 993,92 Z"/>
+  <path fill="#111111" d="M997,99 C1001,94 1009,94 1013,99 L1005,107 Z"/>
+  <rect x="1057" y="68" width="70" height="38" rx="10" fill="none" stroke="#111111" stroke-width="4"/>
+  <rect x="1063" y="74" width="58" height="26" rx="5" fill="#111111"/>
+  <rect x="1131" y="79" width="5" height="16" rx="2" fill="#111111"/>
+</svg>

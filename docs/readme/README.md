@@ -14,24 +14,30 @@ The animated Scout remains unchanged and is documented below.
 | `phone-to-list.webp` | `native-03-to-list.png` | 352.8 | Two ready items with rendered backpack and mouse thumbnails; no raw item ID title or placeholder. |
 | `phone-listing-review.webp` | `native-04-listing-sold-comps.png` | 207.5 | Jordan 3 review: $155 price, three sold matches, $100–$180 range, sale cards and editable fields. |
 | `phone-ebay-posted.webp` | `native-05-posted-to-ebay.png` | 301.7 | Actual post-success screen, Jordan photo and "Live on eBay" label. |
-| `phone-flips.webp` | `native-06-flips-live.png` | 321.0 | Populated Flips with the posted Jordan photo, after loading completes. |
+| `phone-flips.webp` | `native-06-flips-live.png` | 412.0 | Populated Flips with loaded mouse and Jordan photos and the navigation dock. |
 | `phone-sharing.webp` | `native-07-facebook-share.png` | 378.0 | Logitech mouse sharing drawer at $44.95 with two photos; Facebook Marketplace, Mercari and Depop all show Not started. |
 
 ## Capture quality, privacy and evidence
 
 The source timestamps fall within the editor's corresponding `screen` ranges in
-`data/snaplist-demo-edit/edit/edl.json`. They were checked against the walkthrough
+`data/snaplist-demo-edit/edit/edl.json`; the replacement Flips frame at 412.0 seconds
+uses the later beat-8 range after both photos load. They were checked against the walkthrough
 bug log. Selected frames contain no mouse cursor, raw "Item <id>" title, empty
 "No items yet" state, "Can't load" state, "(seller-stated)" suffix, error banner
 or missing item photo. Each source and framed output was visually inspected.
 No readable name, email, account ID, credential or notification is displayed.
 The one-letter profile avatar remains visible where captured.
 
-The native PNGs are unretouched full-resolution extracts. No status-bar crop was
-needed because no notification is visible. Native recording, microphone/camera,
-time and battery indicators remain source content. Framing resizes proportionally
-and rounds the screen aperture; it does not redraw UI or digitally remove a cursor.
-No source commit or installed-build SHA is inferred from the recording filename.
+The exported PNGs are presentation edits of full-resolution native extracts.
+At the captain's request, only the top 180-pixel status-bar band is replaced with
+9:41, a standard-size Dynamic Island and full signal/Wi-Fi/battery. The recording
+dot, focus moon and microphone/camera indicators are omitted from this band.
+This is display chrome, not device-state evidence. All app pixels below the band
+are unchanged. The background is sampled at the band's lower-left edge.
+The old single-tile Flips frame with no dock is excluded; the later source at
+412.0 seconds has two real photos and the dock, without painting either into UI.
+Framing resizes proportionally and rounds the screen aperture. No source commit
+or installed-build SHA is inferred from the recording filename.
 
 The Pro-on image is explicitly an Apple sandbox demonstration, not a live Apple
 purchase receipt or permanent price/allowance commitment. The eBay success screen
@@ -49,15 +55,27 @@ and PNGs are not committed to this repository.
 
 [Native still receipt](native-still-receipt.json) records the source-video hash,
 editor EDL hash, source seconds, native dimensions, PNG filenames and hashes.
-To extract an individual still without resizing or filtering:
+To extract an individual raw still without resizing or filtering:
 
 ```sh
 ffmpeg -ss SOURCE_SECONDS -i RPReplay_Final1790869944.MP4 \
   -map 0:v:0 -frames:v 1 -threads 1 STILL.png
 ```
 
-Copy the selected PNGs under their listed filenames to ignored
-`ios/Artifacts/readme-input/`, then regenerate the README images from the root:
+Regenerate the seven presentation PNGs (macOS font default; use `--font` for a
+bold sans-serif TrueType font elsewhere), then the framed images:
+
+```sh
+python3 scripts/readme/normalize-stills.py \
+  --video /path/to/RPReplay_Final1790869944.MP4 \
+  --receipt docs/readme/native-still-receipt.json \
+  --output-dir ios/Artifacts/readme-input
+```
+
+The generated receipt records both raw-extract and presentation-PNG hashes,
+the replacement band and SVG/font hashes. Copy it to `docs/readme/` when updating
+sources. The authorized shared Desktop PNGs use this same status-bar treatment.
+Then run:
 
 ```sh
 python3 scripts/readme/frame-screens.py \

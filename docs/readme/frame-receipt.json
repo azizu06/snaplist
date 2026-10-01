@@ -8,59 +8,59 @@
   "screens": [
     {
       "source": "native-01-shoe-capture.png",
-      "source_sha256": "57d2b5b058310daac3d1f488a149d6dcf401ea9e7483471f172718d96ddef504",
+      "source_sha256": "eeb4ee73dd86f7c30d08f7a68eb37fac5fb3167299fe033f7123ac131e232994",
       "crop": null,
       "output": "phone-capture.webp",
-      "bytes": 34408,
-      "output_sha256": "bc4a96f5d5855fea2976336d1e126bf3d6f8821df96e0fe6749292fb93f62d6d"
+      "bytes": 33288,
+      "output_sha256": "53c5ebdbc3fb269bcc65eb76354350195c84dd7d0f712cf96d1bfe0649a90699"
     },
     {
       "source": "native-02-pro-on-sandbox.png",
-      "source_sha256": "033ca8d120296db417758f1a925f645c08cd6e095c7972f75a892846f45d39cd",
+      "source_sha256": "b3a6939aa9cd5eff2a393426173163241e8d3ab376b344e239f84555bf2d26c8",
       "crop": null,
       "output": "scout-pro.webp",
-      "bytes": 33102,
-      "output_sha256": "499c457e7ecb183f2ce5e307f52f0556502a358135eb58cbb759891ffec40527"
+      "bytes": 32166,
+      "output_sha256": "a0368ddc6d774b545168697175b797368d49908cb55443eac6f8b7bc2286440a"
     },
     {
       "source": "native-03-to-list.png",
-      "source_sha256": "f0c16045f77a6429c8eec1039f4972074ad4b9c007da10a00a22b3adc5567fe1",
+      "source_sha256": "93a9aaca82a2d720971a80a2e2c3c3b95a19c54a6b48a58564da81b7a12f05ca",
       "crop": null,
       "output": "phone-to-list.webp",
-      "bytes": 20128,
-      "output_sha256": "6729cea5dfed33296729a485765cdac2ad71febcf927532cfeedf419f837a0e5"
+      "bytes": 19238,
+      "output_sha256": "8b146dce4e6b4ff1cd740c72ad44877fe3d8b190fc1512e12e91f9810b31f343"
     },
     {
       "source": "native-04-listing-sold-comps.png",
-      "source_sha256": "6f9a9e395c3bdf519d061b8bd30e8c84ff7a76d364e3cb57052e24fbbbab505d",
+      "source_sha256": "7de092b7920f7fd221f1965d8546c885aecee999c52987cff2c6a4103972ce84",
       "crop": null,
       "output": "phone-listing-review.webp",
-      "bytes": 45806,
-      "output_sha256": "41d7a41777e0f4a3f3a668944b576a6e1a5fd6363f2c68c0e7c03b7f096fc93e"
+      "bytes": 44814,
+      "output_sha256": "797fce08b42cab07f1d8c4e07164cffab255c36b143dd6e0e88be0ace518d83e"
     },
     {
       "source": "native-05-posted-to-ebay.png",
-      "source_sha256": "3a03fe61e6175906d296da9295df5d7b0700bb7e1d94bb5a31897c0104c446c2",
+      "source_sha256": "87a260861b39291418ce51a64f60430d49549c1aec5ca044a1477d60ef3d3beb",
       "crop": null,
       "output": "phone-ebay-posted.webp",
-      "bytes": 26592,
-      "output_sha256": "714434ee5364898c02c2632cbb75243049184610ffe959bf4825735fc622e3b1"
+      "bytes": 25588,
+      "output_sha256": "828148ee92c5b90820ee241cfc1da65388aafb06e99d6ecf9cfb08b1d302280c"
     },
     {
       "source": "native-06-flips-live.png",
-      "source_sha256": "8c365ea08034e50305cd151c5a1793cdbc12aab4936d3edb9e10f8ce16dbef8f",
+      "source_sha256": "9f48ef55abc766d7d54e7b63486261716903abc414e0b5f1aa21ff0bec3516c7",
       "crop": null,
       "output": "phone-flips.webp",
-      "bytes": 15102,
-      "output_sha256": "4ef5ebdd5856902205d48b4b8a6d93d89fd6221994048ce8d52ad2b9215bcb22"
+      "bytes": 24072,
+      "output_sha256": "ef9762c3d12c061971b57d0b7c38386957bacbd85fd11ec1af9249d28ca922d7"
     },
     {
       "source": "native-07-facebook-share.png",
-      "source_sha256": "42f2e2d85cd4a422725de4c9691b73e32af69748eb4129e27883e69bfa8f1f6b",
+      "source_sha256": "c8208dee16a795515984718831df2816ca74da233e8a2ecfe02e045cfc3f2164",
       "crop": null,
       "output": "phone-sharing.webp",
-      "bytes": 34270,
-      "output_sha256": "54cc4b483b01d919b1fa237ed9dabf146c07e5513961f0a0f069339f2f46683a"
+      "bytes": 33274,
+      "output_sha256": "3f0464b38d346e5269b0f57f66a30e94e37cd85f0f13c31a60bd7a439a919ae6"
     }
   ]
 }

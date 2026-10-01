@@ -45,7 +45,8 @@ def frame(source, output, crop=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="readme-frame-") as tmp:
         tmp = Path(tmp)
-        screen, mask, device = [tmp / f"{name}.png" for name in ("screen", "mask", "device")]
+        # Lossless native intermediates avoid repeated full-size PNG compression.
+        screen, mask, device = [tmp / f"{name}.miff" for name in ("screen", "mask", "device")]
         args = [source]
         if crop:
             args += ["-crop", crop, "+repage"]
