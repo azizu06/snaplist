@@ -277,14 +277,16 @@ enum CapturePhase: Equatable {
 }
 
 extension CapturePhase {
-    /// Whether this phase renders the live camera feed rather than a recovery
-    /// or loading surface. The dock is only removed while this is true, since
+    /// Whether this phase renders the live camera surface rather than a
+    /// recovery surface. The dock is only removed while this is true, since
     /// only the live feed is the full-bleed "camera preview" Aziz asked for.
     var isLiveCameraPreview: Bool {
         switch self {
-        case .camera, .captured, .reviewHandoff, .failed:
+        // `.idle` and `.requestingPermission` draw the live surface while the
+        // session starts, so the shell treats them as the preview too.
+        case .camera, .captured, .reviewHandoff, .failed, .idle, .requestingPermission:
             true
-        case .idle, .requestingPermission, .denied, .unavailable:
+        case .denied, .unavailable:
             false
         }
     }

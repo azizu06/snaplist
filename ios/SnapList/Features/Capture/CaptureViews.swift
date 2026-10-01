@@ -38,21 +38,19 @@ struct ScanCameraView: View {
     var body: some View {
         Group {
             switch flow.phase {
-            case .camera, .captured, .reviewHandoff:
+            // `.idle` and `.requestingPermission` draw the live surface too, so
+            // the drawer opens on its controls and framing corners at once
+            // and the preview fills in when the session starts, instead of a
+            // black spinner for the half second `startCamera()` takes. The
+            // shutter stays disabled until `.camera` (`canTakePhoto`). One
+            // case also keeps the surface's identity, so removing the last
+            // staged photo (which drops to `.idle`) does not remount it.
+            case .camera, .captured, .reviewHandoff, .failed, .idle, .requestingPermission:
                 liveSurface
             case .unavailable:
                 recoverySurface(mode: .unavailable)
             case .denied:
                 recoverySurface(mode: .denied)
-            case .failed:
-                liveSurface
-            case .idle, .requestingPermission:
-                ZStack {
-                    SnapListColorToken.cameraSurface.color.ignoresSafeArea()
-                    ProgressView()
-                        .tint(SnapListColorToken.onDarkSurface.color)
-                        .accessibilityLabel("Preparing camera")
-                }
             }
         }
         .onChange(of: scenePhase) { _, next in
@@ -642,7 +640,14 @@ enum ScanReturnFocusPolicy {
     }
 }
 
-/// Where the bottom control stack starts, in global coordinates.
+/// Where the bottom control stack starts, in the surface's own coordinates.
+///
+/// Not `.global`: the Scan drawer slides in and follows the finger with an
+/// `.offset`, which moves global frames without a relayout, so a reader that
+/// did not relayout keeps the global value it read mid-slide. The surface's
+/// bottom reader is one of those, while the staged rows relayout whenever a
+/// photo is added or removed. Mixing the two left the corners measuring
+/// against a stale drawer position and shrinking after the strip emptied.
 ///
 /// The framing corners are drawn in a sibling layer of the same `ZStack`, so
 /// they cannot ask the control stack where it ended up. Every row of that stack
@@ -661,7 +666,11 @@ private struct ScanBottomStackTopPreferenceKey: PreferenceKey {
     }
 }
 
-/// The bottom edge of the surface, in the same global space.
+/// The bottom edge of the surface, in the same surface-local space.
+private enum ScanSurfaceCoordinateSpace {
+    static let name = "scan.surface"
+}
+
 private struct ScanSurfaceBottomPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
@@ -677,7 +686,7 @@ extension View {
             GeometryReader { proxy in
                 Color.clear.preference(
                     key: ScanBottomStackTopPreferenceKey.self,
-                    value: proxy.frame(in: .global).minY
+                    value: proxy.frame(in: .named(ScanSurfaceCoordinateSpace.name)).minY
                 )
             }
         }
@@ -886,11 +895,12 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             GeometryReader { proxy in
                 Color.clear.preference(
                     key: ScanSurfaceBottomPreferenceKey.self,
-                    value: proxy.frame(in: .global).maxY
+                    value: proxy.frame(in: .named(ScanSurfaceCoordinateSpace.name)).maxY
                 )
             }
             .ignoresSafeArea()
         }
+        .coordinateSpace(.named(ScanSurfaceCoordinateSpace.name))
         .onPreferenceChange(ScanBottomStackTopPreferenceKey.self) { top in
             bottomStackTopY = top
         }
@@ -1320,6 +1330,7 @@ struct ScanCameraVisualStateView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     @State private var zoomLens: ScanZoomLens = .wide
+    @State private var removedFixturePhotoIDs: Set<StagedCapturePhoto.ID> = []
 
     private var reduceMotion: Bool { forceReducedMotion || systemReduceMotion }
 
@@ -1392,10 +1403,10 @@ struct ScanCameraVisualStateView: View {
             )
         default:
             LiveScanCameraSurface(
-                thumbnailURLs: Array(repeating: nil, count: fixturePhotoCount),
-                photoIDs: [],
-                isShutterEnabled: fixturePhotoCount < 5,
-                isLibraryEnabled: fixturePhotoCount < 5,
+                thumbnailURLs: Array(repeating: nil, count: fixturePhotoIDs.count),
+                photoIDs: fixturePhotoIDs,
+                isShutterEnabled: fixturePhotoIDs.count < 5,
+                isLibraryEnabled: fixturePhotoIDs.count < 5,
                 isFlashAvailable: true,
                 flashMode: .off,
                 zoomControl: zoomControl,
@@ -1415,9 +1426,17 @@ struct ScanCameraVisualStateView: View {
                 close: {},
                 returnFocus: .constant(nil),
                 review: {},
-                removePhoto: { _ in },
+                removePhoto: { id in removedFixturePhotoIDs.insert(id) },
             )
         }
+    }
+
+    /// Stable per-slot ids so the strip's X actually removes a staged photo,
+    /// which lets a launch walk a live staged-to-empty transition.
+    private var fixturePhotoIDs: [StagedCapturePhoto.ID] {
+        (0..<fixturePhotoCount)
+            .map { UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", $0))! }
+            .filter { !removedFixturePhotoIDs.contains($0) }
     }
 
     private var fixturePhotoCount: Int {
