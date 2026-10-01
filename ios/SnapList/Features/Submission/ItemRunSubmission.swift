@@ -69,8 +69,8 @@ struct ItemRunSubmissionPhoto: Codable, Equatable, Sendable {
 /// reference, not a server path or an authorization capability.
 struct ItemRunSubmissionVoice: Codable, Equatable, Sendable {
     static let mediaType = "audio/wav"
-    static let maximumByteLength = 512 * 1024
-    static let maximumDurationMilliseconds = 15_000
+    static let maximumByteLength = 1536 * 1024
+    static let maximumDurationMilliseconds = 45_000
 
     let assetID: UUID
     let mediaURL: URL

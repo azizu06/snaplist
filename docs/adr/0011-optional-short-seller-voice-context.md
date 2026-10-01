@@ -63,14 +63,14 @@ backgrounding, encoder failure, cancellation, or a missing asset returns a no-vo
 altering the photos. SnapList does not substitute a mandatory text field or silently start a second
 recognizer.
 
-The recorder hard-stops at 15,000 milliseconds by using the duration-bounded recording API. The
+The recorder hard-stops at 45,000 milliseconds by using the duration-bounded recording API. The
 accepted wire format is:
 
 - RIFF/WAVE container (`audio/wav`);
 - signed 16-bit little-endian Linear PCM;
 - mono, 16 kHz;
-- at most 15,000 milliseconds after decoding; and
-- at most 512 KiB, including RIFF metadata (15 seconds of canonical PCM is 480,000 bytes before
+- at most 45,000 milliseconds after decoding; and
+- at most 1536 KiB, including RIFF metadata (45 seconds of canonical PCM is 1,440,000 bytes before
   headers).
 
 The server treats declared media type, duration, and byte length as untrusted. It verifies the
@@ -169,7 +169,15 @@ The normalized outcomes are `transcribed`, `invalid`, `empty`, `unsupported`, `t
 Missing, skipped, deleted, permission-denied, interrupted, and canceled capture never create a server
 voice asset and therefore enter the same photos-only path.
 
-Transcription has a 20-second attempt deadline and at most one billable attempt per logical run. The
+The 45-second recording allowance includes pauses and stutters; it does not enlarge the prompt
+budget. Transcripts still normalize and truncate safely at 1,000 Unicode scalars / 4,096 UTF-8
+bytes before the seller-context schema, persistence, vision and listing prompts. Pricing additionally
+bounds each unverified hint to its existing prompt limit. Oversized transcript output is truncated,
+never a reason to fail the item. Raw audio fits the existing 50-MiB private Storage bucket cap.
+The default 300-second worker lease and job deadline exceed the 60-second transcription budget;
+queue redelivery retains the existing one-billable-attempt fence.
+
+Transcription has a 60-second attempt deadline and at most one billable attempt per logical run. The
 worker durably checkpoints a strict content-free role/provider/model/call reservation and flushes
 its idempotent usage receipt before the external adapter can run. Replay inspects both the pending
 attempt and terminal voice checkpoints, conservatively reuses that receipt, and never retranscribes
@@ -282,7 +290,7 @@ glossary terms.
 - **Make voice mandatory or add a keyboard fallback** — rejected: the approved value is optional
   zero-keyboard context and photos must remain sufficient.
 - **Use AVAudioEngine and stream live audio** — rejected: it creates unnecessary buffering,
-  interruption, and lifecycle complexity for one 15-second file.
+  interruption, and lifecycle complexity for one 45-second file.
 - **Use SpeechAnalyzer as the only launch transcriber** — rejected for now: it would raise the iOS
   floor from 17 to 26 or create different transcript paths by device.
 - **Fall back to SFSpeechRecognizer on older devices** — rejected: it can require Apple's servers,

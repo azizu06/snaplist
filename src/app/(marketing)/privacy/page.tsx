@@ -41,7 +41,7 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Voice context, if you record it.</strong> One optional voice note of at most
-          fifteen seconds. It is treated as your description of the item, not as verified fact
+          forty-five seconds. It is treated as your description of the item, not as verified fact
           about it.
         </li>
         <li>

@@ -1,5 +1,9 @@
 # Issue #351 voice-context primary-source research
 
+> Historical research: the original 15-second / 512-KiB proposal below is superseded by
+> the 45-second / 1536-KiB capture and 60-second transcription deadline in
+> `docs/contracts/voice-context-v1.json`. Pricing arithmetic below describes the original duration.
+
 > Retrieved: **2026-07-21**
 >
 > Scope: official Apple Developer and official OpenAI developer sources only.

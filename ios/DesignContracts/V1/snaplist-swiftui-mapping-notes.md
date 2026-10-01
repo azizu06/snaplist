@@ -5,7 +5,7 @@ implementation authorization.
 
 The future approved package must map exactly two primary destinations, **Scan** and **Trophy Wall**,
 with Settings opened from the profile avatar. It must preserve one-to-five photo intake, optional
-fifteen-second voice context, asynchronous durable processing, plain-language progress, first value
+forty-five-second voice context, asynchronous durable processing, plain-language progress, first value
 before signup/paywall, direct eBay publish only, and honest export packs elsewhere.
 
 Until the redirected high-fidelity package and owning issue are approved:

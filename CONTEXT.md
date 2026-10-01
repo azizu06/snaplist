@@ -15,7 +15,7 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
 
 - **Seller** — the SnapList user. The only human actor in the native product.
 - **Scan** — one of exactly two primary destinations. It owns recoverable intake for one physical
-  item: one to five ordered photos and zero or one voice note capped at fifteen seconds. It clears
+  item: one to five ordered photos and zero or one voice note capped at forty-five seconds. It clears
   only after durable server acceptance.
 - **Flips** — the other primary destination (formerly Trophy Wall). A tenant-owned chronological
   projection of finished items: **published to eBay** and **export pack prepared/shared**. It is not
@@ -25,7 +25,7 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
   **accepted**, **analyzing**, **ready to review**, and **needs retry**.
 - **Settings** — the full account/product-control destination opened from the profile avatar. It is
   not a third primary destination.
-- **Voice context** — optional seller-supplied context from at most one fifteen-second voice note.
+- **Voice context** — optional seller-supplied context from at most one forty-five-second voice note.
   Raw audio is bounded temporary input; a transcript may enrich condition notes or listing copy but
   is not external verification and cannot override image, catalog, sold-evidence, or marketplace
   truth. Missing/failed voice processing falls back to photos only.

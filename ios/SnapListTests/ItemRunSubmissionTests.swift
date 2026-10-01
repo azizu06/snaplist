@@ -1131,6 +1131,37 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(remaining, intake.photos)
     }
 
+    func testSubmissionCarriesA45SecondWAVAndFallsBackForLongerAudio() throws {
+        let intake = SubmissionIntakeFixture(photoCount: 1)
+        let voiceURL = URL(fileURLWithPath: "/voice-45-second-fixture.wav")
+        let voice = NativeIntake.Voice(id: UUID(), mediaURL: voiceURL, duration: 45)
+        let readPhoto = intake.read
+        for sampleCount in [720_000, 720_001] {
+            var bytes = Data(Self.fixedVoiceWAV().prefix(44))
+            bytes.append(Data(repeating: 0, count: sampleCount * 2))
+            for (offset, value) in [(4, UInt32(bytes.count - 8)), (40, UInt32(sampleCount * 2))] {
+                var littleEndian = value.littleEndian
+                let encoded = withUnsafeBytes(of: &littleEndian) { Data($0) }
+                bytes.replaceSubrange(offset..<(offset + 4), with: encoded)
+            }
+            let snapshot = try ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                voice: voice,
+                localeHint: "en-US",
+                readData: { url in url == voiceURL ? bytes : try readPhoto(url) }
+            )
+            XCTAssertEqual(snapshot.photoData, intake.expectedBytes)
+            if sampleCount == 720_000 {
+                XCTAssertEqual(snapshot.voiceContext?.durationMilliseconds, 45_000)
+                XCTAssertEqual(snapshot.voiceContext?.byteLength, 1_440_044)
+                XCTAssertEqual(snapshot.voiceData, bytes)
+            } else {
+                XCTAssertNil(snapshot.voiceContext)
+                XCTAssertNil(snapshot.voiceData)
+            }
+        }
+    }
+
     func testUnreadableOrUnsupportedVoiceFailsOpenToTheExactPhotoPayload()
         throws {
         let intake = SubmissionIntakeFixture(photoCount: 2)

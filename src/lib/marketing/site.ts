@@ -101,7 +101,7 @@ export const FEATURE_STEPS = [
     id: "photo-review",
     title: "Photo Review",
     body:
-      "Reorder, replace, or remove photos, and record one optional voice note up to 15 seconds, before the draft.",
+      "Reorder, replace, or remove photos, and record one optional voice note up to 45 seconds, before the draft.",
   },
   {
     id: "listing-review",
@@ -137,7 +137,7 @@ export const MARKETING_BENTO_CARDS = [
     icon: "mic" as const,
     title: "Voice notes add context",
     description:
-      "Add up to 15 seconds of context. Photos and verified evidence remain the source of truth.",
+      "Add up to 45 seconds of context. Photos and verified evidence remain the source of truth.",
   },
   {
     icon: "pencil" as const,

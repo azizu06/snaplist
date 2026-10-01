@@ -21,7 +21,7 @@
     "scan": {
       "ordered_photo_count": {"minimum": 1, "maximum": 5},
       "optional_voice_context": true,
-      "voice_duration_seconds_maximum": 15,
+      "voice_duration_seconds_maximum": 45,
       "clears_after": "durable_server_acceptance",
       "processing": "asynchronous"
     },

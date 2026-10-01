@@ -82,7 +82,7 @@ enum VoiceNoteRecordingAccessibilityElement: Equatable {
 }
 
 enum VoiceNotePresentation {
-    static let maximumDuration: TimeInterval = 15
+    static let maximumDuration: TimeInterval = 45
     /// Voice Note A1: one height for the recorder, a stopped take and a saved
     /// note, so nothing in the panel moves when a take stops.
     static let sheetHeight: CGFloat = 300
@@ -217,7 +217,7 @@ struct VoiceNoteCommitAuthority {
 }
 
 final class VoiceNoteLocalFileStore: VoiceNoteFileStoring {
-    static let maximumBytes = 524_288
+    static let maximumBytes = 1_572_864
     static let recoveryCeiling: TimeInterval = 24 * 60 * 60
 
     private let fileManager: FileManager

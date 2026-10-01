@@ -24,7 +24,7 @@ processing, credit accounting, coherent review, pricing evidence, or external-si
 The native app has exactly two primary destinations:
 
 1. **Scan** — locally recoverable intake for one physical item with one to five ordered photos and
-   zero or one voice note capped at fifteen seconds. Scan clears only after durable server acceptance,
+   zero or one voice note capped at forty-five seconds. Scan clears only after durable server acceptance,
    after which the seller may start another item while accepted work processes asynchronously.
 2. **Trophy Wall** — one tenant-owned chronological projection merging local pending intake and
    canonical server identity without duplication. Public states are pending upload, accepted,

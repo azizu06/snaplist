@@ -48,6 +48,20 @@ const verifiedVoice: SellerContextTranscriptionInput = {
 };
 
 describe("resolveSellerContextTranscriber", () => {
+  it("transcribes a 45-second asset and safely bounds a rambling transcript", async () => {
+    const bytes = new Uint8Array(1_440_044);
+    const transcriber = resolveSellerContextTranscriber({
+      model: {
+        async transcribe() {
+          return { text: "x".repeat(5_000), language: "en-US" };
+        },
+      },
+    });
+    await expect(
+      transcriber.transcribe({ ...verifiedVoice, bytes, durationMs: 45_000 }),
+    ).resolves.toMatchObject({ kind: "transcribed", text: "x".repeat(1_000) });
+  });
+
   it("exports sellerContext beside, not inside, the generation roles", () => {
     expect(SELLER_CONTEXT_TRANSCRIPTION_ROLE).toBe("sellerContext");
     expect(LLM_ROLES).not.toContain(SELLER_CONTEXT_TRANSCRIPTION_ROLE);
@@ -157,10 +171,10 @@ describe("resolveSellerContextTranscriber", () => {
     });
     const unsupportedInputs = [
       { ...verifiedVoice, bytes: new Uint8Array() },
-      { ...verifiedVoice, bytes: new Uint8Array(524_289) },
+      { ...verifiedVoice, bytes: new Uint8Array(1_572_865) },
       { ...verifiedVoice, mediaType: "audio/mpeg" },
       { ...verifiedVoice, contentSha256: "not-a-sha256" },
-      { ...verifiedVoice, durationMs: 15_001 },
+      { ...verifiedVoice, durationMs: 45_001 },
       { ...verifiedVoice, localeHint: "EN-us" },
       { ...verifiedVoice, localeHint: undefined },
     ] as SellerContextTranscriptionInput[];
@@ -174,7 +188,7 @@ describe("resolveSellerContextTranscriber", () => {
     expect(transcribe).not.toHaveBeenCalled();
   });
 
-  it("aborts the adapter and returns photos-only at the 20-second deadline", async () => {
+  it("aborts the adapter and returns photos-only at the 60-second deadline", async () => {
     vi.useFakeTimers();
     try {
       let adapterSignal: AbortSignal | undefined;
@@ -190,7 +204,7 @@ describe("resolveSellerContextTranscriber", () => {
       void transcriber.transcribe(verifiedVoice).then(settled);
 
       expect(adapterSignal?.aborted).toBe(false);
-      await vi.advanceTimersByTimeAsync(19_999);
+      await vi.advanceTimersByTimeAsync(59_999);
       expect(settled).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
 

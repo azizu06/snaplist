@@ -14,10 +14,10 @@ import type { ProviderUsageTranscriptionTotals } from "../provider-usage/record"
 
 const MAXIMUM_TRANSCRIPT_UNICODE_SCALARS = 1_000;
 const MAXIMUM_TRANSCRIPT_UTF8_BYTES = 4_096;
-const MAXIMUM_AUDIO_BYTES = 524_288;
-const MAXIMUM_AUDIO_DURATION_MS = 15_000;
+const MAXIMUM_AUDIO_BYTES = 1_572_864;
+const MAXIMUM_AUDIO_DURATION_MS = 45_000;
 const MAXIMUM_LANGUAGE_TAG_UTF8_BYTES = 255;
-const TRANSCRIPTION_DEADLINE_MS = 20_000;
+const TRANSCRIPTION_DEADLINE_MS = 60_000;
 const utf8Encoder = new TextEncoder();
 const timedOut = Symbol("seller-context-transcription-timed-out");
 const callerCancelled = Symbol("seller-context-transcription-caller-cancelled");

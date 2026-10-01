@@ -65,7 +65,7 @@ final class VoiceNoteTests: XCTestCase {
         // Moving into a later bar slot fills that slot without disturbing the
         // one already locked in: the fill only ever advances.
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
-            elapsed: 0.5,
+            elapsed: 1.5,
             meterLevels: [0.3, 0.9]
         )
         store.refreshRecording()
@@ -194,7 +194,7 @@ final class VoiceNoteTests: XCTestCase {
 
     func testStartingANewTakeRetiresTheCachedWaveformOfTheFileItWillReplace() throws {
         // The saved note commits to one fixed file name, and two takes that
-        // both reach the 15 s cap write the same byte count, so the file's own
+        // both reach the 45 s cap write the same byte count, so the file's own
         // metadata is not enough to retire a stale shape.
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("snaplist-waveform-cache-\(UUID().uuidString)")
@@ -308,7 +308,7 @@ final class VoiceNoteTests: XCTestCase {
 
         await store.startRecording()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
-            elapsed: 14.9,
+            elapsed: 44.9,
             meterLevels: [0.7]
         )
         store.refreshRecording()
@@ -319,7 +319,7 @@ final class VoiceNoteTests: XCTestCase {
         )
         audio.finishRecordingAtTimeLimit()
 
-        XCTAssertEqual(store.phase, .takeReady(duration: 15))
+        XCTAssertEqual(store.phase, .takeReady(duration: 45))
         XCTAssertNil(store.savedNote)
         XCTAssertEqual(files.committedURLs, [])
     }
@@ -406,31 +406,31 @@ final class VoiceNoteTests: XCTestCase {
 
         await store.startRecording()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
-            elapsed: 14.9,
+            elapsed: 44.9,
             meterLevels: [0.7]
         )
         store.refreshRecording()
 
         XCTAssertEqual(
             store.phase,
-            .recording(elapsed: 14.9, level: 0.7)
+            .recording(elapsed: 44.9, level: 0.7)
         )
         XCTAssertNil(store.savedNote)
         XCTAssertEqual(files.committedURLs, [])
 
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
-            elapsed: 15,
+            elapsed: 45,
             meterLevels: [0.7]
         )
         store.refreshRecording()
 
-        XCTAssertEqual(store.phase, .takeReady(duration: 15))
+        XCTAssertEqual(store.phase, .takeReady(duration: 45))
         XCTAssertNil(store.savedNote)
         XCTAssertEqual(files.committedURLs, [])
 
         store.save()
 
-        XCTAssertEqual(store.savedNote?.duration, 15)
+        XCTAssertEqual(store.savedNote?.duration, 45)
         XCTAssertEqual(files.committedURLs, [audio.provisionalURL])
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
     }
@@ -1217,7 +1217,7 @@ final class VoiceNoteTests: XCTestCase {
         )
         XCTAssertEqual(
             VoiceNotePresentation.recordingAccessibilityLabel(elapsed: 7.8),
-            "Recording, 7 seconds of 15"
+            "Recording, 7 seconds of 45"
         )
         XCTAssertEqual(
             VoiceNotePresentation.recordingAccessibilityLabel(elapsed: 7.8),
@@ -1250,10 +1250,10 @@ final class VoiceNoteTests: XCTestCase {
         let files = VoiceNoteLocalFileStore(rootDirectory: root)
 
         let firstURL = try files.makeProvisionalURL()
-        try Data(repeating: 1, count: 128).write(to: firstURL)
+        try Data(repeating: 1, count: 1_440_044).write(to: firstURL)
         let first = try files.commit(
             provisionalURL: firstURL,
-            duration: 3,
+            duration: 45,
             replacing: nil
         )
 
@@ -1282,7 +1282,7 @@ final class VoiceNoteTests: XCTestCase {
         )
 
         let oversizedURL = try files.makeProvisionalURL()
-        try Data(repeating: 3, count: 524_288).write(to: oversizedURL)
+        try Data(repeating: 3, count: 1_572_864).write(to: oversizedURL)
         XCTAssertThrowsError(
             try files.commit(
                 provisionalURL: oversizedURL,

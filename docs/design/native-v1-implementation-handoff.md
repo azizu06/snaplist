@@ -11,7 +11,7 @@ architecture and state inventory wherever they conflict with the lean Scan-to-Tr
 
 - Primary destinations are exactly **Scan** and **Trophy Wall**.
 - Settings opens from the profile avatar.
-- Scan accepts one to five ordered photos and one optional voice note capped at fifteen seconds.
+- Scan accepts one to five ordered photos and one optional voice note capped at forty-five seconds.
 - Scan clears after durable server acceptance; processing continues asynchronously.
 - Trophy Wall merges local pending intake with canonical server identity and shows plain-language
   states. It never exposes queue, worker, lease, or provider vocabulary or fake progress.
@@ -89,7 +89,7 @@ reopens ADR-0008.
 
 ## Owned implementation gaps
 
-- [#351](https://github.com/azizu06/snaplist/issues/351) owns optional fifteen-second voice-context
+- [#351](https://github.com/azizu06/snaplist/issues/351) owns optional forty-five-second voice-context
   authority and photos-only fallback.
 - [#352](https://github.com/azizu06/snaplist/issues/352) owns the one-to-five mobile submission
   behavior contract.

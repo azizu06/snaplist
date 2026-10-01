@@ -18,7 +18,7 @@ editable, priced listing with minimal friction.
 
 SnapList is a native **Scan-to-Flips** product with exactly two primary destinations:
 
-- **Scan** — capture one to five ordered photos and, optionally, one voice note of at most fifteen
+- **Scan** — capture one to five ordered photos and, optionally, one voice note of at most forty-five
   seconds. Submit once; after durable server acceptance, Scan clears so another item can begin while
   processing continues asynchronously.
 - **Flips** — the chronological place for finished items: published to eBay and export pack
@@ -36,7 +36,7 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 
 - Native SwiftUI is the launch client. Primary navigation is exactly **Scan** and **Flips**;
   Settings opens from the profile avatar.
-- Intake contains one to five ordered photos and at most one optional voice note capped at fifteen
+- Intake contains one to five ordered photos and at most one optional voice note capped at forty-five
   seconds. Voice failure degrades to photos-only processing.
 - Processing is asynchronous. Seller-facing states use plain language and never expose queues,
   workers, leases, fake percentages, or provider internals.
@@ -68,7 +68,7 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 2. As a seller, I want to add, replace, remove, and reorder one to five photos, so that I control the
    item evidence before submission.
 3. As a seller, I want to optionally record, replay, replace, or delete one voice note of at most
-   fifteen seconds, so that I can add context without typing.
+   forty-five seconds, so that I can add context without typing.
 4. As a seller, I want unfinished intake to survive interruption, so that capture work is not lost.
 5. As a seller, I want ambiguous submission to retain the intake and logical request identity, so
    that retry cannot duplicate the item.

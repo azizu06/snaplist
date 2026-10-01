@@ -35,6 +35,14 @@ function file(bytes: Uint8Array, type = "audio/wav"): File {
 }
 
 describe("mobile item submission voice", () => {
+  it("accepts a complete 45-second note beyond the old byte ceiling", async () => {
+    const prepared = await prepareMobileSubmissionVoice(
+      file(wav(16_000 * 45)),
+      "en-US",
+    );
+    expect(prepared).toMatchObject({ durationMs: 45_000, byteLength: 1_440_044 });
+  });
+
   it("derives one bounded canonical PCM receipt and canonical locale", async () => {
     const prepared = await prepareMobileSubmissionVoice(
       file(wav()),
@@ -56,7 +64,7 @@ describe("mobile item submission voice", () => {
     ["empty", file(new Uint8Array())],
     ["unsupported media", file(wav(), "audio/mpeg")],
     ["malformed RIFF", file(new Uint8Array([0x52, 0x49, 0x46, 0x46]))],
-    ["over duration", file(wav(16_000 * 15 + 1))],
+    ["over duration", file(wav(16_000 * 45 + 1))],
     [
       "over byte ceiling",
       file(new Uint8Array(MAX_MOBILE_ITEM_VOICE_BYTES + 1)),

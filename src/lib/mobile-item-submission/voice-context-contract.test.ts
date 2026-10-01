@@ -34,8 +34,8 @@ const contractSchema = z
         channels: z.literal(1),
         sampleRateHz: z.literal(16_000),
         bitsPerSample: z.literal(16),
-        maximumDurationMs: z.literal(15_000),
-        maximumBytes: z.literal(524_288),
+        maximumDurationMs: z.literal(45_000),
+        maximumBytes: z.literal(1_572_864),
         fileProtection: z.literal("complete"),
         excludedFromBackup: z.literal(true),
         localRecoveryMaximumHours: z.literal(24),
@@ -90,7 +90,7 @@ const contractSchema = z
         resolverKind: z.literal("transcription-model"),
         generationRole: z.literal(false),
         disabledByDefault: z.literal(true),
-        attemptDeadlineMs: z.literal(20_000),
+        attemptDeadlineMs: z.literal(60_000),
         maximumBillableAttemptsPerLogicalRun: z.literal(1),
         maximumTranscriptUnicodeScalars: z.literal(1_000),
         maximumTranscriptUtf8Bytes: z.literal(4_096),
@@ -226,8 +226,8 @@ describe("voice-context V1 authority", () => {
     expect(contract.capture).toMatchObject({
       optional: true,
       maximumAssets: 1,
-      maximumDurationMs: 15_000,
-      maximumBytes: 524_288,
+      maximumDurationMs: 45_000,
+      maximumBytes: 1_572_864,
     });
     expect(contract.identity).toMatchObject({
       voiceAffectsPhotoIdentity: false,

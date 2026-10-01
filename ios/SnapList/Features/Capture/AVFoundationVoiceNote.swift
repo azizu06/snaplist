@@ -273,7 +273,7 @@ final class AVFoundationVoiceNoteAudioClient:
         }
         self.recorder = recorder
         // A new take will overwrite the saved note in place, and two takes that
-        // both reach the 15 s cap write the same byte count, so the file's own
+        // both reach the 45 s cap write the same byte count, so the file's own
         // metadata cannot be the only thing that retires the cached shape.
         savedWaveformCacheKey = nil
         savedWaveformCache = []
