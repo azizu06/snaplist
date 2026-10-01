@@ -171,7 +171,8 @@ struct EbayPublishView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.openURL) private var openURL
-    @State private var showsOutboundDetails = false
+    @State private var showsAllSpecifics = false
+    @State private var showsFullDescription = false
 
     var body: some View {
         Group {
@@ -364,7 +365,7 @@ struct EbayPublishView: View {
         _ state: EbayConfirmationViewState
     ) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 16) {
                 EbayPublishFocusedHeading(
                     text: confirmationHeading(state),
                     target: EbayPublishHeadingFocusTarget(
@@ -381,19 +382,29 @@ struct EbayPublishView: View {
                         detail: banner.body,
                         caution: true
                     )
-                    .padding(.top, 8)
                     .accessibilityIdentifier("ebay-publish.confirmation.banner")
                 }
 
                 if let preflight = store.preflight {
+                    itemSummaryCard(preflight)
                     destinationSection(preflight)
-                    fieldsSection(preflight)
-                    Text("Shipping and returns come from your eBay account.")
-                        .snapListTypography(.status)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 2)
+                    detailsSection(preflight)
+                    specificsSection(preflight)
+                    descriptionSection(preflight)
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "shippingbox")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                            .accessibilityHidden(true)
+                        Text("Shipping and returns come from your eBay account.")
+                            .snapListTypography(.status)
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(SnapListColorToken.quietFill.color)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
                 }
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
@@ -437,52 +448,61 @@ struct EbayPublishView: View {
     private func destinationSection(
         _ preflight: EbayPublishPreflight
     ) -> some View {
-        EbayListSection(title: "Posting to") {
-            HStack(spacing: 12) {
-                Image("MarketplaceMarkEbay")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 40)
-                    .accessibilityHidden(true)
-                Spacer(minLength: 8)
+        HStack(spacing: 14) {
+            Image("MarketplaceMarkEbay")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 44, height: 32)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(SnapListColorToken.quietFill.color)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Posting to")
+                    .snapListTypography(.status)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
                 Text(
                     "\(accountName) · \(EbayPublishPresentation.marketplace(preflight.marketplace))"
                 )
                 .snapListTypography(.rowTitle)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.vertical, 12)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                "Posting to eBay as \(accountName), \(EbayPublishPresentation.marketplace(preflight.marketplace))"
-            )
-            .accessibilityIdentifier("ebay-publish.confirmation.destination")
+            Spacer(minLength: 0)
         }
+        .ebayCard()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Posting to eBay as \(accountName), \(EbayPublishPresentation.marketplace(preflight.marketplace))"
+        )
+        .accessibilityIdentifier("ebay-publish.confirmation.destination")
     }
 
-    private func fieldsSection(_ preflight: EbayPublishPreflight) -> some View {
-        EbayListSection(title: "What eBay receives") {
-            HStack(spacing: 12) {
-                confirmationThumbnail
-                    .frame(width: 48, height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+    /// The item eBay will list: photo, title and the price it goes up at.
+    private func itemSummaryCard(_ preflight: EbayPublishPreflight) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            confirmationThumbnail
+                .frame(width: 76, height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 6) {
                 Text(preflight.title)
                     .snapListTypography(.rowTitle)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 10)
-            Divider()
-            EbayValueRow(
-                label: "Price",
-                value: EbayPublishCurrency.string(
-                    preflight.effectivePrice.amount
+                Text(
+                    EbayPublishCurrency.string(preflight.effectivePrice.amount)
                 )
-            )
-            Divider()
+                .snapListTypography(.sectionHeader)
+                .foregroundStyle(SnapListColorToken.ebayAccent.color)
+            }
+            Spacer(minLength: 0)
+        }
+        .ebayCard()
+    }
+
+    private func detailsSection(_ preflight: EbayPublishPreflight) -> some View {
+        EbayListSection(title: "Details", symbol: "list.bullet.rectangle") {
             EbayValueRow(
                 label: "Condition",
                 value: EbayPublishPresentation.condition(
@@ -494,34 +514,69 @@ struct EbayPublishView: View {
                 label: "Photos",
                 value: "\(preflight.photoCount), in this order"
             )
-            Divider()
-            EbayDisclosureRow(
-                title: "Item specifics and description",
-                summary: nil,
-                expanded: $showsOutboundDetails
-            ) {
-                Text("ITEM SPECIFICS")
-                    .snapListTypography(.metadata)
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                if preflight.itemSpecifics.isEmpty {
-                    Text("Not added")
-                } else {
-                    ForEach(preflight.itemSpecifics.keys.sorted(), id: \.self) { key in
-                        EbayValueRow(
-                            label: key,
-                            value: preflight.itemSpecifics[key]?.joined(separator: ", ") ?? ""
-                        )
-                    }
-                }
-                Text("DESCRIPTION")
-                    .snapListTypography(.metadata)
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                    .padding(.top, 24)
-                Text(preflight.description)
+        }
+    }
+
+    private static let collapsedSpecificsCount = 4
+
+    private func specificsSection(_ preflight: EbayPublishPreflight) -> some View {
+        let keys = preflight.itemSpecifics.keys.sorted()
+        let visible = showsAllSpecifics
+            ? keys
+            : Array(keys.prefix(Self.collapsedSpecificsCount))
+        return EbayListSection(
+            title: "Item specifics",
+            symbol: "tag",
+            trailing: keys.isEmpty ? nil : "\(keys.count)"
+        ) {
+            if keys.isEmpty {
+                Text("Not added")
+                    .snapListTypography(.body)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .textSelection(.enabled)
+                    .padding(.vertical, 12)
+            } else {
+                ForEach(Array(visible.enumerated()), id: \.element) { index, key in
+                    if index > 0 { Divider() }
+                    EbayValueRow(
+                        label: key,
+                        value: preflight.itemSpecifics[key]?
+                            .joined(separator: ", ") ?? ""
+                    )
+                }
+                if keys.count > Self.collapsedSpecificsCount {
+                    Divider()
+                    EbayExpandToggle(
+                        title: showsAllSpecifics
+                            ? "Show fewer"
+                            : "Show all \(keys.count)",
+                        expanded: showsAllSpecifics
+                    ) { showsAllSpecifics.toggle() }
+                    .accessibilityIdentifier("ebay-publish.confirmation.specifics-toggle")
+                }
             }
-            .padding(.vertical, 2)
+        }
+    }
+
+    private func descriptionSection(_ preflight: EbayPublishPreflight) -> some View {
+        let isLong = preflight.description.count > 140
+            || preflight.description.contains("\n")
+        return EbayListSection(title: "Description", symbol: "text.alignleft") {
+            Text(preflight.description)
+                .snapListTypography(.body)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .lineLimit(showsFullDescription || !isLong ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .padding(.vertical, 12)
+            if isLong {
+                Divider()
+                EbayExpandToggle(
+                    title: showsFullDescription ? "Show less" : "Show more",
+                    expanded: showsFullDescription
+                ) { showsFullDescription.toggle() }
+                .accessibilityIdentifier("ebay-publish.confirmation.description-toggle")
+            }
         }
     }
 
@@ -581,8 +636,10 @@ struct EbayPublishView: View {
             statusColor: state == .outcomeNotYetKnown
                 ? SnapListColorToken.caution.color
                 : state == .published || state == .publishing
-                    ? SnapListColorToken.action.color
-                    : SnapListColorToken.textTertiary.color,
+                    ? SnapListColorToken.ebayAccent.color
+                    : SnapListColorToken.textSecondary.color,
+            symbol: resultSymbol(state),
+            isWorking: state == .publishing,
             headline: copy.headline,
             detail: copy.body,
             note: copy.note,
@@ -605,6 +662,17 @@ struct EbayPublishView: View {
                 }
             }
         )
+    }
+
+    private func resultSymbol(_ state: EbayResultViewState) -> String {
+        switch state {
+        case .publishing: "arrow.up.circle"
+        case .published: "checkmark.seal.fill"
+        case .unavailable: "wifi.exclamationmark"
+        case .sellerFixableRefusal: "exclamationmark.triangle.fill"
+        case .outcomeNotYetKnown: "hourglass"
+        case .ebaySideChanged: "person.crop.circle.badge.exclamationmark"
+        }
     }
 
     private func confirmationBanner(
@@ -1646,32 +1714,50 @@ private struct EbayConnectPath: View {
     }
 }
 
-/// A native grouped section: a small caption above one inset card of rows.
+/// A grouped card: a small icon + caption above one rounded card of rows.
 private struct EbayListSection<Content: View>: View {
     let title: String
+    var symbol: String? = nil
+    var trailing: String? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
-                .snapListTypography(.metadata)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-                .padding(.horizontal, 4)
-                .accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 12, weight: .semibold))
+                        .accessibilityHidden(true)
+                }
+                Text(title.uppercased())
+                    .snapListTypography(.metadata)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                if let trailing {
+                    Text(trailing)
+                        .snapListTypography(.metadata)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(SnapListColorToken.quietFill.color)
+                        .clipShape(Capsule())
+                }
+            }
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .padding(.horizontal, 4)
             VStack(alignment: .leading, spacing: 0) {
                 content()
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(SnapListColorToken.canvas.color)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 18)
                     .stroke(SnapListColorToken.hairline.color)
                     .accessibilityHidden(true)
             }
         }
-        .padding(.top, 14)
+        .padding(.top, 6)
     }
 }
 
@@ -1828,12 +1914,17 @@ private struct EbayConnectPrimaryButton: View {
                 .snapListTypography(.rowTitle)
                 .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 52)
+                .frame(minHeight: SnapListMetrics.primaryButtonHeight)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .background(SnapListColorToken.ebayAccent.color)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(.rect(cornerRadius: SnapListMetrics.primaryButtonRadius))
+        .shadow(
+            color: SnapListColorToken.ebayAccent.color.opacity(0.16),
+            radius: 4,
+            y: 2
+        )
         // Same `button.primary.<title>` scheme as `SnapListPrimaryButton`,
         // e.g. `button.primary.continue-to-ebay`.
         .accessibilityIdentifier(
@@ -1852,12 +1943,17 @@ private struct EbayConfirmationPrimaryButton: View {
                 .snapListTypography(.rowTitle)
                 .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 52)
+                .frame(minHeight: SnapListMetrics.primaryButtonHeight)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .background(SnapListColorToken.ebayAccent.color)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(.rect(cornerRadius: SnapListMetrics.primaryButtonRadius))
+        .shadow(
+            color: SnapListColorToken.ebayAccent.color.opacity(0.16),
+            radius: 4,
+            y: 2
+        )
         .accessibilityIdentifier("button.primary.post-to-ebay")
     }
 }
@@ -1868,6 +1964,8 @@ private struct EbayResultActionScreen: View {
     let thumbnailSource: EbayResultThumbnailSource
     let status: String
     let statusColor: Color
+    let symbol: String
+    let isWorking: Bool
     let headline: String
     let detail: String
     let note: String?
@@ -1879,39 +1977,46 @@ private struct EbayResultActionScreen: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Spacer(minLength: 16)
+            VStack(spacing: 18) {
+                hero
+                    .padding(.top, 28)
+                    .accessibilityHidden(true)
                 EbayPublishFocusedHeading(
                     text: headline,
                     target: headingFocusTarget
                 )
                     .snapListTypography(.displayTitle)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilitySortPriority(70)
 
                 HStack(spacing: 12) {
                     thumbnail
-                        .frame(width: 54, height: 54)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                         .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(listingTitle)
                             .snapListTypography(.rowTitle)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilitySortPriority(60)
-                        HStack(spacing: 7) {
+                        HStack(spacing: 6) {
                             Circle()
                                 .fill(statusColor)
                                 .frame(width: 7, height: 7)
                                 .accessibilityHidden(true)
                             Text(status)
-                                .snapListTypography(.status)
+                                .snapListTypography(.metadata)
                                 .foregroundStyle(
-                                    SnapListColorToken.textSecondary.color
+                                    SnapListColorToken.inkPrimary.color
                                 )
                                 .accessibilitySortPriority(50)
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(statusColor.opacity(0.12))
+                        .clipShape(Capsule())
                     }
                     Spacer(minLength: 0)
                 }
@@ -1920,26 +2025,36 @@ private struct EbayResultActionScreen: View {
                 Text(detail)
                     .snapListTypography(.body)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilitySortPriority(40)
+
                 if let note {
-                    Text(note)
-                        .snapListTypography(.status)
-                        .foregroundStyle(
-                            SnapListColorToken.textSecondary.color
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(SnapListColorToken.quietFill.color)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .accessibilityIdentifier("ebay-publish.result.note")
-                        .accessibilitySortPriority(30)
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(
+                                SnapListColorToken.textSecondary.color
+                            )
+                            .accessibilityHidden(true)
+                        Text(note)
+                            .snapListTypography(.status)
+                            .foregroundStyle(
+                                SnapListColorToken.textSecondary.color
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("ebay-publish.result.note")
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(SnapListColorToken.quietFill.color)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .accessibilitySortPriority(30)
                 }
-                Spacer(minLength: 16)
             }
-            .frame(maxWidth: .infinity, minHeight: 440, alignment: .leading)
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.bottom, 24)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
@@ -1963,6 +2078,25 @@ private struct EbayResultActionScreen: View {
             .padding(.vertical, 10)
             .background(SnapListColorToken.canvas.color)
             .overlay(alignment: .top) { Divider() }
+        }
+    }
+
+    /// A tinted badge carrying the state's symbol, or a spinner while the
+    /// post is in flight.
+    private var hero: some View {
+        ZStack {
+            Circle()
+                .fill(statusColor.opacity(0.12))
+                .frame(width: 96, height: 96)
+            if isWorking {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(statusColor)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 40, weight: .semibold))
+                    .foregroundStyle(statusColor)
+            }
         }
     }
 
@@ -2008,20 +2142,35 @@ private struct EbayNoticeCard: View {
     let caution: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.headline)
-            Text(detail)
-                .snapListTypography(.status)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
+        HStack(alignment: .top, spacing: 12) {
+            Image(
+                systemName: caution
+                    ? "exclamationmark.triangle.fill"
+                    : "info.circle.fill"
+            )
+            .font(.system(size: 20))
+            .foregroundStyle(
+                caution
+                    ? SnapListColorToken.caution.color
+                    : SnapListColorToken.action.color
+            )
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(detail)
+                    .snapListTypography(.status)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(16)
         .background(
             caution
                 ? SnapListColorToken.cautionFill.color
                 : SnapListColorToken.actionTint.color
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 }
 
@@ -2056,36 +2205,28 @@ private struct EbayValueRow: View {
     }
 }
 
-private struct EbayDisclosureRow<Content: View>: View {
+/// A quiet full-width "Show all N" / "Show less" row at the foot of a card.
+private struct EbayExpandToggle: View {
     let title: String
-    let summary: String?
-    @Binding var expanded: Bool
-    @ViewBuilder let content: () -> Content
+    let expanded: Bool
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                expanded.toggle()
-            } label: {
-                HStack(spacing: 10) {
-                    Text(title).snapListTypography(.status)
-                    Spacer()
-                    if let summary {
-                        Text(summary)
-                            .snapListTypography(.rowTitle)
-                    }
-                    Image(systemName: "chevron.down")
-                        .rotationEffect(.degrees(expanded ? 180 : 0))
-                        .accessibilityHidden(true)
-                }
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                .contentShape(Rectangle())
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title).snapListTypography(.rowTitle)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
+                    .accessibilityHidden(true)
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            if expanded { content() }
+            .foregroundStyle(SnapListColorToken.ebayAccent.color)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
     }
 }
 
@@ -2128,12 +2269,12 @@ private enum EbayPublishPresentation {
 extension View {
     func ebayCard() -> some View {
         self
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(SnapListColorToken.canvas.color)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 18)
                     .stroke(SnapListColorToken.hairline.color)
             }
     }

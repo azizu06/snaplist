@@ -289,7 +289,7 @@ final class EbayPublishUITests: XCTestCase {
         )
     }
 
-    /// #893. Inside the expanded "Item specifics and description" disclosure,
+    /// #893. In the Item specifics and Description cards,
     /// every item-specifics row sat one uniform gap apart, and DESCRIPTION
     /// used that identical gap before its own label — so it read as just
     /// another row rather than the start of a new block. The fixed row adds
@@ -309,13 +309,6 @@ final class EbayPublishUITests: XCTestCase {
             fixture: "confirmation",
             extraArguments: ["--reduced-motion"]
         )
-        let disclosure = confirmation.buttons["Item specifics and description"]
-        XCTAssertTrue(
-            disclosure.waitForExistence(timeout: 10),
-            confirmation.debugDescription
-        )
-        disclosure.tap()
-
         let brand = confirmation.staticTexts["Brand"]
         let color = confirmation.staticTexts["Color"]
         let platform = confirmation.staticTexts["Platform"]
