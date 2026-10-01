@@ -9,6 +9,8 @@
 
 <p align="center"><b>Built for RevenueCat Shipaton 2026 · Next Gen track</b><br>Native iPhone app · Meet Scout, your listing companion</p>
 
+<p align="center"><img src="docs/readme/scout-barcode.gif" width="180" alt="Scout, SnapList’s camera mascot, scanning a barcode on a cardboard parcel in a looping animation."></p>
+
 <p align="center">
   <img src="docs/readme/phone-to-list.jpg" width="220" alt="SnapList on a real iPhone: Scout holds a parcel above a keyboard ready to review in To list.">
   &nbsp;
