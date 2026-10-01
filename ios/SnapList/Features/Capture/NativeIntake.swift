@@ -490,14 +490,22 @@ actor NativeIntake {
                 return (photos, current.voice)
             }
         case .removePhoto(let id):
+            // Removing the last photo ends the item, so its voice note (saved
+            // or held) goes with it; the next photo set starts without one.
             return commitMutation(
                 expected: expected,
-                snapshotKey: snapshotKey
+                snapshotKey: snapshotKey,
+                heldVoiceTake: { current in
+                    current.photos.allSatisfy { $0.id == id }
+                        ? nil
+                        : current.heldVoiceTake
+                }
             ) { current in
                 guard current.photos.contains(where: { $0.id == id }) else {
                     return nil
                 }
-                return (current.photos.filter { $0.id != id }, current.voice)
+                let photos = current.photos.filter { $0.id != id }
+                return (photos, photos.isEmpty ? nil : current.voice)
             }
         case .reorderPhotos(let ids):
             guard ids != active.photos.map(\.id) else {
