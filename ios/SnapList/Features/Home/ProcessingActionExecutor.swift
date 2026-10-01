@@ -88,6 +88,13 @@ struct ProcessingActionExecutor: ProcessingActionExecuting {
             selectScan()
             return .selectedScan
         case .review(let runID):
+            // The run check and the canonical review fetch both need only the
+            // run id, so the review starts now instead of after a whole round
+            // trip. `open` adopts it only for this exact run and still runs
+            // every binding, revision and principal check; any path that does
+            // not open the review abandons it here.
+            listingReviewStore.beginCanonicalFetch(runID: runID)
+            defer { listingReviewStore.abandonCanonicalFetch(runID: runID) }
             guard let route = await runStore.processingReviewRoute(for: runID)
             else {
                 return .rejected

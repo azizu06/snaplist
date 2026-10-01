@@ -821,8 +821,8 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(DockSlot.primary(.trophyWall).accessibilityIdentifier, "dock.trophy-wall")
         XCTAssertNotEqual(DockSlot.processing.systemImage(isSelected: false), "clock")
         XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "Processing")
-        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 1), "Processing, 1 item")
-        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 4), "Processing, 4 items")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 1), "Processing, 1 new item")
+        XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 4), "Processing, 4 new items")
     }
 
     @MainActor

@@ -1,4 +1,6 @@
+import ImageIO
 import SwiftUI
+import UIKit
 
 extension ListingReviewCopy {
     static let retry = "Retry"
@@ -639,6 +641,10 @@ enum ListingReviewCurrency {
 struct ListingReviewPhotoPager: View {
     let photos: [ListingReviewPhoto]
     @State private var selectedOrdinal = 0
+    /// The hero and its thumbnail show the same photo, so they share one
+    /// download per photo. Owned by this pager, so it lives exactly as long as
+    /// this one review screen and is never reused for another listing.
+    @State private var imagePipeline = ListingReviewImagePipeline()
 
     var body: some View {
         VStack(spacing: PhotoReviewV5VisualContract.thumbnailStripTopPadding) {
@@ -661,7 +667,9 @@ struct ListingReviewPhotoPager: View {
                 ForEach(photos, id: \.ordinal) { photo in
                     ListingReviewImage(
                         url: photo.url,
-                        fallbackSystemImage: "photo"
+                        fallbackSystemImage: "photo",
+                        pipeline: imagePipeline,
+                        maxPixelDimension: ListingReviewImagePipeline.heroMaxPixelDimension
                     )
                     .frame(maxWidth: .infinity)
                     .frame(height: PhotoReviewV5VisualContract.heroHeight)
@@ -718,7 +726,9 @@ struct ListingReviewPhotoPager: View {
         } label: {
             ListingReviewImage(
                 url: photo.url,
-                fallbackSystemImage: "photo"
+                fallbackSystemImage: "photo",
+                pipeline: imagePipeline,
+                maxPixelDimension: ListingReviewImagePipeline.thumbnailMaxPixelDimension
             )
             .frame(width: size, height: size)
             .clipShape(.rect(cornerRadius: radius))
@@ -742,10 +752,93 @@ struct ListingReviewPhotoPager: View {
     }
 }
 
+/// Loads the review screen's remote photos: one download per URL for
+/// everyone who asks while it is held, decoded straight to the size on screen
+/// rather than the camera's full resolution. `AsyncImage` fetched the hero and
+/// its thumbnail separately and decoded both at full size.
+@MainActor
+final class ListingReviewImagePipeline {
+    /// Points × 3 for the widest surface each image fills: the full-width hero
+    /// (402pt at most on a phone) and the 64pt thumbnail.
+    static let heroMaxPixelDimension: CGFloat = 1_300
+    static let thumbnailMaxPixelDimension: CGFloat = 200
+    static let defaultMaxPixelDimension: CGFloat = 800
+
+    private let fetch: @Sendable (URL) async throws -> Data
+    private var downloads: [URL: Task<Data, any Error>] = [:]
+
+    init(fetch: @escaping @Sendable (URL) async throws -> Data = ListingReviewImagePipeline.download) {
+        self.fetch = fetch
+    }
+
+    func image(for url: URL, maxPixelDimension: CGFloat) async throws -> UIImage {
+        let download: Task<Data, any Error>
+        if let inFlight = downloads[url] {
+            download = inFlight
+        } else {
+            let fetch = fetch
+            download = Task { try await fetch(url) }
+            downloads[url] = download
+        }
+        let data: Data
+        do {
+            data = try await download.value
+        } catch {
+            // A failed download is not kept, so the next appearance retries.
+            if downloads[url] == download { downloads[url] = nil }
+            throw error
+        }
+        try Task.checkCancellation()
+        return try await Task.detached(priority: .userInitiated) {
+            try Self.downsample(data, maxPixelDimension: maxPixelDimension)
+        }.value
+    }
+
+    nonisolated static func download(_ url: URL) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+
+    nonisolated static func downsample(_ data: Data, maxPixelDimension: CGFloat) throws -> UIImage {
+        guard let source = CGImageSourceCreateWithData(
+                data as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary
+              ),
+              let image = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixelDimension,
+                ] as CFDictionary
+              ) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        return UIImage(cgImage: image)
+    }
+}
+
 private struct ListingReviewImage: View {
     let url: URL?
     let fallbackSystemImage: String
     var placeholderFill: Color = SnapListColorToken.quietFill.color
+    /// Shared by the photos of one pager; an image without one owns its own.
+    var pipeline: ListingReviewImagePipeline?
+    var maxPixelDimension: CGFloat = ListingReviewImagePipeline.defaultMaxPixelDimension
+
+    @State private var ownPipeline = ListingReviewImagePipeline()
+    @State private var phase: Phase = .loading
+
+    private enum Phase: Equatable {
+        case loading
+        case loaded(UIImage)
+        case failed
+    }
 
     var body: some View {
 #if DEBUG
@@ -763,22 +856,34 @@ private struct ListingReviewImage: View {
 
     @ViewBuilder
     private var remoteImage: some View {
-        if url == nil {
-            fallback
-        } else {
-            AsyncImage(url: url) { phase in
+        if let url {
+            Group {
                 switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .empty:
+                case .loaded(let image):
+                    Image(uiImage: image).resizable().scaledToFill()
+                case .loading:
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .failure:
-                    fallback
-                @unknown default:
+                case .failed:
                     fallback
                 }
             }
+            // Keyed on the URL, so a cell reused for another photo starts over
+            // and a load that finishes for a URL no longer shown is dropped.
+            .task(id: url) {
+                phase = .loading
+                do {
+                    let image = try await (pipeline ?? ownPipeline)
+                        .image(for: url, maxPixelDimension: maxPixelDimension)
+                    phase = .loaded(image)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    phase = .failed
+                }
+            }
+        } else {
+            fallback
         }
     }
 

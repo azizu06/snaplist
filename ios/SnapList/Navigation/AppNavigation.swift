@@ -67,8 +67,8 @@ enum DockSlot: Hashable, Identifiable {
         case .processing:
             guard processingCount > 0 else { return "Processing" }
             return processingCount == 1
-                ? "Processing, 1 item"
-                : "Processing, \(processingCount) items"
+                ? "Processing, 1 new item"
+                : "Processing, \(processingCount) new items"
         }
     }
 }
