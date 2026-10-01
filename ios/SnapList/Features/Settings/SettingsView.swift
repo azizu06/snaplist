@@ -1543,7 +1543,7 @@ private struct SettingsReauthenticationView: View {
         SettingsExplanationPage(
             title: "Confirm it’s you",
             lead: profile.method == .apple
-                ? "Apple confirms it’s you. Nothing is sent yet."
+                ? "Apple confirms it’s you."
                 : emailCodeDelivery.lead(email: profile.email)
         ) {
             if let failureCopy = emailCodeDelivery.failureCopy(
