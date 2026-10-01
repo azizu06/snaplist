@@ -37,6 +37,21 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(facebook.waitForExistence(timeout: 10))
         XCTAssertTrue(facebook.isSelected, "An untouched drawer shows the first marketplace.")
 
+        let title = marker("assisted-export.drawer", in: app)
+        let close = app.buttons["assisted-export.drawer.close"]
+        XCTAssertEqual(title.frame.midX, app.frame.midX, accuracy: 1,
+                       "The title stays centred between equal side slots.")
+        XCTAssertEqual(title.frame.midY, close.frame.midY, accuracy: 1,
+                       "The title and close control share one centre line.")
+        for slug in ["mercari", "depop"] {
+            XCTAssertEqual(
+                facebook.frame.width,
+                app.buttons["assisted-export.tab.\(slug)"].frame.width,
+                accuracy: 1,
+                "Marketplace tabs have equal room."
+            )
+        }
+
         let copy = step(app, "copy")
         let save = step(app, "save")
         let open = step(app, "open")
@@ -180,9 +195,8 @@ final class AssistedExportUITests: XCTestCase {
             waitForLabel("Saved", on: step(app, "save"), timeout: loadedTreeTimeout),
             "Saving completes the step once."
         )
-        // The counters live behind the drawer, which hides them from
-        // accessibility while it is up.
-        app.buttons["assisted-export.drawer.close"].tap()
+        // These counters belong to the fixture's outer drawer. There is no
+        // nested guide sheet to dismiss in the one-page design.
         XCTAssertTrue(
             marker("assisted-export.fixture.photo-write-count", in: app)
                 .waitForExistence(timeout: loadedTreeTimeout)
@@ -351,7 +365,8 @@ final class AssistedExportUITests: XCTestCase {
 
         XCTAssertTrue(
             marker("assisted-export.drawer", in: app)
-                .waitForExistence(timeout: loadedTreeTimeout)
+                .waitForExistence(timeout: loadedTreeTimeout),
+            app.debugDescription
         )
         XCTAssertTrue(
             app.buttons["assisted-export.tab.facebook"]
