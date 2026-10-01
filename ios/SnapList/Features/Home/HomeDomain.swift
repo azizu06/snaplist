@@ -821,6 +821,9 @@ final class TrophyWallStore {
             for page in pages {
                 ingest(historyPage: page, principalScope: principalScope)
             }
+            retireRunsAbsent(
+                from: Set(pages.flatMap { $0.entries.map(\.run.id) })
+            )
             collectionOutcome = .loaded
             collectionRefreshRecovery = .idle
         } catch {
@@ -841,6 +844,23 @@ final class TrophyWallStore {
             }
         }
         return true
+    }
+
+    /// A complete answer is the server's whole collection, so a run the wall
+    /// drew from history that the answer no longer lists was deleted there.
+    /// Only runs history has shown are retired: a run accepted while this
+    /// refresh was in flight has no history state yet and keeps its row. The
+    /// tombstone keeps a stale acceptance from drawing the run back.
+    private func retireRunsAbsent(from listedRunIDs: Set<UUID>) {
+        for (runID, state) in canonicalHistoryStates {
+            guard case .visible(let orderKey) = state,
+                  !listedRunIDs.contains(runID) else {
+                continue
+            }
+            canonicalHistoryStates[runID] = .tombstone(orderKey)
+            cards.removeAll { $0.identity == .run(runID) }
+            releasePersistedCoverPhoto(forRun: runID)
+        }
     }
 
     /// Refreshes the collection and, when the boundary refuses the answer,
