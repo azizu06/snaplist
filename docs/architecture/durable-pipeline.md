@@ -115,12 +115,20 @@ migration activates them. The owner-only template uses Supabase Cron + pg_net wi
 bearer secret read from Vault; the same HTTP contract can be invoked by another scheduler without
 changing queue or worker behavior.
 
-Each scheduled worker request claims one message with a 300-second visibility/lease window, retries at
-30 seconds with bounded exponential backoff, and uses three attempts by default. A one-minute cadence
-plus five-minute request ceiling bounds scheduled overlap at five independent requests; each claimed
-run receives its full visibility window, while PGMQ visibility and per-run fencing remain the real
-duplicate-delivery defense. The transport-neutral consumer still supports explicit bounded batches for
-offline partial-completion acceptance.
+A newly accepted native submission registers a Next.js `after()` callback that sends an authenticated
+HTTP wake to the existing worker at `SNAPLIST_PUBLIC_ORIGIN`. Intake returns its durable 202 before
+processing; the worker runs in a separate invocation. Failed admissions and successful replays do not
+wake it. Wake dispatch is best-effort, refuses redirects, and logs only safe machine details. The
+existing minute scheduler remains the recovery/backup path; no database or cron change is required.
+
+Every worker invocation claims up to ten messages and starts their attempts concurrently. It waits
+for every sibling before returning, including when one message encounters an infrastructure or stale
+lease error. Each run keeps its own 300-second visibility/lease window, checkpoint heartbeats, bounded
+exponential retry (starting at 30 seconds), and three attempts. The 300-second function limit covers
+concurrent work rather than the sum of ten serial runs. A one-minute backup cadence bounds scheduled
+invocations at five (up to fifty in-flight runs); enqueue wakes add invocations independently. PGMQ
+visibility, message/run pairing, and per-run fencing remain the real duplicate-delivery defenses.
+Provider, admission, and credit caps are unchanged.
 
 Hourly maintenance performs a short, concurrency-fenced Postgres preparation followed by leased
 Storage cleanup outside the transaction. Staging paths are deleted only when no item references them.
