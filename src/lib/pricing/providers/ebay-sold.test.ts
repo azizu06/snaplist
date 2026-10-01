@@ -2712,6 +2712,22 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
     expect(fetchPage.urls).toHaveLength(0);
   });
 
+  it("rejects premium editions in cached public-page sales for a standard model", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () => [170, 180, 190].map((price, index) => ({
+        url: `https://www.ebay.com/itm/13456789000${index + 1}`,
+        title: "Sony WH-1000XM4 Special Edition Wireless Headphones",
+        price,
+        condition: "Pre-Owned",
+      })),
+      set: async () => undefined,
+    };
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+
   it("normalizes canonical cached rows without fetching", async () => {
     const fetchPage = fakeFetch(FIXTURE_HTML);
     const cache: TtlCache<EbaySoldComp[]> = {

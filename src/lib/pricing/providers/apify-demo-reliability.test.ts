@@ -15,6 +15,70 @@ function provider(runActor: RunApifySoldActor) {
 }
 
 describe("bounded demo sold research", () => {
+  it("does not price a standard DualSense from a premium limited-edition family sale", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValue({
+      status: "SUCCEEDED",
+      items: [sale("Sony PS5 DualSense Marvel’s Wolverine Adamantium Limited Edition NEW SEALED", 149.99, 1, { condition: "Brand New" })],
+    });
+    const result = await provider(runActor).price({
+      brand: "Sony", model: "DualSense", category: "Wireless game controller",
+      condition: "very-good", conditionKnown: true, specs: ["White and black"],
+    });
+    expect(result).toBeNull();
+  });
+
+  it("preserves an identified limited edition when condition matching broadens", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValue({
+      status: "SUCCEEDED",
+      items: [sale("Sony PS5 DualSense Marvel’s Wolverine Adamantium Limited Edition NEW SEALED", 149.99, 1, { condition: "Brand New" })],
+    });
+    const result = await provider(runActor).price({
+      brand: "Sony", model: "DualSense", category: "Wireless game controller",
+      condition: "very-good", conditionKnown: true, specs: ["Marvel’s Wolverine Adamantium Limited Edition"],
+    });
+    expect(result?.suggested).toBe(149.99);
+    expect(result?.sources[0]?.kind).toBe("family-sold-comp");
+  });
+
+  it("prices the standard controller from ordinary sold rows while discarding a premium sale", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValue({
+      status: "SUCCEEDED",
+      items: [
+        ...[45, 50, 55].map((price, index) => sale("Sony PS5 DualSense White and Black", price, index + 1)),
+        sale("Sony PS5 Wireless Controller Marvel’s Wolverine Limited Edition", 149.99, 4),
+      ],
+    });
+    const result = await provider(runActor).price({
+      brand: "Sony", model: "DualSense", category: "Wireless controller",
+      condition: "very-good", conditionKnown: true, specs: ["White and black"],
+    });
+    expect(result?.suggested).toBe(50);
+    expect(result?.evidence).toHaveLength(3);
+    expect(result?.sources.every(source => source.kind === "sold-comp")).toBe(true);
+    expect(result?.sources.some(source => source.url.endsWith("004"))).toBe(false);
+  });
+
+  it("cannot revive an unsupported edition by dropping the model for category research", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValue({
+      status: "SUCCEEDED",
+      items: [sale("Sony PS5 Wireless Controller Marvel’s Wolverine Limited Edition", 149.99, 1)],
+    });
+    expect(await provider(runActor).price({
+      brand: "Sony", model: "DualSense", category: "Wireless controller", condition: "good",
+    })).toBeNull();
+  });
+
+  it("does not substitute a differently named limited edition during family research", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValue({
+      status: "SUCCEEDED",
+      items: [sale("Sony PS5 DualSense Marvel’s Wolverine Limited Edition", 149.99, 1)],
+    });
+    expect(await provider(runActor).price({
+      brand: "Sony", model: "DualSense", category: "Wireless controller", condition: "good",
+      specs: ["Marvel’s Spider-Man Limited Edition"],
+    })).toBeNull();
+  });
+
   it("broadens precise MacBook research twice, preserving screen size and labeling configuration differences", async () => {
     const runActor = vi.fn<RunApifySoldActor>().mockResolvedValueOnce({ status: "SUCCEEDED", items: [] })
       .mockResolvedValueOnce({ status: "SUCCEEDED", items: [sale("Apple MacBook Pro 14-inch 16GB", 900, 1), sale("Apple MacBook Pro 14-inch 16GB", 1000, 2)] })
