@@ -12,9 +12,11 @@ import type { EbayPolicyLocationBinding } from "./policy-location-contract";
 import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
 import {
   EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
+  ebayPolicyHelpUrl,
   ensureEbayPolicyLocationBinding,
 } from "./policy-location-setup";
 import {
+  EbayPolicySetupRequiredError,
   PublishValidationError,
   isEbayAuthError,
   EBAY_RECONNECT_MESSAGE,
@@ -597,6 +599,13 @@ async function readEbayOfferBinding(
       ? EBAY_RECONNECT_MESSAGE
       : setup.message
         ?? `Finish eBay policy/location setup for ${marketplaceId} before publishing.`;
+    if (setup.state === "setupRequired" || setup.state === "selectionRequired") {
+      throw new EbayPolicySetupRequiredError(
+        message,
+        setup.state,
+        ebayPolicyHelpUrl(marketplaceId),
+      );
+    }
     throw new PublishValidationError(message, { cause: setup.cause });
   }
 

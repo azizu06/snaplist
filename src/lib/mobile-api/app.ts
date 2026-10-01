@@ -65,7 +65,10 @@ import {
   PublishedReplayConflictError,
   PublishReviewRevisionConflictError,
 } from "@/lib/marketplace/ebay/publish";
-import { PublishValidationError } from "@/lib/marketplace/ebay/errors";
+import {
+  EbayPolicySetupRequiredError,
+  PublishValidationError,
+} from "@/lib/marketplace/ebay/errors";
 import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
@@ -977,6 +980,16 @@ export function createMobileApiHandler(
         // the seller retrying a condition only they can clear. `cause`, when
         // present, is the internal failure behind that safe message and is the
         // part that belongs in the server log, never in the response.
+        // The seller's eBay account needs a policy or location fixed on eBay.
+        // `reason` is the machine-readable half so the client can render what
+        // is missing and a button to fix it; nothing was sent to eBay.
+        if (error instanceof EbayPolicySetupRequiredError) {
+          return errorResponse(requestId, 422, "invalid_request", error.message, {
+            reason: "ebay_policy_setup_required",
+            setupState: error.setupState,
+            ...(error.helpUrl ? { helpUrl: error.helpUrl } : {}),
+          });
+        }
         if (error instanceof PublishValidationError) {
           if (error.cause !== undefined) {
             dependencies.reportError?.("mobile-api.ebay-publish", error);

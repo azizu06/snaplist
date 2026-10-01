@@ -125,6 +125,7 @@ enum EbayPublishPhase: Equatable, Sendable {
     case outcomeNotYetKnown
     case failed
     case sellerFixableRefusal(message: String)
+    case ebaySetupRequired(message: String, helpURL: URL?)
     case staleRevision
     case providerAuthorityChanged
 }
@@ -167,6 +168,8 @@ final class EbayPublishStore {
             apply(outcome)
         } catch let EbayPublishClientError.sellerFixableRefusal(message) {
             phase = .sellerFixableRefusal(message: message)
+        } catch let EbayPublishClientError.ebaySetupRequired(message, helpURL) {
+            phase = .ebaySetupRequired(message: message, helpURL: helpURL)
         } catch {
             // A transport failure cannot say whether eBay accepted the mutation.
             phase = .outcomeNotYetKnown

@@ -232,8 +232,11 @@ protocol EbayPublishFeatureServing: EbayPublishServing {
 
 enum EbayPublishClientError: Error, Equatable {
     case invalidResponse
-    case httpStatus(Int, message: String?, reason: String?)
+    case httpStatus(Int, message: String?, reason: String?, helpURL: URL? = nil)
     case sellerFixableRefusal(message: String)
+    /// eBay account lacks (or has too many of) a policy or location, so nothing
+    /// was sent. `helpURL` is the eBay page that owns the fix, when verified.
+    case ebaySetupRequired(message: String, helpURL: URL?)
 }
 
 struct UnavailableEbayPublishFeatureService: EbayPublishFeatureServing {
@@ -361,22 +364,41 @@ struct EbayPublishAPIClient: EbayPublishFeatureServing {
                 response: EbayPublishStatus.self
             )
             return Self.outcome(from: status)
-        } catch let EbayPublishClientError.httpStatus(status, message, _)
-            where status == 422 {
-            // Any 422 means eBay refused the mutation; a body that fails to
-            // decode (malformed JSON, a proxy/WAF/gateway error page, or a
-            // differently-keyed payload) still routes to the terminal
-            // seller-fixable screen instead of the ambiguous-outcome path.
-            throw EbayPublishClientError.sellerFixableRefusal(
-                message: message ?? Self.fallbackSellerFixableRefusalMessage
+        } catch let EbayPublishClientError.httpStatus(status, message, reason, helpURL)
+            where status == 422 && reason == Self.ebaySetupRequiredReason {
+            throw EbayPublishClientError.ebaySetupRequired(
+                message: message ?? Self.fallbackSellerFixableRefusalMessage,
+                helpURL: helpURL
             )
-        } catch let EbayPublishClientError.httpStatus(status, _, reason)
+        } catch let EbayPublishClientError.httpStatus(status, _, reason, _)
             where status == 409 {
             if reason == "ebay_published_authority_changed" {
                 return .providerAuthorityChanged
             }
             return .staleRevision
+        } catch let EbayPublishClientError.httpStatus(status, message, _, _)
+            where Self.isDefiniteRefusal(status) {
+            // A 422, or any other definite 4xx (bad request, forbidden, not
+            // found, ...), means the server refused BEFORE it claimed or sent
+            // anything to eBay. It is never the ambiguous "may have been
+            // accepted" outcome: that is reserved for transport failures and
+            // 5xx. A body that fails to decode (malformed JSON, a proxy/WAF/
+            // gateway error page, or a differently-keyed payload) still routes
+            // to the terminal screen instead of the ambiguous-outcome path.
+            throw EbayPublishClientError.sellerFixableRefusal(
+                message: message ?? Self.fallbackSellerFixableRefusalMessage
+            )
         }
+    }
+
+    static let ebaySetupRequiredReason = "ebay_policy_setup_required"
+
+    /// 4xx statuses that prove the request was refused without effect. 401
+    /// (token refresh), 408/425/429 (retryable transport pressure) and 409
+    /// (revision/authority conflict, handled above) keep their own paths.
+    static func isDefiniteRefusal(_ status: Int) -> Bool {
+        (400..<500).contains(status)
+            && ![401, 408, 409, 425, 429].contains(status)
     }
 
     private func send<Response: Decodable>(
@@ -430,7 +452,8 @@ struct EbayPublishAPIClient: EbayPublishFeatureServing {
             throw EbayPublishClientError.httpStatus(
                 http.statusCode,
                 message: payload?.message,
-                reason: payload?.details?.reason
+                reason: payload?.details?.reason,
+                helpURL: payload?.details?.helpUrl
             )
         }
         do {
@@ -468,7 +491,20 @@ struct EbayPublishAPIClient: EbayPublishFeatureServing {
 
     private struct ErrorEnvelope: Decodable {
         struct Payload: Decodable {
-            struct Details: Decodable { let reason: String? }
+            struct Details: Decodable {
+                let reason: String?
+                let helpUrl: URL?
+
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    reason = try container.decodeIfPresent(String.self, forKey: .reason)
+                    // A malformed or non-URL help link must not discard the
+                    // refusal's message and reason.
+                    helpUrl = try? container.decodeIfPresent(URL.self, forKey: .helpUrl)
+                }
+
+                private enum CodingKeys: String, CodingKey { case reason, helpUrl }
+            }
             let message: String
             let details: Details?
         }

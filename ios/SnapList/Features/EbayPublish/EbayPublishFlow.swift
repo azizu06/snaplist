@@ -28,6 +28,7 @@ enum EbayResultViewState: Equatable, Sendable {
     case published
     case unavailable
     case sellerFixableRefusal(message: String)
+    case ebaySetupRequired(message: String, helpURL: URL?)
     case outcomeNotYetKnown
     case ebaySideChanged
 }
@@ -360,6 +361,8 @@ final class EbayPublishFlowStore {
             screen = .result(.unavailable)
         case .sellerFixableRefusal(let message):
             screen = .result(.sellerFixableRefusal(message: message))
+        case .ebaySetupRequired(let message, let helpURL):
+            screen = .result(.ebaySetupRequired(message: message, helpURL: helpURL))
         case .providerAuthorityChanged:
             screen = .result(.ebaySideChanged)
         case .ready, .publishing:
