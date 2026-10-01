@@ -16,6 +16,109 @@ private struct RunStoreBearerTokenProvider: BearerTokenProviding {
 
 @MainActor
 final class RunStoreTests: XCTestCase {
+    // MARK: - Review open latency (processing-dock-nav follow-up)
+
+    private func makeReviewOpenFixture(
+        runService: any RunServing,
+        reviewService: any ListingReviewServing
+    ) -> (ProcessingActionExecutor, ListingReviewStore, ListingReviewPresentationHost) {
+        let tokenProvider = ReviewLatencyBearerProvider()
+        let runStore = RunDetailStore(service: runService, tokenProvider: tokenProvider)
+        let listingReviewStore = ListingReviewStore(
+            service: reviewService,
+            persistence: MemoryListingReviewDraftPersistence(),
+            tokenProvider: tokenProvider
+        )
+        let presentation = ListingReviewPresentationHost()
+        let executor = ProcessingActionExecutor(
+            runStore: runStore,
+            listingReviewStore: listingReviewStore,
+            guestClaimPresentation: ProcessingGuestClaimPresentationHost(),
+            listingReviewPresentation: presentation,
+            applyRetryResult: { _ in false },
+            selectScan: {}
+        )
+        return (executor, listingReviewStore, presentation)
+    }
+
+    /// The run fetch and the canonical review fetch both need only the run id,
+    /// so Review must not wait for one round trip before starting the other.
+    /// The run service holds its answer until the review fetch has started (or
+    /// a timeout passes); a serial open records the timeout.
+    func testReviewOpenOverlapsTheRunAndCanonicalReviewFetches() async throws {
+        let review = try Self.makeReview()
+        let run = Self.makeRun(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            listingID: review.binding.listingID,
+            review: review
+        )
+        let reviewService = ReviewLatencyReviewService(review: review, delay: .zero)
+        let runService = ReviewLatencyRunService(
+            run: run,
+            waitForReviewStart: reviewService
+        )
+        let (executor, store, presentation) = makeReviewOpenFixture(
+            runService: runService,
+            reviewService: reviewService
+        )
+
+        let outcome = await executor.execute(.review(runID: run.id))
+
+        XCTAssertEqual(outcome, .presentedReview)
+        XCTAssertTrue(presentation.isPresented)
+        XCTAssertEqual(store.snapshot?.binding, review.binding)
+        let overlapped = await runService.sawReviewStartBeforeAnswering
+        XCTAssertTrue(overlapped, "The canonical review fetch waited for the run fetch to finish.")
+        let fetches = await reviewService.fetchCount
+        XCTAssertEqual(fetches, 1, "Overlap must not add a second canonical fetch.")
+    }
+
+    /// A run the server refuses to open never presents, and its early review
+    /// fetch is abandoned rather than adopted.
+    func testRefusedRunDiscardsTheEarlyReviewFetch() async throws {
+        let review = try Self.makeReview()
+        let run = Self.makeRun(status: .running, stage: .generating, canOpenReview: false)
+        let reviewService = ReviewLatencyReviewService(review: review, delay: .milliseconds(50))
+        let (executor, store, presentation) = makeReviewOpenFixture(
+            runService: RecordingRunService(results: [.success(run)]),
+            reviewService: reviewService
+        )
+
+        let outcome = await executor.execute(.review(runID: run.id))
+
+        XCTAssertEqual(outcome, .rejected)
+        XCTAssertFalse(presentation.isPresented)
+        XCTAssertNil(store.snapshot)
+        XCTAssertEqual(store.phase, .idle)
+    }
+
+    /// Measurement only: with every round trip held at 300 ms, how long the
+    /// seller waits between tapping Review and the screen presenting.
+    func testMeasureReviewOpenLatencyWithRepresentativeRoundTrips() async throws {
+        let review = try Self.makeReview()
+        let run = Self.makeRun(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            listingID: review.binding.listingID,
+            review: review
+        )
+        let (executor, _, presentation) = makeReviewOpenFixture(
+            runService: ReviewLatencyRunService(run: run, delay: .milliseconds(300)),
+            reviewService: ReviewLatencyReviewService(review: review, delay: .milliseconds(300))
+        )
+        let clock = ContinuousClock()
+        let started = clock.now
+        let outcome = await executor.execute(.review(runID: run.id))
+        let elapsed = clock.now - started
+        XCTAssertEqual(outcome, .presentedReview)
+        XCTAssertTrue(presentation.isPresented)
+        print("REVIEW-OPEN-LATENCY-MS \(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)")
+        XCTAssertLessThan(elapsed, .milliseconds(550), "Two 300 ms round trips ran back to back.")
+    }
+
     func testProcessingReviewRequiresExactServerRunAndBinding() async throws {
         let requestedRunID = UUID(
             uuidString: "31700000-0000-4000-8000-000000000030"
@@ -1077,5 +1180,74 @@ private actor RetryRunService: RunServing {
         )
         guard !retryResults.isEmpty else { throw RunAPIError.unavailable }
         return try retryResults.removeFirst().get()
+    }
+}
+
+private actor ReviewLatencyBearerProvider: BearerTokenProviding {
+    func bearerToken() async throws -> String { "review-latency-bearer" }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        PrincipalBoundBearer(
+            bearerToken: "review-latency-bearer",
+            scopeProof: ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "review-latency-user"
+            )!
+        )
+    }
+}
+
+private actor ReviewLatencyReviewService: ListingReviewServing {
+    let review: ListingReviewResult
+    let delay: Duration
+    private(set) var fetchCount = 0
+    private(set) var hasStarted = false
+
+    init(review: ListingReviewResult, delay: Duration) {
+        self.review = review
+        self.delay = delay
+    }
+
+    func fetchReview(runID: UUID, bearerToken: String) async throws -> ListingReviewResult {
+        fetchCount += 1
+        hasStarted = true
+        try await Task.sleep(for: delay)
+        return review
+    }
+
+    func save(
+        runID: UUID,
+        draft: ListingReviewDraft,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewSaveReceipt {
+        throw ListingReviewClientError.invalidResponse
+    }
+}
+
+private actor ReviewLatencyRunService: RunServing {
+    let run: DurableRun
+    let delay: Duration
+    let waitForReviewStart: ReviewLatencyReviewService?
+    private(set) var sawReviewStartBeforeAnswering = false
+
+    init(run: DurableRun, delay: Duration = .zero, waitForReviewStart: ReviewLatencyReviewService? = nil) {
+        self.run = run
+        self.delay = delay
+        self.waitForReviewStart = waitForReviewStart
+    }
+
+    func fetchRun(id: UUID, bearerToken: String) async throws -> DurableRun {
+        if let waitForReviewStart {
+            for _ in 0..<100 {
+                if await waitForReviewStart.hasStarted {
+                    sawReviewStartBeforeAnswering = true
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        try await Task.sleep(for: delay)
+        return run
     }
 }

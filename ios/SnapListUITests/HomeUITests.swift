@@ -89,7 +89,9 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["dock.scan"].isHittable)
         XCTAssertTrue(processingSlot.isSelected)
         XCTAssertFalse(trophySlot.isSelected)
-        XCTAssertEqual(processingSlot.label, "Processing, 1 item")
+        // The one item is still being priced, so nothing is new yet: the badge
+        // counts unseen ready items, not work in flight.
+        XCTAssertEqual(processingSlot.label, "Processing")
         XCTAssertGreaterThanOrEqual(processingSlot.frame.width, 44)
         XCTAssertGreaterThanOrEqual(processingSlot.frame.height, 44)
         addScreenshot(named: "DOCK-PROCESSING-selected.png")

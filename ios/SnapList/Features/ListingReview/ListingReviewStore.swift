@@ -49,6 +49,12 @@ final class ListingReviewStore {
     private var expiresAt: Date?
     private var draftGeneration: UInt = 0
     private var openGeneration: UInt = 0
+    /// The canonical fetch `beginCanonicalFetch` started, until `open` adopts
+    /// it or the caller abandons it.
+    private var earlyCanonicalFetch: (
+        runID: UUID,
+        task: Task<(PrincipalBoundBearer, ListingReviewResult), any Error>
+    )?
     /// Non-cancellation debounce: every edit schedules a sleep-then-flush
     /// task and overwrites this marker with the draft generation it should
     /// fire for. Any earlier scheduled task whose captured generation no
@@ -101,19 +107,58 @@ final class ListingReviewStore {
     }
 
     @discardableResult
+    /// Starts the canonical review fetch for `runID` ahead of `open`, so a
+    /// caller that must first confirm the run can overlap the two round trips.
+    /// At most one is held; starting another cancels the previous one.
+    func beginCanonicalFetch(runID: UUID) {
+        earlyCanonicalFetch?.task.cancel()
+        let tokenProvider = tokenProvider
+        let service = service
+        earlyCanonicalFetch = (
+            runID,
+            Task {
+                let bearer = try await tokenProvider.principalBoundBearer()
+                try Task.checkCancellation()
+                let canonical = try await service.fetchReview(
+                    runID: runID,
+                    bearerToken: bearer.bearerToken
+                )
+                return (bearer, canonical)
+            }
+        )
+    }
+
+    /// Drops an early fetch `open` did not adopt. A no-op once `open` took it.
+    func abandonCanonicalFetch(runID: UUID) {
+        guard let early = earlyCanonicalFetch, early.runID == runID else { return }
+        early.task.cancel()
+        earlyCanonicalFetch = nil
+    }
+
     func open(_ requested: ListingReviewResult) async -> Bool {
         openGeneration &+= 1
         let generation = openGeneration
         resetForOpen()
+        // Single use: an early fetch for this run is adopted, one for any
+        // other run is cancelled, and either way none outlives this open.
+        let early = earlyCanonicalFetch
+        earlyCanonicalFetch = nil
+        if let early, early.runID != requested.binding.runID {
+            early.task.cancel()
+        }
         let bearer: PrincipalBoundBearer
         let canonical: ListingReviewResult
         do {
-            bearer = try await tokenProvider.principalBoundBearer()
-            guard generation == openGeneration else { return false }
-            canonical = try await service.fetchReview(
-                runID: requested.binding.runID,
-                bearerToken: bearer.bearerToken
-            )
+            if let early, early.runID == requested.binding.runID {
+                (bearer, canonical) = try await early.task.value
+            } else {
+                bearer = try await tokenProvider.principalBoundBearer()
+                guard generation == openGeneration else { return false }
+                canonical = try await service.fetchReview(
+                    runID: requested.binding.runID,
+                    bearerToken: bearer.bearerToken
+                )
+            }
             guard generation == openGeneration,
                   canonical.binding.runID == requested.binding.runID else {
                 throw ListingReviewClientError.invalidResponse

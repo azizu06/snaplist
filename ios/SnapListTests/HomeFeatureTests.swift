@@ -62,6 +62,98 @@ final class HomeAPIOriginTests: XCTestCase {
 }
 
 @MainActor
+final class TrophyWallSeenReadyBadgeTests: XCTestCase {
+    private let principal = TrophyWallPrincipalScope(opaqueValue: "principal-seen")
+
+    private func run(_ n: Int) -> UUID {
+        UUID(uuidString: "5EE00000-0000-4000-8000-00000000000\(n)")!
+    }
+
+    private func canonical(_ n: Int, _ state: TrophyWallCardState) -> TrophyWallCanonicalAcceptedRun {
+        TrophyWallCanonicalAcceptedRun(
+            principalScope: principal,
+            runID: run(n),
+            linkedLogicalIdentity: nil,
+            state: state,
+            lastMeaningfulUpdateAt: Date(timeIntervalSince1970: Double(n)),
+            itemName: "Item \(n)"
+        )
+    }
+
+    private func loadedStore(_ runs: [TrophyWallCanonicalAcceptedRun]) async -> TrophyWallStore {
+        let store = TrophyWallStore(
+            principalScope: principal,
+            repository: StaticTrophyWallRepository(cards: [])
+        )
+        await store.refreshCollection(
+            using: ScriptedTrophyWallRunHistoryRepository(
+                results: [.page(TrophyWallRunHistoryPage(entries: [], nextCursor: nil))]
+            )
+        )
+        runs.forEach(store.ingest)
+        return store
+    }
+
+    /// Only ready items the seller has not seen count; work still in flight
+    /// is not "new".
+    func testBadgeCountsOnlyUnseenReadyItems() async {
+        let store = await loadedStore([
+            canonical(1, .readyToReview),
+            canonical(2, .workingPricing),
+            canonical(3, .readyToReview),
+        ])
+        XCTAssertEqual(store.unseenReadyCount, 2)
+    }
+
+    func testDisplayingLoadedProcessingClearsTheBadgeAndKeepsFutureArrivals() async {
+        let store = await loadedStore([canonical(1, .readyToReview), canonical(2, .workingPricing)])
+        store.markDisplayedReadyRowsSeen()
+        XCTAssertEqual(store.unseenReadyCount, 0)
+
+        // A later arrival is genuinely new again.
+        store.ingest(canonical(2, .readyToReview))
+        XCTAssertEqual(store.unseenReadyCount, 1)
+    }
+
+    /// A visit whose rows were never proved by a successful load must not
+    /// clear the badge.
+    func testDisplayWithoutALoadedCollectionDoesNotClearTheBadge() async {
+        let store = TrophyWallStore(
+            principalScope: principal,
+            repository: StaticTrophyWallRepository(cards: [])
+        )
+        store.ingest(canonical(1, .readyToReview))
+        await store.refreshCollection(
+            using: ScriptedTrophyWallRunHistoryRepository(
+                results: [.failure(URLError(.badServerResponse))]
+            )
+        )
+        XCTAssertNotEqual(store.collectionOutcome, .loaded)
+        store.markDisplayedReadyRowsSeen()
+        XCTAssertEqual(store.unseenReadyCount, 1)
+    }
+
+    func testOpeningOneReadyItemClearsOnlyThatItem() async {
+        let store = await loadedStore([canonical(1, .readyToReview), canonical(3, .readyToReview)])
+        store.markReadyItemSeen(runID: run(1))
+        XCTAssertEqual(store.unseenReadyCount, 1)
+    }
+
+    func testPrincipalTransitionForgetsWhatTheDepartingSellerSaw() async {
+        let store = await loadedStore([canonical(1, .readyToReview)])
+        store.markDisplayedReadyRowsSeen()
+        store.resetForPrincipalTransition()
+        await store.refreshCollection(
+            using: ScriptedTrophyWallRunHistoryRepository(
+                results: [.page(TrophyWallRunHistoryPage(entries: [], nextCursor: nil))]
+            )
+        )
+        store.ingest(canonical(1, .readyToReview))
+        XCTAssertEqual(store.unseenReadyCount, 1)
+    }
+}
+
+@MainActor
 final class TrophyWallDomainTests: XCTestCase {
     /// #1130: ready to review first, then needs retry, then everything still
     /// working; newest first inside each group, so a finished item is never

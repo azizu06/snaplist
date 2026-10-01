@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 @testable import SnapList
 
@@ -2091,3 +2092,90 @@ final class ListingReviewConditionTests: XCTestCase {
         XCTAssertEqual(decoded.sellerLabel, "For Parts")
     }
 }
+
+@MainActor
+final class ListingReviewImagePipelineTests: XCTestCase {
+    private actor FetchCounter {
+        private(set) var count = 0
+        var failuresLeft: Int
+        init(failuresLeft: Int = 0) { self.failuresLeft = failuresLeft }
+        func next() throws {
+            count += 1
+            if failuresLeft > 0 {
+                failuresLeft -= 1
+                throw URLError(.timedOut)
+            }
+        }
+    }
+
+    private static func cameraSizedJPEG() -> Data {
+        let size = CGSize(width: 4032, height: 3024)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 600, y: 400, width: 2400, height: 1800))
+        }
+        return image.jpegData(compressionQuality: 0.85)!
+    }
+
+    /// The hero and its thumbnail ask for the same photo at once; the screen
+    /// downloads it once.
+    func testHeroAndThumbnailShareOneDownload() async throws {
+        let jpeg = Self.cameraSizedJPEG()
+        let counter = FetchCounter()
+        let pipeline = ListingReviewImagePipeline { _ in
+            try await counter.next()
+            try await Task.sleep(for: .milliseconds(50))
+            return jpeg
+        }
+        let url = URL(string: "https://snaplist.test/photo.jpg")!
+
+        async let hero = pipeline.image(for: url, maxPixelDimension: ListingReviewImagePipeline.heroMaxPixelDimension)
+        async let thumbnail = pipeline.image(for: url, maxPixelDimension: ListingReviewImagePipeline.thumbnailMaxPixelDimension)
+        let (heroImage, thumbnailImage) = try await (hero, thumbnail)
+
+        let fetches = await counter.count
+        XCTAssertEqual(fetches, 1)
+        XCTAssertLessThanOrEqual(max(heroImage.size.width, heroImage.size.height) * heroImage.scale, 1_300)
+        XCTAssertLessThanOrEqual(max(thumbnailImage.size.width, thumbnailImage.size.height) * thumbnailImage.scale, 200)
+    }
+
+    func testFailedDownloadIsRetriedOnTheNextRequest() async throws {
+        let jpeg = Self.cameraSizedJPEG()
+        let counter = FetchCounter(failuresLeft: 1)
+        let pipeline = ListingReviewImagePipeline { _ in
+            try await counter.next()
+            return jpeg
+        }
+        let url = URL(string: "https://snaplist.test/photo.jpg")!
+
+        do {
+            _ = try await pipeline.image(for: url, maxPixelDimension: 200)
+            XCTFail("The first download was scripted to fail.")
+        } catch {}
+        _ = try await pipeline.image(for: url, maxPixelDimension: 200)
+        let fetches = await counter.count
+        XCTAssertEqual(fetches, 2)
+    }
+
+    /// Measurement only: decoding a camera-sized photo to the hero's size,
+    /// against decoding it at full resolution the way `AsyncImage` did.
+    func testMeasureDownsampledDecodeAgainstFullDecode() throws {
+        let jpeg = Self.cameraSizedJPEG()
+        let clock = ContinuousClock()
+        let fullStart = clock.now
+        let full = UIImage(data: jpeg)!.preparingForDisplay()!
+        let fullElapsed = clock.now - fullStart
+        let downStart = clock.now
+        let hero = try ListingReviewImagePipeline.downsample(jpeg, maxPixelDimension: ListingReviewImagePipeline.heroMaxPixelDimension)
+        let downElapsed = clock.now - downStart
+        let fullBytes = Int(full.size.width * full.scale * full.size.height * full.scale) * 4
+        let heroBytes = Int(hero.size.width * hero.scale * hero.size.height * hero.scale) * 4
+        print("IMAGE-DECODE full=\(fullElapsed) \(fullBytes / 1_048_576)MB hero=\(downElapsed) \(heroBytes / 1_048_576)MB jpeg=\(jpeg.count / 1024)KB")
+        XCTAssertLessThan(heroBytes, fullBytes / 8)
+    }
+}
+

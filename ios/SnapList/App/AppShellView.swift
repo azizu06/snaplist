@@ -1212,18 +1212,17 @@ struct AppShellView: View {
         }
     }
 
-    /// The in-flight items the Processing slot counts and gates on: exactly
-    /// the rows the Processing screen lists, so the badge never promises a
-    /// row the screen does not show.
+    /// What the Processing slot's badge counts: ready items the seller has
+    /// not seen yet. Visiting Processing (or opening the item) clears them.
     private var dockProcessingCount: Int {
 #if DEBUG
         // The Processing fixture draws its rows from its own store at the
         // root, so the slot counts what that screen actually shows.
         if configuration.fixture == .trophyProcessing {
-            return TrophyWallProcessingLaunchFixture.store.processingRows.count
+            return TrophyWallProcessingLaunchFixture.store.unseenReadyCount
         }
 #endif
-        return trophyWallStore.processingRows.count
+        return trophyWallStore.unseenReadyCount
     }
 
     private var shellChromeProjection: AppShellChromeProjection {
@@ -2817,6 +2816,19 @@ private struct ProcessingListingReviewSurface: View {
         ProcessingGuestClaimPresentationHost()
     @State private var listingReviewPresentation =
         ListingReviewPresentationHost()
+    /// Whether this screen's rows are actually on screen. A pushed review or
+    /// guest claim covers them, and anything that arrives meanwhile has not
+    /// been seen until the seller comes back.
+    @State private var isShowingRows = false
+
+    /// What changes when there is something new to mark seen: the ready rows,
+    /// or the collection finishing a load that proves them.
+    private var seenSignature: [String] {
+        [String(describing: store.collectionOutcome)] + store.processingRows.compactMap { row in
+            guard case .review(let runID) = row.action else { return nil }
+            return runID.uuidString
+        }
+    }
 
     var body: some View {
         @Bindable var listingReviewPresentation = listingReviewPresentation
@@ -2840,6 +2852,9 @@ private struct ProcessingListingReviewSurface: View {
                 case .presentedGuestClaim:
                     activationGuestClaimPresentationChanged(true)
                 case .presentedReview:
+                    if case .review(let runID) = action {
+                        store.markReadyItemSeen(runID: runID)
+                    }
                     activationListingReviewOpened()
                 default:
                     break
@@ -2851,6 +2866,18 @@ private struct ProcessingListingReviewSurface: View {
             onRefresh: onRefresh,
             forceReducedMotion: forceReducedMotion
         )
+        // The dock badge counts ready items the seller has not seen; showing
+        // them here is seeing them (the store refuses unless the collection
+        // actually loaded).
+        .onAppear {
+            isShowingRows = true
+            store.markDisplayedReadyRowsSeen()
+        }
+        .onDisappear { isShowingRows = false }
+        .onChange(of: seenSignature) {
+            guard isShowingRows else { return }
+            store.markDisplayedReadyRowsSeen()
+        }
         .navigationDestination(
             isPresented: Binding(
                 get: { guestClaimPresentation.isPresented },

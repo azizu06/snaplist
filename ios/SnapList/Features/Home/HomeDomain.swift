@@ -686,6 +686,39 @@ final class TrophyWallStore {
         )
     }
 
+    /// Ready runs the seller has already been shown. Held for this principal
+    /// only: `resetForPrincipalTransition` empties it, so one seller's visits
+    /// never quiet another seller's badge.
+    private var seenReadyRunIDs: Set<UUID> = []
+
+    /// What the Processing dock badge counts: items ready to review that the
+    /// seller has not yet seen. Work still in flight is not "new".
+    var unseenReadyCount: Int {
+        processingRows.reduce(into: 0) { count, row in
+            if case .review(let runID) = row.action, !seenReadyRunIDs.contains(runID) {
+                count += 1
+            }
+        }
+    }
+
+    /// The Processing screen calls this while its rows are on screen. Only a
+    /// collection this launch actually loaded counts as shown: a visit whose
+    /// refresh failed leaves the badge alone, because the seller may be
+    /// looking at rows the server never confirmed.
+    func markDisplayedReadyRowsSeen() {
+        guard collectionOutcome == .loaded else { return }
+        for row in processingRows {
+            if case .review(let runID) = row.action {
+                seenReadyRunIDs.insert(runID)
+            }
+        }
+    }
+
+    /// Opening one item's review is seeing it, whatever the collection state.
+    func markReadyItemSeen(runID: UUID) {
+        seenReadyRunIDs.insert(runID)
+    }
+
     var settledTiles: [TrophyWallSettledTile] {
         cards.compactMap { card in
             guard let itemName = card.itemName else {
@@ -937,6 +970,7 @@ final class TrophyWallStore {
 
     func resetForPrincipalTransition() {
         collectionRequestGeneration += 1
+        seenReadyRunIDs = []
         isRefreshingCollection = false
         cards = []
         canonicalHistoryStates = [:]
