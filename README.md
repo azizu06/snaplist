@@ -30,12 +30,6 @@
 5. **Choose where it goes.** Review and confirm a direct eBay publish. For Facebook Marketplace, Mercari, or Depop, take the prepared text and photos into the marketplace and finish posting there yourself.
 6. **See your Flips.** Finished items collect in a chronological view. An export marked prepared or shared stays distinct from an eBay publish; neither is a claim that the item sold.
 
-<p align="center">
-  <img src="docs/readme/phone-flips.webp" width="220" alt="Populated Flips: the posted Jordan 3 item appears with its real photo and October 1 date.">
-</p>
-
-<p align="center"><sub>A finished Jordan 3 listing appears in Flips with its real photo.<br><a href="docs/readme/README.md">Capture sources and dates</a>.</sub></p>
-
 The first usable listing comes **before signup or a paywall**. Try the result on your own item before deciding to keep listing.
 
 ## RevenueCat powers SnapList Pro
