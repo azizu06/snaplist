@@ -166,27 +166,22 @@ enum AssistedExportGuide {
         isShared: Bool
     ) -> AssistedExportGuideProgress {
         let all = AssistedExportGuideStep.allCases
-        if isShared {
-            return AssistedExportGuideProgress(current: nil, completed: all)
-        }
-        // The share sheet carries the text and the photos out in one go, so it
-        // puts the three device steps behind the seller. A server receipt alone
-        // does not: it records that some handoff happened, not which one, so
-        // with no local record of the action nothing is shown as done.
-        let deviceStepsDone = performed.contains(.sharedAnotherWay)
+        // Each device step requires its own successful action record. A share
+        // sheet handoff enables the seller's claim, but neither that handoff
+        // nor the claim proves a clipboard write, photo save, or app open.
         let done: [AssistedExportGuideStep] = all.filter { step in
             switch step {
             case .copyText:
-                return deviceStepsDone || performed.contains(.copiedListingText)
+                return performed.contains(.copiedListingText)
             case .savePhotos:
-                return deviceStepsDone || performed.contains(.savedPhotos)
+                return performed.contains(.savedPhotos)
             case .openDestination:
-                return deviceStepsDone || performed.contains(.openedDestination)
+                return performed.contains(.openedDestination)
             case .confirmPosted:
-                return false
+                return isShared
             }
         }
-        let current = all.first { !done.contains($0) } ?? .confirmPosted
+        let current = isShared ? nil : all.first { !done.contains($0) }
         return AssistedExportGuideProgress(current: current, completed: done)
     }
 }
@@ -357,9 +352,8 @@ struct AssistedExportDomain: Equatable, Sendable {
     }
 
     func accessibilityLabel(for destination: AssistedExportDestination) -> String {
-        // Routed through `rowStateText` rather than re-deriving the same
-        // state: a sighted seller and a VoiceOver seller read one line.
-        "\(destination.displayName), \(rowStateText(for: destination).lowercased())"
+        // Announce the same progress displayed in the marketplace tab.
+        "\(destination.displayName), \(tabStatusText(for: destination).lowercased())"
     }
 
     /// The row's one-line state: Not started, Prepared, or the seller's own
@@ -374,6 +368,24 @@ struct AssistedExportDomain: Equatable, Sendable {
                 ? AssistedExportCopy.prepared
                 : AssistedExportCopy.notStarted
         }
+    }
+
+    /// The marketplace tab's one-line status: the seller's own Shared claim,
+    /// how many of the three device steps they took on this device, or, for a
+    /// handoff known only from its server receipt, Prepared. A receipt says
+    /// some handoff happened, not which, so it never counts as a done step.
+    func tabStatusText(for destination: AssistedExportDestination) -> String {
+        if case .shared = handoff(for: destination) {
+            return AssistedExportCopy.tabShared
+        }
+        let deviceSteps = AssistedExportGuideStep.allCases.filter { $0 != .confirmPosted }
+        let done = guide(for: destination).completed.count
+        if done > 0 {
+            return AssistedExportCopy.stepsDone(done, of: deviceSteps.count)
+        }
+        return hasHandedOff(to: destination)
+            ? AssistedExportCopy.prepared
+            : AssistedExportCopy.notStarted
     }
 
     /// Ask the seller. The sheet only mounts for a row that could legitimately
@@ -477,92 +489,65 @@ struct AssistedExportDomain: Equatable, Sendable {
 /// published, synced, verified, or sold anything.
 enum AssistedExportCopy {
     static let notStarted = "Not started"
-    static let rowHint = "Opens a step-by-step guide"
-    static let closeGuide = "Close"
-    static let chooseMarketplace = "Choose marketplace"
-    static let manualHandoff = "You finish posting in the marketplace app."
-    static let stepDone = "done"
-    static let stepUpcoming = "upcoming"
     static let prepared = "Prepared"
+    static let tabShared = "Shared"
+    static let closeGuide = "Close"
+    static let screenTitle = "Share to other marketplaces"
 
-    static func guideInstruction(
-        _ step: AssistedExportGuideStep,
-        for destination: AssistedExportDestination
-    ) -> String {
-        switch step {
-        case .copyText:
-            return destination == .depop
-                ? "Copy the listing text. Depop takes no separate title."
-                : "Copy the listing text."
-        case .savePhotos:
-            return "Save your photos to your library."
-        case .openDestination:
-            return "Open \(destination.displayName) and paste in the text and photos."
-        case .confirmPosted:
-            return confirmQuestion(destination)
-        }
+    static func stepsDone(_ done: Int, of total: Int) -> String {
+        "\(done) of \(total) done"
     }
 
-    static func completedStepSummary(_ step: AssistedExportGuideStep) -> String {
-        switch step {
-        case .copyText:
-            return "Listing text copied"
-        case .savePhotos:
-            return "Photos saved"
-        case .openDestination:
-            return "Opened"
-        case .confirmPosted:
-            return "Marked as shared"
-        }
+    static func stepPosition(_ position: Int, of total: Int) -> String {
+        "Step \(position) of \(total)"
     }
 
-    static func upcomingStepTitle(
-        _ step: AssistedExportGuideStep,
-        for destination: AssistedExportDestination
-    ) -> String {
-        switch step {
-        case .copyText:
-            return "Copy the listing text"
-        case .savePhotos:
-            return "Save your photos"
-        case .openDestination:
-            return openDestination(destination)
-        case .confirmPosted:
-            return "Confirm you posted it"
-        }
+    // The four checklist rows. Each says what the step hands over in plain
+    // words, because the seller finishes the form somewhere SnapList cannot see.
+    static let copyRowTitle = "Listing text"
+
+    static func copyRowDetail(for destination: AssistedExportDestination) -> String {
+        // Depop takes no title, so its row must not promise one.
+        destination == .depop ? "Description and price" : "Title, description, price"
     }
+
+    static func photosRowTitle(count: Int) -> String {
+        photos(count)
+    }
+
+    static let photosRowDetail = "Saves to Photos"
+
+    static func openRowTitle(_ destination: AssistedExportDestination) -> String {
+        "Open \(shortName(destination))"
+    }
+
+    static let openRowDetail = "Paste text, add photos"
+    static let postedRowTitle = "Posted it?"
+    static let postedRowDetailBefore = "After you post"
+    /// The one fact this family must not hide: SnapList cannot see any of
+    /// these destinations, so only the seller's own tap here is evidence.
+    static let postedRowDetailReady = "Only you can confirm"
+
+    static let copyAction = "Copy"
+    static let copiedAction = "Copied"
+    static let saveAction = "Save"
+    static let savedAction = "Saved"
+    static let openAction = "Open"
+    static let openedAction = "Opened"
+    static let markShared = "Mark shared"
+    static let undo = "Undo"
+    static let shareAnotherWay = "Share another way"
 
     static func openDestination(_ destination: AssistedExportDestination) -> String {
         "Open \(destination.displayName)"
     }
 
     static func didNotOpen(_ destination: AssistedExportDestination) -> String {
-        "\(destination.displayName) didn't open. It may not be installed. "
-            + "Copy the text or share another way."
+        "\(destination.displayName) didn't open. It may not be installed."
     }
 
-    static let screenTitle = "Share to other marketplaces"
-
-    static func stepPosition(_ position: Int, of total: Int) -> String {
-        "Step \(position) of \(total)"
-    }
-    static let copyListingText = "Copy listing text"
-    static let copyListingTextDone = "Copied"
-    static let savedPhotosDone = "Saved to Photos"
-    static let shareAnotherWay = "Share another way"
-    static let markAsShared = "Mark as shared"
-    /// The one fact this family must not hide: SnapList cannot see any of
-    /// these destinations, so only the seller's own tap here is evidence.
-    static let markAsSharedSupport =
-        "SnapList can't see whether this posted. Only you can confirm it here."
-    static let confirmShared = "Yes, mark as shared"
-    static let confirmNotYet = "Not yet"
-    static let markedAsShared = "Marked as shared."
-    static let undo = "Undo"
     static let packOutOfDateTitle = "This pack is out of date"
-    static let packOutOfDateDetail =
-        "You changed the listing after this pack was prepared. Update the "
-            + "pack to match before sharing. Updating replaces the old pack."
+    static let packOutOfDateDetail = "You changed the listing. Update the pack before sharing."
     static let updatePack = "Update pack"
     static let loadFailedTitle = "Couldn’t load this sharing pack"
     static let loadFailedDetail = "Check your connection and try again."
@@ -581,14 +566,10 @@ enum AssistedExportCopy {
     // forgot a save step that no longer exists.
     static let saveBeforeSharing = "Couldn’t save your changes. Check your connection and try again."
 
-    static func savePhotos(count: Int) -> String {
-        "Save \(photos(count))"
-    }
-
-    /// What the pack holds and when it was built. Not a status line: a prepared
-    /// pack is the ordinary state of this screen, so this reports and stops.
-    static func packMeta(photoCount: Int, preparedAt: String) -> String {
-        "\(photos(photoCount)) · Updated \(preparedAt)"
+    /// The name a tab or row has room for. The full name stays the spoken
+    /// label everywhere it matters.
+    private static func shortName(_ destination: AssistedExportDestination) -> String {
+        destination == .facebookMarketplace ? "Facebook" : destination.displayName
     }
 
     private static func photos(_ count: Int) -> String {
@@ -605,25 +586,29 @@ enum AssistedExportCopy {
     /// hold no seller-facing literals of their own.
     static let allSellerFacingStrings: [String] = [
         notStarted,
-        rowHint,
-        closeGuide,
-        chooseMarketplace,
-        manualHandoff,
-        stepDone,
-        stepUpcoming,
         prepared,
-        stepPosition(2, of: 4),
+        tabShared,
+        closeGuide,
         screenTitle,
-        copyListingText,
-        copyListingTextDone,
-        savedPhotosDone,
-        shareAnotherWay,
-        markAsShared,
-        markAsSharedSupport,
-        confirmShared,
-        confirmNotYet,
-        markedAsShared,
+        stepsDone(2, of: 3),
+        stepPosition(2, of: 4),
+        copyRowTitle,
+        photosRowTitle(count: 8),
+        photosRowTitle(count: 1),
+        photosRowDetail,
+        openRowDetail,
+        postedRowTitle,
+        postedRowDetailBefore,
+        postedRowDetailReady,
+        copyAction,
+        copiedAction,
+        saveAction,
+        savedAction,
+        openAction,
+        openedAction,
+        markShared,
         undo,
+        shareAnotherWay,
         packOutOfDateTitle,
         packOutOfDateDetail,
         updatePack,
@@ -633,16 +618,14 @@ enum AssistedExportCopy {
         actionFailed,
         entryTitle,
         saveBeforeSharing,
-        savePhotos(count: 8),
-        savePhotos(count: 1),
-        packMeta(photoCount: 8, preparedAt: "2:41 PM"),
-    ] + AssistedExportGuideStep.allCases.flatMap { step in
-        AssistedExportDestination.allCases.flatMap { destination in
-            [
-                guideInstruction(step, for: destination),
-                upcomingStepTitle(step, for: destination),
-            ]
-        } + [completedStepSummary(step)]
+    ] + AssistedExportDestination.allCases.flatMap { destination in
+        [
+            copyRowDetail(for: destination),
+            openRowTitle(destination),
+            openDestination(destination),
+            didNotOpen(destination),
+            confirmQuestion(destination),
+        ]
     }
 
     static func sharedStatus(on date: Date) -> String {
