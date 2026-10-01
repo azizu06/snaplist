@@ -289,6 +289,18 @@ describe("listing/generate — the description reads as sentences, not a form (#
     expect(description).not.toMatch(LABEL_COLON_PATTERN);
   });
 
+  it("keeps seller-stated provenance out of the buyer-facing description (bugs.md #19)", () => {
+    const description = buildCoreListingDescription({
+      ...CORE,
+      identitySource: "seller-stated",
+      identityVariantUncertain: true,
+    });
+
+    expect(description).toBe(buildCoreListingDescription(CORE));
+    expect(description).not.toMatch(/seller/i);
+    expect(description).not.toMatch(/unconfirmed/i);
+  });
+
   it("does not double the word condition when the core already carries it", () => {
     const description = buildCoreListingDescription({
       ...CORE,

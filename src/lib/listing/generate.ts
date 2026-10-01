@@ -423,13 +423,9 @@ export function buildCoreListingDescription(
       ? `${name} in ${conditionPhrase}`
       : `${name} in ${conditionPhrase} condition`
     : name;
-  const sentences = attributes.identitySource === "seller-stated"
-    ? [
-        asSentence(`The seller identifies this as ${name}`),
-        ...(conditionPhrase ? [asSentence(`It is in ${conditionPhrase}${/\bcondition\b/i.test(conditionPhrase) ? "" : " condition"}`)] : []),
-        ...(attributes.identityVariantUncertain ? ["Exact version or trim is unconfirmed."] : []),
-      ]
-    : [asSentence(identity)];
+  // A seller-stated identity reads like any other here: its provenance is a seller-only
+  // signal (identification reason + reduced confidence), never buyer copy (bugs.md #19).
+  const sentences = [asSentence(identity)];
   const specs = (attributes.specs ?? [])
     .map((spec) => safeSellerCoreValue(spec))
     .filter((spec): spec is string => Boolean(spec))
