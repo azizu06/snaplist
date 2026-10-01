@@ -687,6 +687,9 @@ final class TrophyWallStore {
     private(set) var cards: [TrophyWallCard]
     private(set) var collectionOutcome: TrophyWallCollectionOutcome = .unknown
     private(set) var collectionRefreshRecovery: TrophyWallCollectionRefreshRecovery = .idle
+    /// The last attempt carried no accepted identity before any answer, so
+    /// the collection is still unproved rather than refused.
+    private var isAwaitingSession = false
     private var canonicalHistoryStates: [UUID: CanonicalHistoryState]
     private var runIDsByListingID: [UUID: UUID]
     private(set) var isRefreshingCollection = false
@@ -859,8 +862,19 @@ final class TrophyWallStore {
             )
             collectionOutcome = .loaded
             collectionRefreshRecovery = .idle
+            isAwaitingSession = false
         } catch {
             guard collectionRequestGeneration == requestGeneration else {
+                return true
+            }
+            // Before the first answer, a request that carried no accepted
+            // identity proves nothing about the collection: on a cold launch it
+            // only raced session restore, and the principal transition that
+            // follows the restore loads the wall again. Staying `unknown` keeps
+            // the wall loading instead of flashing a failure it never had.
+            isAwaitingSession = collectionOutcome == .unknown
+                && Self.isSessionPending(error)
+            if isAwaitingSession {
                 return true
             }
             collectionOutcome = Self.outcome(forFailure: error)
@@ -918,7 +932,7 @@ final class TrophyWallStore {
         }
 
         var attempt = 1
-        while collectionOutcome == .unavailable,
+        while collectionOutcome == .unavailable || isAwaitingSession,
               attempt < TrophyWallCollectionRecoveryPolicy.maximumAutomaticAttempts {
             attempt += 1
             await waiting(
@@ -1034,6 +1048,7 @@ final class TrophyWallStore {
         runIDsByListingID = [:]
         collectionOutcome = .unknown
         collectionRefreshRecovery = .idle
+        isAwaitingSession = false
         // The departing principal's directory is not deleted here. This runs on
         // every transition, including the one back to the same seller after a
         // relaunch, and a wall that erased on transition would be the defect
@@ -1046,6 +1061,13 @@ final class TrophyWallStore {
     /// A server that answered badly is not the same as a device that could not
     /// reach one, so only genuine reachability codes may claim `offline`. Every
     /// other failure — timeout, TLS, DNS, HTTP status, decode — is `unavailable`.
+    private static func isSessionPending(_ error: any Error) -> Bool {
+        if error is BearerTokenProviderError {
+            return true
+        }
+        return (error as? RunAPIError) == .authenticationRequired
+    }
+
     private static func outcome(
         forFailure error: any Error
     ) -> TrophyWallCollectionOutcome {
