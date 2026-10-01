@@ -62,6 +62,14 @@ struct ProGateSheet: View {
     @State private var contentHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
 
+    /// Ignores sub-point layout jitter. A detent that changes while the seller
+    /// drags the drawer cancels the drag, so swipe-down would snap back instead
+    /// of dismissing; only a real content change (a new state) resizes it.
+    private static func settle(_ height: inout CGFloat, to measured: CGFloat) {
+        let rounded = measured.rounded(.up)
+        if abs(rounded - height) > 2 { height = rounded }
+    }
+
     var body: some View {
         Group {
             if isAccessibilitySize {
@@ -91,7 +99,7 @@ struct ProGateSheet: View {
                     .padding(.top, 10)
                     .background(SnapListColorToken.canvas.color)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                        footerHeight = $0
+                        Self.settle(&footerHeight, to: $0)
                     }
             }
         }
@@ -135,7 +143,7 @@ struct ProGateSheet: View {
                 .padding(.bottom, 8)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-            contentHeight = $0
+            Self.settle(&contentHeight, to: $0)
         }
     }
 

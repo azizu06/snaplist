@@ -497,7 +497,7 @@ private actor ProGatePurchaseFixtureAPI: MobileAPIClient {
         if reads > 1, fixture == .purchaseMissing { throw MobileAPIClientError.httpStatus(503) }
         // Long enough that the timed-out pending state stays on screen while a
         // UI test waits out the paywall's state animations before reading it.
-        if reads > 1, fixture == .purchaseTimeout { try await Task.sleep(for: .seconds(6)) }
+        if reads > 1, fixture == .purchaseTimeout { try await Task.sleep(for: .seconds(30)) }
         let granted = reads > 1 && (fixture == .purchaseVerified || fixture == .purchaseTimeout)
             || reads > 3 && fixture == .purchaseDelayed
         return .init(data: .init(billingSource: granted ? .storeKit : .included, status: granted ? .active : .included, remainingItems: granted ? 7 : 1, periodStart: nil, periodEnd: nil, gracePeriodEnd: nil, transitionState: .notRequired, legacyStripeStatus: nil), meta: .init(requestId: "fixture-entitlement"))
