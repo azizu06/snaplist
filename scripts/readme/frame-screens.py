@@ -52,7 +52,7 @@ def frame(source, output, crop=None):
         run(*args, "-auto-orient", "-resize", "1179x2556", "-background", "#090a0b",
             "-gravity", "center", "-extent", "1179x2556", screen)
         run("-size", "1179x2556", "xc:black", "-fill", "white", "-draw",
-            "roundrectangle 0,0 1178,2555 150,150", mask)
+            "roundrectangle 0,0 1178,2555 190,190", mask)
         run(screen, mask, "-alpha", "off", "-compose", "CopyOpacity", "-composite", screen)
         run("-background", "none", FRAME, device)
         run(device, screen, "-geometry", "+50+50", "-compose", "Over", "-composite",

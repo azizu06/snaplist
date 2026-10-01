@@ -27,7 +27,7 @@ an explicit crop; mismatched aspect ratios and out-of-bounds crops fail instead
 of stretching or guessing. Do not include Mirroring hover controls or pointers
 inside the chosen screen region. Use a settled capture with those absent.
 
-For the accepted README set, place the five raw files in the ignored local
+For the accepted README set, place the selected raw files in the ignored local
 `ios/Artifacts/readme-input/` folder using the names in `sources.json`, then run:
 
 ```sh

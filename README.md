@@ -12,14 +12,14 @@
 <p align="center"><img src="docs/readme/scout-barcode.gif" width="180" alt="Scout, SnapList’s camera mascot, scanning a barcode on a cardboard parcel in a looping animation."></p>
 
 <p align="center">
-  <img src="docs/readme/phone-to-list.jpg" width="220" alt="SnapList on a real iPhone: Scout holds a parcel above a keyboard ready to review in To list.">
+  <img src="docs/readme/phone-to-list.webp" width="220" alt="SnapList on a real iPhone: Scout holds a parcel above a keyboard ready to review in To list.">
   &nbsp;
-  <img src="docs/readme/phone-listing-review.jpg" width="220" alt="Real iPhone listing review: editable keyboard price, title, description and condition, with no verified sold matches found.">
+  <img src="docs/readme/phone-listing-review.webp" width="220" alt="Air Jordan 3 listing review on iPhone: four real photos and an editable $160 starting price.">
   &nbsp;
-  <img src="docs/readme/phone-flips.jpg" width="220" alt="Real iPhone Flips screen: Scout invites you to scan your first item, above the three-button dock.">
+  <img src="docs/readme/phone-price-evidence.webp" width="220" alt="Air Jordan price evidence on iPhone: five sold matches, a $100–$219.99 range, and eBay sale cards.">
 </p>
 
-<p align="center"><sub>Real app, real iPhone. To list → review → Flips.<br><a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
+<p align="center"><sub>Real app captured on iPhone, with matching presentation frames. To list → review → price evidence.<br><a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 ## From photo to flip
 
@@ -36,7 +36,7 @@ The first usable listing comes **before signup or a paywall**. Try the result on
 
 Scout meets you at a packing counter when you want more AI listings. The plan appears on a taped packing slip: price, renewal terms, Subscribe, and Restore, with Terms and Privacy close at hand.
 
-<p align="center"><img src="docs/readme/scout-pro.jpg" width="290" alt="SnapList Pro on a real iPhone: Scout at a packing counter, a monthly plan on a taped slip, Subscribe, Restore, Terms and Privacy."><br><sub>Scout’s packing-counter paywall. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
+<p align="center"><img src="docs/readme/scout-pro.webp" width="220" alt="Scout Pro on iPhone: a saved item, packing-counter artwork, monthly plan, Subscribe, Restore, Terms and Privacy."><br><sub>Scout’s packing-counter paywall. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 | Free first item | SnapList Pro |
 | --- | --- |
