@@ -254,7 +254,7 @@ struct ProGateSheet: View {
                 // The rotated confirmation stamp needs its own paper area;
                 // its visual bounds must not cover the renewal disclosure.
                 .frame(
-                    height: stampContent == nil ? 20 : stampSize * 5.5,
+                    height: stampContent == nil ? 20 : stampSize * 3,
                     alignment: .bottomLeading
                 )
                 .padding(.top, 10)
