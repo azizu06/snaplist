@@ -55,7 +55,9 @@ function rowFrom(data: unknown): Record<string, unknown> | null {
 function finiteTimestamp(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
-  return normalized === "infinity" || normalized === "-infinity" ? null : value;
+  return normalized === "infinity" || normalized === "-infinity"
+    ? null
+    : new Date(value).toISOString();
 }
 
 export function createSupabaseRevenueCatEntitlementStore(

@@ -46,6 +46,13 @@ that included period and would instead spend StoreKit. The native purchase
 confirmation requires the server's active StoreKit projection. The public SQL
 regression failed three assertions before the fix.
 
+At 07:35Z, the RevenueCat worker confirmed that the repaired SQL projection was
+exposing another pre-existing boundary defect: finite PostgREST timestamps such
+as `2026-10-01T07:29:50+00:00` were passed unchanged into the mobile contract,
+whose strict Zod datetime schema accepts UTC `Z` strings. Real paid entitlement
+requests therefore returned HTTP 500. This PR also normalizes finite dates with
+`Date.toISOString()` while keeping unbounded/null dates null.
+
 ## Repair and prior configuration
 
 Captain-authorized production repair:
@@ -93,6 +100,11 @@ TDD at the public SQL interfaces:
   is focused SQL evidence, not a full local Supabase/RLS suite.
 - Existing included-offer route, fence, HTTP, configuration, and Apple-adapter
   contract tests: **37 passed**. Typecheck and migration-version audit passed.
+- Timestamp correction: both active/grace entitlement HTTP contract tests first
+  returned **500 instead of 200**; both pass after UTC normalization. The complete
+  mobile API, RevenueCat, and operator-Pro suites passed **132 tests**; typecheck
+  and focused lint passed. This TypeScript correction requires the PR's app
+  deployment; the earlier database migration alone cannot ship it.
 
 Hosted end-to-end test:
 
