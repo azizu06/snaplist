@@ -3197,6 +3197,55 @@ describe("mobile API v1 provider-neutral handler", () => {
     });
   });
 
+  it.each(["active", "grace"])("returns the %s StoreKit entitlement with database timestamp offsets", async (status) => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{
+        billing_source: "storekit",
+        status,
+        remaining_items: 30,
+        period_start: "2026-10-01T07:29:50+00:00",
+        period_end: "2026-10-01T07:34:50+00:00",
+        grace_period_end: status === "grace" ? "2026-10-01T07:39:50+00:00" : null,
+        transition_state: "not_required",
+        legacy_stripe_status: null,
+      }],
+      error: null,
+    });
+    const subscriptionBridge = createSupabaseNativeSubscriptionBridge(
+      { rpc } as never,
+      {
+        signingSecret: "offline-webhook-secret",
+        authorization: "Bearer offline",
+        appId: "app_test",
+        entitlementId: "pro",
+        monthlyProductId: "snaplist-pro-fixture",
+        monthlyAllowance: 30,
+        allowedEnvironment: "PRODUCTION",
+      },
+    );
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_native" }),
+      subscriptionBridge,
+    })(new Request("http://localhost/v1/entitlements/ai-items", {
+      headers: { authorization: "Bearer signed-jwt" },
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: {
+        billingSource: "storekit",
+        status,
+        remainingItems: 30,
+        periodStart: "2026-10-01T07:29:50.000Z",
+        periodEnd: "2026-10-01T07:34:50.000Z",
+        gracePeriodEnd: status === "grace" ? "2026-10-01T07:39:50.000Z" : null,
+        transitionState: "not_required",
+        legacyStripeStatus: null,
+      },
+      meta: { requestId: "req_test" },
+    });
+  });
+
   it("returns an included allowance without leaking unbounded database timestamps", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: [
