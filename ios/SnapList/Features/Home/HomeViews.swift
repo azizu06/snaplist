@@ -52,7 +52,7 @@ struct TrophyWallView: View {
 
     /// The genuinely empty wall's Scout. Processing's loaded-empty screen,
     /// one dock tap away, uses a different clip (`CollectionMessage.scout`).
-    static let emptyWallScout: TrophyWallScout = .uncertainty
+    static let emptyWallScout: TrophyWallScout = .barcodeScan
 
     @ScaledMetric(relativeTo: .title) private var titleSize = 28
     @Environment(\.dockScrollScale) private var dockScrollScale
@@ -555,6 +555,15 @@ struct TrophyWallProcessingView: View {
         let offlineNotice: String?
         let refreshUnavailableNotice: String?
         let collectionMessage: CollectionMessage?
+        let activity: Activity?
+    }
+
+    /// The Scout line above the rows. Scout inspects while anything is still
+    /// being worked on and holds a packed box once everything is ready to
+    /// review. Any other mix gets no line, because neither clip would be true.
+    struct Activity: Equatable {
+        let scout: TrophyWallScout
+        let text: String
     }
 
     /// The centered group shown when there is no row to show at all. It states
@@ -574,8 +583,8 @@ struct TrophyWallProcessingView: View {
             switch scoutImageName {
             case "ScoutRetryReview":
                 .recovery
-            case "ScoutReassurance":
-                .reassurance
+            case "ActivationScoutACT04":
+                .thumbsUp
             default:
                 .uncertainty
             }
@@ -604,7 +613,7 @@ struct TrophyWallProcessingView: View {
     private static let emptyCollectionMessage = CollectionMessage(
         heading: "Nothing to list.",
         action: .scan(label: "Scan an item"),
-        scoutImageName: "ScoutReassurance",
+        scoutImageName: "ActivationScoutACT04",
         scoutAccessibilityLabel: scoutAccessibilityLabel
     )
     static let unavailableCollectionMessage = CollectionMessage(
@@ -734,6 +743,10 @@ struct TrophyWallProcessingView: View {
                         identifier: Self.refreshUnavailableNoticeIdentifier,
                         announcesOnAppear: true
                     )
+                }
+
+                if let activity = presentation.activity {
+                    TrophyWallProcessingActivityView(activity: activity)
                 }
 
                 if let collectionMessage = presentation.collectionMessage {
@@ -868,7 +881,8 @@ struct TrophyWallProcessingView: View {
                 disclosureAccessibilityLabel: nil,
                 offlineNotice: nil,
                 refreshUnavailableNotice: nil,
-                collectionMessage: collectionMessage(for: collectionOutcome)
+                collectionMessage: collectionMessage(for: collectionOutcome),
+                activity: nil
             )
         }
 
@@ -885,6 +899,7 @@ struct TrophyWallProcessingView: View {
             availableHeight: availableHeight
         )
         let hiddenCount = rows.count - clampedRows.count
+        let activity = Self.activity(for: rows)
         guard hiddenCount > 0 else {
             return Presentation(
                 visibleRows: rows,
@@ -892,7 +907,8 @@ struct TrophyWallProcessingView: View {
                 disclosureAccessibilityLabel: nil,
                 offlineNotice: offlineNotice,
                 refreshUnavailableNotice: refreshUnavailableNotice,
-                collectionMessage: nil
+                collectionMessage: nil,
+                activity: activity
             )
         }
 
@@ -903,7 +919,8 @@ struct TrophyWallProcessingView: View {
                 disclosureAccessibilityLabel: "Show fewer items",
                 offlineNotice: offlineNotice,
                 refreshUnavailableNotice: refreshUnavailableNotice,
-                collectionMessage: nil
+                collectionMessage: nil,
+                activity: activity
             )
         }
 
@@ -915,8 +932,23 @@ struct TrophyWallProcessingView: View {
                 : "Show more items",
             offlineNotice: offlineNotice,
             refreshUnavailableNotice: refreshUnavailableNotice,
-            collectionMessage: nil
+            collectionMessage: nil,
+            activity: activity
         )
+    }
+
+    /// Counts every row, not only the visible ones, so the line stays true
+    /// behind a collapsed disclosure.
+    static func activity(for rows: [TrophyWallProcessingRow]) -> Activity? {
+        let inProgress = rows.filter { $0.activation == .stillWorking }.count
+        if inProgress > 0 {
+            return Activity(scout: .inspection, text: "\(inProgress) in progress")
+        }
+        let allReady = rows.allSatisfy { row in
+            if case .review = row.action { true } else { false }
+        }
+        guard !rows.isEmpty, allReady else { return nil }
+        return Activity(scout: .boxLift, text: "\(rows.count) ready")
     }
 
     /// A refused refresh only earns a sentence once SnapList has spent its own
@@ -1012,6 +1044,30 @@ private struct TrophyWallNoticeStripView: View {
                 )
             )
         }
+    }
+}
+
+private struct TrophyWallProcessingActivityView: View {
+    let activity: TrophyWallProcessingView.Activity
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TrophyWallScoutView(
+                scout: activity.scout,
+                height: 96,
+                accessibilityLabel: activity.text
+            )
+
+            Text(activity.text)
+                .snapListTypography(.body)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(activity.text)
+        .accessibilityIdentifier("trophy.processing.activity")
     }
 }
 

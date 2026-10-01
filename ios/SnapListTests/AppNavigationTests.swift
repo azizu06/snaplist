@@ -780,7 +780,7 @@ final class AppNavigationTests: XCTestCase {
     // MARK: - #1134 Processing dock slot
 
     func testProcessingSlotPresencePolicyCoversAllThreeValues() {
-        let primary: [DockSlot] = [.primary(.scan), .primary(.trophyWall)]
+        let primary: [DockSlot] = [.primary(.trophyWall), .primary(.scan)]
 
         XCTAssertEqual(ProcessingDockSlotPresence.current, .always)
 
@@ -801,8 +801,18 @@ final class AppNavigationTests: XCTestCase {
     func testProcessingSlotStaysReachableWithNothingInFlight() {
         let slots = DockSlotPolicy.slots(processingCount: 0)
 
-        XCTAssertEqual(slots, [.primary(.scan), .primary(.trophyWall), .processing])
+        XCTAssertEqual(slots, [.primary(.trophyWall), .primary(.scan), .processing])
         XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "To list")
+    }
+
+    /// The owner kept today's dock and moved the camera to the middle,
+    /// because it raises the Scan drawer rather than opening a screen. Flips
+    /// leads as home; To list, with its badge, takes the outer edge.
+    func testCameraSitsBetweenTrophyWallAndProcessing() {
+        XCTAssertEqual(
+            DockSlotPolicy.slots(processingCount: 2),
+            [.primary(.trophyWall), .primary(.scan), .processing]
+        )
     }
 
     func testProcessingSlotIsSelectedOnlyWhileTheProcessingScreenIsOnTop() {
@@ -823,6 +833,13 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 0), "To list")
         XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 1), "To list, 1 new item")
         XCTAssertEqual(DockSlot.processing.accessibilityLabel(processingCount: 4), "To list, 4 new items")
+    }
+
+    /// `progress.indicator` read as a sun. To list is a stack of work, filled
+    /// while its screen is on top, the way Flips fills its trophy.
+    func testProcessingSlotShowsAStackOfWorkFilledWhenSelected() {
+        XCTAssertEqual(DockSlot.processing.systemImage(isSelected: false), "square.stack.3d.up")
+        XCTAssertEqual(DockSlot.processing.systemImage(isSelected: true), "square.stack.3d.up.fill")
     }
 
     @MainActor

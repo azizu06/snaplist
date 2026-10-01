@@ -56,6 +56,11 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(processingSlot.isHittable)
         XCTAssertFalse(processingSlot.isSelected)
         XCTAssertTrue(trophySlot.isSelected)
+        // The camera raises the Scan drawer rather than opening a screen, so it
+        // sits between Flips and To list.
+        let scanSlot = app.buttons["dock.scan"]
+        XCTAssertLessThan(trophySlot.frame.midX, scanSlot.frame.midX)
+        XCTAssertLessThan(scanSlot.frame.midX, processingSlot.frame.midX)
         XCTAssertGreaterThanOrEqual(processingSlot.frame.width, 44)
         XCTAssertGreaterThanOrEqual(processingSlot.frame.height, 44)
         addScreenshot(named: "DOCK-EMPTY-wall.png")
@@ -94,6 +99,11 @@ final class HomeUITests: XCTestCase {
         XCTAssertEqual(processingSlot.label, "To list")
         XCTAssertGreaterThanOrEqual(processingSlot.frame.width, 44)
         XCTAssertGreaterThanOrEqual(processingSlot.frame.height, 44)
+        // Scout inspects beside a count while that item is still worked on.
+        XCTAssertEqual(
+            app.descendants(matching: .any)["trophy.processing.activity"].label,
+            "1 in progress"
+        )
         addScreenshot(named: "DOCK-PROCESSING-selected.png")
 
         trophySlot.tap()
