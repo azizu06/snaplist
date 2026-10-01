@@ -1,6 +1,6 @@
 begin;
 
-select plan(7);
+select plan(8);
 
 -- Issue #524. The device fence is enforced inside
 -- `private.reserve_ai_item_credit_for_pipeline_run`, the only place an account
@@ -40,6 +40,18 @@ begin
     null,
     1,
     'device-fence-paid-event',
+    statement_timestamp()
+  );
+  perform public.record_verified_storekit_ai_item_period(
+    'device-fence-lapsed',
+    'device-fence-lapsed-period',
+    'device-fence-lapsed-transaction',
+    statement_timestamp() - interval '40 days',
+    statement_timestamp() - interval '10 days',
+    'expired',
+    null,
+    24,
+    'device-fence-lapsed-event',
     statement_timestamp()
   );
 end;
@@ -197,6 +209,32 @@ select throws_ok(
   'P0001',
   'AI item credit unavailable: device-fence-required',
   'no claim and no paid entitlement still denies before any provider spend'
+);
+
+-- A lapsed StoreKit period funds nothing, and the verified entitlement read
+-- reports the included run to this seller. The denial has to agree with that
+-- reading: the same Pro offer a seller with no period at all receives, not a
+-- "subscription is not active" message behind Settings.
+select throws_ok(
+  $$
+    select *
+    from public.stage_pipeline_batch(
+      'device-fence-lapsed',
+      '91000000-0000-4000-8000-000000000005'::uuid,
+      jsonb_build_array(jsonb_build_object(
+        'idempotency_key', 'device-fence-lapsed-run',
+        'source', 'single',
+        'autopilot_enabled', false,
+        'photo_paths', jsonb_build_array('device-fence-lapsed/pgtap/front.jpg'),
+        'cost_basis', null
+      )),
+      100,
+      100
+    )
+  $$,
+  'P0001',
+  'AI item credit unavailable: device-fence-required',
+  'a device-denied seller with only a lapsed paid period is offered Pro'
 );
 
 select * from finish();
