@@ -12,14 +12,14 @@
 <p align="center"><img src="docs/readme/scout-barcode.gif" width="180" alt="Scout, SnapList’s camera mascot, scanning a barcode on a cardboard parcel in a looping animation."></p>
 
 <p align="center">
-  <img src="docs/readme/phone-airpods-review.webp" width="220" alt="AirPods Max listing review: a full headphone photo, seller-stated identity, and an editable $148.50 price.">
+  <img src="docs/readme/phone-capture.webp" width="220" alt="Native iPhone capture: real Jordan 3 shoes in SnapList's camera.">
   &nbsp;
-  <img src="docs/readme/phone-dualsense-review.webp" width="220" alt="DualSense listing review: a real controller photo and an editable $149.99 price.">
+  <img src="docs/readme/phone-to-list.webp" width="220" alt="Native To list: a backpack and Logitech mouse are ready to review, both with real thumbnails.">
   &nbsp;
-  <img src="docs/readme/phone-flips.webp" width="220" alt="Populated Flips: the posted Jordan 3 item appears with its real photo and October 1 date.">
+  <img src="docs/readme/phone-listing-review.webp" width="220" alt="Native Jordan 3 review: $155 price, three sold matches from $100 to $180, and editable listing details.">
 </p>
 
-<p align="center"><sub>AirPods Max, DualSense, and a finished Jordan 3 listing. Real photos captured from the native iPhone app in matching presentation frames.<br><a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
+<p align="center"><sub>Capture → To list → review. Stills from the native iPhone demo recording in matching device frames.<br><a href="docs/readme/README.md">Screenshot notes and source timestamps</a>.</sub></p>
 
 ## From photo to flip
 
@@ -30,12 +30,24 @@
 5. **Choose where it goes.** Review and confirm a direct eBay publish. For Facebook Marketplace, Mercari, or Depop, take the prepared text and photos into the marketplace and finish posting there yourself.
 6. **See your Flips.** Finished items collect in a chronological view. An export marked prepared or shared stays distinct from an eBay publish; neither is a claim that the item sold.
 
+<p align="center">
+  <img src="docs/readme/phone-ebay-posted.webp" width="220" alt="Native eBay post success: Jordan 3 shoes are marked Live on eBay.">
+  &nbsp;
+  <img src="docs/readme/phone-flips.webp" width="220" alt="Native Flips: the posted Jordan 3 shoes appear with a real photo and October 1 date.">
+  &nbsp;
+  <img src="docs/readme/phone-sharing.webp" width="220" alt="Native Facebook Marketplace sharing drawer: a Logitech mouse at $44.95, two photos, and text/photo handoff steps; all destinations show Not started.">
+</p>
+
+<p align="center"><sub>Posted to eBay → Flips. Facebook Marketplace uses a guided handoff; this screen shows Not started.</sub></p>
+
 The first usable listing comes **before signup or a paywall**. Try the result on your own item before deciding to keep listing.
 
 ## RevenueCat powers SnapList Pro
 
 Scout meets you at a packing counter when you want more AI listings. The plan appears on a taped packing slip: price, renewal terms, Subscribe, and Restore, with Terms and Privacy close at hand.
 
+
+<p align="center"><img src="docs/readme/scout-pro.webp" width="220" alt="Native sandbox subscription confirmation: Scout celebrates SnapList Pro is on beside monthly plan terms."><br><sub>SnapList Pro is on — Apple sandbox demonstration. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 | Free first item | SnapList Pro |
 | --- | --- |
