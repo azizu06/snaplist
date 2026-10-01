@@ -246,6 +246,66 @@ export async function loadExportHandoffPack(
   return { handoffs, effectivePrice: price, reviewRevision: item.review_revision };
 }
 
+interface SavedDraftRow {
+  title: string | null;
+  description: string | null;
+}
+
+/**
+ * Write the assisted pack row the native sharing drawer hands over.
+ *
+ * `record_export_handoff` refuses a receipt for text SnapList never prepared,
+ * and the only writer of those rows was the retired web export page (#598).
+ * The native drawer builds its pack from the seller's saved eBay draft at the
+ * same content revision, so this persists exactly that draft as the
+ * destination's pack — no model call, nothing the device sent. The draft read
+ * is RLS-scoped and `persist_export_packs` refuses the write unless the caller
+ * owns the item and both revisions are still current, so a stale or foreign
+ * pack fails closed here exactly as it does at the receipt.
+ */
+export async function prepareExportPackFromSavedDraft(
+  supabase: SupabaseClient,
+  input: ExportHandoffMutation,
+): Promise<void> {
+  assertAssisted(input.platform);
+  const { data, error } = await supabase
+    .from("listings")
+    .select("title, description")
+    .eq("item_id", input.itemId)
+    .eq("platform", "ebay")
+    .eq("source_review_revision", input.reviewContentRevision)
+    .maybeSingle();
+  if (error) {
+    refused({
+      message: `Failed to read the saved listing: ${error.message}`,
+      code: error.code,
+    });
+  }
+  const draft = data as SavedDraftRow | null;
+  if (!draft?.title?.trim() || !draft.description?.trim()) {
+    throw new ExportHandoffError(
+      "This listing changed after the pack was prepared.",
+      "P0002",
+    );
+  }
+
+  const { error: persistError } = await supabase.rpc("persist_export_packs", {
+    p_item_id: input.itemId,
+    p_source_review_revision: input.reviewContentRevision,
+    p_expected_review_revision: input.reviewRevision,
+    p_packs: [
+      {
+        platform: input.platform,
+        // Depop has no title field; the row still needs one for identity.
+        title: draft.title,
+        description: draft.description,
+        copy: { source: "saved_listing_draft" },
+      },
+    ],
+  });
+  if (persistError) refused(persistError);
+}
+
 /**
  * Record that the seller handed the pack to a destination — the share sheet
  * opened, the text was copied, the photos were saved. Idempotent: a retried
