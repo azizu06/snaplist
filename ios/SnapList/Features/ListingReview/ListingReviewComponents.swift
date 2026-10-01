@@ -830,6 +830,10 @@ struct ListingReviewImage: View {
     /// Shared by the photos of one pager; an image without one owns its own.
     var pipeline: ListingReviewImagePipeline?
     var maxPixelDimension: CGFloat = ListingReviewImagePipeline.defaultMaxPixelDimension
+    /// Shows the whole photo letterboxed instead of cropped. The photo itself
+    /// is rounded by this radius, so a letterboxed image never shows the sharp
+    /// rectangle of its own pixels inside a rounded tile.
+    var fitCornerRadius: CGFloat?
 
     @State private var ownPipeline = ListingReviewImagePipeline()
     @State private var phase: Phase = .loading
@@ -843,9 +847,17 @@ struct ListingReviewImage: View {
     var body: some View {
 #if DEBUG
         if url?.host == "example.com" {
-            Image("FirstValueController")
-                .resizable()
-                .scaledToFill()
+            if let fitCornerRadius {
+                Image("FirstValueController")
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: fitCornerRadius))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Image("FirstValueController")
+                    .resizable()
+                    .scaledToFill()
+            }
         } else {
             remoteImage
         }
@@ -860,7 +872,15 @@ struct ListingReviewImage: View {
             Group {
                 switch phase {
                 case .loaded(let image):
-                    Image(uiImage: image).resizable().scaledToFill()
+                    if let fitCornerRadius {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: fitCornerRadius))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    }
                 case .loading:
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1743,7 +1763,8 @@ struct ListingReviewSoldCard: View {
                 ListingReviewImage(
                     url: match.photoURL,
                     fallbackSystemImage: "shippingbox",
-                    placeholderFill: SnapListColorToken.actionTint.color
+                    placeholderFill: SnapListColorToken.actionTint.color,
+                    fitCornerRadius: 10
                 )
                 .frame(height: 130)
                 .frame(maxWidth: .infinity)
