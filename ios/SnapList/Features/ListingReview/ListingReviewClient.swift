@@ -112,8 +112,11 @@ struct ListingReviewAPIClient: ListingReviewServing {
                        .isEmpty {
                     throw ListingReviewClientError.refused(message)
                 }
+                // `conflict` also covers in-progress and idempotency errors.
+                // Match ListingReviewStaleError's wire message independently
+                // of the shorter seller-facing ListingReviewCopy.staleReview.
                 if envelope?.error.code == "conflict",
-                   envelope?.error.message == ListingReviewCopy.staleReview {
+                   envelope?.error.message == "This review changed. Reload and try again." {
                     throw ListingReviewClientError.conflict
                 }
                 throw ListingReviewClientError.unavailable

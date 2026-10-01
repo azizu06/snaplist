@@ -161,10 +161,11 @@ final class ListingReviewStoreTests: XCTestCase {
             snapshot.listing.description
         )
 
+        // Wire message from ListingReviewStaleError in src/lib/listing-review/save.ts.
         let staleClient = ListingReviewAPIClient(
             baseURL: URL(string: "https://api.snaplist.dev")!,
             session: makeConflictSession(
-                message: ListingReviewCopy.staleReview
+                message: "This review changed. Reload and try again."
             )
         )
         do {
@@ -1007,7 +1008,8 @@ final class ListingReviewStoreTests: XCTestCase {
         let staleStore = makeStore(
             service: makeSaveThroughAPIClient(
                 snapshot: snapshot,
-                message: ListingReviewCopy.staleReview
+                // Replay the server message; visible copy is independently shorter.
+                message: "This review changed. Reload and try again."
             )
         )
         let staleOpened = await staleStore.open(snapshot)
@@ -1016,7 +1018,8 @@ final class ListingReviewStoreTests: XCTestCase {
         let staleOutcome = await staleStore.done()
         XCTAssertEqual(staleOutcome, .stayed)
         XCTAssertEqual(staleStore.phase, .conflict)
-        XCTAssertEqual(staleStore.announcement, ListingReviewCopy.staleReview)
+        XCTAssertTrue(staleStore.isStale)
+        XCTAssertEqual(staleStore.announcement, "This review changed. Reload.")
 
         let inProgressStore = makeStore(
             service: makeSaveThroughAPIClient(
