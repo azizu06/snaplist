@@ -1376,6 +1376,44 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(url, URL(string: coverURL))
     }
 
+    /// The wall keeps a row's state between refreshes, and a refresh whose order
+    /// key and state are unchanged used to be dropped whole. A row first drawn
+    /// from a response that carried no cover photo (an older server, or a signing
+    /// miss) then kept its placeholder for as long as the app stayed open.
+    @MainActor
+    func testUnchangedRefreshStillBackfillsACoverPhotoTheRowLacked() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        store.ingest(
+            historyPage: try fixture.historyPage(
+                status: .running,
+                stage: .identifying,
+                terminalOutcome: nil
+            ),
+            principalScope: fixture.principal
+        )
+        XCTAssertNil(
+            store.processingRows.first { $0.id == .run(fixture.runID) }?
+                .coverPhotoURL
+        )
+
+        let coverURL = "https://media.snaplist.dev/signed/front.jpg"
+        store.ingest(
+            historyPage: try fixture.historyPage(
+                status: .running,
+                stage: .identifying,
+                terminalOutcome: nil,
+                itemCoverPhotoURL: coverURL
+            ),
+            principalScope: fixture.principal
+        )
+
+        let row = try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(row.coverPhotoURL, URL(string: coverURL))
+    }
+
     /// Two ways the bytes are genuinely absent: a run this device never staged,
     /// and bytes that no longer decode. Both keep the slot the wall already
     /// draws instead of an empty image well.
