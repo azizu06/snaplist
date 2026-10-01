@@ -32,6 +32,7 @@ struct SettingsView: View {
     @State private var ebayConnectionLoadPhase =
         SettingsSellingPresentation.LoadPhase.loading
     @State private var showsEbayDisconnectConfirmation = false
+    @State private var showsEbayConnect = false
 #if DEBUG
     /// `--settings-proof=SET-01`'s stateful stand-in, shared by this screen's
     /// own read and disconnect and by the connect screen it opens, so a
@@ -322,6 +323,17 @@ struct SettingsView: View {
             Text("SnapList could not load the plan. Try again in a moment.")
         }
         .task { await loadEbayConnection() }
+        .navigationDestination(isPresented: $showsEbayConnect) {
+            EbayConnectionSettingsView(
+                makeStore: makeEbayConnectionSettingsStore,
+                forceReducedMotion: false,
+                onConnected: { showsEbayConnect = false }
+            )
+        }
+        .onChange(of: showsEbayConnect) { _, isShown in
+            guard !isShown else { return }
+            Task { await loadEbayConnection() }
+        }
         // Keyed on the account: Settings can stay on the navigation stack
         // while the seller signs out and into another account, and the card
         // must never keep the previous account's plan.
@@ -911,14 +923,11 @@ struct SettingsView: View {
         case .connect:
             settingsCardDivider
             settingsCardRow {
-                NavigationLink {
-                    EbayConnectionSettingsView(
-                        makeStore: makeEbayConnectionSettingsStore,
-                        forceReducedMotion: false
-                    )
-                    .onDisappear {
-                        Task { await loadEbayConnection() }
-                    }
+                // A presentation flag rather than a `NavigationLink`: the
+                // shell's stack is path-bound, where `dismiss()` from a
+                // link's destination does not pop, so Settings owns the pop.
+                Button {
+                    showsEbayConnect = true
                 } label: {
                     HStack {
                         Text("Connect eBay")

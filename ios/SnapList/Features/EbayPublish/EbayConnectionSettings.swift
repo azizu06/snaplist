@@ -106,15 +106,22 @@ struct EbayConnectionSettingsView: View {
     // first time this view's identity is installed, and keeps the same
     // store across every subsequent re-render.
     let forceReducedMotion: Bool
+    /// Settings shows the connected account inline, so a confirmed
+    /// connection hands control back to it rather than rendering here.
+    let onConnected: () -> Void
 
     @State private var store: EbayConnectionSettingsStore
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @Environment(\.dismiss) private var dismiss
 
     private var reduceMotion: Bool { systemReduceMotion || forceReducedMotion }
 
-    init(makeStore: @escaping () -> EbayConnectionSettingsStore, forceReducedMotion: Bool) {
+    init(
+        makeStore: @escaping () -> EbayConnectionSettingsStore,
+        forceReducedMotion: Bool,
+        onConnected: @escaping () -> Void
+    ) {
         self.forceReducedMotion = forceReducedMotion
+        self.onConnected = onConnected
         _store = State(initialValue: makeStore())
     }
 
@@ -126,8 +133,6 @@ struct EbayConnectionSettingsView: View {
             case .notConnected, .connecting:
                 notConnected
             case .connected:
-                // Settings shows the connected account inline, so a
-                // connected state only ever means "go back there".
                 checking
             case .notAvailable:
                 notAvailable
@@ -138,7 +143,7 @@ struct EbayConnectionSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.load() }
         .onChange(of: store.state) { _, state in
-            if case .connected = state { dismiss() }
+            if case .connected = state { onConnected() }
         }
     }
 
