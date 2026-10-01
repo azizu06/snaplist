@@ -460,7 +460,7 @@ private struct TrophyWallSettledTileView: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
             } else if let coverPhotoURL = tile.coverPhotoURL {
-                AsyncImage(url: coverPhotoURL) { image in
+                CoverPhotoRemoteImage(url: coverPhotoURL) { image in
                     image
                         .resizable()
                         .scaledToFill()
@@ -1194,7 +1194,7 @@ struct TrophyWallProcessingRowPhoto: View {
                             .rect(cornerRadius: Self.cornerRadiusPoints)
                         )
                 case .remote(let url):
-                    AsyncImage(url: url) { image in
+                    CoverPhotoRemoteImage(url: url) { image in
                         image
                             .resizable()
                             .scaledToFill()
@@ -1589,5 +1589,86 @@ private extension TrophyWallProcessingAction {
         } else {
             true
         }
+    }
+}
+
+// MARK: - Cover photo cache
+
+/// Decoded cover photos shared by Flips tiles and To list rows for the session.
+/// `AsyncImage` keeps nothing between appearances, so every visit to Flips
+/// started each tile blank and fetched its photo again. The server re-signs
+/// these URLs on every refresh, so the token in the query changes while the
+/// storage object behind the path does not; the key drops the query.
+final class CoverPhotoImageCache: @unchecked Sendable {
+    static let shared = CoverPhotoImageCache()
+
+    private let storage = NSCache<NSString, UIImage>()
+
+    init(countLimit: Int = 200) {
+        storage.countLimit = countLimit
+    }
+
+    static func key(for url: URL) -> String {
+        guard var components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        ) else {
+            return url.absoluteString
+        }
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? url.absoluteString
+    }
+
+    func image(for url: URL) -> UIImage? {
+        storage.object(forKey: Self.key(for: url) as NSString)
+    }
+
+    func insert(_ image: UIImage, for url: URL) {
+        storage.setObject(image, forKey: Self.key(for: url) as NSString)
+    }
+}
+
+/// A remote cover photo that draws a photo already decoded this session in the
+/// first frame and fetches only on a miss. Shaped like `AsyncImage` so callers
+/// keep their own sizing and clipping.
+struct CoverPhotoRemoteImage<Content: View, Placeholder: View>: View {
+    let url: URL
+    var cache: CoverPhotoImageCache = .shared
+    @ViewBuilder let content: (Image) -> Content
+    @ViewBuilder let placeholder: () -> Placeholder
+
+    /// Keyed so a view reused for another photo never draws the previous one.
+    @State private var loaded: (key: String, image: UIImage)?
+
+    private var image: UIImage? {
+        if let cached = cache.image(for: url) {
+            return cached
+        }
+        guard let loaded, loaded.key == CoverPhotoImageCache.key(for: url) else {
+            return nil
+        }
+        return loaded.image
+    }
+
+    var body: some View {
+        if let image {
+            content(Image(uiImage: image))
+        } else {
+            placeholder()
+                .task(id: CoverPhotoImageCache.key(for: url)) {
+                    await load()
+                }
+        }
+    }
+
+    private func load() async {
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let decoded = UIImage(data: data) else {
+            return
+        }
+        let prepared = await decoded.byPreparingForDisplay() ?? decoded
+        cache.insert(prepared, for: url)
+        loaded = (CoverPhotoImageCache.key(for: url), prepared)
     }
 }

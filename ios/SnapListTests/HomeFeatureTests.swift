@@ -4601,3 +4601,37 @@ private struct StaticTrophyWallRepository: TrophyWallRepository {
         cards.filter { $0.principalScope == principalScope }
     }
 }
+
+/// Flips tiles and To list rows draw the same signed cover photos. Each refresh
+/// re-signs them, so only the token in the query changes; the photo behind the
+/// path does not. A photo decoded once must be drawn again on the next visit
+/// without waiting on the network.
+final class CoverPhotoImageCacheTests: XCTestCase {
+    private func signedURL(path: String, token: String) -> URL {
+        URL(string: "https://example.supabase.co/storage/v1/object/sign/item-photos/\(path)?token=\(token)")!
+    }
+
+    private func image() -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+    }
+
+    func testPhotoDecodedOnceIsReusedWhenTheSameObjectIsReSigned() {
+        let cache = CoverPhotoImageCache()
+        let stored = image()
+        cache.insert(stored, for: signedURL(path: "user/run/0.jpg", token: "first"))
+
+        XCTAssertTrue(
+            cache.image(for: signedURL(path: "user/run/0.jpg", token: "second")) === stored
+        )
+    }
+
+    func testDifferentPhotoPathDoesNotReuseAnotherItemsPhoto() {
+        let cache = CoverPhotoImageCache()
+        cache.insert(image(), for: signedURL(path: "user/run/0.jpg", token: "a"))
+
+        XCTAssertNil(cache.image(for: signedURL(path: "user/other/0.jpg", token: "a")))
+    }
+}
