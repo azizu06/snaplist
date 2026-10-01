@@ -1,6 +1,8 @@
-# Trophy Wall visual fidelity
+# Flips visual fidelity
 
-The owner-approved Trophy Wall contract is the v3.2 canvas:
+Flips was named Trophy Wall, and To list was named Processing, until the owner
+renamed both to reseller words. The owner-approved contract is the v3.2 canvas,
+which still uses the old names:
 
 https://claude.ai/design/p/897124b5-5da4-447e-9dab-26706c006653?via=share&file=Trophy+Wall+%2B+Processing+-+Hi-Fi+Candidate+v3.2.dc.html
 
@@ -8,8 +10,8 @@ The shipping surface has two approved states.
 
 ## HOME-01 settled
 
-- The persistent header contains the `Trophy Wall` title, clock control, and
-  account control.
+- The persistent header contains the `Flips` title and account control. To list
+  uses the same header grammar.
 - The wall is a two-column photo grid. Tiles use a 4:5 aspect ratio, a 12 point
   gutter, and 12 point corners.
 - The reviewed fixture uses six distinct cleared photo compositions on six
@@ -26,9 +28,8 @@ The shipping surface has two approved states.
 
 ## Shared chrome and assets
 
-- One compact floating dock contains exactly Scan and Trophy Wall. Each
-  destination uses its selected or unselected icon inside one rounded dock
-  background.
+- One compact floating dock contains Scan, Flips, and To list. Each slot uses
+  its selected or unselected icon inside one rounded dock background.
 - The live canvas's Adobe product subjects remain proof-only. Shipping evidence
   uses the cleared bundled product photos and does not copy proof-only media.
 
@@ -37,10 +38,10 @@ The shipping surface has two approved states.
 The older Seller Home attention dashboard, search, filters, recents, orders,
 conversations, publish issues, drafts, and listing-management states are
 retired. Historical HOME-03 and HOME-04 captures do not describe the current
-product and are not reachable from Trophy Wall.
+product and are not reachable from Flips.
 
-Processing, including PROC-07D, is owned by its separate focused contract. This
-document does not define or approve Processing behavior.
+To list (formerly Processing), including PROC-07D, is owned by its separate
+focused contract. This document does not define or approve To list behavior.
 
 ## Reviewed evidence
 

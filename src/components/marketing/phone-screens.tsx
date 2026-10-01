@@ -88,7 +88,7 @@ export function TrophyWallScreen() {
   return (
     <Shot
       src="/marketing/screens/trophy-wall.webp"
-      alt="Trophy Wall, a grid of items the seller has run through SnapList."
+      alt="Flips, a grid of items the seller has run through SnapList."
     />
   );
 }

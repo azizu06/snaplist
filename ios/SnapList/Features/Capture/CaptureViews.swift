@@ -1197,7 +1197,7 @@ private struct ScanCloseCameraButton: View {
         .frame(width: 48, height: 48)
         .contentShape(.circle)
         .accessibilityLabel("Close camera")
-        .accessibilityHint("Closes the Scan drawer and returns to Trophy Wall")
+        .accessibilityHint("Closes the Scan drawer and returns to Flips")
         .accessibilityIdentifier("scan.close")
         .accessibilitySortPriority(80)
     }

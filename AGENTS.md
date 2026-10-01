@@ -5,7 +5,7 @@ source of truth for *what* we build and *why*. This file is *how* to work in the
 where they disagree.
 
 ## What this is
-A production-real native **Scan-to-Trophy-Wall** product: one to five photos plus optional short
+A production-real native **Scan-to-Flips** product: one to five photos plus optional short
 voice context → an editable, priced listing. The **AI pipeline is the product** for the average
 consumer reseller. eBay is the only direct-publish launch destination and lives behind adapters;
 Facebook Marketplace, Mercari, and Depop receive honest export packs.
@@ -23,7 +23,9 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   blocking only when the guest chooses **Publish to eBay**, after which the same result is claimed
   and reopened. Pre-value onboarding has no seller questionnaire. See ADR-0008.
 - **Lean native information architecture:** exactly two primary destinations, **Scan** and
-  **Trophy Wall**. Settings opens from the profile avatar. Scan accepts one to five ordered photos
+  **Flips** (finished items). Its dock companion **To list** holds items still in progress. Both
+  names are reseller words; "Trophy Wall" and "Processing" are retired names, so never reintroduce
+  them in UI, copy, or docs. Settings opens from the profile avatar. Scan accepts one to five ordered photos
   and at most one optional voice note capped at fifteen seconds. Processing is asynchronous, but
   seller-facing states use plain language and never expose queue, worker, lease, or provider terms.
 - **AI-item credits settle on durable value.** The first usable listing and first seller-confirmed

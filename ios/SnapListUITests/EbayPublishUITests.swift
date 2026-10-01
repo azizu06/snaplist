@@ -108,7 +108,7 @@ final class EbayPublishUITests: XCTestCase {
                 "Changes made on eBay will not come back to SnapList."
             ].exists
         )
-        assertHittableButton("button.primary.go-to-trophy-wall", in: published)
+        assertHittableButton("button.primary.go-to-flips", in: published)
         assertHittableButton("button.secondary.view-on-ebay", in: published)
         XCTAssertFalse(published.buttons["ebay-publish.back"].exists)
         attachEvidence(for: "published", app: published)
@@ -132,7 +132,7 @@ final class EbayPublishUITests: XCTestCase {
         XCTAssertTrue(unknown.staticTexts["Checking with eBay"].exists)
         XCTAssertTrue(
             unknown.staticTexts[
-                "The connection dropped at the wrong moment. SnapList will find out and update your Trophy Wall."
+                "The connection dropped at the wrong moment. SnapList will find out and update Flips."
             ].exists
         )
         XCTAssertTrue(
@@ -140,7 +140,7 @@ final class EbayPublishUITests: XCTestCase {
                 "There is nothing for you to do, and nothing will be posted twice."
             ].exists
         )
-        assertHittableButton("button.primary.go-to-trophy-wall", in: unknown)
+        assertHittableButton("button.primary.go-to-flips", in: unknown)
         XCTAssertFalse(unknown.buttons["button.secondary.view-on-ebay"].exists)
         XCTAssertFalse(unknown.buttons["ebay-publish.back"].exists)
         XCTAssertFalse(unknown.buttons["button.primary.check-again"].exists)
@@ -176,10 +176,10 @@ final class EbayPublishUITests: XCTestCase {
             body: "Buyers can find it now. eBay handles the listing from here.",
             note: "Changes made on eBay will not come back to SnapList.",
             actionIdentifiers: [
-                "button.primary.go-to-trophy-wall",
+                "button.primary.go-to-flips",
                 "button.secondary.view-on-ebay",
             ],
-            actionLabels: ["Go to Trophy Wall", "View on eBay"]
+            actionLabels: ["Go to Flips", "View on eBay"]
         )
         attachEvidence(for: "published-accessibility3", app: published)
 
@@ -192,10 +192,10 @@ final class EbayPublishUITests: XCTestCase {
             headingIdentifier: "ebay-publish.result.outcome-unknown",
             heading: "SnapList does not know yet whether eBay accepted this listing.",
             status: "Checking with eBay",
-            body: "The connection dropped at the wrong moment. SnapList will find out and update your Trophy Wall.",
+            body: "The connection dropped at the wrong moment. SnapList will find out and update Flips.",
             note: "There is nothing for you to do, and nothing will be posted twice.",
-            actionIdentifiers: ["button.primary.go-to-trophy-wall"],
-            actionLabels: ["Go to Trophy Wall"]
+            actionIdentifiers: ["button.primary.go-to-flips"],
+            actionLabels: ["Go to Flips"]
         )
         attachEvidence(for: "outcome-unknown-accessibility3", app: unknown)
     }

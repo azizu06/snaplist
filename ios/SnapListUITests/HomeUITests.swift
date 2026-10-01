@@ -36,12 +36,12 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(empty.staticTexts["No items yet"].waitForExistence(timeout: 3))
         XCTAssertTrue(empty.buttons["trophy.wall.scan"].exists)
         XCTAssertFalse(empty.scrollViews["trophy.wall.grid"].exists)
-        XCTAssertTrue(empty.staticTexts["Trophy Wall"].isHittable)
+        XCTAssertTrue(empty.staticTexts["Flips"].isHittable)
         // #1134: the header clock is gone. The Processing dock slot stays
         // reachable with nothing in flight; the count badge is what zero drops.
         XCTAssertFalse(empty.buttons["trophy.wall.processing"].exists)
         XCTAssertTrue(empty.buttons["dock.processing"].isHittable)
-        XCTAssertEqual(empty.buttons["dock.processing"].label, "Processing")
+        XCTAssertEqual(empty.buttons["dock.processing"].label, "To list")
         XCTAssertTrue(empty.buttons["trophy.wall.account"].isHittable)
     }
 
@@ -65,7 +65,7 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(processingSlot.isSelected)
         XCTAssertEqual(
             app.staticTexts["trophy.processing.collection.heading"].label,
-            "Nothing is processing."
+            "Nothing to list."
         )
         XCTAssertFalse(app.staticTexts["No items yet"].exists)
         addScreenshot(named: "DOCK-EMPTY-processing.png")
@@ -91,7 +91,7 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(trophySlot.isSelected)
         // The one item is still being priced, so nothing is new yet: the badge
         // counts unseen ready items, not work in flight.
-        XCTAssertEqual(processingSlot.label, "Processing")
+        XCTAssertEqual(processingSlot.label, "To list")
         XCTAssertGreaterThanOrEqual(processingSlot.frame.width, 44)
         XCTAssertGreaterThanOrEqual(processingSlot.frame.height, 44)
         addScreenshot(named: "DOCK-PROCESSING-selected.png")
@@ -107,7 +107,9 @@ final class HomeUITests: XCTestCase {
         processingSlot.tap()
         XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 2))
         XCTAssertTrue(processingSlot.isSelected)
-        app.buttons["trophy.processing.back"].tap()
+        // To list mirrors Flips: no back button, the dock is the way around.
+        XCTAssertFalse(app.buttons["trophy.processing.back"].exists)
+        trophySlot.tap()
         XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
     }
 
@@ -489,7 +491,7 @@ final class HomeUITests: XCTestCase {
 
         let wall = app.otherElements["trophy.wall"]
         XCTAssertTrue(wall.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Trophy Wall"].exists)
+        XCTAssertTrue(app.staticTexts["Flips"].exists)
         XCTAssertFalse(app.buttons["home.search.open"].exists)
         XCTAssertFalse(app.staticTexts["Orders"].exists)
 
@@ -922,9 +924,11 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["listing-review"].exists)
     }
 
-    /// Processing had no way to ask the server for fresh status short of
-    /// leaving the screen and coming back (#897). Nothing polls, so the control
-    /// has to be here, and it has to say when it is working.
+    /// To list wears the Flips header: title at left, account at right, and
+    /// no toolbar refresh or back button. Fresh status is a pull on the rows,
+    /// and pulling keeps the seller on the same screen (#897).
+    // Name kept until the TrophyWall/Processing identifier rename, so open
+    // PRs that reshard this test do not conflict.
     func testProcessingRefreshControlRunsAndReportsWhileItWorks() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -934,17 +938,21 @@ final class HomeUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let refresh = app.buttons["trophy.processing.refresh"]
-        XCTAssertTrue(refresh.waitForExistence(timeout: 3))
-        XCTAssertEqual(refresh.value as? String, "")
+        let account = app.buttons["trophy.processing.account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 3))
+        XCTAssertEqual(account.label, "Account, opens Settings")
+        XCTAssertTrue(app.staticTexts["To list"].exists)
+        XCTAssertFalse(app.buttons["trophy.processing.refresh"].exists)
+        XCTAssertFalse(app.buttons["trophy.processing.back"].exists)
 
-        refresh.tap()
-
-        assertValueIsReached("Refreshing", on: refresh, timeout: 3)
-        assertValueIsReached("", on: refresh, timeout: 5)
+        let reviewRow = app.buttons["trophy.processing.row.run.37500000-0000-4000-8000-000000000003"]
+        XCTAssertTrue(reviewRow.exists)
+        let start = reviewRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 320)))
 
         // The seller asked for status, not for a different screen.
-        XCTAssertTrue(app.buttons["trophy.processing.row.run.37500000-0000-4000-8000-000000000003"].exists)
+        XCTAssertTrue(reviewRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["trophy.processing"].exists)
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 

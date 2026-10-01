@@ -10,7 +10,7 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .scan: "Scan"
-        case .trophyWall: "Trophy Wall"
+        case .trophyWall: "Flips"
         }
     }
 
@@ -65,10 +65,10 @@ enum DockSlot: Hashable, Identifiable {
         case .primary(let tab):
             return tab.title
         case .processing:
-            guard processingCount > 0 else { return "Processing" }
+            guard processingCount > 0 else { return "To list" }
             return processingCount == 1
-                ? "Processing, 1 new item"
-                : "Processing, \(processingCount) new items"
+                ? "To list, 1 new item"
+                : "To list, \(processingCount) new items"
         }
     }
 }

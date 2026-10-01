@@ -1341,7 +1341,7 @@ private struct EbayConnectionCopy {
         case .declined:
             (headline, body, primary, secondary, identifier) = (
                 "You did not grant access.",
-                "Your listing is saved and nothing was posted. You can connect later, and the listing stays on your Trophy Wall until you do.",
+                "Your listing is saved and nothing was posted. You can connect later, and the listing stays in To list until you do.",
                 "Continue to eBay", "Back to my listing", "declined"
             )
         case .cancelled:
@@ -1474,40 +1474,40 @@ struct EbayResultCopy {
             (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "Posting to eBay.", "Posting",
                 "This usually takes a few seconds. You can leave this screen and it will keep going.",
-                nil, nil, "Go to Trophy Wall", "publishing", .info
+                nil, nil, "Go to Flips", "publishing", .info
             )
         case .published:
             (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "Your listing is live on eBay.", "Live on eBay",
                 "Buyers can find it now. eBay handles the listing from here.",
                 "Changes made on eBay will not come back to SnapList.",
-                "Go to Trophy Wall", "View on eBay", "published", .info
+                "Go to Flips", "View on eBay", "published", .info
             )
         case .unavailable:
             (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "eBay is not responding.", "Not posted",
                 "Your listing was not posted. It is saved and ready to send when eBay is back.",
-                nil, "Try again", "Go to Trophy Wall", "unavailable", .neutral
+                nil, "Try again", "Go to Flips", "unavailable", .neutral
             )
         case .sellerFixableRefusal(let message):
             (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "This listing was not posted.", "Not posted",
                 message,
-                nil, "Go to Trophy Wall", nil, "seller-fixable-refusal", .neutral
+                nil, "Go to Flips", nil, "seller-fixable-refusal", .neutral
             )
         case .outcomeNotYetKnown:
             (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "SnapList does not know yet whether eBay accepted this listing.",
                 "Checking with eBay",
-                "The connection dropped at the wrong moment. SnapList will find out and update your Trophy Wall.",
+                "The connection dropped at the wrong moment. SnapList will find out and update Flips.",
                 "There is nothing for you to do, and nothing will be posted twice.",
-                "Go to Trophy Wall", nil, "outcome-unknown", .caution
+                "Go to Flips", nil, "outcome-unknown", .caution
             )
         case .ebaySideChanged:
             (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "Your eBay connection changed.", "Not posted",
                 "Nothing was sent to eBay. Your listing is exactly as you left it.",
-                nil, "Check eBay connection", "Go to Trophy Wall", "ebay-side-changed", .neutral
+                nil, "Check eBay connection", "Go to Flips", "ebay-side-changed", .neutral
             )
         }
     }

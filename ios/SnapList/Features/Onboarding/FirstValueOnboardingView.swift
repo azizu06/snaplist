@@ -586,7 +586,7 @@ struct FirstValueOnboardingView: View {
             }
             HStack(spacing: 10) {
                 backgroundActionTile("camera", "Scan the next one", "No waiting")
-                backgroundActionTile("trophy", "Trophy Wall", "Finished listings")
+                backgroundActionTile("trophy", "Flips", "Finished listings")
             }
             .padding(.top, 27)
             ScoutLine(

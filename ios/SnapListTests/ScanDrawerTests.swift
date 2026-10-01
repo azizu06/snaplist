@@ -210,7 +210,7 @@ final class AppShellSubmissionCompletionCopyTests: XCTestCase {
     func testTheCompletionAnnouncementNamesWhereTheItemWentAndWhatItIsDoing() {
         XCTAssertEqual(
             AppShellSubmissionCompletionCopy.announcement,
-            "Item added to Trophy Wall. Analysing."
+            "Item added to To list. Analysing."
         )
     }
 }

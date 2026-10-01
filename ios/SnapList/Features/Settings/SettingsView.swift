@@ -1249,7 +1249,7 @@ private struct SettingsLocalRemovalView: View {
         SettingsExplanationPage(title: "Remove unsent photos and voice notes") {
             SettingsFactSection(title: "What is removed from this iPhone", bullets: [
                 "Photos and a voice note you have not submitted yet, and this iPhone’s copy of anything it is holding for an item.",
-                "Items still waiting to be sent will leave Trophy Wall."
+                "Items still waiting to be sent will leave To list."
             ])
             SettingsFactSection(
                 title: "What this does not change",

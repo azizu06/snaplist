@@ -20,13 +20,13 @@ final class EbayPublishDeliveryTests: XCTestCase {
         XCTAssertEqual(copy.chip, "Checking with eBay")
         XCTAssertEqual(
             copy.body,
-            "The connection dropped at the wrong moment. SnapList will find out and update your Trophy Wall."
+            "The connection dropped at the wrong moment. SnapList will find out and update Flips."
         )
         XCTAssertEqual(
             copy.note,
             "There is nothing for you to do, and nothing will be posted twice."
         )
-        XCTAssertEqual(copy.primary, "Go to Trophy Wall")
+        XCTAssertEqual(copy.primary, "Go to Flips")
         XCTAssertNil(copy.secondary)
 
         let sellerVisibleCopy = [

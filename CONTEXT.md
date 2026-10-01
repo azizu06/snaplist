@@ -7,8 +7,8 @@ durable entitlement, marketplace-authority, and supersession decisions.
 
 A seller uses **Scan** to submit one to five photos and optional short **voice context**. SnapList
 asynchronously identifies the **Item**, finds trustworthy **sold comps** when available, produces a
-user-editable **price recommendation** and **Listing**, and returns truthful progress and outcomes to
-the **Trophy Wall**. The first usable listing precedes signup/paywall. eBay is the only direct-publish
+user-editable **price recommendation** and **Listing**, and returns truthful progress to **To list**
+and outcomes to **Flips**. The first usable listing precedes signup/paywall. eBay is the only direct-publish
 destination; Facebook Marketplace, Mercari, and Depop receive honest **export packs**.
 
 ## Lean MVP language
@@ -17,11 +17,12 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
 - **Scan** — one of exactly two primary destinations. It owns recoverable intake for one physical
   item: one to five ordered photos and zero or one voice note capped at fifteen seconds. It clears
   only after durable server acceptance.
-- **Trophy Wall** — the other primary destination. A tenant-owned chronological projection that
-  merges local pending intake with canonical server truth without duplication. Its public states are
-  **pending upload**, **accepted**, **analyzing**, **ready to review**, **needs retry**, **published to
-  eBay**, and **export pack prepared/shared**. It is not an analytics, messaging, inventory, order, or
-  fulfillment dashboard.
+- **Flips** — the other primary destination (formerly Trophy Wall). A tenant-owned chronological
+  projection of finished items: **published to eBay** and **export pack prepared/shared**. It is not
+  an analytics, messaging, inventory, order, or fulfillment dashboard.
+- **To list** — Flips' dock companion (formerly Processing). It merges local pending intake with
+  canonical server truth without duplication and shows items still in progress: **pending upload**,
+  **accepted**, **analyzing**, **ready to review**, and **needs retry**.
 - **Settings** — the full account/product-control destination opened from the profile avatar. It is
   not a third primary destination.
 - **Voice context** — optional seller-supplied context from at most one fifteen-second voice note.
@@ -77,9 +78,9 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
   It owns status/stage/attempt/idempotency/recovery truth. Seller UI maps it to plain language and
   never exposes queue, worker, lease, or provider terminology.
 - **Logical run identity** — the persisted tenant-owned idempotency key that links one recoverable
-  local intake to its canonical pipeline run. Trophy Wall convergence uses this exact key, never
+  local intake to its canonical pipeline run. To list and Flips convergence uses this exact key, never
   title, time, position, or fuzzy matching.
-- **Trophy Wall history order key** — the frozen snapshot timestamp plus run ID used for stable
+- **Flips history order key** — the frozen snapshot timestamp plus run ID used for stable
   collection membership and pagination. It remains distinct from the canonical run detail's current
   `lastMeaningfulUpdateAt`, which may advance as truthful processing state changes.
 - **Pipeline queue envelope** — internal `{ run_id, schema_version }` wake-up data. It contains no
@@ -151,8 +152,9 @@ acceptance criteria. ADR-0008 records the superseded issue families.
 ## Terms to avoid
 
 - “Home,” “Listings,” “Inbox,” or “Insights” as primary native destinations → use **Scan** and
-  **Trophy Wall**.
-- “Queued,” “worker,” “lease,” or provider names in seller-facing progress → use the Trophy Wall
+  **Flips**.
+- “Trophy Wall” or “Processing” as screen names → use **Flips** and **To list**.
+- “Queued,” “worker,” “lease,” or provider names in seller-facing progress → use the To list
   public states.
 - “Published” for Facebook Marketplace, Mercari, or Depop → use **export pack prepared/shared**.
 - “The model’s confidence” when referring to the composite → use **confidence**.

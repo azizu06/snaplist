@@ -114,7 +114,7 @@ struct ListingReviewView: View {
                         )
                         .contentShape(.rect)
                 }
-                .accessibilityLabel("Back to Processing review")
+                .accessibilityLabel("Back to To list")
                 .accessibilityFocused($focusedElement, equals: .back)
                 .accessibilityIdentifier("listing-review.back")
                 .buttonStyle(.plain)
