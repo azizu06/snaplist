@@ -1,45 +1,66 @@
 # Showcase screenshot provenance
 
-The README uses real captures of the running native app inside one original,
+The README shows real captures of the native app in one original,
 repository-authored generic iPhone-style presentation frame. Every phone image
-is transparent, 480 × 996 px and displayed at 220 px wide. The frame is illustrative;
-it is not an Apple marketing asset or a photographed device. The animated Scout
-below remains the app animation described later in this file.
+is transparent, 480 × 996 px and displayed at 220 px wide. The frame is illustrative,
+not an Apple marketing asset or a photographed device. The Scout animation is
+unchanged and documented below.
 
-| Image | Phone worker source | What it demonstrates |
-| --- | --- | --- |
-| `phone-to-list.webp` | `devpost-screens/to-list-1790835303-1179x2556.png` | A retained keyboard item ready for review. Native screenshot attachment from signed Release `56ed76107a143e4d85962bdf3afee5b93fd5695a`. |
-| `phone-listing-review.webp` | `devpost-screens/mirroring-set/shoes-ready-review-hero-phone.png` | Air Jordan 3 Retro White Cement Reimagined, Men's Size 10: four photos and editable $160 price. |
-| `phone-price-evidence.webp` | `devpost-screens/mirroring-set/shoes-review-comp-cards-1-2-phone.png` | The same item's actual five sold matches, $100–$219.99 range, and $155 / $219.99 eBay sale cards. |
-| `scout-pro.webp` | `devpost-screens/mirroring-set/pro-paywall-before-purchase-phone.png` | Scout Pro opened after saving shoe intake; $9.99 monthly terms, Subscribe, Restore, Terms and Privacy. This is a pre-purchase screen, not a purchase receipt. |
+| Image | Phone worker source in `devpost-screens/mirroring-set/` | Native source commit | What it demonstrates |
+| --- | --- | --- | --- |
+| `phone-airpods-review.webp` | `final2-03-airpods-review-1179x2556.png` | `6e74fc72dbdb2fa652f14c8e910573b8f7267d51` | Full AirPods Max hero photo, seller-stated identity, editable $148.50 price and the app's pricing wording. |
+| `phone-dualsense-review.webp` | `final2-04-dualsense-review-1179x2556.png` | `6e74fc72dbdb2fa652f14c8e910573b8f7267d51` | Full DualSense hero photo, item identity and editable $149.99 price. |
+| `phone-flips.webp` | `final2-07-flips-populated-1179x2556.png` | `6e74fc72dbdb2fa652f14c8e910573b8f7267d51` | Populated final-build Flips with the posted Jordan photo and October 1 date, without an unavailable tag. |
 
-Source paths are relative to the phone worker's local ignored
-`ios/Artifacts/input-keyboard-followup/` folder. The Mirroring captures came from
-installed native source `408bddc0d01811958b9c27f115783f9488c7e1e5`; the worker's
-`sandbox-shoes-capture-manifest.json` documents the review captures and source
-commit. They were cropped by that worker from 652 × 1436 windows to the observed
-620 × 1344 phone bounds at +16+76, without content edits. Pointer decorations
-inside the screen are retained; the Mac window and surrounding background are
-excluded. No UI, prices, sold cards or item photos were fabricated or painted in.
+Raw sources remain in the phone worker's ignored
+`ios/Artifacts/input-keyboard-followup/` folder. Per-source SHA-256 hashes and
+framing receipts are checked into [frame-receipt.json](frame-receipt.json).
 
-Each selected full-resolution source and framed output was visually inspected.
-No email, name, account ID, credential or notification is visible. All files
-marked private and all account-background captures were excluded. The earlier
-empty Flips screenshot and review placeholder were removed from the showcase;
-a populated Flips/sharing capture can replace this interim price-evidence shot
-when the phone worker supplies it. Actual price-evidence wording is shown as
-captured; framing does not independently validate the matcher or every sale.
-Prepared/shared export packs must remain distinct from eBay publish or sold status.
+## Capture and evidence limits
 
-This task did not operate the physical phone, publish a listing or purchase a
-subscription. Screenshots do not establish an App Store release or a live Apple
-purchase/restore. The selected paywall price is this build's product price, not a
-permanent public price commitment.
+These are iPhone Mirroring captures of the running app, not native
+high-resolution screenshot attachments. The worker removed the Mac window by
+cropping observed screen bounds: final2 captures 612 × 1332 at +16+76. The
+final2 1179 × 2556 files are scaled exports of those Mirroring crops.
+Original windows/crops are retained locally. The framing tool then preserves
+screen proportions, rounds the aperture and adds the same illustrative device
+body. No mouse cursor or Mirroring pointer is visible in the three selected
+screens. No app UI,
+item photos, prices, marketplace status or evidence was fabricated or painted in.
+
+The phone worker's `final2-walk-099-101-verdicts.json` records the signed final
+Release source and new AirPods/DualSense/Flips exports. It reports that the final
+Jordan Flips tile opened the actual native eBay Active listing at $160 with one
+available and zero sold. The screenshot used here shows the Flips tile; the
+account-bearing eBay proof stays private. Neither Flips nor the live listing
+means the item sold. Historical post-success and sharing screenshots are omitted
+because they contain Mirroring pointers; their source artifacts remain local.
+This README task did not operate the phone, publish a listing,
+make a purchase or send an external share.
+
+Pricing and identity wording are reproduced as displayed by the app; this
+framing task did not independently verify each sold match or product identity.
+These images do not establish an App Store release or live Apple purchase/restore.
+
+## Privacy and image quality
+
+Every selected full-resolution source and final framed output was visually
+inspected for real rendered photos and public-safe content. No name, email,
+account identifier, credential or notification is visible. The one-letter
+profile avatar is retained. All private/account-background images are excluded,
+including newer confirmation/paywall captures that expose the eBay account name.
+
+To list is omitted: the newer ready-list rows have blank thumbnails even though
+AirPods and DualSense photos render in review. Nike Dunk is excluded; Jordan 3
+is the only shoe. Empty/black Flips captures, photo placeholders and diagnostic
+screens are excluded. Every included draft has a real hero photo and price.
+Prepared/shared export packs
+remain distinct from eBay publish and sold status.
 
 ## Reproduce the framed images
 
 See [the framing tool instructions](../../scripts/readme/README.md). Copy the
-selected raw files under their original filenames to ignored
+three selected raw files under their original filenames to ignored
 `ios/Artifacts/readme-input/`, then run from the repository root:
 
 ```sh
@@ -47,15 +68,20 @@ python3 scripts/readme/frame-screens.py \
   --manifest scripts/readme/sources.json --output-dir docs/readme
 ```
 
-The tool preserves screen proportions, clips the rounded screen aperture, adds
-the original device enclosure and hardware island, and encodes WebP with
-transparent alpha. [frame-receipt.json](frame-receipt.json) records exact source,
-frame and output hashes, crop rectangles, encoder version, size and dimensions.
-Raw files and private test logs remain ignored.
-
+The receipt records source, frame and output hashes, crop rectangles, encoder
+version, sizes and dimensions. Raw sources and private test logs remain ignored.
 The older `listing-review.png` and `trophy-wall.png` filenames remain only for
 historical simulator evidence in the [developer guide](../developer-guide.md#screenshot-provenance).
 Those fixture matches are not live sales research or current hero images.
+
+## Cursor-free capture gate
+
+Only the final2 AirPods Max, DualSense and populated Flips sources pass the
+current cursor-free gate. Historical Jordan review, eBay post success, sharing
+and paywall images were removed because they contain Mirroring pointers. They
+may return only after clean recapture with the pointer outside the Mirroring
+window, then full source/output privacy, photo and cursor inspection. The README
+does not digitally erase pointers or fabricate replacement app content.
 
 ## Scout hero animation
 

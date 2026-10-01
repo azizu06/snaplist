@@ -7,36 +7,28 @@
   ],
   "screens": [
     {
-      "source": "to-list-1790835303-1179x2556.png",
-      "source_sha256": "6e289cc2183574cf8b4f4061ee5eaf55cd40cdb2c0ecb8e9aaef6a4af6c02aed",
+      "source": "final2-03-airpods-review-1179x2556.png",
+      "source_sha256": "4f6f59aa12442758b39a85334154f3b2cc5d5cad54e98a496ce9e23c67eb4a78",
       "crop": null,
-      "output": "phone-to-list.webp",
-      "bytes": 17174,
-      "output_sha256": "4c961ca1f07817d9099a7bd9a66c8ab06abf51ffe7d88ff338d4efd690d531b3"
+      "output": "phone-airpods-review.webp",
+      "bytes": 53936,
+      "output_sha256": "21d7d2a3335bed29faaab85d5ee8c5d667e378f0c1a8057f694e59b9ec6e6fd3"
     },
     {
-      "source": "shoes-ready-review-hero-phone.png",
-      "source_sha256": "099a6e8cddd3f2ac4d470a03ab6ccddcd6d9dc2916e1be8027c74bdac507dedb",
+      "source": "final2-04-dualsense-review-1179x2556.png",
+      "source_sha256": "8fcec152263ae4ae0df2d0506533bbcf08a1bfb8934becc79e84b2da8a5aceee",
       "crop": null,
-      "output": "phone-listing-review.webp",
-      "bytes": 46868,
-      "output_sha256": "f1c80959446b7656f8fdda0cc476f102c65ff7c17e37854ebe10ffe2a8f8d9d2"
+      "output": "phone-dualsense-review.webp",
+      "bytes": 30038,
+      "output_sha256": "0b1d138543e5192229831a27bc178b4fd30d9afcf017dbec5011f287233db502"
     },
     {
-      "source": "shoes-review-comp-cards-1-2-phone.png",
-      "source_sha256": "9b59f123411f2414c5f8c0ea9837fa9b783191fdd2069cd61803da4989f224f9",
+      "source": "final2-07-flips-populated-1179x2556.png",
+      "source_sha256": "eb079e0fa762d63f73f5af0448440e7bf440836c87ac5e5a022d901300e6d6dc",
       "crop": null,
-      "output": "phone-price-evidence.webp",
-      "bytes": 43104,
-      "output_sha256": "1e1cacf85986fa81248f6607eeb4392cef56c2030235dbcc6c446c358028b333"
-    },
-    {
-      "source": "pro-paywall-before-purchase-phone.png",
-      "source_sha256": "e52f3513541c2ef1a7f9b1d295be703aa76a30ca8631893e1d4b88e8834d8173",
-      "crop": null,
-      "output": "scout-pro.webp",
-      "bytes": 45298,
-      "output_sha256": "0ee9b97e19dcff3d07de4d917d4f3586143c17174f9294a8e46eb791f10f414f"
+      "output": "phone-flips.webp",
+      "bytes": 20196,
+      "output_sha256": "3f213d5ac7dd65763e48ca517c75c1143adf674d243b3a646b798538e295c490"
     }
   ]
 }
