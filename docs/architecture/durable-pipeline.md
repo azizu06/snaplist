@@ -117,12 +117,16 @@ changing queue or worker behavior.
 
 A newly accepted native submission registers a Next.js `after()` callback that sends an authenticated
 HTTP wake to the existing worker at `SNAPLIST_PUBLIC_ORIGIN`. Intake returns its durable 202 before
-processing; the worker runs in a separate invocation. Failed admissions and successful replays do not
-wake it. Wake dispatch is best-effort, refuses redirects, and logs only safe machine details. The
+processing; the worker runs in a separate invocation. The bearer-protected POST wake header
+`x-snaplist-worker-wake: 1` registers consumption with the worker's own `after()` before returning
+202 admission. Intake awaits admission only, with a ten-second dispatch deadline; no processing
+promise is left untracked. Scheduler GET and ordinary POST still await aggregate completion.
+Failed admissions and successful replays do not wake it. Wake dispatch is best-effort, refuses
+redirects, and logs only safe machine details. The
 existing minute scheduler remains the recovery/backup path; no database or cron change is required.
 
 Every worker invocation claims up to ten messages and starts their attempts concurrently. It waits
-for every sibling before returning, including when one message encounters an infrastructure or stale
+for every sibling before consumption settles, including when one message encounters an infrastructure or stale
 lease error. Each run keeps its own 300-second visibility/lease window, checkpoint heartbeats, bounded
 exponential retry (starting at 30 seconds), and three attempts. The 300-second function limit covers
 concurrent work rather than the sum of ten serial runs. A one-minute backup cadence bounds scheduled

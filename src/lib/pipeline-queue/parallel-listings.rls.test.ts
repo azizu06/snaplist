@@ -1,9 +1,16 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import { appendFileSync } from "node:fs";
 import { startNodeMobileRuntime } from "@/runtime/node/server";
 import type * as Harness from "@/test/parallel-listings-harness";
 import { wakePipelineWorker } from "./wake";
+import { POST as workerPost } from "@/app/api/internal/pipeline-worker/route";
+
+const { after, createWorker } = vi.hoisted(() => ({ after: vi.fn(), createWorker: vi.fn() }));
+vi.mock("next/server", async (original) => ({
+  ...await original<typeof import("next/server")>(), after,
+}));
+vi.mock("@/lib/pipeline-queue/internal", () => ({ createInternalPipelineWorker: createWorker }));
 
 // Opt-in: the helper additionally refuses every address except this test's
 // dedicated loopback stack. Normal unit/CI runs do not connect to a database.
@@ -20,6 +27,7 @@ function receipt(value: Record<string, unknown>) {
 describe.skipIf(!enabled)("parallel listings on isolated Supabase", () => {
   beforeAll(async () => { h = await import("@/test/parallel-listings-harness"); });
   afterAll(async () => { await h.cleanup(used); await h.pool.end(); });
+  let singleItemWallMs = 0;
 
   async function verify(subs: Harness.Submitted[], rec: Harness.Recorder, redeliveries = 0) {
     const rows = await h.runRows(subs.map((sub) => sub.runId!));
@@ -52,9 +60,17 @@ describe.skipIf(!enabled)("parallel listings on isolated Supabase", () => {
     const submit = h.makeSubmissionHandler(tenants);
     const rec = new h.Recorder();
     const wakes: Promise<void>[] = [];
-    const workers: Promise<unknown>[] = [];
+    const workers: Promise<void>[] = [];
+    const dispatches: Array<{ claimed: number; responseMs: number }> = [];
+    const callbacks: Array<() => Promise<void>> = [];
+    let nextWorker = 0;
+    after.mockImplementation((callback: () => Promise<void>) => callbacks.push(callback));
+    createWorker.mockImplementation(() => h.makeWorker(`wake${nextWorker++}`, rec, cfg).worker);
+    const previousSecret = process.env.CRON_SECRET;
+    process.env.CRON_SECRET = "local-test-worker";
     // Real loopback HTTP dispatch to a bearer-protected receiver, using the
-    // same real worker composition with fixture model stages only.
+    // production worker admission route and real worker composition. Only the
+    // platform after() boundary is simulated; every background promise is tracked.
     const server = await startNodeMobileRuntime({
       host: "127.0.0.1", port: 0,
       handler: async (request) => {
@@ -62,9 +78,15 @@ describe.skipIf(!enabled)("parallel listings on isolated Supabase", () => {
             || request.headers.get("authorization") !== "Bearer local-test-worker") {
           return new Response(null, { status: 401 });
         }
-        const worker = h.makeWorker(`wake${workers.length}`, rec, cfg).worker.consume();
-        workers.push(worker);
-        return new Response(JSON.stringify(await worker));
+        const start = rec.now();
+        const response = await workerPost(request);
+        expect(response.status).toBe(202);
+        const callback = callbacks.shift()!;
+        workers.push(new Promise<void>((resolve, reject) => {
+          setImmediate(() => { callback().then(resolve, reject); });
+        }));
+        dispatches.push({ claimed: 0, responseMs: Math.round(rec.now() - start) });
+        return response;
       },
     });
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -79,7 +101,15 @@ describe.skipIf(!enabled)("parallel listings on isolated Supabase", () => {
         h.submitOne(handler, tenants[index % tenants.length], `wake${count}-${index}`)));
       expect(subs.every((sub) => sub.status === 202)).toBe(true);
       await Promise.all(wakes);
+      const wakeWall = Math.round(rec.now());
+      expect(dispatches).toHaveLength(count);
+      expect(wakeWall).toBeLessThan(3000);
+      expect(rec.events.some((event) => event.kind === "run.complete")).toBe(false);
       await Promise.all(workers);
+      for (const [index, dispatch] of dispatches.entries()) {
+        dispatch.claimed = (rec.events.find((event) => event.kind === "queue.claim"
+          && event.worker === `wake${index}`)?.ids as string[]).length;
+      }
       const intervals = [...h.runIntervals(rec.events).values()];
       const first = Math.min(...intervals.map(([start]) => start));
       const lastStart = Math.max(...intervals.map(([start]) => start));
@@ -90,11 +120,23 @@ describe.skipIf(!enabled)("parallel listings on isolated Supabase", () => {
       expect(lastStart).toBeLessThan(3000);
       expect(lastStart - first).toBeLessThan(2000);
       expect(h.maxOverlap(intervals)).toBe(count);
-      expect(wall).toBeLessThan(8500);
+      if (count === 1) singleItemWallMs = wall;
       await verify(subs, rec);
       receipt({ scenario: "wake", count, lastClaimMs: lastClaim, lastStartMs: lastStart,
-        wallMs: wall, overlap: h.maxOverlap(intervals), settledCredits: count, distinctClaims: count });
+        wallMs: wall, overlap: h.maxOverlap(intervals), settledCredits: count, distinctClaims: count,
+        wakeWallMs: wakeWall, dispatches, singleItemWallMs });
+      if (count > 1) {
+        // Keep wall time near the matched single-item run, allowing the same
+        // 3s start window already required above. Host load is not a fixed SLA.
+        expect(singleItemWallMs).toBeGreaterThan(0);
+        expect(wall).toBeLessThan(singleItemWallMs + 3000);
+      }
     } finally {
+      await Promise.allSettled(workers);
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+      after.mockReset();
+      createWorker.mockReset();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   }, 60_000);

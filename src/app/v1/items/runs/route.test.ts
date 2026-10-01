@@ -174,7 +174,7 @@ describe("production mobile item submission route", () => {
       "https://snaplist.example/api/internal/pipeline-worker",
       expect.objectContaining({
         method: "POST",
-        headers: { authorization: "Bearer local-worker-secret" },
+        headers: { authorization: "Bearer local-worker-secret", "x-snaplist-worker-wake": "1" },
         redirect: "error",
       }),
     );

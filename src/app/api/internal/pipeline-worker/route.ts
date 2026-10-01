@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { logServerError } from "@/lib/api/errors";
 import { createInternalPipelineWorker } from "@/lib/pipeline-queue/internal";
 
@@ -30,7 +30,20 @@ async function handle(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const summary = await createInternalPipelineWorker().consume();
+    const worker = createInternalPipelineWorker();
+    if (request.method === "POST" && request.headers.get("x-snaplist-worker-wake") === "1") {
+      // Register platform-tracked work before admitting the wake. The sender
+      // waits only for admission; this invocation owns the full 300s budget.
+      after(async () => {
+        try {
+          await worker.consume();
+        } catch (error) {
+          logServerError("pipeline.worker", error);
+        }
+      });
+      return NextResponse.json({ accepted: true }, { status: 202 });
+    }
+    const summary = await worker.consume();
     return NextResponse.json(summary);
   } catch (error) {
     logServerError("pipeline.worker", error);

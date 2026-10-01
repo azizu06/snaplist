@@ -25,13 +25,12 @@ export async function wakePipelineWorker(input: {
     }
     const response = await fetch(`${url.origin}/api/internal/pipeline-worker`, {
       method: "POST",
-      headers: { authorization: `Bearer ${input.secret}` },
+      headers: { authorization: `Bearer ${input.secret}`, "x-snaplist-worker-wake": "1" },
       redirect: "error",
       cache: "no-store",
-      // Both routes allow 300s. This wait is bounded; dispatch failure cannot
-      // undo durable acceptance, and the independently invoked worker retains
-      // its own duration budget and fenced recovery even if intake times out.
-      signal: AbortSignal.timeout(290_000),
+      // Wait for admission only. The worker tracks processing with after() and
+      // retains its own duration budget even if dispatch fails or times out.
+      signal: AbortSignal.timeout(10_000),
     });
     await response.body?.cancel();
     if (!response.ok) {

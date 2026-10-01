@@ -1,7 +1,8 @@
 # Immediate parallel listing processing
 
 The native submission route returns durable acceptance, then uses Next.js `after()` to call the
-existing authenticated worker in a separate HTTP invocation. Each invocation claims at most ten
+existing authenticated worker in a separate HTTP invocation. The worker registers consumption with
+its own `after()` and returns prompt 202 admission; the sender awaits only admission. Each invocation claims at most ten
 messages and processes them concurrently. The existing minute cron remains the backup/retry sweeper.
 No database schema, production data, cron schedule, provider cap, or credit policy changed.
 
@@ -9,25 +10,27 @@ No database schema, production data, cron schedule, provider cap, or credit poli
 
 Real layers: isolated local Postgres, PGMQ, RLS, private Storage, submission/staging, fenced worker
 RPCs, checkpointing, durable completion, provider-usage isolation, and credit settlement. HTTP wake
-requests reached a loopback bearer-protected receiver composed with the real worker. Fixture layers:
+requests reached the production bearer-protected admission route through loopback HTTP, composed
+with the real worker. Fixture layers:
 authentication principals and the model stages (1.5 s identification + 2.5 s pricing + 1.5 s listing).
-The Next.js `after()` scheduling boundary is separately covered through the production route's unit
-contract; this is not a deployed Vercel or real-provider capacity measurement.
+The Next.js `after()` scheduling boundary is simulated with explicitly tracked promises and separately
+covered through the production routes' unit contracts; this is not a deployed Vercel or real-provider
+capacity measurement.
 
 The harness is reused from the September 24 concurrency investigation, with explicit safeguards
 against a shared or hosted database. It accepts only project `snaplist-parallel-listings`' dedicated
 API/database addresses `127.0.0.1:56421` / `127.0.0.1:56422`. Secrets are not printed.
 
-| Scenario | Last claim | Last processing start | Durable wall time | Peak overlapping runs | Settled credits |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| One submission, automatic wake | 186 ms | 233 ms | 5.829 s | 1 | 1 |
-| Five submissions, automatic wakes | 195 ms | 235 ms | 5.789 s | 5 | 5 |
-| Ten submissions, automatic wakes | 281 ms | 340 ms | 5.897 s | 10 | 10 |
-| Ten queued items, backup plus two duplicate invocations | — | — | 5.655 s | 10 | 10 |
+| Scenario | All wakes returned | Last claim | Last processing start | Durable wall time | Peak overlapping runs | Settled credits |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| One submission, automatic wake | 124 ms | 131 ms | 163 ms | 5.730 s | 1 | 1 |
+| Five submissions, automatic wakes | 178 ms | 172 ms | 208 ms | 5.777 s | 5 | 5 |
+| Ten submissions, automatic wakes | 287 ms | 249 ms | 316 ms | 5.896 s | 10 | 10 |
+| Ten queued items, backup plus two duplicate invocations | — | — | — | 5.648 s | 10 | 10 |
 
 All four scenarios had exactly one distinct claim per item, one correctly owned listing and
 prediction per run, isolated provider usage, and an empty queue afterward. The backup race returned
-claim counts `[0, 10, 0]`. Another invocation claimed zero after completion.
+claim counts `[0, 0, 10]`. Another invocation claimed zero after completion.
 
 An injected identification failure among five siblings produced four successful drafts and one
 retry. Only the failed run reached attempt 2; the other four stayed at attempt 1. After retry:
@@ -39,6 +42,43 @@ TDD receipts: the concurrency test first failed with peak `1` instead of `5`; th
 first requested `1` instead of `10`; the production submission route first scheduled zero wakeups.
 Each passed after its corresponding implementation. A consumer infrastructure error is also tested
 to wait for successful siblings before rejecting the invocation.
+
+## Admission lifetime finding
+
+The initial implementation awaited synchronous worker completion from the submission's `after()`.
+The review's underlying lifetime finding was valid, but its example that all ten wakes wait for a
+nonempty batch was disproved. A real local ten-item baseline split claims `[8, 2]` between two workers:
+their HTTP responses took 5.719 s and 5.714 s. The other eight workers claimed zero and responded in
+6–28 ms. A single-item baseline waited 6.097 s. One baseline five-item attempt missed the 3 s claim
+threshold (3.947 s). Admission, start, overlap, and settlement assertions remain unchanged.
+
+A later run alongside build/lint reached 8.615 s for ten items and missed the original 8.5 s fixture
+wall limit. Running the suite alone still reached 8.517 s, versus a matched single item at 5.912 s;
+admission/start/overlap checks passed. The host reported load averages 26.80 / 114.34 / 175.57 across
+15 logical CPUs. Firstmate authorized replacing only the fixed wake wall limit with the same-run
+single-item wall time plus the already-required three-second start window. This bound checks that
+bursts finish near one item's time rather than scaling with item count; it does not invent a hosted
+8.5 s SLA. Raw timings are retained here. The final sequential suite passed all five scenarios
+at the tabled times, with host load averages 11.22 / 72.68 / 147.16 and no overlapping task-local
+CPU validation commands. Typecheck, lint, production build, and 181 focused tests also passed.
+
+The narrow correction uses the same authenticated endpoint. A POST carrying the wake header
+registers a callback before 202 admission, and that callback awaits the entire bounded consumer.
+The native submission still tracks its HTTP dispatch, now capped at ten seconds rather than 290.
+No untracked promise or new queue exists. Setup/registration failures return 500; background errors
+are logged and leave the durable queue and fenced lease recovery intact. Ordinary scheduler methods
+retain their aggregate responses. Tests held consumption unresolved while admission returned,
+verified the tracked callback stayed pending, checked auth/setup failures, and injected a background
+failure. The first admission test timed out against synchronous completion (RED), then passed.
+
+[Next.js documents](https://nextjs.org/docs/app/api-reference/functions/after) that `after()` extends
+serverless lifetime through `waitUntil` and is subject to the route's duration limit. That makes the
+extra sender lifetime concrete, even though no user-facing acceptance was delayed.
+[Vercel's Fluid compute pricing](https://vercel.com/docs/functions/usage-and-pricing) excludes I/O
+wait from active CPU billing but charges provisioned memory through the instance's last in-flight
+request. Requests can share instances, so this evidence does not imply ten extra memory allocations
+or a measured dollar saving. Removing the avoidable sender lifetime is an in-scope resource-cost
+correction; actual hosted placement, billing mode, cold starts, and charges remain unmeasured.
 
 ## Reproduce
 
@@ -78,14 +118,16 @@ Ordinary test runs skip this suite. Stop only the dedicated workdir with `stop -
 
 After deployment, normal successful native submissions should start without waiting for a cron
 boundary. Set `SNAPLIST_PUBLIC_ORIGIN` to this API deployment and keep `CRON_SECRET` configured;
-both submission and worker routes allow 300 seconds. The wake is best-effort, uses a 290-second
-bounded HTTP wait, and refuses redirects. A missed wake leaves the durable message for the next
+both submission and worker routes allow 300 seconds. The wake is best-effort, awaits only authenticated
+admission with a ten-second HTTP deadline, and refuses redirects. The worker's own `after()` tracks
+consumption within its existing 300-second limit. A missed wake leaves the durable message for the next
 minute tick, which can now start up to ten items together. Warm/cold starts and real provider latency
 remain unmeasured here. Existing provider spend caps and admission/entitlement gates remain active.
 
 The worker's per-run fencing and retry behavior are unchanged. All claimed siblings are awaited
-before an invocation surfaces an infrastructure error; a stale attempt may still return a worker
-500, but cannot abandon its siblings. The hosting function can still terminate at its 300-second
+before consumption surfaces an infrastructure error; synchronous scheduler requests return worker
+500s, while admitted background wakes log failures. Neither abandons its siblings. The hosting
+function can still terminate at its 300-second
 limit, after which existing lease/checkpoint recovery applies.
 
 For the owner phone test, using normal app submissions only:

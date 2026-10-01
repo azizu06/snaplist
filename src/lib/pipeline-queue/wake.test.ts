@@ -4,6 +4,17 @@ import { wakePipelineWorker } from "./wake";
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("worker wake HTTP capability", () => {
+  it("requests prompt tracked admission with a short dispatch deadline", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const dispatch = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", dispatch);
+    await wakePipelineWorker({ origin: "https://snaplist.example", secret: "local-secret" });
+    expect(dispatch).toHaveBeenCalledWith("https://snaplist.example/api/internal/pipeline-worker", expect.objectContaining({
+      method: "POST", headers: { authorization: "Bearer local-secret", "x-snaplist-worker-wake": "1" },
+      redirect: "error",
+    }));
+    expect(timeout).toHaveBeenCalledWith(10_000);
+  });
   it("does not dispatch when the origin or internal secret is missing", async () => {
     const dispatch = vi.fn();
     vi.stubGlobal("fetch", dispatch);

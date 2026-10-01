@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const consume = vi.fn();
-vi.mock("@/lib/pipeline-queue/internal", () => ({
-  createInternalPipelineWorker: () => ({ consume }),
+const { consume, after, createWorker, logError } = vi.hoisted(() => ({
+  consume: vi.fn(), after: vi.fn(), createWorker: vi.fn(), logError: vi.fn(),
 }));
+vi.mock("next/server", async (original) => ({
+  ...await original<typeof import("next/server")>(), after,
+}));
+vi.mock("@/lib/pipeline-queue/internal", () => ({
+  createInternalPipelineWorker: createWorker,
+}));
+vi.mock("@/lib/api/errors", () => ({ logServerError: logError }));
+
+beforeEach(() => {
+  after.mockReset();
+  logError.mockReset();
+  createWorker.mockReset().mockReturnValue({ consume });
+});
 
 describe("GET /api/internal/pipeline-worker", () => {
   beforeEach(() => {
@@ -21,7 +33,7 @@ describe("GET /api/internal/pipeline-worker", () => {
     const { GET } = await import("./route");
     const response = await GET(
       new Request("http://localhost/api/internal/pipeline-worker", {
-        headers: { authorization: "Bearer worker-secret" },
+        headers: { authorization: "Bearer worker-secret", "x-snaplist-worker-wake": "1" },
       }),
     );
 
@@ -34,6 +46,7 @@ describe("GET /api/internal/pipeline-worker", () => {
       skipped: 0,
     });
     expect(consume).toHaveBeenCalledOnce();
+    expect(after).not.toHaveBeenCalled();
   });
 
   // The auth proxy no longer redirects this path, so the route's own guard is
@@ -97,5 +110,62 @@ describe("POST /api/internal/pipeline-worker", () => {
       skipped: 0,
     });
     expect(consume).toHaveBeenCalledOnce();
+  });
+
+  function wakeRequest(secret = "worker-secret") {
+    return new Request("http://localhost/api/internal/pipeline-worker", {
+      method: "POST",
+      headers: { authorization: `Bearer ${secret}`, "x-snaplist-worker-wake": "1" },
+    });
+  }
+
+  it("admits a wake before processing and tracks consumption until it settles", async () => {
+    process.env.CRON_SECRET = "worker-secret";
+    let finish!: () => void;
+    consume.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const { POST } = await import("./route");
+    const response = await POST(wakeRequest());
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ accepted: true });
+    expect(after).toHaveBeenCalledOnce();
+    expect(consume).not.toHaveBeenCalled();
+    let settled = false;
+    const background = after.mock.calls[0][0]().then(() => { settled = true; });
+    await Promise.resolve();
+    expect(consume).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+    finish();
+    await background;
+    expect(settled).toBe(true);
+  });
+
+  it("logs a background failure while durable queue recovery remains with cron", async () => {
+    process.env.CRON_SECRET = "worker-secret";
+    const failure = new Error("consume failed");
+    consume.mockRejectedValue(failure);
+    const { POST } = await import("./route");
+    expect((await POST(wakeRequest())).status).toBe(202);
+    await expect(after.mock.calls[0][0]()).resolves.toBeUndefined();
+    expect(logError).toHaveBeenCalledWith("pipeline.worker", failure);
+  });
+
+  it("rejects a wake without authority before registering background work", async () => {
+    const { POST } = await import("./route");
+    expect((await POST(wakeRequest())).status).toBe(503);
+    process.env.CRON_SECRET = "worker-secret";
+    expect((await POST(wakeRequest("wrong-secret"))).status).toBe(401);
+    expect(after).not.toHaveBeenCalled();
+    expect(createWorker).not.toHaveBeenCalled();
+  });
+
+  it("does not accept a wake if worker setup or background registration fails", async () => {
+    process.env.CRON_SECRET = "worker-secret";
+    const { POST } = await import("./route");
+    createWorker.mockImplementationOnce(() => { throw new Error("not configured"); });
+    expect((await POST(wakeRequest())).status).toBe(500);
+    expect(after).not.toHaveBeenCalled();
+    after.mockImplementationOnce(() => { throw new Error("no execution context"); });
+    expect((await POST(wakeRequest())).status).toBe(500);
+    expect(consume).not.toHaveBeenCalled();
   });
 });

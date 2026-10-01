@@ -26,6 +26,10 @@ and `CRON_SECRET` to the same internal bearer used by the worker. Neither the re
 input chooses the destination. Public HTTPS is required outside local development; redirects are
 refused so the bearer cannot travel to another origin. A missing configuration, network failure,
 non-success response, or interrupted dispatch leaves the accepted message for the existing cron.
+Wake requests carry `x-snaplist-worker-wake: 1` and receive 202 after the authenticated worker has
+registered consumption with its own Next.js `after()` callback. The sender awaits only that admission,
+with a ten-second deadline. Background failures are logged; queue/lease recovery stays with cron.
+Scheduler GET and ordinary POST retain synchronous aggregate responses, including worker 500s.
 
 The five-minute maximum and one-minute backup cadence permit up to five scheduled worker requests,
 each processing at most ten runs concurrently. Wake invocations are additional. This is a planning
