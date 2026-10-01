@@ -18,6 +18,9 @@
     }
   },
   "selector_observed_seconds": {
+    "SnapListUITests/SnapListUITests/testCancelledPurchaseReturnsToTheOfferWithoutClaimingPro": 8.687,
+    "SnapListUITests/SnapListUITests/testCompletedPurchaseWithMissingOrIgnoredGrantOffersRecoveryWithoutAnotherPurchase": 28.978,
+    "SnapListUITests/SnapListUITests/testDelayedPurchaseGrantCanBeRecheckedAndVerifiedPurchaseCanFinish": 17.717,
     "SnapListUITests/HomeUITests/testDownwardDragFromCameraSurfaceDismissesScanDrawer": 9.218,
     "SnapListUITests/HomeUITests/testPhotoReviewDownwardScrollAwayFromTopKeepsDrawerOpen": 8.390,
     "SnapListUITests/AccountDeletionUITests/testADeletionThatStoppedPartwayKeepsTheControlThatCanFinishIt": 6.075,

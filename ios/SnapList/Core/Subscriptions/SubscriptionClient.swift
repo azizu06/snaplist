@@ -12,6 +12,18 @@ protocol SubscriptionClient: Sendable {
     func loadProducts() async throws -> [SubscriptionProductMetadata]
     func purchase(productID: String) async throws -> SubscriptionAdvisoryOutcome
     func restore() async throws -> SubscriptionAdvisoryOutcome
+    func purchase(productID: String, appUserID: String) async throws -> SubscriptionAdvisoryOutcome
+    func restore(appUserID: String) async throws -> SubscriptionAdvisoryOutcome
+}
+
+extension SubscriptionClient {
+    func purchase(productID: String, appUserID: String) async throws -> SubscriptionAdvisoryOutcome {
+        try await purchase(productID: productID)
+    }
+
+    func restore(appUserID: String) async throws -> SubscriptionAdvisoryOutcome {
+        try await restore()
+    }
 }
 
 actor FixtureSubscriptionClient: SubscriptionClient {

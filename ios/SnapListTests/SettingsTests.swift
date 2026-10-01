@@ -891,6 +891,63 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testSameEmailAndMethodStillResetSubscriptionForADifferentClerkID() {
+        let identity = SettingsIdentity.member(method: .emailCode, email: "same@example.com")
+        let scope = SettingsSubscriptionAccountScope(identity: identity, accountID: "user_A", makeStore: { SubscriptionStore(client: FixtureSubscriptionClient()) })
+        let oldReading = scope.store
+        XCTAssertTrue(scope.rebind(to: identity, accountID: "user_B"))
+        XCTAssertFalse(scope.isCurrent(oldReading))
+        XCTAssertEqual(scope.store.state, .unconfigured)
+    }
+
+    @MainActor
+    func testAccountSwitchDiscardsSuspendedConfigurationAndServerResponses() async {
+        for suspendConfiguration in [true, false] {
+            let identity = SettingsIdentity.member(method: .emailCode, email: "same@example.com")
+            let scope = SettingsSubscriptionAccountScope(identity: identity, accountID: "user_A", makeStore: { SubscriptionStore(client: FixtureSubscriptionClient()) })
+            let configurationGate = SettingsAsyncResponse<NativeSubscriptionConfiguration>()
+            let entitlementGate = SettingsAsyncResponse<ServerVerifiedSubscription>()
+            let configuration = NativeSubscriptionConfiguration(configured: true, appUserID: "user_A", publicSDKKey: "appl_fixture", entitlementID: "pro", monthlyProductID: "monthly", offeringID: nil, transitionState: .notRequired, legacyStripeStatus: nil)
+            let entitlement = ServerVerifiedSubscription(source: .storeKit, status: .active, remainingItems: 7, periodStart: nil, periodEnd: nil, gracePeriodEnd: nil, transitionState: nil, legacyStripeStatus: nil)
+            let load = Task {
+                await scope.load(
+                    configuration: { suspendConfiguration ? await configurationGate.read() : configuration },
+                    entitlement: { await entitlementGate.read() }
+                )
+            }
+            if suspendConfiguration { await configurationGate.waitUntilStarted() }
+            else { await entitlementGate.waitUntilStarted() }
+            scope.rebind(to: identity, accountID: "user_B")
+            if suspendConfiguration { configurationGate.resolve(configuration) }
+            else { entitlementGate.resolve(entitlement) }
+            await load.value
+            XCTAssertEqual(scope.store.state, .unconfigured)
+            XCTAssertEqual(scope.loadPhase, .loading)
+        }
+    }
+
+    @MainActor
+    func testAccountSwitchDiscardsAPaywallPreparedForTheOldAccount() async {
+        let identity = SettingsIdentity.member(method: .emailCode, email: "same@example.com")
+        var currentID = "user_A"
+        let scope = SettingsSubscriptionAccountScope(identity: identity, accountID: currentID, makeStore: { SubscriptionStore(client: FixtureSubscriptionClient()) })
+        let response = SettingsAsyncResponse<RevenueCatConfigurationEnvelope>()
+        let plans = ProGateStore(
+            mobileAPIClient: SettingsPreparedPlansAPI(configuration: response),
+            subscriptionClient: FixtureSubscriptionClient(),
+            currentAccountID: { currentID }
+        )
+        let prepare = Task { await scope.preparePlans(plans) }
+        await response.waitUntilStarted()
+        currentID = "user_B"
+        scope.rebind(to: identity, accountID: currentID)
+        response.resolve(.init(data: .init(configured: true, appUserId: "user_A", publicSdkKey: "appl_fixture", entitlementId: "pro", monthlyProductId: "monthly", offeringId: nil, transitionState: .notRequired, legacyStripeStatus: nil), meta: .init(requestId: "fixture")))
+        let outcome = await prepare.value
+        XCTAssertNil(outcome)
+        XCTAssertEqual(plans.state, .hidden)
+    }
+
     func testSubscriptionFirstPaintAndConfigurationFailureAreHonest() {
         let unresolved = SettingsSubscriptionPresentation(
             state: .unconfigured,
@@ -1801,4 +1858,37 @@ final class SettingsNotificationsRowTests: XCTestCase {
             )
         }
     }
+}
+
+@MainActor
+private final class SettingsAsyncResponse<Value> {
+    private var continuation: CheckedContinuation<Value, Never>?
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func read() async -> Value {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            waiters.forEach { $0.resume() }
+            waiters.removeAll()
+        }
+    }
+    func waitUntilStarted() async {
+        if continuation != nil { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func resolve(_ value: Value) {
+        continuation?.resume(returning: value)
+        continuation = nil
+    }
+}
+
+private struct SettingsPreparedPlansAPI: MobileAPIClient {
+    let configuration: SettingsAsyncResponse<RevenueCatConfigurationEnvelope>
+    func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope { await configuration.read() }
+    func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
+        .init(data: .init(billingSource: .included, status: .included, remainingItems: 1, periodStart: nil, periodEnd: nil, gracePeriodEnd: nil, transitionState: .notRequired, legacyStripeStatus: nil), meta: .init(requestId: "fixture"))
+    }
+    func getHealth() async throws -> HealthEnvelope { throw MobileAPIClientError.httpStatus(500) }
+    func getSession() async throws -> SessionEnvelope { throw MobileAPIClientError.httpStatus(500) }
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope { throw MobileAPIClientError.httpStatus(500) }
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope { throw MobileAPIClientError.httpStatus(500) }
 }

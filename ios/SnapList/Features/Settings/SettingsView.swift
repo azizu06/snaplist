@@ -33,8 +33,9 @@ struct SettingsView: View {
         SettingsSellingPresentation.LoadPhase.loading
     @State private var analyticsConsentState: SettingsAnalyticsConsentState
     @State private var subscriptionScope: SettingsSubscriptionAccountScope
-    @State private var subscriptionLoadPhase =
-        SettingsSubscriptionPresentation.LoadPhase.loading
+    private var subscriptionLoadPhase: SettingsSubscriptionPresentation.LoadPhase {
+        subscriptionScope.loadPhase
+    }
     @State private var managesSubscription = false
     /// The SnapList Pro offer opened from `Get SnapList Pro`. It is the same
     /// `ProGateStore` the item gate uses, so purchase, restore, and the
@@ -80,6 +81,8 @@ struct SettingsView: View {
         _subscriptionScope = State(
             initialValue: SettingsSubscriptionAccountScope(
                 identity: profile.identity,
+                accountID: profile.accountID,
+                currentAccountID: { ClerkAuthenticationComposition.currentUserID() },
                 makeStore: { SubscriptionStore(client: subscriptionClient) }
             )
         )
@@ -339,10 +342,11 @@ struct SettingsView: View {
         // Keyed on the account: Settings can stay on the navigation stack
         // while the seller signs out and into another account, and the card
         // must never keep the previous account's plan.
-        .task(id: profile.identity) {
-            if subscriptionScope.rebind(to: profile.identity) {
-                subscriptionLoadPhase = .loading
+        .task(id: profile.accountID) {
+            if subscriptionScope.rebind(to: profile.identity, accountID: profile.accountID) {
+                plansStore?.accountChanged()
                 plansStore = nil
+                isPreparingPlans = false
             }
             guard !profile.isGuest, !isSettingsHubProof else { return }
             await loadSubscription()
@@ -538,13 +542,15 @@ struct SettingsView: View {
             return
         }
 #endif
+        let reading = subscriptionScope.store
         isPreparingPlans = true
-        defer { isPreparingPlans = false }
+        defer { if subscriptionScope.isCurrent(reading) { isPreparingPlans = false } }
         let store = ProGateStore(
             mobileAPIClient: mobileAPIClient,
             subscriptionClient: subscriptionClient
         )
-        switch await store.prepare() {
+        guard let outcome = await subscriptionScope.preparePlans(store) else { return }
+        switch outcome {
         case .presented:
             plansStore = store
         case .fallbackToPhotoReview, .fallbackToAccountClaim:
@@ -566,42 +572,20 @@ struct SettingsView: View {
     }
 
     private func loadSubscription() async {
-        subscriptionLoadPhase = .loading
-        do {
-            let configuration = try await mobileAPIClient
-                .getRevenueCatConfiguration().data.subscriptionConfiguration
-            await subscriptionStore.load(configuration: configuration)
-            let refreshPlan = SettingsEntitlementRefreshPlan.afterInitialLoad(
-                subscriptionStore.state
-            )
-            subscriptionLoadPhase = refreshPlan.deletionDisclosureLoadPhase
-            guard refreshPlan == .requestServerTruth else { return }
-            await refreshServerEntitlement()
-        } catch {
-            subscriptionLoadPhase = .failed
-        }
+        await subscriptionScope.load(
+            configuration: {
+                try await mobileAPIClient.getRevenueCatConfiguration().data.subscriptionConfiguration
+            },
+            entitlement: {
+                try await mobileAPIClient.getAiItemEntitlement().data.serverVerifiedSubscription
+            }
+        )
     }
 
     private func restoreSubscription() async {
-        subscriptionLoadPhase = .loaded
-        await subscriptionStore.restore()
-        let refreshPlan = SettingsEntitlementRefreshPlan.afterRestore(
-            subscriptionStore.state
-        )
-        subscriptionLoadPhase = refreshPlan.deletionDisclosureLoadPhase
-        guard refreshPlan == .requestServerTruth else { return }
-        await refreshServerEntitlement()
-    }
-
-    private func refreshServerEntitlement() async {
-        await SettingsEntitlementServerRefresh.perform(
-            fetch: {
-                try await mobileAPIClient
-                    .getAiItemEntitlement().data.serverVerifiedSubscription
-            },
-            apply: subscriptionStore.applyServerVerification,
-            setLoadPhase: { subscriptionLoadPhase = $0 }
-        )
+        await subscriptionScope.restore {
+            try await mobileAPIClient.getAiItemEntitlement().data.serverVerifiedSubscription
+        }
     }
 
     /// The Notifications switch (#891). iOS owns the permission, so the switch
@@ -2356,6 +2340,7 @@ struct SettingsProfile {
     let emailAddressID: String?
     let initials: String
     let method: SettingsAuthenticationMethod
+    var accountID: String? = nil
     var methodLabel: String { method == .apple ? "Apple" : "Email code" }
     var identity: SettingsIdentity {
         isGuest ? .guest : .member(method: method, email: email)
@@ -2371,7 +2356,8 @@ struct SettingsProfile {
                 email: "jordan.hale@icloud.com",
                 emailAddressID: "fixture-primary-email",
                 initials: "JH",
-                method: .apple
+                method: .apple,
+                accountID: "fixture-settings-user"
             )
         }
 #endif
@@ -2401,7 +2387,8 @@ struct SettingsProfile {
                 lastName: user.lastName,
                 isSignedIn: true
             ),
-            method: apple ? .apple : .emailCode
+            method: apple ? .apple : .emailCode,
+            accountID: user.id
         )
     }
 }

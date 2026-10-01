@@ -489,7 +489,7 @@ struct AppShellView: View {
     }
 
     private func makeProGateStoreIfNeeded() -> ProGateStore {
-        if let proGateStore { return proGateStore }
+        if let proGateStore, proGateStore.belongsToCurrentAccount { return proGateStore }
         let store = ProGateStore(
             mobileAPIClient: dependencies.mobileAPIClient,
             subscriptionClient: dependencies.subscriptionClient

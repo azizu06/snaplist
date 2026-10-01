@@ -25,12 +25,17 @@ final class SubscriptionStore {
     private(set) var state: State = .unconfigured
     private let client: any SubscriptionClient
     private var products: [SubscriptionProductMetadata] = []
+    private var operationID = UUID()
+    private var appUserID: String?
 
     init(client: any SubscriptionClient) {
         self.client = client
     }
 
     func load(configuration: NativeSubscriptionConfiguration) async {
+        let id = UUID()
+        operationID = id
+        appUserID = nil
         guard configuration.configured else {
             state = .unconfigured
             return
@@ -38,19 +43,28 @@ final class SubscriptionStore {
         state = .loading
         do {
             try await client.configure(configuration)
-            products = try await client.loadProducts()
+            guard operationID == id else { return }
+            let loaded = try await client.loadProducts()
+            guard operationID == id else { return }
+            products = loaded
+            appUserID = configuration.appUserID
             state = .available(products)
         } catch is CancellationError {
             return
         } catch {
+            guard operationID == id else { return }
             state = .failed(String(describing: error))
         }
     }
 
     func purchase(productID: String) async {
+        guard let appUserID else { state = .unconfigured; return }
+        let id = UUID()
+        operationID = id
         state = .purchasing(productID: productID)
         do {
-            let result = try await client.purchase(productID: productID)
+            let result = try await client.purchase(productID: productID, appUserID: appUserID)
+            guard operationID == id else { return }
             switch result {
             case .cancelled:
                 state = .available(products)
@@ -62,16 +76,22 @@ final class SubscriptionStore {
                 state = .available(products)
             }
         } catch is CancellationError {
+            guard operationID == id else { return }
             state = .available(products)
         } catch {
+            guard operationID == id else { return }
             state = .failed(String(describing: error))
         }
     }
 
     func restore() async {
+        guard let appUserID else { state = .unconfigured; return }
+        let id = UUID()
+        operationID = id
         state = .restoring
         do {
-            let result = try await client.restore()
+            let result = try await client.restore(appUserID: appUserID)
+            guard operationID == id else { return }
             switch result {
             case .nothingToRestore:
                 state = .restoreNotFound
@@ -81,8 +101,10 @@ final class SubscriptionStore {
                 state = .awaitingServerVerification(action: .restore)
             }
         } catch is CancellationError {
+            guard operationID == id else { return }
             state = .available(products)
         } catch {
+            guard operationID == id else { return }
             state = .failed(String(describing: error))
         }
     }
@@ -90,6 +112,7 @@ final class SubscriptionStore {
     /// RevenueCat CustomerInfo never calls this. Only the authenticated server
     /// response backed by the #168 ledger may promote advisory state to verified.
     func applyServerVerification(_ entitlement: ServerVerifiedSubscription) {
+        operationID = UUID()
         state = .verified(entitlement)
     }
 }

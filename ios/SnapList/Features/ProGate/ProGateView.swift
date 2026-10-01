@@ -24,6 +24,9 @@ enum ProGateCopy {
     static let nothingToRestore =
         "No SnapList Pro subscription was found on this Apple Account. If you bought it with a different Apple Account, sign in with that one and try again."
     static let confirmingTitle = "Confirming your subscription"
+    static let pendingTitle = "Subscription not confirmed yet"
+    static let pendingStatement =
+        "SnapList hasn’t confirmed Pro on this account yet. Check again or restore your purchase. You can close this screen safely."
     static let confirmingStatement =
         "SnapList turns Pro on after the App Store and your SnapList account both confirm the purchase."
     static let confirmingSubline =
@@ -122,6 +125,9 @@ struct ProGateSheet: View {
         .interactiveDismissDisabled(!store.isDismissible)
         .onAppear(perform: focusHeading)
         .onChange(of: store.state) { _, _ in focusHeading() }
+        .onChange(of: ClerkAuthenticationComposition.currentUserID()) { _, _ in
+            store.accountChanged()
+        }
     }
 
     private var pinnedFooter: some View {
@@ -159,6 +165,8 @@ struct ProGateSheet: View {
         switch store.state {
         case .offer:
             badge(symbol: "sparkles")
+        case .verificationPending:
+            badge(symbol: "clock")
         case .confirming:
             ZStack {
                 Circle().fill(SnapListColorToken.actionTint.color)
@@ -222,9 +230,11 @@ struct ProGateSheet: View {
             if context == .itemGate {
                 reassurance
             }
-        case .confirming:
+        case .confirming, .verificationPending:
             centeredStatement(
-                ProGateCopy.confirmingStatement,
+                store.state == .verificationPending
+                    ? ProGateCopy.pendingStatement
+                    : ProGateCopy.confirmingStatement,
                 subline: context == .itemGate
                     ? ProGateCopy.confirmingSubline
                     : ProGateCopy.plansConfirmingSubline
@@ -487,6 +497,17 @@ struct ProGateSheet: View {
                 )
                 .padding(.bottom, 16)
                 .accessibilityIdentifier("pro-gate.confirming")
+        case .verificationPending:
+            VStack(spacing: 8) {
+                proGatePrimaryButton("Check again") {
+                    Task { await store.refreshPendingVerification() }
+                }
+                .accessibilityIdentifier("pro-gate.check-again")
+                restoreControl(isRestoring: false)
+                plainButton("Close", identifier: "pro-gate.close") {
+                    store.dismiss()
+                }
+            }
         case .ready:
             proGatePrimaryButton(
                 context == .itemGate ? "Start this listing" : "Done",
@@ -642,6 +663,7 @@ struct ProGateSheet: View {
         case .offer:
             context == .itemGate ? ProGateCopy.offerTitle : ProGateCopy.plansTitle
         case .confirming: ProGateCopy.confirmingTitle
+        case .verificationPending: ProGateCopy.pendingTitle
         case .ready(let source):
             source == .purchase
                 ? ProGateCopy.purchaseReadyTitle
@@ -658,7 +680,7 @@ struct ProGateSheet: View {
     /// states are a single outcome, so they center on it.
     private var isOutcomeState: Bool {
         switch store.state {
-        case .confirming, .ready: true
+        case .confirming, .verificationPending, .ready: true
         case .offer, .hidden: false
         }
     }
@@ -818,11 +840,14 @@ struct ProGateFixtureHostView: View {
                 )
                 : .idle
         )
+        .task {
+            if fixture.exercisesPurchase { _ = await store.prepare() }
+        }
         .sheet(isPresented: fixtureBinding) {
             ProGateSheet(
                 store: store,
                 listingSummary: .fixture,
-                startListing: {},
+                startListing: { _ = store.consumeResumeIntent() },
                 fallbackToPhotoReview: {},
                 context: fixture.sheetContext
             )

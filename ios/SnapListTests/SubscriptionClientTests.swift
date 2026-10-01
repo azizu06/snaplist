@@ -96,6 +96,7 @@ final class SubscriptionClientTests: XCTestCase {
     /// the SDK stayed bound to A until relaunch, so B could not load the plan
     /// and a checkout could have been attributed to A. B's server-issued ID
     /// now rebinds the SDK with `logIn`, never `logOut`, never a reconfigure.
+    @MainActor
     func testAccountSwitchRebindsTheSDKToTheCurrentServerIssuedUser() async throws {
         let identity = RecordingRevenueCatIdentity()
         let client = RevenueCatSubscriptionClient(identity: identity)
@@ -113,6 +114,7 @@ final class SubscriptionClientTests: XCTestCase {
 
     /// `logIn` from an anonymous ID aliases it into the new account. SnapList
     /// never configures one, so meeting one refuses instead of merging.
+    @MainActor
     func testAnonymousSDKIdentityIsNeverMergedIntoTheSignedInAccount() async {
         let identity = RecordingRevenueCatIdentity(
             configuredAs: "$RCAnonymousID:device",
@@ -133,6 +135,7 @@ final class SubscriptionClientTests: XCTestCase {
     }
 
     /// A failed switch leaves nothing a purchase could use for the old user.
+    @MainActor
     func testFailedAccountSwitchLeavesTheClientUnconfigured() async throws {
         let identity = RecordingRevenueCatIdentity()
         let client = RevenueCatSubscriptionClient(identity: identity)
@@ -147,6 +150,25 @@ final class SubscriptionClientTests: XCTestCase {
         do {
             _ = try await client.purchase(productID: "snaplist.pro.monthly")
             XCTFail("A purchase must not run after a failed switch")
+        } catch {
+            XCTAssertEqual(error as? SubscriptionClientError, .unconfigured)
+        }
+    }
+
+    @MainActor
+    func testPurchaseAndRestoreRefuseAnAccountThatDidNotLoadTheOffer() async throws {
+        let identity = RecordingRevenueCatIdentity()
+        let client = RevenueCatSubscriptionClient(identity: identity)
+        try await client.configure(.revenueCatFixture(appUserID: "user_B"))
+        do {
+            _ = try await client.purchase(productID: "snaplist.pro.monthly", appUserID: "user_A")
+            XCTFail("A stale A offer must not purchase for B.")
+        } catch {
+            XCTAssertEqual(error as? SubscriptionClientError, .unconfigured)
+        }
+        do {
+            _ = try await client.restore(appUserID: "user_A")
+            XCTFail("A stale A restore must not run for B.")
         } catch {
             XCTAssertEqual(error as? SubscriptionClientError, .unconfigured)
         }

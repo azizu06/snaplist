@@ -49,16 +49,19 @@ struct LiveRevenueCatIdentity: RevenueCatIdentity {
     }
 }
 
-final class RevenueCatSubscriptionClient: SubscriptionClient, @unchecked Sendable {
+actor RevenueCatSubscriptionClient: SubscriptionClient {
     private let identity: any RevenueCatIdentity
     private var configuration: NativeSubscriptionConfiguration?
     private var packagesByProductID: [String: Package] = [:]
+    private var configurationID = UUID()
 
     init(identity: any RevenueCatIdentity = LiveRevenueCatIdentity()) {
         self.identity = identity
     }
 
     func configure(_ configuration: NativeSubscriptionConfiguration) async throws {
+        let id = UUID()
+        configurationID = id
         guard configuration.configured,
               let publicSDKKey = configuration.publicSDKKey,
               !publicSDKKey.isEmpty,
@@ -89,12 +92,18 @@ final class RevenueCatSubscriptionClient: SubscriptionClient, @unchecked Sendabl
             packagesByProductID = [:]
             try await identity.logIn(configuration.appUserID)
         }
+        guard configurationID == id, identity.appUserID == configuration.appUserID else {
+            throw SubscriptionClientError.unconfigured
+        }
         self.configuration = configuration
     }
 
     func loadProducts() async throws -> [SubscriptionProductMetadata] {
         guard let configuration else { throw SubscriptionClientError.unconfigured }
         let offerings = try await Purchases.shared.offerings()
+        guard self.configuration == configuration, identity.appUserID == configuration.appUserID else {
+            throw SubscriptionClientError.unconfigured
+        }
         let offering = configuration.offeringID.flatMap(offerings.offering(identifier:))
             ?? offerings.current
         guard let offering else { throw SubscriptionClientError.offeringUnavailable }
@@ -126,7 +135,12 @@ final class RevenueCatSubscriptionClient: SubscriptionClient, @unchecked Sendabl
     }
 
     func purchase(productID: String) async throws -> SubscriptionAdvisoryOutcome {
-        guard configuration != nil else { throw SubscriptionClientError.unconfigured }
+        guard let configuration else { throw SubscriptionClientError.unconfigured }
+        return try await purchase(productID: productID, appUserID: configuration.appUserID)
+    }
+
+    func purchase(productID: String, appUserID: String) async throws -> SubscriptionAdvisoryOutcome {
+        try requireIdentity(appUserID)
         guard let package = packagesByProductID[productID] else {
             throw SubscriptionClientError.productUnavailable
         }
@@ -146,15 +160,28 @@ final class RevenueCatSubscriptionClient: SubscriptionClient, @unchecked Sendabl
     }
 
     func restore() async throws -> SubscriptionAdvisoryOutcome {
+        guard let configuration else { throw SubscriptionClientError.unconfigured }
+        return try await restore(appUserID: configuration.appUserID)
+    }
+
+    func restore(appUserID: String) async throws -> SubscriptionAdvisoryOutcome {
+        try requireIdentity(appUserID)
         guard let configuration,
               let entitlementID = configuration.entitlementID else {
             throw SubscriptionClientError.unconfigured
         }
         let customerInfo = try await Purchases.shared.restorePurchases()
+        try requireIdentity(appUserID)
         guard customerInfo.entitlements[entitlementID]?.isActive == true else {
             return .nothingToRestore
         }
         return .awaitingServerVerification
+    }
+
+    private func requireIdentity(_ appUserID: String) throws {
+        guard configuration?.appUserID == appUserID, identity.appUserID == appUserID else {
+            throw SubscriptionClientError.unconfigured
+        }
     }
 }
 
