@@ -111,6 +111,9 @@ struct VoiceNoteSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @AccessibilityFocusState private var focusedControl: FocusTarget?
     @State private var dismissAfterSuccessfulSave = false
+    /// How far the seller has pulled the panel down. Only the panel moves:
+    /// Photo Review yields its own drag while the voice note is open.
+    @State private var dragTranslation: CGFloat = 0
 
     private enum FocusTarget: Hashable {
         case savedSummary
@@ -129,6 +132,8 @@ struct VoiceNoteSheet: View {
                     .padding(.horizontal, SnapListMetrics.screenGutter)
             }
             .scrollIndicators(.hidden)
+            // Content that fits does not rubber-band under the panel's drag.
+            .scrollBounceBehavior(.basedOnSize)
 
             Button(action: {}) {
                 Capsule()
@@ -139,6 +144,11 @@ struct VoiceNoteSheet: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Sheet Grabber")
+            .modifier(VoiceNoteGrabberDrag(
+                isEnabled: swipeCanMovePanel,
+                changed: { dragTranslation = $0 },
+                ended: finishSwipe
+            ))
         }
         .frame(
             maxWidth: .infinity,
@@ -158,6 +168,17 @@ struct VoiceNoteSheet: View {
                 style: .continuous
             )
         )
+        .offset(y: ScanDrawerDragPolicy.offset(forTranslation: dragTranslation))
+        .modifier(DownwardDragPanModifier(
+            isEnabled: swipeCanMovePanel,
+            changed: { dragTranslation = $0 },
+            ended: finishSwipe
+        ))
+        // VoiceOver's escape gesture is the swipe's twin: it closes the voice
+        // note on the same terms and never reaches the page underneath.
+        .accessibilityAction(.escape) {
+            performSwipeDismissal()
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
@@ -615,8 +636,8 @@ struct VoiceNoteSheet: View {
         isMuted: Bool
     ) -> some View {
         Text(VoiceNotePresentation.elapsedText(seconds))
-            .font(.system(size: 15, weight: .semibold))
             .monospacedDigit()
+            .snapListTypography(.rowTitle)
             .foregroundStyle(
                 isMuted
                     ? SnapListColorToken.textTertiary.color
@@ -818,6 +839,45 @@ struct VoiceNoteSheet: View {
         store.toggleTakePlayback()
     }
 
+    /// A live take holds the panel still; every other phase lets it follow
+    /// the finger and decides on release.
+    private var swipeCanMovePanel: Bool {
+        VoiceNoteSwipePolicy.dismissal(for: store.phase) != .blocked
+    }
+
+    private func finishSwipe(translation: CGFloat, velocity: CGFloat) {
+        let outcome = ScanDrawerDragPolicy.outcome(
+            translation: translation,
+            velocity: velocity,
+            drawerHeight: VoiceNotePresentation.sheetHeight
+        )
+        guard outcome == .dismiss else {
+            settleSwipe()
+            return
+        }
+        performSwipeDismissal()
+    }
+
+    /// The panel keeps the finger's offset while it leaves; anything that
+    /// leaves it up springs it back.
+    private func performSwipeDismissal() {
+        switch VoiceNoteSwipePolicy.dismissal(for: store.phase) {
+        case .blocked:
+            settleSwipe()
+        case .keepTakeAndClose:
+            saveAndDismissWhenCommitted()
+        case .close:
+            closePresentationIfPossible()
+        }
+    }
+
+    private func settleSwipe() {
+        guard dragTranslation != 0 else { return }
+        withAnimation(ScanDrawerMotionPolicy.presentationAnimation(
+            reduceMotion: reduceMotion
+        )) { dragTranslation = 0 }
+    }
+
     /// Delete on review keeps the panel open, on the state it fell back to:
     /// the empty recorder, or the prior saved note.
     private func discardReviewedTake() {
@@ -853,11 +913,13 @@ struct VoiceNoteSheet: View {
             break
         case .ready, .accessOff, .interrupted, .saveFailed:
             dismissAfterSuccessfulSave = false
+            settleSwipe()
         }
     }
 
     private func closePresentationIfPossible() {
         guard store.dismiss() else {
+            settleSwipe()
             return
         }
         if let dismissPresentation {
@@ -885,6 +947,33 @@ enum VoiceNoteSheetLayout {
     /// The title reads first even while recording, ahead of Cancel, the
     /// timer and Stop (`VoiceNoteRecordingAccessibilityElement`).
     static let titleSortPriority: Double = 4
+}
+
+/// Before iOS 18 there is no UIKit pan bridge, so the grabber carries the
+/// panel's drag on its own, as the Scan drawer's grabber does.
+private struct VoiceNoteGrabberDrag: ViewModifier {
+    let isEnabled: Bool
+    let changed: (CGFloat) -> Void
+    let ended: (CGFloat, CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content
+        } else {
+            content.gesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged {
+                        changed(ScanDrawerDragPolicy.offset(
+                            forTranslation: $0.translation.height
+                        ))
+                    }
+                    .onEnded {
+                        ended($0.translation.height, $0.velocity.height)
+                    },
+                including: isEnabled ? .all : .subviews
+            )
+        }
+    }
 }
 
 private struct VoiceNoteSheetActionStyle: ButtonStyle {

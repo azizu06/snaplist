@@ -134,6 +134,32 @@ final class ScanDrawerPresentationTests: XCTestCase {
         )
     }
 
+    /// Photo Review takes the whole screen once there are photos to review;
+    /// the camera keeps the popup. Expanded, the status bar comes back to the
+    /// content as an inset with the slim grabber band under it, and the card
+    /// drops its corner radius so no dimmed wall shows at the screen corners.
+    func testPhotoReviewExpandsTheDrawerToTheWholeScreen() {
+        let insets = EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)
+        let expanded = ScanDrawerLayout(
+            safeAreaSize: CGSize(width: 402, height: 778),
+            safeAreaInsets: insets,
+            isExpanded: true
+        )
+        let popup = ScanDrawerLayout(
+            safeAreaSize: CGSize(width: 402, height: 778),
+            safeAreaInsets: insets
+        )
+
+        XCTAssertEqual(expanded.drawerHeight, 874, accuracy: 0.001)
+        XCTAssertEqual(
+            expanded.contentInsets,
+            EdgeInsets(top: 76, leading: 0, bottom: 34, trailing: 0)
+        )
+        XCTAssertEqual(expanded.cornerRadius, 0)
+        XCTAssertEqual(popup.drawerHeight, 786.6, accuracy: 0.001)
+        XCTAssertEqual(popup.cornerRadius, ScanDrawerMetrics.cornerRadius)
+    }
+
     /// Landscape puts the Dynamic Island and the rounded corners at the sides.
     /// The drawer spans the full width, so its content has to be handed those
     /// side insets back, and the height still comes from the physical screen.

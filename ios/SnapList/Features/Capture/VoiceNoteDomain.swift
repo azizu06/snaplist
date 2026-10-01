@@ -119,6 +119,33 @@ enum VoiceNotePresentation {
     }
 }
 
+/// What a downward swipe on the open voice note does. The voice note is the
+/// active drawer over Photo Review, so its swipe closes it, never the page
+/// underneath; and a swipe may only do what one of the panel's own controls
+/// already does, so it can never be the way audio is lost.
+enum VoiceNoteSwipeDismissal: Equatable {
+    /// The panel springs back. A live take ends through Stop or Cancel, and a
+    /// take whose save failed through Try again or Close.
+    case blocked
+    /// The take under review is kept, as the collapse control keeps it.
+    case keepTakeAndClose
+    /// The panel closes, as its Close control closes it.
+    case close
+}
+
+enum VoiceNoteSwipePolicy {
+    static func dismissal(for phase: VoiceNotePhase) -> VoiceNoteSwipeDismissal {
+        switch phase {
+        case .recording, .saveFailed:
+            .blocked
+        case .takeReady:
+            .keepTakeAndClose
+        case .ready, .saved, .accessOff, .interrupted:
+            .close
+        }
+    }
+}
+
 @MainActor
 protocol VoiceNoteAudioClient: AnyObject {
     var permission: VoiceNoteMicrophonePermission { get }
