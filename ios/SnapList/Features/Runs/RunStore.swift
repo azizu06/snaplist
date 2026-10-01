@@ -52,6 +52,22 @@ final class RunDetailStore {
         }
     }
 
+    /// The listing a finished run produced when Listing Review cannot open it.
+    /// Review reads only unpublished drafts, so a listing already posted to
+    /// eBay answers `canOpenReview == false`; the seller still has a posting to
+    /// reach. Present only for a succeeded, completed run of this exact id.
+    func finishedListingWithoutReview(for runID: UUID) async -> UUID? {
+        guard let token = try? await tokenProvider.bearerToken(),
+              let run = try? await service.fetchRun(id: runID, bearerToken: token),
+              run.id == runID,
+              run.status == .succeeded,
+              run.stage == .completed,
+              !run.legalActions.canOpenReview else {
+            return nil
+        }
+        return run.listingID
+    }
+
     /// The one path every seller-facing surface uses to reach a run's listing
     /// directly — Processing rows, settled Trophy Wall tiles, and (#963) the
     /// removed run-status card's former callers alike. A signed-out guest must

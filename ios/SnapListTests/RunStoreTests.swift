@@ -75,6 +75,54 @@ final class RunStoreTests: XCTestCase {
         XCTAssertEqual(fetches, 1, "Overlap must not add a second canonical fetch.")
     }
 
+    /// Listing Review reads only unpublished drafts, so a finished run whose
+    /// listing is live on eBay answers `canOpenReview == false`. Its Flips tile
+    /// must hand the seller's eBay page to the system, not say "unavailable".
+    func testTileForPostedListingOpensItsEbayPostingInsteadOfBeingRefused() async throws {
+        let listingID = UUID(uuidString: "31700000-0000-4000-8000-000000000020")!
+        let run = Self.makeRun(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: false,
+            listingID: listingID
+        )
+        let tokenProvider = ReviewLatencyBearerProvider()
+        let runStore = RunDetailStore(
+            service: RecordingRunService(results: [.success(run)]),
+            tokenProvider: tokenProvider
+        )
+        let ebay = PostedListingStatusService(
+            EbayPublishStatus(
+                listingID: listingID,
+                outcome: .published,
+                ebayListingID: "177000000001",
+                ebayOfferID: "offer-1",
+                alreadyPublished: true,
+                environment: .production
+            )
+        )
+        var opened: [URL] = []
+        let executor = ProcessingActionExecutor(
+            runStore: runStore,
+            listingReviewStore: ListingReviewStore(
+                service: ReviewLatencyReviewService(review: try Self.makeReview(), delay: .zero),
+                persistence: MemoryListingReviewDraftPersistence(),
+                tokenProvider: tokenProvider
+            ),
+            guestClaimPresentation: ProcessingGuestClaimPresentationHost(),
+            listingReviewPresentation: ListingReviewPresentationHost(),
+            applyRetryResult: { _ in false },
+            selectScan: {},
+            ebayPublishService: ebay,
+            openExternalURL: { opened.append($0) }
+        )
+
+        let outcome = await executor.execute(.review(runID: run.id))
+
+        XCTAssertEqual(outcome, .openedEbayPosting)
+        XCTAssertEqual(opened, [URL(string: "https://www.ebay.com/itm/177000000001")!])
+    }
+
     /// A run the server refuses to open never presents, and its early review
     /// fetch is abandoned rather than adopted.
     func testRefusedRunDiscardsTheEarlyReviewFetch() async throws {
@@ -1249,5 +1297,37 @@ private actor ReviewLatencyRunService: RunServing {
         }
         try await Task.sleep(for: delay)
         return run
+    }
+}
+
+/// Answers only the read-only status call a posted-listing tile makes.
+private actor PostedListingStatusService: EbayPublishFeatureServing {
+    private let status: EbayPublishStatus
+
+    init(_ status: EbayPublishStatus) {
+        self.status = status
+    }
+
+    func createOAuthSession(idempotencyKey: UUID) async throws -> EbayOAuthSession {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func connection() async throws -> EbayConnectionStatus {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func disconnect() async throws -> EbayConnectionStatus {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func preflight(listingID: UUID) async throws -> EbayPublishPreflight {
+        throw EbayPublishClientError.invalidResponse
+    }
+    func status(listingID: UUID) async throws -> EbayPublishStatus {
+        status
+    }
+    func publish(
+        listingID: UUID,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID
+    ) async throws -> EbayPublishTransportOutcome {
+        throw EbayPublishClientError.invalidResponse
     }
 }
