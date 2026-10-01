@@ -105,6 +105,26 @@ final class TrophyWallSeenReadyBadgeTests: XCTestCase {
         XCTAssertEqual(store.unseenReadyCount, 2)
     }
 
+    /// Mark shared moves the item to Flips at once; To list must not keep
+    /// offering it for review, or count it as ready, until the next refresh.
+    func testExportSharedMovesTheItemOutOfToListImmediately() async {
+        let store = await loadedStore([
+            canonical(1, .readyToReview),
+            canonical(2, .readyToReview),
+        ])
+        XCTAssertEqual(store.unseenReadyCount, 2)
+
+        store.applyExportShared(runID: run(1))
+
+        XCTAssertEqual(store.unseenReadyCount, 1)
+        XCTAssertEqual(store.unseenReadyRunIDs, [run(2)])
+        XCTAssertEqual(store.processingRows.map(\.itemName), ["Item 2"])
+        XCTAssertEqual(
+            store.cards.first { $0.identity == .run(run(1)) }?.state,
+            .exportPrepared
+        )
+    }
+
     /// The shell keeps refreshing only while something is still in flight, so
     /// an item that finishes while the seller sits on Flips still reaches the
     /// badge without a manual pull.

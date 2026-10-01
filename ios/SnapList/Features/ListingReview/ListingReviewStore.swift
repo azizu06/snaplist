@@ -138,7 +138,9 @@ final class ListingReviewStore {
     func open(_ requested: ListingReviewResult) async -> Bool {
         openGeneration &+= 1
         let generation = openGeneration
-        resetForOpen()
+        resetForOpen(
+            keepingContentFor: requested.binding.runID
+        )
         // Single use: an early fetch for this run is adopted, one for any
         // other run is cancelled, and either way none outlives this open.
         let early = earlyCanonicalFetch
@@ -769,13 +771,19 @@ final class ListingReviewStore {
         }
     }
 
-    private func resetForOpen() {
+    /// Reopening the run already on screen (Flips after a share, say) keeps
+    /// its last content visible while the canonical fetch confirms it, rather
+    /// than blanking the review to a spinner. With no scope there is nothing
+    /// it can save until `open` adopts the fresh copy.
+    private func resetForOpen(keepingContentFor runID: UUID? = nil) {
         draftGeneration &+= 1
         pendingAutosaveGeneration = nil
         resaveRequested = false
         phase = .idle
-        snapshot = nil
-        draft = nil
+        if runID == nil || snapshot?.binding.runID != runID {
+            snapshot = nil
+            draft = nil
+        }
         activeScope = nil
         pendingSave = nil
         savedDraft = nil

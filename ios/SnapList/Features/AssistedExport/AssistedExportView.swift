@@ -27,24 +27,25 @@ struct AssistedExportHostView: View {
         summary: AssistedExportItemSummary,
         service: any AssistedExportServing,
         funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink(),
-        refreshPack: @escaping @MainActor () async -> AssistedExportPack?
+        refreshPack: @escaping @MainActor () async -> AssistedExportPack?,
+        onShared: (@MainActor () -> Void)? = nil
     ) {
         self.pack = pack
         self.summary = summary
         self.refreshPack = refreshPack
         _observedListingRevision = State(initialValue: pack.reviewRevision)
-        _store = State(
-            initialValue: AssistedExportStore(
-                pack: pack,
-                service: service,
-                funnelAnalytics: funnelAnalytics,
-                // Only the product persists progress. Tests and fixtures take
-                // the in-memory default so nothing leaks between launches.
-                progress: AssistedExportUserDefaultsProgress(
-                    userID: ClerkAuthenticationComposition.currentUserID()
-                )
+        let store = AssistedExportStore(
+            pack: pack,
+            service: service,
+            funnelAnalytics: funnelAnalytics,
+            // Only the product persists progress. Tests and fixtures take
+            // the in-memory default so nothing leaks between launches.
+            progress: AssistedExportUserDefaultsProgress(
+                userID: ClerkAuthenticationComposition.currentUserID()
             )
         )
+        store.onShared = onShared
+        _store = State(initialValue: store)
     }
 
     var body: some View {
@@ -148,9 +149,11 @@ struct AssistedExportView: View {
             Group {
                 switch store.phase {
                 case .loading:
-                    ProgressView()
-                        .frame(maxWidth: .infinity, minHeight: 240)
-                        .accessibilityLabel("Loading sharing pack")
+                    // The pack is already on the device, so the drawer opens
+                    // on its steps instead of a blank spinner. They stay inert
+                    // until the server's receipts arrive.
+                    preparedContent
+                        .disabled(true)
                 case .failed:
                     ContentUnavailableView {
                         Label(
@@ -167,13 +170,7 @@ struct AssistedExportView: View {
                     }
                     .frame(minHeight: 240)
                 case .ready:
-                    ScrollView {
-                        drawerContent
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                                contentHeight = $0
-                            }
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
+                    preparedContent
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
@@ -206,11 +203,21 @@ struct AssistedExportView: View {
 
     private var domain: AssistedExportDomain { store.domain }
 
+    private var preparedContent: some View {
+        ScrollView {
+            drawerContent
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    contentHeight = $0
+                }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
     /// Fits the content. Accessibility sizes get the full height, where the
     /// content scrolls.
     private var detents: Set<PresentationDetent> {
         if dynamicTypeSize.isAccessibilitySize { return [.large] }
-        guard store.phase == .ready else { return [.medium] }
+        guard store.phase != .failed else { return [.medium] }
         return [.height(headerHeight + contentHeight)]
     }
 

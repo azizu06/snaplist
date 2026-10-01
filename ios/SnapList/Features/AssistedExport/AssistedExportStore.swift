@@ -136,6 +136,9 @@ final class AssistedExportStore {
     private(set) var isWriting = false
     private(set) var actionMessage: String?
     private(set) var completedAction: AssistedExportCompletedAction?
+    /// Told once the server records a new Shared receipt, so the caller can
+    /// move the item to Flips without waiting for its next refresh.
+    @ObservationIgnored var onShared: (@MainActor () -> Void)?
 
     private let service: any AssistedExportServing
     private let funnelAnalytics: any FunnelAnalyticsEventSinking
@@ -456,6 +459,7 @@ final class AssistedExportStore {
             }
             if case .recorded = confirmOutcome {
                 funnelAnalytics.record(.exportPackShared, eventID: UUID())
+                onShared?()
             }
         } catch AssistedExportClientError.conflict {
             domain.dismissConfirmSheet()

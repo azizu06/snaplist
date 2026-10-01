@@ -56,11 +56,14 @@ enum AssistedExportDeviceActionError: Error {
     case photoLibraryDenied
 }
 
-private extension AssistedExportDestination {
+extension AssistedExportDestination {
     var sellerHandoffURL: URL {
         switch self {
         case .facebookMarketplace:
-            return URL(string: "https://www.facebook.com/marketplace/create/item")!
+            // The Facebook app routes `/marketplace/create/item` through
+            // Marketplace search for the literal word "item", so open
+            // Marketplace home; the seller starts the listing from there.
+            return URL(string: "https://www.facebook.com/marketplace/")!
         case .mercari:
             return URL(string: "https://www.mercari.com/us/sell/")!
         case .depop:

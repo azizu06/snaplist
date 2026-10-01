@@ -2718,7 +2718,8 @@ struct TrophyWallFeatureView: View {
             dismissReview: { listingReviewPresentation.dismiss() },
             goToTrophyWall: { listingReviewPresentation.leave(to: returnToTrophyWall) },
             startNewItem: startNewItem,
-            activationInteraction: activationListingReviewInteraction
+            activationInteraction: activationListingReviewInteraction,
+            exportShared: { store.applyExportShared(runID: $0) }
         )
         if #available(iOS 18, *),
            TrophyWallZoomTransitionPolicy.shouldZoom(
@@ -2963,7 +2964,8 @@ private struct ProcessingListingReviewSurface: View {
                 dismissReview: { listingReviewPresentation.dismiss() },
                 goToTrophyWall: { listingReviewPresentation.leave(to: goToTrophyWall) },
                 startNewItem: onScan,
-                activationInteraction: activationListingReviewInteraction
+                activationInteraction: activationListingReviewInteraction,
+                exportShared: { store.applyExportShared(runID: $0) }
             )
         }
         .onChange(of: listingReviewPresentation.isPresented) { _, isPresented in
