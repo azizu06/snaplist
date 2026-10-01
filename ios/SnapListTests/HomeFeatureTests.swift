@@ -1969,6 +1969,60 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertTrue(openedRoutes.isEmpty)
     }
 
+    /// An item deleted on the server must leave the wall on the next complete
+    /// refresh, not only after a relaunch. A failed or half-paged refresh proves
+    /// nothing about what is gone, so it keeps every row.
+    func testCompleteRefreshDropsRunsTheServerNoLongerListsAndFailedRefreshKeepsThem() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let savedCards = store.cards
+
+        await store.refreshCollection(
+            using: ScriptedTrophyWallRunHistoryRepository(
+                results: [.failure(URLError(.badServerResponse))]
+            )
+        )
+        XCTAssertEqual(store.cards, savedCards)
+
+        let survivingPage = try fixture.historyPage(
+            status: .queued,
+            stage: .queued,
+            terminalOutcome: nil
+        )
+        await store.refreshCollection(
+            using: ScriptedTrophyWallRunHistoryRepository(
+                results: [
+                    .page(TrophyWallRunHistoryPage(
+                        entries: survivingPage.entries,
+                        nextCursor: "page-2"
+                    )),
+                    .failure(URLError(.timedOut)),
+                ]
+            )
+        )
+        XCTAssertTrue(
+            store.cards.contains { $0.identity == .run(fixture.thirdRunID) },
+            "A refresh that never reached the last page cannot prove a deletion."
+        )
+
+        await store.refreshCollection(
+            using: ScriptedTrophyWallRunHistoryRepository(
+                results: [.page(survivingPage)]
+            )
+        )
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        let runIDs = store.cards.compactMap { card -> UUID? in
+            guard case .run(let runID) = card.identity else { return nil }
+            return runID
+        }
+        XCTAssertEqual(runIDs, [fixture.runID])
+        XCTAssertTrue(
+            store.cards.contains { $0.identity == .local(fixture.unrelatedLogicalID) },
+            "Local intake not yet accepted is not the server's to retire."
+        )
+    }
+
     func testOfflineRefreshKeepsOwnerScopedSavedTrophyCardsWithoutInventingServerTruth() async {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: fixture.processingInitialCards)
