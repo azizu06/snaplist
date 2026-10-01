@@ -10,5 +10,6 @@
   "ambiguous": false,
   "uncertaintyReason": null,
   "candidates": null,
-  "identityHintUsed": null
+  "identityHintUsed": null,
+  "sellerIdentity": null
 }

@@ -74,8 +74,11 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   unmistakable, the vision role names them; counterfeit or authenticity doubt is raised through the
   uncertainty signal and the confidence composite, never by returning a hedge or a null identity. A
   hedge ("AirPods Pro-style") is not an identity and is discarded. The seller's transcribed voice note
-  may HINT an identity as clearly delimited unverified data — adopted only when the photos agree,
-  recorded as seller-hinted, and worth reduced identification completeness.
+  may supply an identity as clearly delimited unverified data. Combine imperfect transcription,
+  photos and product knowledge to resolve the best canonical brand/model family when the photos do
+  not contradict it. Missing markings or an unknown version/trim must not erase a usable family or
+  skip sold research. Record this as seller-stated (not photo-verified), disclose it in the listing,
+  and retain reduced identification completeness; reject a photo-contradicted claim.
 - **A model-generated title never earns a sold-comp query.** The vision title is written for every
   item, generic ones included, so it is not identification: it routes no tier and keys no sold or web
   query. It may travel to the model-backed pricing tiers only as a clearly labeled non-identity hint

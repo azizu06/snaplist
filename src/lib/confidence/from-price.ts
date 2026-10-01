@@ -174,7 +174,7 @@ export function identificationSignalsFrom(
     // An identity the seller NAMED is unverified context, not verified evidence
     // (#1120, PRD user story 11) — the composite gives it half credit. A missing
     // source reads as photo-read, which is what every pre-#1120 row is.
-    identitySellerHinted: attributes.identitySource === "seller-hinted",
+    identitySellerHinted: attributes.identitySource === "seller-hinted" || attributes.identitySource === "seller-stated",
   };
 }
 

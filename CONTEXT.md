@@ -31,7 +31,9 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
 - **Item** — one physical thing the seller wants to sell. The root entity with photos, extracted
   **attributes**, a **condition**, and eventually a **price recommendation**.
 - **Attributes** — Zod-validated facts extracted from photos: brand, model, category, key specs, and
-  any passively decoded ISBN/UPC. Prefer “attributes” over “metadata” or “details.”
+  any passively decoded ISBN/UPC. A canonical family adopted from compatible voice/product knowledge
+  carries seller-stated provenance and reduced confidence; unknown trim stays unconfirmed.
+  Prefer “attributes” over “metadata” or “details.”
 - **Condition** — the assessed wear state of an item. Prefer “condition” over “quality.”
 - **ISBN / UPC** — passive identification aids. ISBN may resolve structured catalog identity; UPC
   may sharpen search. Neither creates a barcode-only Scan mode, and UPC is never a price source.

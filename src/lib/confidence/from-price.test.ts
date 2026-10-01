@@ -151,13 +151,13 @@ describe("confidenceSignalsFor — upc-aided-web strongly-corroborated asking ga
 });
 
 describe("identificationSignalsFrom — seller-hinted identity (#1120)", () => {
-  it("reports a seller-hinted identity so the composite can discount it", () => {
+  it.each(["seller-hinted", "seller-stated"] as const)("reports a %s identity so the composite can discount it", (identitySource) => {
     expect(
       identificationSignalsFrom({
         brand: "Apple",
         model: "AirPods Pro",
         category: "electronics",
-        identitySource: "seller-hinted",
+        identitySource,
       }).identitySellerHinted,
     ).toBe(true);
   });
