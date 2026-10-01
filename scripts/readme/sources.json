@@ -1,0 +1,9 @@
+{
+  "screens": [
+    {"source": "../../ios/Artifacts/readme-input/to-list.png", "output": "phone-to-list.webp"},
+    {"source": "../../ios/Artifacts/readme-input/listing-review.png", "output": "phone-listing-review.webp"},
+    {"source": "../../ios/Artifacts/readme-input/flips.png", "output": "phone-flips.webp"},
+    {"source": "../../ios/Artifacts/readme-input/scout-pro.png", "output": "scout-pro.webp"},
+    {"source": "../../ios/Artifacts/readme-input/sharing.png", "output": "phone-sharing.webp"}
+  ]
+}
