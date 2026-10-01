@@ -832,6 +832,11 @@ struct AppShellView: View {
     /// drawer if it happens to be up.
     private func returnToTrophyWall() {
         router.resetWallPath()
+        // A review or guest claim pushed inside To list is torn down with the
+        // path, so its own dismissal callback never runs; without this the
+        // dock stays hidden behind a review that is no longer there.
+        activationListingReviewPresented = false
+        activationGuestClaimPresented = false
         applyScanDrawer(.dismissed)
     }
 
@@ -2681,7 +2686,7 @@ struct TrophyWallFeatureView: View {
             correctionAvailability: correctionAvailability,
             forceReducedMotion: forceReducedMotion,
             dismissReview: { listingReviewPresentation.dismiss() },
-            goToTrophyWall: returnToTrophyWall,
+            goToTrophyWall: { listingReviewPresentation.leave(to: returnToTrophyWall) },
             startNewItem: startNewItem,
             activationInteraction: activationListingReviewInteraction
         )
@@ -2926,7 +2931,7 @@ private struct ProcessingListingReviewSurface: View {
                 correctionAvailability: correctionAvailability,
                 forceReducedMotion: forceReducedMotion,
                 dismissReview: { listingReviewPresentation.dismiss() },
-                goToTrophyWall: goToTrophyWall,
+                goToTrophyWall: { listingReviewPresentation.leave(to: goToTrophyWall) },
                 startNewItem: onScan,
                 activationInteraction: activationListingReviewInteraction
             )

@@ -34,6 +34,14 @@ final class ListingReviewPresentationHost {
         isPresented = false
     }
 
+    /// "Go to Flips" from inside review (eBay publish's result screen, say).
+    /// The review is pushed by this flag rather than the shell's path, so
+    /// resetting the path alone leaves it on top and the dock hidden.
+    func leave(to goToTrophyWall: () -> Void) {
+        dismiss()
+        goToTrophyWall()
+    }
+
     private func failClosed() {
         openFailed = true
         ListingReviewAnnouncement.post(
