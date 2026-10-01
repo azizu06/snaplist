@@ -76,6 +76,12 @@ export function createScriptAwareAuthorityRedis(
       const current = parseAuthority(
         store.get(authorityKey) ?? store.get(claimKey),
       );
+      if (args.length === 1) {
+        if (claim?.ownerToken !== transition.ownerToken || current?.ownerToken !== transition.ownerToken || current.state !== "terminal") return 0;
+        store.delete(claimKey);
+        store.delete(authorityKey);
+        return 1;
+      }
       if (
         claim?.ownerToken !== transition.ownerToken ||
         current?.ownerToken !== transition.ownerToken ||

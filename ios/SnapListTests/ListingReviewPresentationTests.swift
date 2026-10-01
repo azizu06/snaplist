@@ -38,6 +38,19 @@ final class ListingReviewPresentationTests: XCTestCase {
         )
     }
 
+    func testWeakerResearchLabelsUseExistingTitleWithoutChangingTheWireContract() throws {
+        for label in ["Model family match", "Category comparison", "Single sold comparison"] {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "id": "sale", "sourceURL": "https://www.ebay.com/itm/123456789012",
+                "soldPrice": 90, "currency": "USD", "title": "\(label): Actual marketplace title",
+                "condition": NSNull(), "soldAt": NSNull(),
+            ])
+            let match = try JSONDecoder().decode(ListingReviewSoldMatch.self, from: data)
+            XCTAssertEqual(match.researchMatchLabel, label)
+        }
+        XCTAssertNil(try decodedSoldMatch(sourceURL: "https://www.ebay.com/itm/123456789012").researchMatchLabel)
+    }
+
     func testSoldMatchOpensTheCanonicalEbayItemDestination() throws {
         for source in [
             "https://www.ebay.com/itm/123456789001?utm_source=receipt#details",

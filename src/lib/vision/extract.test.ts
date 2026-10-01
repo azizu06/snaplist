@@ -136,6 +136,18 @@ describe("vision/extract — schema validation + retry", () => {
     expect(attributes.model).toBeUndefined();
   });
 
+  it.each([
+    ["gaming laptop", "This is my gaming laptop", "Laptop", "Dell", "XPS 15", false],
+    ["AirPods", "These are AirPods", "AirPods earbuds", "Apple", "AirPods", true],
+    ["任天堂Switch", "任天堂Switchblade", "Game console", "Nintendo", "Switch", false],
+  ] as const)("grounds named speech without category suppression or mixed-script substring (%s)", async (sourceText, text, category, brand, model, accepted) => {
+    const { attributes } = await extractItemAttributes({ images: ["fixture.jpg"],
+      sellerContext: { text, language: "en", provenance: "seller_voice", verification: "unverified" },
+      generate: async () => ({ category, sellerIdentity: { sourceText, brand, model, contradicted: false, variantUncertain: true } }),
+    });
+    expect(attributes.model).toBe(accepted ? model : undefined);
+  });
+
   it("grounds an exact Japanese product phrase embedded in continuous speech", async () => {
     const { attributes } = await extractItemAttributes({
       images: ["console.jpg"],

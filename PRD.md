@@ -165,8 +165,16 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 - Caffein Apify is the intended primary automatic `ebay-sold` adapter, but activation is an
   operator-controlled configuration decision gated by current cost/quality evidence. Direct public
   sold-page retrieval remains a fail-soft fallback. Both use the same canonical matcher.
-- Retrieve ten sold candidates first and expand once to twenty only when fewer than three trustworthy
-  anchors survive. Persist/display at most five deterministically ranked verified matches; never pad.
+- Apify researches up to three bounded queries: thirty precise candidates, then fifty brand/model-family
+  candidates and fifty specific-category candidates when fewer than three exact anchors survive. Keep
+  actual sold amounts only, with at most five ranked cards. A lone sale is limited evidence; configuration,
+  condition and category differences receive visible weaker-comparison labels and reduced confidence.
+  Derive the recommendation and its range from the strongest available comparison basis: exact item,
+  then model family, then category. Broader cards must not outvote an available exact sale.
+  Category research never resolves the seller's identity or promotes asking/unknown accepted amounts.
+  Never cache empty, failed or unusable results. Each Actor is capped at 120 seconds/$0.25 with bounded
+  status observation up to 125 seconds; all research has a 225.5-second deadline inside the 300-second
+  worker. Later starts tighten to remaining time. Zero paid-start retries; unknown outcomes stay fenced.
 - Evidence-backed tiers cite sources. When no trustworthy sold evidence exists, complete the editable
   draft with the exact honest no-evidence language rather than failing the run.
 - Confidence is a composite of tier trust, comp agreement, and identification completeness. Raw model
@@ -176,6 +184,7 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
   signal, never by withholding the identity (#1120). A hedge ("AirPods Pro-style") is not an identity
   and is discarded. A model-generated title alone is still not an identity and never earns a sold-comp
   query: the canonical matcher can only anchor on brand, model, or a resolved product name.
+  A specific category may instead research explicitly weaker category comparisons, without identity.
 - Structured model output uses the role-keyed provider registry, Vercel AI SDK, and Zod. Optional
   listing-example retrieval is evaluation-gated, default-off, and never pricing or factual authority.
 

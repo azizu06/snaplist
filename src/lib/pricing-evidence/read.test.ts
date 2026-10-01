@@ -75,6 +75,16 @@ function row() {
 }
 
 describe("pricing-evidence read projection", () => {
+  it("keeps broader family sales limited even with four disclosed actual amounts", () => {
+    const input = row();
+    input.price_result.sources[0].kind = "family-sold-comp";
+    input.evidence[0].title = "Model family match: Sony headphones";
+    const result = buildPricingEvidenceProjection(input, { userId: "user_a", itemId: input.item_id, now: Date.parse("2026-07-20T00:00:00Z") });
+    expect(result.evidenceLevel).toBe("limited");
+    expect(result.comparables[0].title).toMatch(/^Model family match:/);
+    expect(result.comparables).toHaveLength(4);
+  });
+
   it("returns one coherent disclosed-sold snapshot with server fee and payout truth", () => {
     const projection = buildPricingEvidenceProjection(row(), {
       userId: "user_a",

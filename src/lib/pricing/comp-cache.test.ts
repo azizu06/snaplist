@@ -16,6 +16,17 @@ afterEach(() => {
 });
 
 describe("createInMemoryTtlCache", () => {
+  it("releases only the exact terminal owner and permits a later independent claim", async () => {
+    const cache = createInMemoryTtlCache<string>(60_000);
+    await cache.claim?.("item", undefined, "a");
+    expect(await cache.releaseTerminalClaim?.("item", "a")).toBe(false);
+    await cache.terminateClaimAuthority?.("item", "a");
+    expect(await cache.releaseTerminalClaim?.("item", "b")).toBe(false);
+    expect(await cache.releaseTerminalClaim?.("item", "a")).toBe(true);
+    expect(await cache.claim?.("item", undefined, "b")).toBe(true);
+    expect(await cache.releaseTerminalClaim?.("item", "a")).toBe(false);
+  });
+
   it("returns null on a miss and the stored value on a hit", async () => {
     const cache = createInMemoryTtlCache<number[]>(10_000);
     expect(await cache.get("k")).toBeNull();
@@ -59,6 +70,24 @@ describe("createInMemoryTtlCache", () => {
 });
 
 describe("createUpstashTtlCache (injected fake client)", () => {
+  it("atomically releases only a terminal owner and preserves a replacement owner's claim", async () => {
+    let replacement: string | null = null;
+    const redis = createScriptAwareAuthorityRedis({ beforeTransition: ({ claimKey }) => {
+      if (replacement) { redis.writeAuthority(claimKey, replacement, "live"); replacement = null; }
+    } });
+    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, redis.client);
+    await cache.claim?.("item", undefined, "a");
+    expect(await cache.releaseTerminalClaim?.("item", "a")).toBe(false);
+    await cache.terminateClaimAuthority?.("item", "a");
+    expect(await cache.releaseTerminalClaim?.("item", "b")).toBe(false);
+    replacement = "b";
+    expect(await cache.releaseTerminalClaim?.("item", "a")).toBe(false);
+    expect(await cache.getClaimOwner?.("item")).toBe("b");
+    await cache.terminateClaimAuthority?.("item", "b");
+    expect(await cache.releaseTerminalClaim?.("item", "b")).toBe(true);
+    expect(await cache.claim?.("item", undefined, "c")).toBe(true);
+  });
+
   it("namespaces keys, sets with a TTL, and round-trips JSON", async () => {
     const calls: { set: [string, string, { ex: number }][]; get: string[] } = {
       set: [],

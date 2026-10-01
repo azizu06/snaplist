@@ -84,7 +84,7 @@ function adoptSellerFamily(raw: VisionGenerateResult, context?: SellerContext): 
 } {
   const claim = sellerIdentitySchema.safeParse(raw.sellerIdentity);
   if (!context || !claim.success || claim.data.contradicted ||
-      !spokenProductPhrase(context.text, claim.data.sourceText, raw.category) ||
+      !spokenProductPhrase(context.text, claim.data.sourceText, `${claim.data.brand} ${claim.data.model}`) ||
       isHedgedIdentity(claim.data.brand) || isHedgedIdentity(claim.data.model)) {
     return { raw, adopted: false };
   }
@@ -282,18 +282,34 @@ const GENERIC_PRODUCT_WORDS = new Set([
   "a", "an", "the", "this", "that", "these", "those", "is", "are", "my", "it", "its",
   "item", "product", "device", "keyboard", "mechanical", "computer", "laptop", "phone",
   "tablet", "camera", "earbuds", "headphones", "speaker", "console", "controller",
+  "gaming", "wireless", "bluetooth", "portable", "compact", "electric", "digital",
 ]);
 
 function identityTokens(text: string): string[] {
   return text.normalize("NFKC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
 }
 
-function spokenProductPhrase(transcript: string, phrase: string, category?: string): boolean {
+function spokenProductPhrase(transcript: string, phrase: string, canonical: string): boolean {
   if (!spokenIdentity(transcript, phrase)) return false;
-  const generic = new Set([...COMMON_WORD_MODEL_NAMES, ...GENERIC_PRODUCT_WORDS, ...identityTokens(category ?? "")]);
+  const generic = new Set([...COMMON_WORD_MODEL_NAMES, ...GENERIC_PRODUCT_WORDS]);
   // Literal occurrence alone is insufficient: "mechanical keyboard" names no
   // product family. Retain a distinctive name token, including imperfect speech.
-  return identityTokens(phrase).some((token) => /\p{L}/u.test(token) && !generic.has(token));
+  const source = identityTokens(phrase).filter(token => /\p{L}/u.test(token) && !generic.has(token));
+  if (!source.length) return false;
+  // Non-Latin names may require the model's translation, still grounded in the
+  // literal phrase. Latin canonicalization requires a shared distinctive name.
+  if (source.some(token => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(token))) return true;
+  const names = identityTokens(canonical).filter(token => !generic.has(token));
+  const joinedSource = source.join("");
+  const joinedNames = names.join("");
+  if (joinedNames.includes(joinedSource)) return true;
+  const numbers = (phrase.match(/\d+/g) ?? []).join(" ");
+  const canonicalNumbers = (canonical.match(/\d+/g) ?? []).join(" ");
+  // Speech can hear "Rainy 75" as "Raining 75". A shared number and at least
+  // four leading name letters allow normalization without a product alias list.
+  return !!numbers && numbers === canonicalNumbers && source.some(token =>
+    names.some(name => token.length >= 4 && name.length >= 4 && token.slice(0, 4) === name.slice(0, 4)));
+
 }
 
 /**
@@ -318,9 +334,11 @@ function spokenIdentity(transcript: string, identity: string): boolean {
   const spoken = transcript.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, " ");
   // These scripts routinely join product names to surrounding speech without
   // spaces. Latin and other spaced scripts still require whole-token boundaries.
-  const continuousScript = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(identity);
+  const continuousScript = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
+  const first = tokens[0][0];
+  const last = tokens.at(-1)!.at(-1)!;
   const pattern = new RegExp(
-    `${continuousScript ? "" : "(?<![\\p{L}\\p{M}\\p{N}])"}${tokens.join("\\s+")}s?${continuousScript ? "" : "(?![\\p{L}\\p{M}\\p{N}])"}`,
+    `${continuousScript.test(first) ? "" : "(?<![\\p{L}\\p{M}\\p{N}])"}${tokens.join("\\s+")}s?${continuousScript.test(last) ? "" : "(?![\\p{L}\\p{M}\\p{N}])"}`,
     "iu",
   );
   return pattern.test(spoken);

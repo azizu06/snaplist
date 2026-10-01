@@ -210,8 +210,8 @@ describe("voice family with an unconfirmed keyboard variant", () => {
     });
     expect(runActor).toHaveBeenCalledOnce();
     expect(runActor.mock.calls[0]?.[0]).toMatchObject({
-      input: { keywords: ["WOBKEY Rainy75"], count: 10 },
-      timeoutSecs: 55, maxTotalChargeUsd: 0.11, requestRetries: 2, restartOnError: false,
+      input: { keywords: ["WOBKEY Rainy75"], count: 30 },
+      timeoutSecs: 120, waitSecs: 125, maxTotalChargeUsd: 0.25, requestRetries: 2, restartOnError: false,
     });
     expect(result.attributes).toMatchObject({ brand: "WOBKEY", model: "Rainy75", identitySource: "seller-stated" });
     expect(result.price.tier).toBe("ebay-sold");
@@ -251,7 +251,10 @@ describe("voice family with an unconfirmed keyboard variant", () => {
     await stages.price({ attributes: identified.attributes, sellerContext });
     expect(identified.attributes).toMatchObject({ brand: "Keychron", model: "K2", identitySource: "photos" });
     expect(runActor).toHaveBeenCalled();
-    for (const [request] of runActor.mock.calls) expect(request.input.keywords).toEqual(["Keychron K2"]);
+    expect(runActor.mock.calls.map(([request]) => request.input.keywords)).toEqual([
+      ["Keychron K2"], ["Keychron K2"], ["Keychron Mechanical keyboard"],
+    ]);
+    expect(JSON.stringify(runActor.mock.calls)).not.toContain("WOBKEY");
   });
 
   it("records a genuinely unusable identity skip without invoking paid research", async () => {
@@ -259,7 +262,7 @@ describe("voice family with an unconfirmed keyboard variant", () => {
     const emitDiagnostic = vi.fn();
     const stages = createVisionPipelineStages({
       supabase: fakeDownloadClient(),
-      generate: async () => ({ category: "Mechanical keyboard", title: "Generic keyboard", ambiguous: true }),
+      generate: async () => ({ category: "Electronics", title: "Generic keyboard", ambiguous: true }),
       priceItem: createDefaultPricer({
         apifySold: { enabled: true, token: "offline-placeholder", runActor, emitDiagnostic },
         ebaySold: { enabled: false },
