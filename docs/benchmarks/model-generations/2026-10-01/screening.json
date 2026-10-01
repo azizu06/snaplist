@@ -1,0 +1,3074 @@
+{
+  "observedAt": "2026-10-01T06:33:09.359Z",
+  "sourceSha": "f0296c07dfbc466b279569cf37d23ec91bcd6ab9",
+  "plan": {
+    "models": [
+      "gpt-5.6-terra",
+      "gpt-6-luna",
+      "gpt-6.1-sol",
+      "gpt-6-astra"
+    ],
+    "stages": [
+      "vision",
+      "listing",
+      "export",
+      "pricingAgent",
+      "judge"
+    ],
+    "photoFixtures": [
+      {
+        "path": "public/demo/reseller/airpods-max.webp",
+        "brand": "Apple",
+        "family": "AirPods Max"
+      },
+      {
+        "path": "public/demo/reseller/dualsense.webp",
+        "brand": "Sony",
+        "family": "DualSense"
+      }
+    ],
+    "fixturesPerStage": 2,
+    "maximumRequests": 40,
+    "limitUsd": 1.25,
+    "maxOutputTokens": 2048,
+    "serviceTier": "default",
+    "reasoning": "production wrapper default; unchanged",
+    "externalSearchCalls": 0,
+    "databaseWrites": 0,
+    "live": true
+  },
+  "completionPlan": {
+    "models": [
+      "gpt-5.6-terra",
+      "gpt-6-luna",
+      "gpt-6.1-sol",
+      "gpt-6-astra"
+    ],
+    "stages": [
+      "vision",
+      "listing",
+      "export",
+      "pricingAgent",
+      "judge"
+    ],
+    "photoFixtures": [
+      {
+        "path": "public/demo/reseller/airpods-max.webp",
+        "brand": "Apple",
+        "family": "AirPods Max"
+      },
+      {
+        "path": "public/demo/reseller/dualsense.webp",
+        "brand": "Sony",
+        "family": "DualSense"
+      }
+    ],
+    "fixturesPerStage": 2,
+    "maximumRequests": 64,
+    "limitUsd": 1.2,
+    "maxOutputTokens": 2048,
+    "serviceTier": "default",
+    "completeListings": true,
+    "reasoning": "production wrapper default; unchanged",
+    "externalSearchCalls": 0,
+    "databaseWrites": 0,
+    "live": true
+  },
+  "benchmarkSourceSha256": "0d6b4746faa3d3ab323726165a4ac5b2544aef3c0c6d05c1a93442bb923b10e4",
+  "photoHashes": [
+    {
+      "path": "public/demo/reseller/airpods-max.webp",
+      "sha256": "8878e31c9a381bdf10ab4ecadfd179c8440efac26ac24bbd05c02b579c89dbdb"
+    },
+    {
+      "path": "public/demo/reseller/dualsense.webp",
+      "sha256": "be193067c83e9dcb4e60f5b0c3a6ae07dffd1d4ff77ef0428fc1d85781f07e62"
+    }
+  ],
+  "measuredTokenCostUsd": 0.32018330000000006,
+  "unknownReservedUsd": 0,
+  "requests": [
+    {
+      "stage": "vision",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 2764,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 85,
+      "reasoningTokens": 0,
+      "costUsd": 0.004728,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2893,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 204,
+      "reasoningTokens": 119,
+      "costUsd": 0.0002874,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 9460,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 205,
+      "reasoningTokens": 80,
+      "costUsd": 0.005758,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 3628,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 129,
+      "reasoningTokens": 0,
+      "costUsd": 0.02499,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 3964,
+      "inputTokens": 608,
+      "cachedInputTokens": 0,
+      "outputTokens": 240,
+      "reasoningTokens": 129,
+      "costUsd": 0.004096,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 6658,
+      "inputTokens": 608,
+      "cachedInputTokens": 0,
+      "outputTokens": 588,
+      "reasoningTokens": 481,
+      "costUsd": 0.0003548,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 6357,
+      "inputTokens": 608,
+      "cachedInputTokens": 0,
+      "outputTokens": 258,
+      "reasoningTokens": 115,
+      "costUsd": 0.003796,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 5966,
+      "inputTokens": 608,
+      "cachedInputTokens": 0,
+      "outputTokens": 280,
+      "reasoningTokens": 141,
+      "costUsd": 0.02008,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 1639,
+      "inputTokens": 312,
+      "cachedInputTokens": 0,
+      "outputTokens": 59,
+      "reasoningTokens": 0,
+      "costUsd": 0.001332,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2771,
+      "inputTokens": 312,
+      "cachedInputTokens": 0,
+      "outputTokens": 198,
+      "reasoningTokens": 133,
+      "costUsd": 0.0001302,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 6146,
+      "inputTokens": 312,
+      "cachedInputTokens": 0,
+      "outputTokens": 174,
+      "reasoningTokens": 83,
+      "costUsd": 0.002364,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 4456,
+      "inputTokens": 312,
+      "cachedInputTokens": 0,
+      "outputTokens": 159,
+      "reasoningTokens": 68,
+      "costUsd": 0.01107,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 2777,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 131,
+      "reasoningTokens": 0,
+      "costUsd": 0.00237,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 3488,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 163,
+      "reasoningTokens": 26,
+      "costUsd": 0.00012140000000000001,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 2988,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 133,
+      "reasoningTokens": 0,
+      "costUsd": 0.002128,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 2910,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 131,
+      "reasoningTokens": 0,
+      "costUsd": 0.01054,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 1649,
+      "inputTokens": 405,
+      "cachedInputTokens": 0,
+      "outputTokens": 24,
+      "reasoningTokens": 0,
+      "costUsd": 0.001098,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 6119,
+      "inputTokens": 405,
+      "cachedInputTokens": 0,
+      "outputTokens": 310,
+      "reasoningTokens": 280,
+      "costUsd": 0.0001955,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 4607,
+      "inputTokens": 405,
+      "cachedInputTokens": 0,
+      "outputTokens": 119,
+      "reasoningTokens": 89,
+      "costUsd": 0.002,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 3869,
+      "inputTokens": 405,
+      "cachedInputTokens": 0,
+      "outputTokens": 133,
+      "reasoningTokens": 103,
+      "costUsd": 0.0107,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 3561,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 127,
+      "reasoningTokens": 0,
+      "costUsd": 0.02489,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 5381,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 138,
+      "reasoningTokens": 0,
+      "costUsd": 0.005088,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2410,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 180,
+      "reasoningTokens": 90,
+      "costUsd": 0.00027539999999999997,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 3053,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 160,
+      "reasoningTokens": 62,
+      "costUsd": 0.005628,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 4286,
+      "inputTokens": 630,
+      "cachedInputTokens": 0,
+      "outputTokens": 166,
+      "reasoningTokens": 0,
+      "costUsd": 0.0146,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 6553,
+      "inputTokens": 630,
+      "cachedInputTokens": 0,
+      "outputTokens": 291,
+      "reasoningTokens": 112,
+      "costUsd": 0.00417,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 3975,
+      "inputTokens": 630,
+      "cachedInputTokens": 0,
+      "outputTokens": 350,
+      "reasoningTokens": 132,
+      "costUsd": 0.000238,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 2210,
+      "inputTokens": 630,
+      "cachedInputTokens": 0,
+      "outputTokens": 118,
+      "reasoningTokens": 0,
+      "costUsd": 0.002676,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 4469,
+      "inputTokens": 334,
+      "cachedInputTokens": 0,
+      "outputTokens": 175,
+      "reasoningTokens": 78,
+      "costUsd": 0.01209,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 5627,
+      "inputTokens": 334,
+      "cachedInputTokens": 0,
+      "outputTokens": 178,
+      "reasoningTokens": 87,
+      "costUsd": 0.002448,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2586,
+      "inputTokens": 334,
+      "cachedInputTokens": 0,
+      "outputTokens": 193,
+      "reasoningTokens": 130,
+      "costUsd": 0.0001299,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "export",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 1836,
+      "inputTokens": 334,
+      "cachedInputTokens": 0,
+      "outputTokens": 61,
+      "reasoningTokens": 0,
+      "costUsd": 0.0014,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 2974,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 133,
+      "reasoningTokens": 0,
+      "costUsd": 0.01064,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 3142,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 133,
+      "reasoningTokens": 0,
+      "costUsd": 0.002128,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2981,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 170,
+      "reasoningTokens": 31,
+      "costUsd": 0.0001249,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 1908,
+      "inputTokens": 399,
+      "cachedInputTokens": 0,
+      "outputTokens": 131,
+      "reasoningTokens": 0,
+      "costUsd": 0.00237,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 3028,
+      "inputTokens": 304,
+      "cachedInputTokens": 0,
+      "outputTokens": 75,
+      "reasoningTokens": 45,
+      "costUsd": 0.00679,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 3290,
+      "inputTokens": 304,
+      "cachedInputTokens": 0,
+      "outputTokens": 84,
+      "reasoningTokens": 54,
+      "costUsd": 0.001448,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 4583,
+      "inputTokens": 304,
+      "cachedInputTokens": 0,
+      "outputTokens": 194,
+      "reasoningTokens": 164,
+      "costUsd": 0.0001274,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 1219,
+      "inputTokens": 304,
+      "cachedInputTokens": 0,
+      "outputTokens": 24,
+      "reasoningTokens": 0,
+      "costUsd": 0.000896,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 3272,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 82,
+      "reasoningTokens": 0,
+      "costUsd": 0.004692,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 2343,
+      "inputTokens": 211,
+      "cachedInputTokens": 0,
+      "outputTokens": 102,
+      "reasoningTokens": 76,
+      "costUsd": 0.001646,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 2657,
+      "inputTokens": 642,
+      "cachedInputTokens": 0,
+      "outputTokens": 137,
+      "reasoningTokens": 0,
+      "costUsd": 0.002928,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 3079,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 246,
+      "reasoningTokens": 157,
+      "costUsd": 0.00030839999999999996,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 4246,
+      "inputTokens": 212,
+      "cachedInputTokens": 0,
+      "outputTokens": 115,
+      "reasoningTokens": 89,
+      "costUsd": 0.0000787,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 5695,
+      "inputTokens": 643,
+      "cachedInputTokens": 0,
+      "outputTokens": 332,
+      "reasoningTokens": 139,
+      "costUsd": 0.00023030000000000001,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 6989,
+      "inputTokens": 1854,
+      "cachedInputTokens": 1664,
+      "outputTokens": 183,
+      "reasoningTokens": 58,
+      "costUsd": 0.0023764000000000003,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 5788,
+      "inputTokens": 211,
+      "cachedInputTokens": 0,
+      "outputTokens": 98,
+      "reasoningTokens": 72,
+      "costUsd": 0.001402,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 4418,
+      "inputTokens": 643,
+      "cachedInputTokens": 0,
+      "outputTokens": 158,
+      "reasoningTokens": 0,
+      "costUsd": 0.002866,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 4067,
+      "inputTokens": 1854,
+      "cachedInputTokens": 1664,
+      "outputTokens": 127,
+      "reasoningTokens": 0,
+      "costUsd": 0.009914,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 4003,
+      "inputTokens": 212,
+      "cachedInputTokens": 0,
+      "outputTokens": 69,
+      "reasoningTokens": 43,
+      "costUsd": 0.00557,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 5230,
+      "inputTokens": 651,
+      "cachedInputTokens": 0,
+      "outputTokens": 179,
+      "reasoningTokens": 0,
+      "costUsd": 0.01546,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 3628,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 127,
+      "reasoningTokens": 0,
+      "costUsd": 0.02489,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 3395,
+      "inputTokens": 209,
+      "cachedInputTokens": 0,
+      "outputTokens": 67,
+      "reasoningTokens": 41,
+      "costUsd": 0.00544,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-astra",
+      "status": 200,
+      "wallMs": 4121,
+      "inputTokens": 651,
+      "cachedInputTokens": 0,
+      "outputTokens": 186,
+      "reasoningTokens": 0,
+      "costUsd": 0.01581,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 4772,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 128,
+      "reasoningTokens": 0,
+      "costUsd": 0.004988,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 3790,
+      "inputTokens": 210,
+      "cachedInputTokens": 0,
+      "outputTokens": 56,
+      "reasoningTokens": 30,
+      "costUsd": 0.00098,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6.1-sol",
+      "status": 200,
+      "wallMs": 7259,
+      "inputTokens": 652,
+      "cachedInputTokens": 0,
+      "outputTokens": 308,
+      "reasoningTokens": 117,
+      "costUsd": 0.004384,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2302,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 209,
+      "reasoningTokens": 90,
+      "costUsd": 0.0002899,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2755,
+      "inputTokens": 211,
+      "cachedInputTokens": 0,
+      "outputTokens": 65,
+      "reasoningTokens": 39,
+      "costUsd": 0.0000536,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-luna",
+      "status": 200,
+      "wallMs": 2594,
+      "inputTokens": 641,
+      "cachedInputTokens": 0,
+      "outputTokens": 238,
+      "reasoningTokens": 130,
+      "costUsd": 0.00018310000000000003,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 3123,
+      "inputTokens": 1854,
+      "cachedInputTokens": 0,
+      "outputTokens": 148,
+      "reasoningTokens": 58,
+      "costUsd": 0.005484,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 1924,
+      "inputTokens": 214,
+      "cachedInputTokens": 0,
+      "outputTokens": 61,
+      "reasoningTokens": 35,
+      "costUsd": 0.00116,
+      "finishReason": "stop"
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-5.6-terra",
+      "status": 200,
+      "wallMs": 1975,
+      "inputTokens": 644,
+      "cachedInputTokens": 0,
+      "outputTokens": 122,
+      "reasoningTokens": 0,
+      "costUsd": 0.002752,
+      "finishReason": "stop"
+    }
+  ],
+  "samples": [
+    {
+      "stage": "vision",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 2867,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "over-ear wireless headphones",
+          "condition": "good",
+          "specs": [
+            "Black finish"
+          ],
+          "title": "Apple AirPods Max Black Over-Ear Headphones",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Apple AirPods Max Black Over-Ear Headphones",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-5.6-terra"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 2896,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "Wireless over-ear headphones",
+          "condition": "very-good",
+          "title": "Apple AirPods Max headphones",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Apple AirPods Max headphones",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-6-luna"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 9463,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "Over-ear headphones",
+          "condition": "very-good",
+          "specs": [
+            "Space Gray finish"
+          ],
+          "title": "Apple AirPods Max — Space Gray",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Apple AirPods Max — Space Gray",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-6.1-sol"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 3631,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "Over-ear headphones",
+          "condition": "good",
+          "specs": [
+            "Dark-colored aluminum ear cups",
+            "Mesh canopy headband"
+          ],
+          "title": "Apple AirPods Max Over-Ear Headphones",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Apple AirPods Max Over-Ear Headphones",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-6-astra"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 3971,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Sony WH-1000XM4 Electronics",
+          "itemSpecifics": [
+            {
+              "name": "Brand",
+              "value": "Sony"
+            },
+            {
+              "name": "Model",
+              "value": "WH-1000XM4"
+            },
+            {
+              "name": "Category",
+              "value": "Electronics"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            }
+          ],
+          "description": "Sony WH-1000XM4 electronics in good condition. Please review the photos for the item's condition and included contents.",
+          "tags": [
+            "Sony",
+            "WH-1000XM4",
+            "electronics",
+            "good condition"
+          ]
+        },
+        "listing": {
+          "title": "Sony WH-1000XM4 Electronics",
+          "itemSpecifics": {
+            "Brand": "Sony",
+            "Model": "WH-1000XM4",
+            "Type": "electronics",
+            "Condition": "good"
+          },
+          "description": "Sony WH-1000XM4 in good condition.",
+          "tags": [
+            "Sony",
+            "WH-1000XM4",
+            "electronics",
+            "good condition"
+          ]
+        }
+      },
+      "quality": {
+        "title": 4,
+        "description": 3,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 6662,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Sony WH-1000XM4 Electronics",
+          "itemSpecifics": [
+            {
+              "name": "Brand",
+              "value": "Sony"
+            },
+            {
+              "name": "Model",
+              "value": "WH-1000XM4"
+            },
+            {
+              "name": "Category",
+              "value": "Electronics"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            }
+          ],
+          "description": "This Sony WH-1000XM4 is an electronics item in good condition. No other item details are available.",
+          "tags": [
+            "Sony",
+            "WH-1000XM4",
+            "electronics"
+          ]
+        },
+        "listing": {
+          "title": "Sony WH-1000XM4 Electronics",
+          "itemSpecifics": {
+            "Brand": "Sony",
+            "Model": "WH-1000XM4",
+            "Type": "electronics",
+            "Condition": "good"
+          },
+          "description": "Sony WH-1000XM4 in good condition.",
+          "tags": [
+            "Sony",
+            "WH-1000XM4",
+            "electronics"
+          ]
+        }
+      },
+      "quality": {
+        "title": 4,
+        "description": 3,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 6359,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Sony WH-1000XM4 Electronics",
+          "itemSpecifics": [
+            {
+              "name": "Brand",
+              "value": "Sony"
+            },
+            {
+              "name": "Model",
+              "value": "WH-1000XM4"
+            },
+            {
+              "name": "Category",
+              "value": "Electronics"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            }
+          ],
+          "description": "I'm selling my Sony WH-1000XM4. It's in good condition.",
+          "tags": [
+            "Sony",
+            "WH-1000XM4",
+            "Sony WH-1000XM4",
+            "electronics"
+          ]
+        },
+        "listing": {
+          "title": "Sony WH-1000XM4 Electronics",
+          "itemSpecifics": {
+            "Brand": "Sony",
+            "Model": "WH-1000XM4",
+            "Type": "electronics",
+            "Condition": "good"
+          },
+          "description": "Sony WH-1000XM4 in good condition.",
+          "tags": [
+            "Sony",
+            "WH-1000XM4",
+            "Sony WH-1000XM4",
+            "electronics"
+          ]
+        }
+      },
+      "quality": {
+        "title": 4,
+        "description": 3,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 5971,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Sony WH-1000XM4 Headphones",
+          "itemSpecifics": [
+            {
+              "name": "Brand",
+              "value": "Sony"
+            },
+            {
+              "name": "Model",
+              "value": "WH-1000XM4"
+            },
+            {
+              "name": "Category",
+              "value": "Electronics"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            }
+          ],
+          "description": "These are Sony WH-1000XM4 headphones. They are used and in good condition.",
+          "tags": [
+            "Sony",
+            "WH-1000XM4",
+            "Sony headphones"
+          ]
+        },
+        "listing": {
+          "title": "Sony WH-1000XM4",
+          "itemSpecifics": {
+            "Brand": "Sony",
+            "Model": "WH-1000XM4",
+            "Type": "electronics",
+            "Condition": "good"
+          },
+          "description": "Sony WH-1000XM4 in good condition.",
+          "tags": []
+        }
+      },
+      "quality": {
+        "title": 4,
+        "description": 3,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 1647,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "Sony WH-1000XM4 Headphones - Good Condition",
+            "description": null
+          },
+          "mercari": {
+            "title": "Sony WH-1000XM4",
+            "description": null,
+            "hashtags": [
+              "#sony",
+              "#wh1000xm4",
+              "#electronics"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "Sony WH-1000XM4",
+          "description": "For sale: Sony WH-1000XM4. Condition: good."
+        },
+        "mercari": {
+          "title": "Sony WH-1000XM4",
+          "description": "For sale: Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        },
+        "depop": {
+          "description": "Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": false
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 2774,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "Sony WH-1000XM4 Electronics, Good Condition",
+            "description": null
+          },
+          "mercari": {
+            "title": "Sony WH-1000XM4 Good",
+            "description": null,
+            "hashtags": [
+              "#sony",
+              "#wh1000xm4",
+              "#electronics"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "Sony WH-1000XM4",
+          "description": "For sale: Sony WH-1000XM4. Condition: good."
+        },
+        "mercari": {
+          "title": "Sony WH-1000XM4 Good",
+          "description": "For sale: Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        },
+        "depop": {
+          "description": "Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": false
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 6148,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "Sony WH-1000XM4 — Good Condition",
+            "description": null
+          },
+          "mercari": {
+            "title": "Sony WH-1000XM4 - Good Condition",
+            "description": null,
+            "hashtags": [
+              "#sony",
+              "#wh1000xm4",
+              "#electronics"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "Sony WH-1000XM4",
+          "description": "For sale: Sony WH-1000XM4. Condition: good."
+        },
+        "mercari": {
+          "title": "Sony WH-1000XM4",
+          "description": "For sale: Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        },
+        "depop": {
+          "description": "Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": false
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 4458,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "Sony WH-1000XM4 - Good Condition",
+            "description": null
+          },
+          "mercari": {
+            "title": "Sony WH-1000XM4 - Good Condition",
+            "description": null,
+            "hashtags": [
+              "#sony",
+              "#wh1000xm4",
+              "#electronics"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "Sony WH-1000XM4",
+          "description": "For sale: Sony WH-1000XM4. Condition: good."
+        },
+        "mercari": {
+          "title": "Sony WH-1000XM4",
+          "description": "For sale: Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        },
+        "depop": {
+          "description": "Sony WH-1000XM4. Condition: good.",
+          "hashtags": [
+            "#sony",
+            "#wh1000xm4",
+            "#electronics"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": false
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 2782,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-0-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 3490,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-0-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 2990,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-0-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 2913,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-0-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-0-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 1653,
+      "requestCount": 1,
+      "output": {
+        "title": 5,
+        "description": 5,
+        "grounded": 5,
+        "overall": 5
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "description": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "grounded": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "overall": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          }
+        },
+        "overallWithin1Rate": 1
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 6121,
+      "requestCount": 1,
+      "output": {
+        "title": 5,
+        "description": 4,
+        "grounded": 2,
+        "overall": 3
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "description": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "grounded": {
+            "meanAbsDiff": 3,
+            "within1Rate": 0,
+            "exactRate": 0
+          },
+          "overall": {
+            "meanAbsDiff": 2,
+            "within1Rate": 0,
+            "exactRate": 0
+          }
+        },
+        "overallWithin1Rate": 0
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 4610,
+      "requestCount": 1,
+      "output": {
+        "title": 5,
+        "description": 4,
+        "grounded": 2,
+        "overall": 3
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "description": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "grounded": {
+            "meanAbsDiff": 3,
+            "within1Rate": 0,
+            "exactRate": 0
+          },
+          "overall": {
+            "meanAbsDiff": 2,
+            "within1Rate": 0,
+            "exactRate": 0
+          }
+        },
+        "overallWithin1Rate": 0
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 0,
+      "structuredPass": true,
+      "wallMs": 3873,
+      "requestCount": 1,
+      "output": {
+        "title": 5,
+        "description": 4,
+        "grounded": 2,
+        "overall": 3
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "description": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "grounded": {
+            "meanAbsDiff": 3,
+            "within1Rate": 0,
+            "exactRate": 0
+          },
+          "overall": {
+            "meanAbsDiff": 2,
+            "within1Rate": 0,
+            "exactRate": 0
+          }
+        },
+        "overallWithin1Rate": 0
+      }
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 3563,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "DualSense",
+          "category": "Video game controller",
+          "condition": "good",
+          "specs": [
+            "PlayStation 5 controller",
+            "White and black finish"
+          ],
+          "title": "Sony DualSense PS5 Controller – White",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Sony DualSense PS5 Controller – White",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-6-astra"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 5384,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "DualSense",
+          "category": "Video game controller",
+          "condition": "good",
+          "specs": [
+            "PlayStation 5 controller",
+            "White and black",
+            "Dual analog sticks",
+            "Integrated touchpad"
+          ],
+          "title": "Sony DualSense PS5 Controller - White",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Sony DualSense PS5 Controller - White",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-6.1-sol"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 2412,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "DualSense Wireless Controller",
+          "category": "Video game controller",
+          "condition": "very-good",
+          "specs": [
+            "White and black"
+          ],
+          "title": "Sony DualSense Wireless Controller — White",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Sony DualSense Wireless Controller — White",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-6-luna"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "vision",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 3055,
+      "requestCount": 1,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "PlayStation 5 DualSense Wireless Controller",
+          "category": "Video game controller",
+          "condition": "very-good",
+          "specs": [
+            "White and black colorway"
+          ],
+          "title": "Sony PS5 DualSense Wireless Controller - White",
+          "identitySource": "photos"
+        },
+        "identification": {
+          "label": "Sony PS5 DualSense Wireless Controller - White",
+          "confident": true,
+          "evidence": 0.75
+        },
+        "model": "gpt-5.6-terra"
+      },
+      "quality": {
+        "identityCorrect": true
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 4290,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Ceramic Coffee Mug White",
+          "itemSpecifics": [
+            {
+              "name": "Type",
+              "value": "Coffee mug"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            },
+            {
+              "name": "Material",
+              "value": "Ceramic"
+            },
+            {
+              "name": "Color",
+              "value": "White"
+            },
+            {
+              "name": "Capacity",
+              "value": "12 oz"
+            },
+            {
+              "name": "Care",
+              "value": "Dishwasher safe"
+            }
+          ],
+          "description": "This white ceramic coffee mug holds 12 oz and is dishwasher safe. It's in good condition with no chips or cracks.",
+          "tags": [
+            "ceramic coffee mug",
+            "white coffee mug",
+            "12 oz mug",
+            "dishwasher safe mug"
+          ]
+        },
+        "listing": {
+          "title": "Ceramic Coffee Mug White",
+          "itemSpecifics": {
+            "Type": "generic",
+            "Condition": "good"
+          },
+          "description": "Ceramic coffee mug in good condition. It has white ceramic, 12 oz, dishwasher safe and no chips or cracks.",
+          "tags": [
+            "ceramic coffee mug",
+            "white coffee mug",
+            "12 oz mug",
+            "dishwasher safe mug"
+          ]
+        }
+      },
+      "quality": {
+        "title": 3,
+        "description": 4,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 6555,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Ceramic Coffee Mug White",
+          "itemSpecifics": [
+            {
+              "name": "Type",
+              "value": "Coffee mug"
+            },
+            {
+              "name": "Material",
+              "value": "Ceramic"
+            },
+            {
+              "name": "Color",
+              "value": "White"
+            },
+            {
+              "name": "Capacity",
+              "value": "12 oz"
+            },
+            {
+              "name": "Features",
+              "value": "Dishwasher safe"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            }
+          ],
+          "description": "This white ceramic coffee mug holds 12 oz. It's in good condition with no chips or cracks. It's dishwasher safe.",
+          "tags": [
+            "ceramic coffee mug",
+            "white coffee mug",
+            "12 oz mug",
+            "dishwasher safe mug"
+          ]
+        },
+        "listing": {
+          "title": "Ceramic Coffee Mug White",
+          "itemSpecifics": {
+            "Type": "generic",
+            "Condition": "good"
+          },
+          "description": "Ceramic coffee mug in good condition. It has white ceramic, 12 oz, dishwasher safe and no chips or cracks.",
+          "tags": [
+            "ceramic coffee mug",
+            "white coffee mug",
+            "12 oz mug",
+            "dishwasher safe mug"
+          ]
+        }
+      },
+      "quality": {
+        "title": 3,
+        "description": 4,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 3978,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Ceramic Coffee Mug White 12 oz",
+          "itemSpecifics": [
+            {
+              "name": "Type",
+              "value": "Coffee mug"
+            },
+            {
+              "name": "Material",
+              "value": "Ceramic"
+            },
+            {
+              "name": "Color",
+              "value": "White"
+            },
+            {
+              "name": "Capacity",
+              "value": "12 oz"
+            },
+            {
+              "name": "Features",
+              "value": "Dishwasher safe"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            }
+          ],
+          "description": "This is a white ceramic coffee mug with a 12 oz capacity. It is in good condition with no chips or cracks, and it is dishwasher safe.",
+          "tags": [
+            "ceramic coffee mug",
+            "white mug",
+            "12 oz mug",
+            "dishwasher safe mug"
+          ]
+        },
+        "listing": {
+          "title": "Ceramic Coffee Mug White 12 oz",
+          "itemSpecifics": {
+            "Type": "generic",
+            "Condition": "good"
+          },
+          "description": "Ceramic coffee mug in good condition. It has white ceramic, 12 oz, dishwasher safe and no chips or cracks.",
+          "tags": [
+            "ceramic coffee mug",
+            "white mug",
+            "12 oz mug",
+            "dishwasher safe mug"
+          ]
+        }
+      },
+      "quality": {
+        "title": 4,
+        "description": 4,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "listing",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 2213,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "title": "Ceramic Coffee Mug White 12 oz Dishwasher Safe",
+          "itemSpecifics": [
+            {
+              "name": "Category",
+              "value": "Generic"
+            },
+            {
+              "name": "Condition",
+              "value": "Good"
+            },
+            {
+              "name": "Material",
+              "value": "White ceramic"
+            },
+            {
+              "name": "Capacity",
+              "value": "12 oz"
+            },
+            {
+              "name": "Dishwasher Safe",
+              "value": "Yes"
+            }
+          ],
+          "description": "White ceramic coffee mug in good condition. It holds 12 oz and is dishwasher safe. No chips or cracks.",
+          "tags": [
+            "ceramic coffee mug",
+            "white mug",
+            "12 oz mug",
+            "dishwasher safe mug",
+            "coffee cup"
+          ]
+        },
+        "listing": {
+          "title": "Ceramic coffee mug",
+          "itemSpecifics": {
+            "Type": "generic",
+            "Condition": "good"
+          },
+          "description": "Ceramic coffee mug in good condition. It has white ceramic, 12 oz, dishwasher safe and no chips or cracks.",
+          "tags": []
+        }
+      },
+      "quality": {
+        "title": 3,
+        "description": 4,
+        "grounded": 5,
+        "overall": 4
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 4473,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "White Ceramic Coffee Mug, 12 oz - Dishwasher Safe, No Chips or Cracks",
+            "description": null
+          },
+          "mercari": {
+            "title": "White Ceramic Coffee Mug 12 oz",
+            "description": null,
+            "hashtags": [
+              "#whiteceramic",
+              "#12oz",
+              "#dishwashersafe"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "White Ceramic Coffee Mug, 12 oz - Dishwasher Safe, No Chips or Cracks",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks."
+        },
+        "mercari": {
+          "title": "White Ceramic Coffee Mug 12 oz",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#whiteceramic",
+            "#12oz",
+            "#dishwashersafe"
+          ]
+        },
+        "depop": {
+          "description": "Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#generic",
+            "#whiteceramic",
+            "#12oz",
+            "#dishwashersafe",
+            "#nochipsorcracks"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": true
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 5629,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "White Ceramic Coffee Mug, 12 oz — Good Condition",
+            "description": null
+          },
+          "mercari": {
+            "title": "White Ceramic Coffee Mug 12 oz",
+            "description": null,
+            "hashtags": [
+              "#whiteceramic",
+              "#12oz",
+              "#dishwashersafe"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "Ceramic coffee mug",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks."
+        },
+        "mercari": {
+          "title": "White Ceramic Coffee Mug 12 oz",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#whiteceramic",
+            "#12oz",
+            "#dishwashersafe"
+          ]
+        },
+        "depop": {
+          "description": "Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#generic",
+            "#whiteceramic",
+            "#12oz",
+            "#dishwashersafe",
+            "#nochipsorcracks"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": false
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 2589,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "White Ceramic Coffee Mug, 12 oz, Dishwasher Safe",
+            "description": null
+          },
+          "mercari": {
+            "title": "Ceramic Coffee Mug 12 oz White",
+            "description": null,
+            "hashtags": [
+              "#ceramic",
+              "#coffee",
+              "#mug"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "White Ceramic Coffee Mug, 12 oz, Dishwasher Safe",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks."
+        },
+        "mercari": {
+          "title": "Ceramic Coffee Mug 12 oz White",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#ceramic",
+            "#coffee",
+            "#mug"
+          ]
+        },
+        "depop": {
+          "description": "Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#generic",
+            "#whiteceramic",
+            "#12oz",
+            "#dishwashersafe",
+            "#nochipsorcracks"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": true
+      }
+    },
+    {
+      "stage": "export",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 1838,
+      "requestCount": 1,
+      "output": {
+        "raw": {
+          "facebook": {
+            "title": "White Ceramic 12 oz Coffee Mug - Dishwasher Safe, No Chips or Cracks",
+            "description": null
+          },
+          "mercari": {
+            "title": "White Ceramic 12 oz Coffee Mug",
+            "description": null,
+            "hashtags": [
+              "#ceramic",
+              "#coffeemug"
+            ]
+          }
+        },
+        "facebook": {
+          "title": "White Ceramic 12 oz Coffee Mug - Dishwasher Safe, No Chips or Cracks",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks."
+        },
+        "mercari": {
+          "title": "White Ceramic 12 oz Coffee Mug",
+          "description": "For sale: Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#ceramic"
+          ]
+        },
+        "depop": {
+          "description": "Ceramic coffee mug. Condition: good. Details: white ceramic, 12 oz, dishwasher safe, no chips or cracks.",
+          "hashtags": [
+            "#generic",
+            "#whiteceramic",
+            "#12oz",
+            "#dishwashersafe",
+            "#nochipsorcracks"
+          ]
+        }
+      },
+      "quality": {
+        "rawGrounded": false
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 2975,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-1-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 3145,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-1-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 2983,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-1-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "pricingAgent",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 1911,
+      "requestCount": 1,
+      "output": [
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-1",
+          "price": 178,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 — SOLD listing"
+        },
+        {
+          "url": "https://www.ebay.com/itm/fixture-1-2",
+          "price": 185.5,
+          "kind": "sold",
+          "title": "Sony WH-1000XM4 (Black) — SOLD"
+        },
+        {
+          "url": "https://www.mercari.com/us/item/fixture-1-3",
+          "price": 199.99,
+          "kind": "asking",
+          "title": "Sony WH-1000XM4 used"
+        }
+      ],
+      "quality": {
+        "exactExtraction": true
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-astra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 3031,
+      "requestCount": 1,
+      "output": {
+        "title": 2,
+        "description": 4,
+        "grounded": 2,
+        "overall": 2
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "description": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "grounded": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "overall": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          }
+        },
+        "overallWithin1Rate": 1
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 3293,
+      "requestCount": 1,
+      "output": {
+        "title": 3,
+        "description": 4,
+        "grounded": 2,
+        "overall": 2
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "description": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "grounded": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "overall": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          }
+        },
+        "overallWithin1Rate": 1
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-6-luna",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 4584,
+      "requestCount": 1,
+      "output": {
+        "title": 3,
+        "description": 4,
+        "grounded": 2,
+        "overall": 2
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          },
+          "description": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "grounded": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "overall": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          }
+        },
+        "overallWithin1Rate": 1
+      }
+    },
+    {
+      "stage": "judge",
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 1,
+      "structuredPass": true,
+      "wallMs": 1220,
+      "requestCount": 1,
+      "output": {
+        "title": 2,
+        "description": 5,
+        "grounded": 2,
+        "overall": 2
+      },
+      "quality": {
+        "examples": 1,
+        "perDimension": {
+          "title": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "description": {
+            "meanAbsDiff": 2,
+            "within1Rate": 0,
+            "exactRate": 0
+          },
+          "grounded": {
+            "meanAbsDiff": 1,
+            "within1Rate": 1,
+            "exactRate": 0
+          },
+          "overall": {
+            "meanAbsDiff": 0,
+            "within1Rate": 1,
+            "exactRate": 1
+          }
+        },
+        "overallWithin1Rate": 1
+      }
+    }
+  ],
+  "completeListings": [
+    {
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 0,
+      "usableCandidate": true,
+      "wallMs": 6089,
+      "modelCostUsd": 0.009266,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "over-ear wireless headphones",
+          "condition": "good",
+          "specs": [
+            "Black color"
+          ],
+          "title": "Apple AirPods Max Black Headphones",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 250,
+          "range": {
+            "min": 180,
+            "max": 350
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-5.6-terra"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Apple AirPods Max Over-Ear Wireless Headphones Black",
+          "description": "Apple AirPods Max in good condition. It has black color.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Apple",
+              "Model": "AirPods Max",
+              "Type": "over-ear wireless headphones",
+              "Condition": "good"
+            },
+            "tags": [
+              "Apple AirPods Max",
+              "AirPods Max Black",
+              "Apple headphones",
+              "over-ear headphones",
+              "wireless headphones"
+            ]
+          }
+        },
+        "model": "gpt-5.6-terra",
+        "listingModel": "gpt-5.6-terra",
+        "pricingModel": "gpt-5.6-terra",
+        "identification": {
+          "label": "Apple AirPods Max Black Headphones",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "fixtureIndex": 0,
+      "usableCandidate": true,
+      "wallMs": 8784,
+      "modelCostUsd": 0.0006173999999999989,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "Wireless over-ear headphones",
+          "condition": "very-good",
+          "specs": [
+            "Space Gray"
+          ],
+          "title": "Apple AirPods Max — Space Gray",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 250,
+          "range": {
+            "min": 190,
+            "max": 320
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-6-luna"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Apple AirPods Max Wireless Over-Ear Headphones Space Gray",
+          "description": "Apple AirPods Max in very good condition. It has space Gray.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Apple",
+              "Model": "AirPods Max",
+              "Type": "Wireless over-ear headphones",
+              "Condition": "very-good"
+            },
+            "tags": [
+              "Apple headphones",
+              "AirPods Max",
+              "wireless over-ear headphones",
+              "Space Gray"
+            ]
+          }
+        },
+        "model": "gpt-6-luna",
+        "listingModel": "gpt-6-luna",
+        "pricingModel": "gpt-6-luna",
+        "identification": {
+          "label": "Apple AirPods Max — Space Gray",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 0,
+      "usableCandidate": true,
+      "wallMs": 12790,
+      "modelCostUsd": 0.0066444,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "Over-ear headphones",
+          "condition": "very-good",
+          "specs": [
+            "Space Gray finish"
+          ],
+          "title": "Apple AirPods Max — Space Gray",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 220,
+          "range": {
+            "min": 160,
+            "max": 300
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-6.1-sol"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Apple AirPods Max Over-Ear Headphones Space Gray",
+          "description": "Apple AirPods Max in very good condition. It has space Gray finish.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Apple",
+              "Model": "AirPods Max",
+              "Type": "Over-ear headphones",
+              "Condition": "very-good"
+            },
+            "tags": [
+              "Apple",
+              "AirPods Max",
+              "over-ear headphones",
+              "Space Gray"
+            ]
+          }
+        },
+        "model": "gpt-6.1-sol",
+        "listingModel": "gpt-6.1-sol",
+        "pricingModel": "gpt-6.1-sol",
+        "identification": {
+          "label": "Apple AirPods Max — Space Gray",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "fixtureIndex": 0,
+      "usableCandidate": true,
+      "wallMs": 9312,
+      "modelCostUsd": 0.030944000000000003,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Apple",
+          "model": "AirPods Max",
+          "category": "Over-ear headphones",
+          "condition": "good",
+          "specs": [
+            "Dark gray finish",
+            "Mesh canopy headband"
+          ],
+          "title": "Apple AirPods Max Over-Ear Headphones",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 220,
+          "range": {
+            "min": 150,
+            "max": 320
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-6-astra"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Apple AirPods Max Over-Ear Headphones Dark Gray",
+          "description": "Apple AirPods Max in good condition. It has dark gray finish and mesh canopy headband.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Apple",
+              "Model": "AirPods Max",
+              "Type": "Over-ear headphones",
+              "Condition": "good"
+            },
+            "tags": [
+              "Apple",
+              "AirPods Max",
+              "over-ear headphones",
+              "dark gray headphones"
+            ]
+          }
+        },
+        "model": "gpt-6-astra",
+        "listingModel": "gpt-6-astra",
+        "pricingModel": "gpt-6-astra",
+        "identification": {
+          "label": "Apple AirPods Max Over-Ear Headphones",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "fixtureIndex": 1,
+      "usableCandidate": true,
+      "wallMs": 7757,
+      "modelCostUsd": 0.04614000000000001,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "DualSense",
+          "category": "Game controller",
+          "condition": "good",
+          "specs": [
+            "PlayStation 5 controller",
+            "White and black color scheme"
+          ],
+          "title": "Sony DualSense PS5 Controller – White",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 30,
+          "range": {
+            "min": 20,
+            "max": 45
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-6-astra"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Sony DualSense",
+          "description": "Sony DualSense in good condition. It has PlayStation 5 controller and white and black color scheme.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Sony",
+              "Model": "DualSense",
+              "Type": "Game controller",
+              "Condition": "good"
+            },
+            "tags": []
+          }
+        },
+        "model": "gpt-6-astra",
+        "listingModel": "gpt-6-astra",
+        "pricingModel": "gpt-6-astra",
+        "identification": {
+          "label": "Sony DualSense PS5 Controller – White",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "fixtureIndex": 1,
+      "usableCandidate": true,
+      "wallMs": 12039,
+      "modelCostUsd": 0.010352,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "DualSense",
+          "category": "Video game controller",
+          "condition": "good",
+          "specs": [
+            "PlayStation 5 controller",
+            "White and black color scheme"
+          ],
+          "title": "Sony DualSense PS5 Controller — White",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 30,
+          "range": {
+            "min": 20,
+            "max": 45
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-6.1-sol"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Sony DualSense",
+          "description": "Sony DualSense in good condition. It has PlayStation 5 controller and white and black color scheme.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Sony",
+              "Model": "DualSense",
+              "Type": "Video game controller",
+              "Condition": "good"
+            },
+            "tags": []
+          }
+        },
+        "model": "gpt-6.1-sol",
+        "listingModel": "gpt-6.1-sol",
+        "pricingModel": "gpt-6.1-sol",
+        "identification": {
+          "label": "Sony DualSense PS5 Controller — White",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "fixtureIndex": 1,
+      "usableCandidate": true,
+      "wallMs": 5062,
+      "modelCostUsd": 0.0005266000000000021,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "DualSense Wireless Controller",
+          "category": "Video game controller",
+          "condition": "good",
+          "specs": [
+            "White"
+          ],
+          "title": "Sony DualSense Wireless Controller – White",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 35,
+          "range": {
+            "min": 25,
+            "max": 45
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-6-luna"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Sony DualSense Wireless Controller White",
+          "description": "Sony DualSense Wireless Controller in good condition. It has white.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Sony",
+              "Model": "DualSense Wireless Controller",
+              "Type": "Video game controller",
+              "Condition": "good"
+            },
+            "tags": [
+              "Sony controller",
+              "DualSense",
+              "wireless game controller",
+              "white controller"
+            ]
+          }
+        },
+        "model": "gpt-6-luna",
+        "listingModel": "gpt-6-luna",
+        "pricingModel": "gpt-6-luna",
+        "identification": {
+          "label": "Sony DualSense Wireless Controller – White",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "fixtureIndex": 1,
+      "usableCandidate": true,
+      "wallMs": 5103,
+      "modelCostUsd": 0.009396000000000002,
+      "requestCount": 3,
+      "output": {
+        "attributes": {
+          "brand": "Sony",
+          "model": "DualSense Wireless Controller",
+          "category": "Video game controller",
+          "condition": "like-new",
+          "specs": [
+            "White"
+          ],
+          "title": "Sony PS5 DualSense Wireless Controller - White",
+          "identitySource": "photos"
+        },
+        "price": {
+          "suggested": 50,
+          "range": {
+            "min": 38,
+            "max": 60
+          },
+          "confidence": 0.2,
+          "sources": [],
+          "tier": "llm-only",
+          "model": "gpt-5.6-terra"
+        },
+        "confidence": {
+          "score": 0.3525,
+          "band": "low",
+          "autopilotEligible": false
+        },
+        "listing": {
+          "platform": "ebay",
+          "title": "Sony DualSense Wireless Controller PS5 White",
+          "description": "Sony DualSense Wireless Controller in like new condition. It has white.",
+          "fields": {
+            "itemSpecifics": {
+              "Brand": "Sony",
+              "Model": "DualSense Wireless Controller",
+              "Type": "Video game controller",
+              "Condition": "like-new"
+            },
+            "tags": [
+              "Sony",
+              "DualSense",
+              "PS5 controller",
+              "wireless controller",
+              "white controller",
+              "video game controller"
+            ]
+          }
+        },
+        "model": "gpt-5.6-terra",
+        "listingModel": "gpt-5.6-terra",
+        "pricingModel": "gpt-5.6-terra",
+        "identification": {
+          "label": "Sony PS5 DualSense Wireless Controller - White",
+          "confident": true,
+          "evidence": 0.75
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Two fixed examples per stage; exploratory percentiles, not a p95 reliability claim.",
+    "512px single photos; no multi-photo, seller voice, DB durability, or live search evidence.",
+    "2048 completion-token cap includes reasoning; cap failures disqualify, never justify adoption.",
+    "Complete candidates use the real pipeline with local photo downloads and LLM-only pricing. DB durability and live sold/web retrieval costs are not measured.",
+    "Heuristic listing scores are screening only; human labels calibrate judge candidates."
+  ]
+}
