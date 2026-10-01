@@ -524,6 +524,11 @@ final class SettingsSubscriptionAccountScope {
     private(set) var accountID: String?
     private(set) var store: SubscriptionStore
     var loadPhase = SettingsSubscriptionPresentation.LoadPhase.loading
+    /// The last plan the server confirmed for this account. Settings shows it
+    /// while a fresh reading loads, so reopening Settings never blanks the
+    /// card to `Checking`. Kept per account for the life of the process.
+    private(set) var lastVerified: ServerVerifiedSubscription?
+    private static var lastVerifiedByAccount: [String: ServerVerifiedSubscription] = [:]
     @ObservationIgnored private let makeStore: () -> SubscriptionStore
     @ObservationIgnored private let currentAccountID: (@MainActor () -> String?)?
     private var requestID = UUID()
@@ -539,6 +544,15 @@ final class SettingsSubscriptionAccountScope {
         self.currentAccountID = currentAccountID
         self.makeStore = makeStore
         store = makeStore()
+        lastVerified = accountID.flatMap { Self.lastVerifiedByAccount[$0] }
+    }
+
+    /// Applies a reading the server just returned elsewhere (the SnapList Pro
+    /// sheet) so the card shows it before its own refresh finishes.
+    func remember(_ entitlement: ServerVerifiedSubscription) {
+        store.applyServerVerification(entitlement)
+        lastVerified = entitlement
+        if let accountID { Self.lastVerifiedByAccount[accountID] = entitlement }
     }
 
     /// Returns `true` when the account changed and the reading was reset.
@@ -549,6 +563,7 @@ final class SettingsSubscriptionAccountScope {
         self.accountID = accountID
         requestID = UUID()
         store = makeStore()
+        lastVerified = accountID.flatMap { Self.lastVerifiedByAccount[$0] }
         loadPhase = .loading
         return true
     }
@@ -612,7 +627,7 @@ final class SettingsSubscriptionAccountScope {
             fetch: entitlement,
             apply: { [self] value in
                 guard isCurrent(reading), requestID == id else { return }
-                reading.applyServerVerification(value)
+                remember(value)
             },
             setLoadPhase: { [self] phase in
                 guard isCurrent(reading), requestID == id else { return }
@@ -694,13 +709,21 @@ struct SettingsSubscriptionPresentation: Equatable {
             .joined(separator: ". ") + "."
     }
 
+    /// `lastKnown` is the last plan the server confirmed. While a fresh
+    /// reading is still loading it stands in for `Checking`; a failed or
+    /// finished reading always wins over it.
     init(
         state: SubscriptionStore.State,
         loadPhase: LoadPhase = .loaded,
+        lastKnown: ServerVerifiedSubscription? = nil,
         locale: Locale = .current
     ) {
         let manage: [Action] = [.manage]
         let manageAndRestore: [Action] = [.manage, .restore]
+        if let lastKnown, loadPhase == .loading || state == .loading {
+            self = Self.verified(lastKnown, locale: locale)
+            return
+        }
         switch loadPhase {
         case .loading:
             self.init(
@@ -837,7 +860,9 @@ struct SettingsSubscriptionPresentation: Equatable {
         let formatter = DateFormatter()
         formatter.locale = locale
         formatter.dateStyle = .long
-        formatter.timeStyle = .none
+        // A period can end on the day it is read; without the time, a renewal
+        // later today reads as already over.
+        formatter.timeStyle = .short
         return [Fact(label: label, value: formatter.string(from: date))]
     }
 }

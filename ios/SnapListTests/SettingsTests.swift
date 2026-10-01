@@ -891,6 +891,64 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    /// Demo findings: every Settings open blanked the card to `Checking`, and
+    /// right after a purchase it showed the old free plan first. The last plan
+    /// the server confirmed stays on screen while a fresh reading loads.
+    @MainActor
+    func testLastConfirmedPlanStaysVisibleWhileSettingsRefreshes() {
+        let identity = SettingsIdentity.member(method: .emailCode, email: "pro@example.com")
+        let accountID = "user_last_known_\(UUID().uuidString)"
+        let pro = ServerVerifiedSubscription(
+            source: .storeKit, status: .active, remainingItems: 7,
+            periodStart: nil, periodEnd: nil, gracePeriodEnd: nil,
+            transitionState: nil, legacyStripeStatus: nil
+        )
+        let first = SettingsSubscriptionAccountScope(
+            identity: identity, accountID: accountID,
+            makeStore: { SubscriptionStore(client: FixtureSubscriptionClient()) }
+        )
+        XCTAssertNil(first.lastVerified)
+        first.remember(pro)
+        XCTAssertEqual(first.store.state, .verified(pro))
+
+        let reopened = SettingsSubscriptionAccountScope(
+            identity: identity, accountID: accountID,
+            makeStore: { SubscriptionStore(client: FixtureSubscriptionClient()) }
+        )
+        let refreshing = SettingsSubscriptionPresentation(
+            state: .loading,
+            loadPhase: .loading,
+            lastKnown: reopened.lastVerified
+        )
+        XCTAssertEqual(refreshing.stateID, "SUB-07")
+        XCTAssertEqual(refreshing.remainingItems, 7)
+
+        let failed = SettingsSubscriptionPresentation(
+            state: .available([]), loadPhase: .failed, lastKnown: pro
+        )
+        XCTAssertEqual(failed.stateID, "SUB-15", "A failed refresh must not pass off the old plan as current.")
+        XCTAssertTrue(reopened.rebind(to: identity, accountID: "user_other_\(UUID().uuidString)"))
+        XCTAssertNil(reopened.lastVerified, "Another account never sees this plan.")
+    }
+
+    func testCurrentPeriodEndIncludesTheTimeSoASameDayRenewalDoesNotReadAsOver() {
+        let periodEnd = Date(timeIntervalSince1970: 1_790_870_400) // 2026-10-01 16:00 UTC
+        let presentation = SettingsSubscriptionPresentation(
+            state: .verified(
+                ServerVerifiedSubscription(
+                    source: .storeKit, status: .active, remainingItems: 3,
+                    periodStart: nil, periodEnd: periodEnd, gracePeriodEnd: nil,
+                    transitionState: nil, legacyStripeStatus: nil
+                )
+            ),
+            locale: Locale(identifier: "en_US")
+        )
+        let value = presentation.facts.first { $0.label == "Current period ends" }?.value
+        XCTAssertNotNil(value)
+        XCTAssertTrue(value?.contains("2026") == true)
+        XCTAssertTrue(value?.contains(":") == true, "Expected a time in \(value ?? "nil")")
+    }
+
     @MainActor
     func testSameEmailAndMethodStillResetSubscriptionForADifferentClerkID() {
         let identity = SettingsIdentity.member(method: .emailCode, email: "same@example.com")
