@@ -231,7 +231,6 @@ struct AppShellView: View {
             if let proGateStore {
                 ProGateSheet(
                     store: proGateStore,
-                    listingSummary: nil,
                     startListing: resumeProGatedListing,
                     fallbackToPhotoReview: fallbackFromPresentedProGate
                 )

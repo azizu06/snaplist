@@ -320,7 +320,6 @@ struct SettingsView: View {
             if let plansStore {
                 ProGateSheet(
                     store: plansStore,
-                    listingSummary: nil,
                     startListing: { _ = plansStore.consumeResumeIntent() },
                     fallbackToPhotoReview: { plansFallbackPending = true },
                     context: .settingsPlans

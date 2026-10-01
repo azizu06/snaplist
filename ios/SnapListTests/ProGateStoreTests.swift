@@ -12,14 +12,11 @@ final class ProGateStoreTests: XCTestCase {
     )
 
     func testProGateKeepsTheApprovedItemGateCopy() {
-        XCTAssertEqual(ProGateCopy.offerTitle, "This item needs SnapList Pro")
+        XCTAssertEqual(ProGateCopy.offerTitle, "Keep listing with Pro")
+        XCTAssertEqual(ProGateCopy.plansTitle, "SnapList Pro")
         XCTAssertEqual(
-            ProGateCopy.reassuranceTitle,
-            "What happens if you don’t subscribe"
-        )
-        XCTAssertEqual(
-            SnapListColorToken.proGateReassuranceDivider.rawValue,
-            "#E6E7EA"
+            ProGateCopy.pendingStatement,
+            "Don’t buy again. Check again or restore."
         )
     }
 

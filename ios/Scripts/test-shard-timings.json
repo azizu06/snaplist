@@ -182,7 +182,7 @@
     "SnapListUITests/SnapListUITests/testPhotosTooLargeBannerHasALaunchableFixtureRoute": 5.849,
     "SnapListUITests/SnapListUITests/testPrimaryShellNavigationAndTypedDestinations": 10.241,
     "SnapListUITests/SnapListUITests/testProGateAccessibilityTypeScalesAndKeepsActionsInTheSheetScroll": 24.602,
-    "SnapListUITests/SnapListUITests/testProGateOfferFirstBenefitRowClearsThePriceBlockOnceScrolledIntoView": 9.065,
+    "SnapListUITests/SnapListUITests/testProGateOfferSlipSitsAboveTheSubscribeFooter": 9.065,
     "SnapListUITests/SnapListUITests/testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable": 11.707,
     "SnapListUITests/SnapListUITests/testProGateOfferLegalFooterOpensTermsAndPrivacy": 22.0,
     "SnapListUITests/SnapListUITests/testProGatePaywallSlidesDownToDismissWhenDismissible": 12.0,
@@ -270,6 +270,7 @@
     "SnapListUITests/ListingReviewUITests/testEditingPriceHasOneKeyboardDoneAndRestoresWorkflowDoneAfterDismissal": 15.242,
     "SnapListUITests/ListingReviewUITests/testFocusedPriceStaysVisibleAboveTheKeyboardWhileEditing": 14.733,
     "SnapListUITests/ListingReviewUITests/testConditionAndTypeAreEditableInlineWithoutOpeningSpecifics": 30.909,
-    "SnapListUITests/ListingReviewUITests/testSingleLineTitleUsesACompactCaptionedTouchTarget": 26.609
+    "SnapListUITests/ListingReviewUITests/testSingleLineTitleUsesACompactCaptionedTouchTarget": 26.609,
+    "SnapListUITests/SnapListUITests/testProGateShortSheetScrollsLongMetadataAboveTheReservedFooter": 11.455
   }
 }

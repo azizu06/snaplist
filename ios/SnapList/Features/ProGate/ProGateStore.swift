@@ -55,6 +55,9 @@ final class ProGateStore {
     private let confirmationTimeout: Duration
     private var deadlineTask: Task<Void, Never>?
     fileprivate var offerProduct: SubscriptionProductMetadata?
+    /// The StoreKit product the offer showed, kept after the offer so the
+    /// confirmation states draw the same plan the seller agreed to.
+    var offeredProduct: SubscriptionProductMetadata? { offerProduct }
     private var pendingVerification: ReadySource?
     private var pendingVerificationID: UUID?
 
@@ -401,13 +404,15 @@ final class ProGateStore {
 
 #if DEBUG
 extension ProGateStore {
-    static func fixture(_ fixture: ProGateFixtureState) -> ProGateStore {
+    static func fixture(_ fixture: ProGateFixtureState, longMetadata: Bool = false) -> ProGateStore {
         let product = SubscriptionProductMetadata(
             id: "fixture-monthly",
-            localizedTitle: "SnapList Pro",
+            localizedTitle: longMetadata
+                ? "SnapList Pro – Abonnement für monatliche KI-Angebote und bearbeitbare Verkaufsentwürfe"
+                : "SnapList Pro",
             localizedDescription: "Fixture",
             localizedPrice: "$9.99",
-            billingPeriod: .init(value: 1, unit: .month)
+            billingPeriod: .init(value: longMetadata ? 12 : 1, unit: .month)
         )
         if fixture.exercisesPurchase {
             return ProGateStore(
@@ -492,7 +497,9 @@ private actor ProGatePurchaseFixtureAPI: MobileAPIClient {
     func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
         reads += 1
         if reads > 1, fixture == .purchaseMissing { throw MobileAPIClientError.httpStatus(503) }
-        if reads > 1, fixture == .purchaseTimeout { try await Task.sleep(for: .seconds(2)) }
+        // Long enough that the timed-out pending state stays on screen while a
+        // UI test waits out the paywall's state animations before reading it.
+        if reads > 1, fixture == .purchaseTimeout { try await Task.sleep(for: .seconds(30)) }
         let granted = reads > 1 && (fixture == .purchaseVerified || fixture == .purchaseTimeout)
             || reads > 3 && fixture == .purchaseDelayed
         return .init(data: .init(billingSource: granted ? .storeKit : .included, status: granted ? .active : .included, remainingItems: granted ? 7 : 1, periodStart: nil, periodEnd: nil, gracePeriodEnd: nil, transitionState: .notRequired, legacyStripeStatus: nil), meta: .init(requestId: "fixture-entitlement"))

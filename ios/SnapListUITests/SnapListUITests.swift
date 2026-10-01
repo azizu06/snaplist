@@ -4314,30 +4314,68 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
-    /// #978: the pinned footer used to sit beside the scroll view as a
-    /// `VStack` sibling, whose shrunk scroll frame cut the first
-    /// `WHAT PRO DOES` row mid-sentence behind the price block once scrolled
-    /// into view. The footer now floats over a full-height scroll view via
-    /// `safeAreaInset`, the same primitive `floatingDock(...)` uses, so
-    /// scrolling the row into view clears the footer instead of rendering
-    /// behind it — matching how `testFloatingDockDoesNotCoverTheLastRow...`
-    /// proves the Settings/Trophy Wall dock clearance.
-    func testProGateOfferFirstBenefitRowClearsThePriceBlockOnceScrolledIntoView() {
+    /// #978 kept the paywall's content from rendering behind its pinned
+    /// footer. The drawer now fits its content, so the packing slip that
+    /// carries the price and renewal terms must sit fully above Subscribe
+    /// without any scrolling.
+    func testProGateOfferSlipSitsAboveTheSubscribeFooter() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
 
-        let row = app.descendants(matching: .any)["pro-gate.allowance-row"]
-        let price = app.descendants(matching: .any)["pro-gate.plan"]
-        XCTAssertTrue(row.waitForExistence(timeout: 3))
-        XCTAssertTrue(price.waitForExistence(timeout: 3))
+        let plan = app.descendants(matching: .any)["pro-gate.plan"]
+        let primary = app.buttons["pro-gate.primary"]
+        XCTAssertTrue(plan.waitForExistence(timeout: 3))
+        XCTAssertTrue(primary.waitForExistence(timeout: 3))
 
-        for _ in 0..<12 {
-            guard row.frame.maxY > price.frame.minY else { break }
-            app.swipeUp()
+        let receipt = "plan=\(plan.frame), primary=\(primary.frame)"
+        addScreenshot(named: "PROGATE-SLIP-CLEARANCE-402x874.png")
+        XCTAssertLessThanOrEqual(plan.frame.maxY, primary.frame.minY, receipt)
+    }
+
+    /// A short native sheet with long synthetic StoreKit metadata at the
+    /// standard text size must scroll the renewal slip clear of Subscribe.
+    /// No purchase is made; the real sheet/footer/layout path is mounted.
+    func testProGateShortSheetScrollsLongMetadataAboveTheReservedFooter() {
+        let app = launch(extraArguments: [
+            "--pro-gate-fixture=PAY-01",
+            "--pro-gate-short-long-metadata",
+        ])
+        let plan = app.descendants(matching: .any)["pro-gate.plan"]
+        let primary = app.buttons["pro-gate.primary"]
+        XCTAssertTrue(plan.waitForExistence(timeout: 3))
+        XCTAssertTrue(primary.waitForExistence(timeout: 3))
+        XCTAssertTrue(primary.isHittable)
+        XCTAssertTrue((plan.value as? String)?.contains("12 months until canceled") == true)
+        let initialPlan = plan.frame
+        let initialFooter = primary.frame
+        let top = app.windows.firstMatch.frame.maxY - 330
+        addScreenshot(named: "pro-gate-short-long-before-scroll")
+
+        for _ in 0..<3 {
+            let window = app.windows.firstMatch
+            let start = window.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: window.frame.midX, dy: primary.frame.minY - 24)
+            )
+            let end = window.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: window.frame.midX, dy: top)
+            )
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
-
-        let receipt = "row=\(row.frame), price=\(price.frame)"
-        addScreenshot(named: "PROGATE-BENEFIT-ROW-CLEARANCE-402x874.png")
-        XCTAssertLessThanOrEqual(row.frame.maxY, price.frame.minY, receipt)
+        let receipt = "initialPlan=\(initialPlan), plan=\(plan.frame), footer=\(primary.frame)"
+        let geometry = XCTAttachment(string: receipt)
+        geometry.name = "pro-gate-short-long-geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        addScreenshot(named: "pro-gate-short-long-after-scroll")
+        XCTAssertLessThan(plan.frame.minY, initialPlan.minY - 50, receipt)
+        XCTAssertLessThanOrEqual(plan.frame.maxY, primary.frame.minY, receipt)
+        XCTAssertEqual(primary.frame.minY, initialFooter.minY, accuracy: 2, receipt)
+        XCTAssertTrue(primary.isHittable)
+        XCTAssertTrue(app.buttons["pro-gate.restore-purchase"].isHittable)
+        for identifier in ["pro-gate.terms-of-service", "pro-gate.privacy-policy"] {
+            let legal = app.buttons[identifier]
+            XCTAssertTrue(legal.isHittable)
+            XCTAssertLessThanOrEqual(legal.frame.maxY, app.windows.firstMatch.frame.maxY)
+        }
     }
 
     func testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable() {
@@ -4345,17 +4383,14 @@ final class SnapListUITests: XCTestCase {
 
         let title = app.staticTexts["pro-gate.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 3))
-        XCTAssertEqual(title.label, "This item needs SnapList Pro")
+        XCTAssertEqual(title.label, "Keep listing with Pro")
+        let plan = app.descendants(matching: .any)["pro-gate.plan"]
+        XCTAssertEqual(plan.label, "SnapList Pro, Monthly, $9.99 per month")
+        // App Review 3.1.2: the renew-until-canceled terms ride on the slip
+        // beside the price instead of a separate line of fine print.
         XCTAssertEqual(
-            app.staticTexts["pro-gate.what-pro-does"].label,
-            "What Pro does"
-        )
-        XCTAssertTrue(
-            app.staticTexts["What happens if you don’t subscribe"].exists
-        )
-        XCTAssertEqual(
-            app.descendants(matching: .any)["pro-gate.plan"].label,
-            "SnapList Pro, Monthly, $9.99 per month"
+            plan.value as? String,
+            "AI listings every month. Renews Monthly until canceled, via Apple."
         )
 
         for control in [
@@ -4424,10 +4459,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThan(title.frame.height, standardTitleHeight * 1.5)
 
         let primary = app.buttons["pro-gate.primary"]
-        // The decision controls sit below the plan tile and Subscribe, so
-        // scroll until the last of them is reachable, not just the first.
-        let decline = app.buttons["pro-gate.not-now"]
-        for _ in 0..<6 where !decline.isHittable {
+        // Subscribe and Restore sit below the slip in the scroll view, so
+        // scroll until the last of them is reachable; Not now is the close
+        // control pinned to the sheet's corner.
+        let restore = app.buttons["pro-gate.restore-purchase"]
+        for _ in 0..<8 where !restore.isHittable {
             app.swipeUp()
         }
         XCTAssertTrue(app.descendants(matching: .any)["pro-gate.plan"].exists)
@@ -4442,11 +4478,8 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "pro-gate-accessibility3")
     }
 
-    /// #961: the paywall is one of the sheets the owner named directly ("the
-    /// paywall and everything"). `pro-gate.primary` sits outside the sheet's
-    /// own `ScrollView` (it is pinned below it at this, non-accessibility,
-    /// Dynamic Type size), so a drag started there reaches the sheet's
-    /// drag-to-dismiss recognizer instead of just scrolling the offer copy.
+    /// #961: dismiss the fitted drawer with a downward drag from its upper
+    /// scene, where the native sheet's dismissal gesture is reachable.
     func testProGatePaywallSlidesDownToDismissWhenDismissible() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
 
@@ -4454,19 +4487,20 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["pro-gate.primary"].waitForExistence(timeout: 3))
 
-        // Drag from the title text, not a button — starting the touch on a
-        // Button hands the gesture to its own tap/highlight tracking before
-        // the sheet's interactive-dismiss pan ever sees it, the same reason
-        // ListingReviewDrawer's dismiss test drags from the drawer container
-        // rather than one of its controls.
-        let start = title.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0)
+        let close = app.buttons["pro-gate.not-now"]
+        XCTAssertTrue(close.exists)
+        let window = app.windows.firstMatch
+        // Start beside the close control, in the noninteractive scene. The
+        // heading now sits near the bottom of the fitted drawer; a drag from
+        // there to the screen edge cannot traverse its dismissal distance.
+        let start = window.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: window.frame.width / 2, dy: close.frame.midY - window.frame.minY)
         )
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1))
+        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
         start.press(forDuration: 0.05, thenDragTo: end)
 
-        XCTAssertFalse(
-            title.waitForExistence(timeout: 3),
+        XCTAssertTrue(
+            title.waitForNonExistence(timeout: 3),
             "A swipe-down must dismiss the paywall when it is dismissible."
         )
     }
@@ -4479,6 +4513,7 @@ final class SnapListUITests: XCTestCase {
             purchase.tap()
             let check = app.buttons["pro-gate.check-again"]
             XCTAssertTrue(check.waitForExistence(timeout: 4), fixture)
+            addScreenshot(named: "pro-gate-\(fixture)-pending")
             XCTAssertFalse(app.descendants(matching: .any)["pro-gate.confirming"].exists)
             XCTAssertFalse(app.buttons["Subscribe"].exists)
             let restore = app.buttons["pro-gate.restore-purchase"]
@@ -4506,6 +4541,7 @@ final class SnapListUITests: XCTestCase {
                 check.tap()
             }
             XCTAssertTrue(app.staticTexts["SnapList Pro is on"].waitForExistence(timeout: 4))
+            addScreenshot(named: "pro-gate-\(fixture)-verified")
             XCTAssertFalse(app.buttons["pro-gate.check-again"].exists)
             app.buttons["pro-gate.primary"].tap()
             XCTAssertFalse(app.staticTexts["pro-gate.title"].waitForExistence(timeout: 1))
