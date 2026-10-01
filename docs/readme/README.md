@@ -32,7 +32,7 @@ The app plays this home-state clip once; the README repeats it indefinitely.
 The GIF preserves transparency and the complete scan action, crops only the
 transparent margins, and uses a shared 128-color palette. It is 240 × 255 px,
 65 frames / 4.06 seconds at approximately 16 fps, and 1,483,536 bytes. Its compact
-centered placement keeps the existing screenshots immediately beneath the hero.
+180 px centered placement keeps the existing screenshots immediately beneath the hero.
 The barcode is mascot illustration, not a promise of barcode-only capture.
 
 Regenerate from the repository root with FFmpeg (the explicit libvpx decoder
