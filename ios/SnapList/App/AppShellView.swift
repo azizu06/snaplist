@@ -2600,6 +2600,7 @@ struct TrophyWallFeatureView: View {
     /// there is no tile in that flow — so it falls back to the plain push.
     @State private var zoomTransitionRunID: UUID?
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.openURL) private var openURL
 
     private var reduceMotion: Bool {
         systemReduceMotion || forceReducedMotion
@@ -2718,7 +2719,9 @@ struct TrophyWallFeatureView: View {
             guestClaimPresentation: guestClaimPresentation,
             listingReviewPresentation: listingReviewPresentation,
             applyRetryResult: { _ in false },
-            selectScan: startNewItem
+            selectScan: startNewItem,
+            ebayPublishService: dependencies.ebayPublishService,
+            openExternalURL: { openURL($0) }
         )
         let outcome = await executor.execute(.review(runID: runID))
         switch outcome {

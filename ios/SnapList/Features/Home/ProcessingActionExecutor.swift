@@ -48,6 +48,9 @@ enum ProcessingActionOutcome: Equatable {
     case selectedScan
     case presentedGuestClaim
     case presentedReview
+    /// The listing is already posted, so the tap handed its eBay page to the
+    /// system instead of opening Listing Review.
+    case openedEbayPosting
     case projectedRetry
     case rejected
 }
@@ -65,6 +68,10 @@ struct ProcessingActionExecutor: ProcessingActionExecuting {
     let listingReviewPresentation: ListingReviewPresentationHost
     let applyRetryResult: (DurableRun) -> Bool
     let selectScan: () -> Void
+    /// Where a posted listing's eBay page goes. Both are absent for surfaces
+    /// that only ever open drafts.
+    let ebayPublishService: (any EbayPublishFeatureServing)?
+    let openExternalURL: ((URL) -> Void)?
 
     init(
         runStore: RunDetailStore,
@@ -72,7 +79,9 @@ struct ProcessingActionExecutor: ProcessingActionExecuting {
         guestClaimPresentation: ProcessingGuestClaimPresentationHost,
         listingReviewPresentation: ListingReviewPresentationHost,
         applyRetryResult: @escaping (DurableRun) -> Bool,
-        selectScan: @escaping () -> Void
+        selectScan: @escaping () -> Void,
+        ebayPublishService: (any EbayPublishFeatureServing)? = nil,
+        openExternalURL: ((URL) -> Void)? = nil
     ) {
         self.runStore = runStore
         self.listingReviewStore = listingReviewStore
@@ -80,6 +89,8 @@ struct ProcessingActionExecutor: ProcessingActionExecuting {
         self.listingReviewPresentation = listingReviewPresentation
         self.applyRetryResult = applyRetryResult
         self.selectScan = selectScan
+        self.ebayPublishService = ebayPublishService
+        self.openExternalURL = openExternalURL
     }
 
     func execute(_ action: TrophyWallProcessingAction) async -> ProcessingActionOutcome {
@@ -97,7 +108,7 @@ struct ProcessingActionExecutor: ProcessingActionExecuting {
             defer { listingReviewStore.abandonCanonicalFetch(runID: runID) }
             guard let route = await runStore.processingReviewRoute(for: runID)
             else {
-                return .rejected
+                return await openEbayPosting(runID: runID) ?? .rejected
             }
             switch route {
             case .guestClaim(let context):
@@ -122,5 +133,22 @@ struct ProcessingActionExecutor: ProcessingActionExecuting {
             }
             return .projectedRetry
         }
+    }
+
+    /// Review reads only unpublished drafts, so a tile for a listing already
+    /// live on eBay lands here. Only eBay's confirmed publication of that
+    /// listing yields a destination; anything else stays refused.
+    private func openEbayPosting(runID: UUID) async -> ProcessingActionOutcome? {
+        guard let ebayPublishService,
+              let openExternalURL,
+              let listingID = await runStore.finishedListingWithoutReview(for: runID),
+              let url = await EbayOwnListingDestination.resolve(
+                  listingID: listingID,
+                  service: ebayPublishService
+              ) else {
+            return nil
+        }
+        openExternalURL(url)
+        return .openedEbayPosting
     }
 }
