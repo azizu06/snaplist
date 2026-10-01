@@ -34,7 +34,7 @@ The first usable listing comes **before signup or a paywall**. Try the result on
 
 Scout meets you at a packing counter when you want more AI listings. The plan appears on a taped packing slip: price, renewal terms, Subscribe, and Restore, with Terms and Privacy close at hand.
 
-<p align="center"><img src="docs/readme/scout-pro.png" width="290" alt="SnapList Pro simulator screenshot: Scout at a packing counter, a monthly plan on a taped slip, Subscribe, Restore, Terms and Privacy."><br><sub>Scout’s packing-counter paywall. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
+<p align="center"><img src="docs/readme/scout-pro.jpg" width="290" alt="SnapList Pro on a real iPhone: Scout at a packing counter, a monthly plan on a taped slip, Subscribe, Restore, Terms and Privacy."><br><sub>Scout’s packing-counter paywall. <a href="docs/readme/README.md">Screenshot notes</a>.</sub></p>
 
 | Free first item | SnapList Pro |
 | --- | --- |
