@@ -642,12 +642,20 @@ struct ListingReviewView: View {
                 ) {
                     HStack {
                         Text(draft.condition.sellerLabel)
+                            .font(.body)
                         Spacer()
                         Image(systemName: "chevron.up.chevron.down")
                             .foregroundStyle(SnapListColorToken.textSecondary.color)
                     }
                 }
+                .contentShape(Rectangle())
             }
+            // The automatic Menu style draws the system's highlighted capsule
+            // over the label at rest. Plain keeps it the same bordered box as
+            // every other field, as `ListingReviewChoiceField` does.
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
             .foregroundStyle(SnapListColorToken.inkPrimary.color)
             .accessibilityLabel("Condition")
             .accessibilityValue(draft.condition.sellerLabel)
