@@ -856,4 +856,20 @@ final class AppNavigationTests: XCTestCase {
         router.openProcessingFromDock()
         XCTAssertEqual(router.selectedPath, [.home(.processing)])
     }
+
+    /// "Go to Flips" from eBay publish's result screen. The review is pushed by
+    /// its presentation flag, not the shell path, so leaving must drop that
+    /// flag before the shell resets its path; otherwise the review stays on
+    /// top, and the dock it hides never comes back.
+    @MainActor
+    func testLeavingReviewForFlipsDismissesTheReviewBeforeReturningToTheWall() {
+        let presentation = ListingReviewPresentationHost()
+        presentation.isPresented = true
+        var wasPresentedAtReturn: Bool?
+
+        presentation.leave(to: { wasPresentedAtReturn = presentation.isPresented })
+
+        XCTAssertEqual(wasPresentedAtReturn, false)
+        XCTAssertFalse(presentation.isPresented)
+    }
 }
