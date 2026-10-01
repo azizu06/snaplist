@@ -3618,6 +3618,9 @@ struct PhotoReviewView: View {
             reduceMotion ? nil : .easeOut(duration: 0.24),
             value: isVoiceNotePresented
         )
+        // The open voice note is the active drawer: its swipe closes it, and
+        // the Scan drawer holding this page stops answering drags until then.
+        .scanDrawerYieldsDrag(to: isVoiceNotePresented)
         .onAppear {
             // A take restored after relaunch lands back on review with the
             // panel open, where the seller left it (#1136).

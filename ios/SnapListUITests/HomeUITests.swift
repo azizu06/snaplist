@@ -390,6 +390,58 @@ final class HomeUITests: XCTestCase {
         add(attachment)
     }
 
+    /// Owner-approved: the camera stays a popup over the wall, and going on
+    /// to Photo Review takes the whole screen. Back to the camera returns to
+    /// the popup with every staged photo still there.
+    func testPhotoReviewOpensFullScreenWhileTheCameraStaysAPopup() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture",
+                               "--zero-network-fixtures"]
+        app.launchAfterRetiringPriorInstance()
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5), app.debugDescription)
+        let window = app.windows.firstMatch.frame
+        let popupTop = window.maxY - window.height * 0.9
+        XCTAssertEqual(drawer.frame.minY, popupTop, accuracy: 1,
+            "The camera is a popup with the wall showing above it.")
+        let stagedLabel = review.label
+
+        review.tap()
+        let count = app.descendants(matching: .any)["photo-review.count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        waitForDrawerTop(drawer, toReach: window.minY)
+        XCTAssertEqual(drawer.frame.minY, window.minY, accuracy: 1,
+            "Photo Review fills the screen.")
+        let back = app.buttons["photo-review.back"]
+        XCTAssertTrue(back.isHittable)
+        XCTAssertGreaterThanOrEqual(back.frame.minY, 62,
+            "The header clears the status bar. back=\(back.frame)")
+        let photoCount = count.label
+        let fullScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        fullScreen.name = "PHOTO-REVIEW-FULL-SCREEN-402x874"
+        fullScreen.lifetime = .keepAlways
+        add(fullScreen)
+
+        back.tap()
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        waitForDrawerTop(drawer, toReach: popupTop)
+        XCTAssertEqual(drawer.frame.minY, popupTop, accuracy: 1)
+        XCTAssertEqual(review.label, stagedLabel, "No staged photo was lost.")
+
+        review.tap()
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        XCTAssertEqual(count.label, photoCount)
+    }
+
+    private func waitForDrawerTop(_ drawer: XCUIElement, toReach top: CGFloat) {
+        let reached = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in abs(drawer.frame.minY - top) <= 1 },
+            object: nil
+        )
+        _ = XCTWaiter.wait(for: [reached], timeout: 3)
+    }
+
     /// One dock, two destinations, on every screen that shows it. The Scan
     /// camera used to draw its own `scan.tab` / `trophy-wall.tab` control; it now
     /// renders the same component, so the identifiers below are the only pair

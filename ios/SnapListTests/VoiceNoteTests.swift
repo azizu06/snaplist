@@ -1178,6 +1178,28 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertTrue(denied.permission.canOpenSettings)
     }
 
+    /// The voice note's swipe only does what one of its controls already
+    /// does: a live take and a failed save stay, a reviewed take is kept the
+    /// way the collapse control keeps it, and everything else closes.
+    func testSwipeDismissalNeverDropsAudioAPanelControlWouldKeep() {
+        let expectations: [(VoiceNotePhase, VoiceNoteSwipeDismissal)] = [
+            (.recording(elapsed: 3, level: 0.4), .blocked),
+            (.saveFailed, .blocked),
+            (.takeReady(duration: 7), .keepTakeAndClose),
+            (.ready, .close),
+            (.saved(isPlaying: true), .close),
+            (.accessOff(permission: .denied), .close),
+            (.interrupted, .close)
+        ]
+        for (phase, dismissal) in expectations {
+            XCTAssertEqual(
+                VoiceNoteSwipePolicy.dismissal(for: phase),
+                dismissal,
+                "\(phase)"
+            )
+        }
+    }
+
     func testFrozenV21CopyGeometryAndAccessibilityTruth() {
         XCTAssertEqual(VoiceNotePresentation.sheetHeight, 300)
         XCTAssertEqual(VoiceNotePresentation.minimumTarget, 44)

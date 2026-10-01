@@ -748,6 +748,9 @@ struct AppShellView: View {
         .overlay {
             ScanDrawerSurface(
                 isPresented: router.isScanPresented,
+                // The camera stays a popup over the wall; Photo Review, once
+                // the seller has photos to look at, takes the whole screen.
+                isExpanded: isPhotoReviewInDrawer,
                 reduceMotion: reduceMotion,
                 dismiss: { applyScanDrawer(.dismissed) }
             ) {

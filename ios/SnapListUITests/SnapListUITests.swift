@@ -1493,30 +1493,35 @@ final class SnapListUITests: XCTestCase {
         XCTAssertLessThan(elapsedIndex ?? .max, saveIndex ?? .max)
     }
 
-    func testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth() {
+    /// The voice note is the active drawer over Photo Review: a downward
+    /// swipe on it closes it and leaves the review page exactly where it was,
+    /// and reopening shows the same note. Closing by swipe is closing by the
+    /// Close control, so the reopen truth is the same either way.
+    func testVoiceNoteSwipeClosesOnlyTheVoiceDrawerAndReopensStable() {
         let saved = launchVoiceNoteFixture(
             "--voice-note-saved-playing-fixture"
         )
-        let savedClose = saved.buttons["voice-note.close"]
+        let drawer = saved.descendants(matching: .any)["scan.drawer"]
+        XCTAssertTrue(drawer.exists, saved.debugDescription)
+        let drawerTop = drawer.frame.minY
         let playback = saved.buttons["voice-note.playback"]
-        let rerecord = saved.buttons["voice-note.rerecord"]
-        let delete = saved.buttons["voice-note.delete"]
         XCTAssertEqual(playback.label, "Pause voice note")
-        XCTAssertTrue(rerecord.exists)
-        XCTAssertTrue(delete.exists)
-
         playback.tap()
         XCTAssertEqual(playback.label, "Play voice note")
 
         attemptVoiceNoteSwipeDismiss(in: saved)
 
-        XCTAssertTrue(savedClose.exists)
-        XCTAssertEqual(playback.label, "Play voice note")
-
-        savedClose.tap()
+        XCTAssertTrue(
+            saved.buttons["voice-note.close"].waitForNonExistence(timeout: 3),
+            "A swipe on the voice note closes the voice note."
+        )
         let savedRow = saved.buttons["photo-review.voice"]
         XCTAssertTrue(savedRow.waitForExistence(timeout: 2))
+        XCTAssertTrue(savedRow.isHittable, "Photo Review is still up.")
         XCTAssertEqual(savedRow.label, "Voice note, 0:12, collapsed")
+        XCTAssertTrue(drawer.exists, "The page under the voice note stays.")
+        XCTAssertEqual(drawer.frame.minY, drawerTop, accuracy: 1)
+
         savedRow.tap()
         XCTAssertEqual(
             saved.buttons["voice-note.playback"].label,
@@ -1535,12 +1540,9 @@ final class SnapListUITests: XCTestCase {
 
         attemptVoiceNoteSwipeDismiss(in: interrupted)
 
-        XCTAssertTrue(interrupted.buttons["voice-note.close"].exists)
-        XCTAssertTrue(interruptedCopy.exists)
-
-        interrupted.buttons["voice-note.close"].tap()
         let emptyRow = interrupted.buttons["photo-review.voice"]
-        XCTAssertTrue(emptyRow.waitForExistence(timeout: 2))
+        XCTAssertTrue(emptyRow.waitForExistence(timeout: 3))
+        XCTAssertFalse(interrupted.buttons["voice-note.close"].exists)
         XCTAssertEqual(
             emptyRow.label,
             "Voice note, Add details the photos might miss, collapsed"
@@ -1551,6 +1553,100 @@ final class SnapListUITests: XCTestCase {
                 .waitForExistence(timeout: 2)
         )
         XCTAssertFalse(interruptedCopy.exists)
+    }
+
+    /// While the voice note is open the review page does not move, whether
+    /// the finger starts on the panel or on the dimmed page above it. A short
+    /// drag on the panel springs it back.
+    func testOpenVoiceNoteHoldsTheReviewPageStillUnderEveryDrag() {
+        let app = launchVoiceNoteFixture("--voice-note-saved-playing-fixture")
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
+        let title = app.staticTexts["voice-note.title"]
+        let drawerTop = drawer.frame.minY
+        let titleTop = title.frame.minY
+
+        let start = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(
+            forDuration: 0.1,
+            thenDragTo: start.withOffset(CGVector(dx: 0, dy: 40)),
+            withVelocity: .slow,
+            thenHoldForDuration: 0.3
+        )
+        let settled = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in abs(title.frame.minY - titleTop) <= 1 },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 2), .completed,
+            "A short drag returns the voice note to where it was.")
+        XCTAssertTrue(app.buttons["voice-note.close"].exists)
+        XCTAssertEqual(drawer.frame.minY, drawerTop, accuracy: 1)
+
+        let page = app.windows.firstMatch.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)
+        )
+        page.press(
+            forDuration: 0.05,
+            thenDragTo: app.windows.firstMatch.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)
+            ),
+            withVelocity: 1_000,
+            thenHoldForDuration: 0
+        )
+        XCTAssertTrue(drawer.exists, "The review page is not the active drawer.")
+        XCTAssertEqual(drawer.frame.minY, drawerTop, accuracy: 1)
+        XCTAssertTrue(app.buttons["voice-note.close"].exists)
+        addScreenshot(named: "VOICE-NOTE-SWIPE-PARENT-STILL-402x874.png")
+    }
+
+    /// A swipe only does what a panel control already does: it never ends a
+    /// live take, and a stopped take is kept the way the collapse control
+    /// keeps it, not thrown away.
+    func testVoiceNoteSwipeNeverEndsALiveTakeAndKeepsAReviewedOne() {
+        let app = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        let drawer = app.descendants(matching: .any)["scan.drawer"]
+        let drawerTop = drawer.frame.minY
+
+        attemptVoiceNoteSwipeDismiss(in: app)
+
+        XCTAssertTrue(app.buttons["voice-note.cancel"].exists,
+            "Recording continues; Stop or Cancel ends it.")
+        XCTAssertEqual(drawer.frame.minY, drawerTop, accuracy: 1)
+
+        app.buttons["voice-note.save"].tap()
+        XCTAssertTrue(
+            app.buttons["voice-note.save-recording"].waitForExistence(timeout: 2)
+        )
+
+        attemptVoiceNoteSwipeDismiss(in: app)
+
+        let row = app.buttons["photo-review.voice"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertEqual(row.label, "Voice note, 0:07, collapsed")
+        XCTAssertEqual(drawer.frame.minY, drawerTop, accuracy: 1)
+    }
+
+    /// #1156 review: the live timer grows with larger text again.
+    func testVoiceNoteTimerScalesWithLargerText() {
+        let standard = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        let standardHeight = standard.staticTexts["voice-note.elapsed"].frame.height
+        standard.terminate()
+
+        let larger = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel",
+            extraArguments: ["--dynamic-type=accessibility3"]
+        )
+        let elapsed = larger.staticTexts["voice-note.elapsed"]
+        XCTAssertTrue(elapsed.exists)
+        XCTAssertGreaterThan(elapsed.frame.height, standardHeight + 4,
+            "standard=\(standardHeight) larger=\(elapsed.frame.height)")
+        addScreenshot(named: "VOICE-NOTE-TIMER-AX3-402x874.png")
     }
 
     func testVoiceNoteRecordingCancelAndSaveBothDismissToExactRowTruth() {
@@ -5526,13 +5622,14 @@ final class SnapListUITests: XCTestCase {
 
     private func launchVoiceNoteFixture(
         _ fixtureArgument: String,
-        expectedControl: String = "voice-note.close"
+        expectedControl: String = "voice-note.close",
+        extraArguments: [String] = []
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
             fixtureArgument
-        ]
+        ] + extraArguments
         app.launchAfterRetiringPriorInstance()
 
         let review = app.buttons["scan.review"]

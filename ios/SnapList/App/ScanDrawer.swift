@@ -78,26 +78,48 @@ enum ScanDrawerMetrics {
     static let scrimOpacity: Double = 0.32
     /// Space for the grabber above the drawer's content.
     static let grabHandleBandHeight: CGFloat = 32
+    /// Photo Review fills the screen, so its grabber sits in a slimmer band
+    /// under the status bar rather than above a card edge.
+    static let expandedGrabHandleBandHeight: CGFloat = 14
 }
 
 /// Where the drawer sits, derived from what a GeometryReader reports: the
 /// safe-area size and the insets around it. Pure so the device geometry the
 /// drawer has to honour is assertable without rendering one.
+///
+/// The camera is a popup over the wall; Photo Review, once there are photos
+/// to review, is `isExpanded`: the full screen, with the status bar handed to
+/// its content as an inset (owner-approved recommendation, #1156 follow-up).
 struct ScanDrawerLayout: Equatable {
     let drawerHeight: CGFloat
     let contentInsets: EdgeInsets
+    let cornerRadius: CGFloat
+    /// The visible strip the grabber is centred in, below any status bar.
+    let grabberBandHeight: CGFloat
 
-    init(safeAreaSize: CGSize, safeAreaInsets: EdgeInsets) {
+    init(
+        safeAreaSize: CGSize,
+        safeAreaInsets: EdgeInsets,
+        isExpanded: Bool = false
+    ) {
         let screenHeight = safeAreaSize.height
             + safeAreaInsets.top
             + safeAreaInsets.bottom
-        drawerHeight = screenHeight * ScanDrawerMetrics.heightFraction
+        drawerHeight = isExpanded
+            ? screenHeight
+            : screenHeight * ScanDrawerMetrics.heightFraction
+        grabberBandHeight = isExpanded
+            ? ScanDrawerMetrics.expandedGrabHandleBandHeight
+            : ScanDrawerMetrics.grabHandleBandHeight
         contentInsets = EdgeInsets(
-            top: ScanDrawerMetrics.grabHandleBandHeight,
+            top: isExpanded
+                ? safeAreaInsets.top + grabberBandHeight
+                : grabberBandHeight,
             leading: safeAreaInsets.leading,
             bottom: safeAreaInsets.bottom,
             trailing: safeAreaInsets.trailing
         )
+        cornerRadius = isExpanded ? 0 : ScanDrawerMetrics.cornerRadius
     }
 }
 
@@ -224,6 +246,24 @@ enum AppShellSubmissionCompletionCopy {
     static let announcement = "Item added to Trophy Wall. Analysing."
 }
 
+/// Raised by drawer content while a drawer of its own is open over it, such
+/// as the voice note over Photo Review. The open child is the active drawer:
+/// its swipe moves only it, so the Scan drawer stops answering drags, its
+/// grabber and its scrim until the child closes.
+struct ScanDrawerNestedDrawerKey: PreferenceKey {
+    static let defaultValue = false
+
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
+extension View {
+    func scanDrawerYieldsDrag(to nestedDrawerIsOpen: Bool) -> some View {
+        preference(key: ScanDrawerNestedDrawerKey.self, value: nestedDrawerIsOpen)
+    }
+}
+
 /// The Scan drawer's presentation.
 ///
 /// Not a system sheet — see the note at its call site: iOS 26 scales the
@@ -234,12 +274,15 @@ enum AppShellSubmissionCompletionCopy {
 /// gesture implemented rather than inherited.
 struct ScanDrawerSurface<Content: View>: View {
     let isPresented: Bool
+    /// Photo Review rather than the camera: the drawer fills the screen.
+    var isExpanded = false
     let reduceMotion: Bool
     let dismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
     @State private var dragTranslation: CGFloat = 0
     @State private var revealProgress: CGFloat = 0
+    @State private var nestedDrawerIsOpen = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
@@ -254,7 +297,8 @@ struct ScanDrawerSurface<Content: View>: View {
         GeometryReader { safeArea in
             let layout = ScanDrawerLayout(
                 safeAreaSize: safeArea.size,
-                safeAreaInsets: safeArea.safeAreaInsets
+                safeAreaInsets: safeArea.safeAreaInsets,
+                isExpanded: isExpanded
             )
 
             GeometryReader { _ in
@@ -296,6 +340,10 @@ struct ScanDrawerSurface<Content: View>: View {
             ScanDrawerMotionPolicy.presentationAnimation(reduceMotion: reduceMotion),
             value: isPresented
         )
+        .animation(
+            ScanDrawerMotionPolicy.presentationAnimation(reduceMotion: reduceMotion),
+            value: isExpanded
+        )
     }
 
     private var scrim: some View {
@@ -303,13 +351,19 @@ struct ScanDrawerSurface<Content: View>: View {
             .opacity(ScanDrawerMetrics.scrimOpacity)
             .ignoresSafeArea()
             .contentShape(.rect)
-            .onTapGesture(perform: dismiss)
+            .onTapGesture {
+                guard !nestedDrawerIsOpen else { return }
+                dismiss()
+            }
             .accessibilityHidden(true)
     }
 
     private func card(_ layout: ScanDrawerLayout) -> some View {
         let height = layout.drawerHeight
         return content()
+            .onPreferenceChange(ScanDrawerNestedDrawerKey.self) { isOpen in
+                nestedDrawerIsOpen = isOpen
+            }
             // Padding for what respects the safe area — the camera's controls,
             // Photo Review's header and action bar — while the preview, which
             // ignores it, still fills the card edge to edge.
@@ -319,14 +373,14 @@ struct ScanDrawerSurface<Content: View>: View {
             .background(SnapListColorToken.canvas.color)
             .clipShape(
                 UnevenRoundedRectangle(
-                    topLeadingRadius: ScanDrawerMetrics.cornerRadius,
+                    topLeadingRadius: layout.cornerRadius,
                     bottomLeadingRadius: 0,
                     bottomTrailingRadius: 0,
-                    topTrailingRadius: ScanDrawerMetrics.cornerRadius,
+                    topTrailingRadius: layout.cornerRadius,
                     style: .continuous
                 )
             )
-            .overlay(alignment: .top) { grabHandle(drawerHeight: height) }
+            .overlay(alignment: .top) { grabHandle(layout) }
             // The drawer's own marker, applied outside the clip. A 1x1 point
             // at the card's top-left corner is exactly what a 28pt corner
             // radius clips away, and a clipped view never reaches the
@@ -349,7 +403,8 @@ struct ScanDrawerSurface<Content: View>: View {
             // the drawer, the same promise the close control and the swipe
             // make.
             .accessibilityAction(.escape, dismiss)
-            .modifier(ScanDrawerPanModifier(
+            .modifier(DownwardDragPanModifier(
+                isEnabled: !nestedDrawerIsOpen,
                 changed: { dragTranslation = $0 },
                 ended: { translation, velocity in
                     let outcome = ScanDrawerDragPolicy.outcome(
@@ -371,13 +426,16 @@ struct ScanDrawerSurface<Content: View>: View {
     }
 
     /// The grabber marks the same downward gesture available on the card.
+    /// Expanded, the touch band reaches up through the status bar while the
+    /// capsule stays in the visible strip below it.
     @ViewBuilder
-    private func grabHandle(drawerHeight: CGFloat) -> some View {
+    private func grabHandle(_ layout: ScanDrawerLayout) -> some View {
+        let drawerHeight = layout.drawerHeight
         let handle = Color.clear
-            .frame(height: ScanDrawerMetrics.grabHandleBandHeight)
+            .frame(height: layout.contentInsets.top)
             .frame(maxWidth: .infinity)
             .contentShape(.rect)
-            .overlay {
+            .overlay(alignment: .bottom) {
                 // A material rather than a fixed tint: the drawer holds the
                 // black camera and the light Photo Review, and an ink-coloured
                 // grabber disappears against the first. With Reduce
@@ -392,8 +450,11 @@ struct ScanDrawerSurface<Content: View>: View {
                     }
                 }
                 .frame(width: 36, height: 5)
+                .frame(height: layout.grabberBandHeight)
             }
             .accessibilityHidden(true)
+            // A nested drawer owns the drag; its scrim takes the touch.
+            .allowsHitTesting(!nestedDrawerIsOpen)
         if #available(iOS 18, *) {
             handle
         } else {
@@ -418,13 +479,22 @@ struct ScanDrawerSurface<Content: View>: View {
     }
 }
 
-private struct ScanDrawerPanModifier: ViewModifier {
+/// The downward drag a drawer follows: the Scan drawer's card and the voice
+/// note over Photo Review both take theirs from here. `isEnabled` false
+/// leaves the touch to whatever else is under the finger; turning it off
+/// mid-drag cancels the drag, which settles the drawer back where it was.
+struct DownwardDragPanModifier: ViewModifier {
+    var isEnabled = true
     let changed: (CGFloat) -> Void
     let ended: (CGFloat, CGFloat) -> Void
 
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
-            content.gesture(ScanDrawerSurfacePan(changed: changed, ended: ended))
+            content.gesture(DownwardDragPan(
+                isEnabled: isEnabled,
+                changed: changed,
+                ended: ended
+            ))
         } else {
             content
         }
@@ -436,7 +506,8 @@ private struct ScanDrawerPanModifier: ViewModifier {
 /// move the drawer; horizontal photo paging and thumbnail reordering retain
 /// their existing recognizers.
 @available(iOS 18, *)
-private struct ScanDrawerSurfacePan: UIGestureRecognizerRepresentable {
+private struct DownwardDragPan: UIGestureRecognizerRepresentable {
+    let isEnabled: Bool
     let changed: (CGFloat) -> Void
     let ended: (CGFloat, CGFloat) -> Void
 
@@ -449,7 +520,14 @@ private struct ScanDrawerSurfacePan: UIGestureRecognizerRepresentable {
         pan.maximumNumberOfTouches = 1
         pan.cancelsTouchesInView = false
         pan.delegate = context.coordinator
+        pan.isEnabled = isEnabled
         return pan
+    }
+
+    func updateUIGestureRecognizer(_ pan: UIPanGestureRecognizer, context: Context) {
+        if pan.isEnabled != isEnabled {
+            pan.isEnabled = isEnabled
+        }
     }
 
     func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
