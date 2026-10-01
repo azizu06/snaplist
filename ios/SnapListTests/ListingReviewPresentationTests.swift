@@ -611,4 +611,59 @@ final class ListingReviewInlineTextViewTests: XCTestCase {
                 + "silently on every Bold Text toggle."
         )
     }
+
+    func testConditionSpecificShowsTheSellerLabelNotTheStoredSlug() {
+        XCTAssertEqual(
+            ListingReviewCondition.displayText(
+                forSpecificNamed: "Condition", value: "very-good"
+            ),
+            "Very Good"
+        )
+        XCTAssertEqual(
+            ListingReviewCondition.displayText(
+                forSpecificNamed: " condition", value: "like-new"
+            ),
+            "Like New"
+        )
+        // Other specifics and unrecognized condition text pass through.
+        XCTAssertEqual(
+            ListingReviewCondition.displayText(
+                forSpecificNamed: "Color", value: "very-good"
+            ),
+            "very-good"
+        )
+        XCTAssertEqual(
+            ListingReviewCondition.displayText(
+                forSpecificNamed: "Condition", value: "Gently used"
+            ),
+            "Gently used"
+        )
+    }
+
+    @MainActor
+    func testInlineFieldCanDropTheKeyboardAccessoryDone() {
+        let host = UIHostingController(rootView:
+            ListingReviewInlineTextField(
+                label: "Title",
+                value: "A title",
+                identifier: "no-accessory",
+                field: .title,
+                edits: ListingReviewInlineEdits(),
+                focusValue: "title",
+                focus: .constant(nil),
+                showsKeyboardAccessory: false
+            )
+        )
+        host.loadViewIfNeeded()
+        host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 200)
+        host.view.layoutIfNeeded()
+
+        func textViews(in view: UIView) -> [UITextView] {
+            (view as? UITextView).map { [$0] } ?? []
+                + view.subviews.flatMap(textViews(in:))
+        }
+        let found = textViews(in: host.view)
+        XCTAssertFalse(found.isEmpty)
+        XCTAssertTrue(found.allSatisfy { $0.inputAccessoryView == nil })
+    }
 }

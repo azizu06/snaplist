@@ -80,6 +80,10 @@ struct ItemSpecificsEditorView: View {
         let pending = baseline(for: specific.name) != specific.value
         let identifier =
             "listing-review.specific.\(specific.name.accessibilityKey)"
+        let shownValue = ListingReviewCondition.displayText(
+            forSpecificNamed: specific.name,
+            value: specific.value
+        )
 
         switch ListingReviewSpecificEditing.mode(
             forSpecificNamed: specific.name,
@@ -88,7 +92,7 @@ struct ItemSpecificsEditorView: View {
         case .inPlace:
             ListingReviewInlineTextField(
                 label: specific.name,
-                value: specific.value,
+                value: shownValue,
                 pending: pending,
                 identifier: identifier,
                 field: correctionAvailability == .notOffered
@@ -103,7 +107,7 @@ struct ItemSpecificsEditorView: View {
         case .guidedCorrection, .spent:
             ListingReviewChoiceField(
                 label: specific.name,
-                value: specific.value,
+                value: shownValue,
                 identifier: identifier,
                 hint: correctionAvailability == .offered
                     ? "Opens guided correction"
@@ -140,7 +144,12 @@ struct ItemSpecificsEditorView: View {
             }
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                Text(target.value)
+                Text(
+                    ListingReviewCondition.displayText(
+                        forSpecificNamed: target.name,
+                        value: target.value
+                    )
+                )
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .frame(maxWidth: .infinity, alignment: .leading)
