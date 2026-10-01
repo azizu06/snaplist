@@ -88,7 +88,8 @@ final class RunStoreTests: XCTestCase {
         )
         let tokenProvider = ReviewLatencyBearerProvider()
         let runStore = RunDetailStore(
-            service: RecordingRunService(results: [.success(run)]),
+            // One answer for the review route, one for the posting fallback.
+            service: RecordingRunService(results: [.success(run), .success(run)]),
             tokenProvider: tokenProvider
         )
         let ebay = PostedListingStatusService(
