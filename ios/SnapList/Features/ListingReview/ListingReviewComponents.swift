@@ -28,6 +28,21 @@ extension ListingReviewCondition: CaseIterable {
         .forParts,
     ]
 
+    /// What a Condition specific shows the seller: the human label, never the
+    /// stored slug ("very-good"). Display only: the saved value stays the slug,
+    /// and `matchingFallbackInput` accepts the label back when it is edited.
+    static func displayText(
+        forSpecificNamed name: String,
+        value: String
+    ) -> String {
+        guard ListingReviewDraft.saveContractKey(for: name)
+                == "reserved:condition",
+              let condition = matchingFallbackInput(value) else {
+            return value
+        }
+        return condition.sellerLabel
+    }
+
     static func matchingFallbackInput(
         _ value: String
     ) -> ListingReviewCondition? {
@@ -1108,6 +1123,7 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
     let edits: ListingReviewInlineEdits
     let focusValue: Focus
     let lineLimit: ClosedRange<Int>
+    let showsKeyboardAccessory: Bool
     // Not `@FocusState`. The control is a `UITextView` now, and SwiftUI's
     // focus system only moves SwiftUI's own responders: writing a value no
     // `.focused` modifier claims makes SwiftUI resign whatever is editing,
@@ -1130,7 +1146,8 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
         edits: ListingReviewInlineEdits,
         focusValue: Focus,
         focus: Binding<Focus?>,
-        lineLimit: ClosedRange<Int> = 1...4
+        lineLimit: ClosedRange<Int> = 1...4,
+        showsKeyboardAccessory: Bool = true
     ) {
         self.label = label
         self.value = value
@@ -1140,6 +1157,7 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
         self.edits = edits
         self.focusValue = focusValue
         self.lineLimit = lineLimit
+        self.showsKeyboardAccessory = showsKeyboardAccessory
         _focus = focus
         _text = State(initialValue: value)
     }
@@ -1162,6 +1180,7 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
                     legibilityWeight: legibilityWeight,
                     textStyle: .caption1
                 ),
+                showsKeyboardAccessory: showsKeyboardAccessory,
                 isFocused: focus == focusValue,
                 focusChanged: { editing in
                     if editing {
@@ -1366,6 +1385,9 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
     let font: UIFont
     let lineLimit: ClosedRange<Int>
     var captionFont: UIFont? = nil
+    /// Off where the screen draws its own full-width Done while editing, so
+    /// the seller never sees two.
+    var showsKeyboardAccessory = true
     let isFocused: Bool
     let focusChanged: (Bool) -> Void
 
@@ -1414,7 +1436,9 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
         view.textColor = UIColor(SnapListColorToken.inkPrimary.color)
         view.font = font
         view.text = text
-        view.inputAccessoryView = context.coordinator.keyboardAccessory()
+        if showsKeyboardAccessory {
+            view.inputAccessoryView = context.coordinator.keyboardAccessory()
+        }
         apply(accessibility: view)
         return view
     }

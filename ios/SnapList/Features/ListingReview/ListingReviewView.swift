@@ -594,7 +594,8 @@ struct ListingReviewView: View {
                 edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.title,
                 focus: $inlineFocus,
-                lineLimit: 1...3
+                lineLimit: 1...3,
+                showsKeyboardAccessory: false
             )
             .id(ListingReviewInlineFocus.title)
             .accessibilityFocused($focusedElement, equals: .title)
@@ -608,7 +609,8 @@ struct ListingReviewView: View {
                 edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.description,
                 focus: $inlineFocus,
-                lineLimit: 1...10
+                lineLimit: 1...10,
+                showsKeyboardAccessory: false
             )
             .id(ListingReviewInlineFocus.description)
             .accessibilityFocused($focusedElement, equals: .description)
@@ -699,7 +701,8 @@ struct ListingReviewView: View {
                 field: .fallbackIdentitySpecific(type.name),
                 edits: inlineEdits,
                 focusValue: ListingReviewInlineFocus.type,
-                focus: $inlineFocus, lineLimit: 1...3
+                focus: $inlineFocus, lineLimit: 1...3,
+                showsKeyboardAccessory: false
             )
         case .guidedCorrection, .spent:
             Menu {

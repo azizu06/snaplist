@@ -10,6 +10,32 @@ final class EbayPublishDeliveryTests: XCTestCase {
         super.tearDown()
     }
 
+    func testConditionSlugsNeverReachTheConfirmationRows() {
+        XCTAssertEqual(
+            EbayPublishPresentation.specificValue(
+                named: "Condition", values: ["very-good"]
+            ),
+            "Used, very good"
+        )
+        XCTAssertEqual(
+            EbayPublishPresentation.specificValue(
+                named: "Condition", values: ["like-new"]
+            ),
+            "Like new"
+        )
+        XCTAssertEqual(EbayPublishPresentation.condition("fair"), "Fair")
+        XCTAssertEqual(
+            EbayPublishPresentation.condition("some-new-slug"),
+            "Some New Slug"
+        )
+        XCTAssertEqual(
+            EbayPublishPresentation.specificValue(
+                named: "Brand", values: ["very-good", "Sony"]
+            ),
+            "very-good, Sony"
+        )
+    }
+
     func testUnknownOutcomeCopyOffersOnlyTheApprovedTrophyWallRecovery() {
         let copy = EbayResultCopy(state: .outcomeNotYetKnown)
 

@@ -540,8 +540,10 @@ struct EbayPublishView: View {
                     if index > 0 { Divider() }
                     EbayValueRow(
                         label: key,
-                        value: preflight.itemSpecifics[key]?
-                            .joined(separator: ", ") ?? ""
+                        value: EbayPublishPresentation.specificValue(
+                            named: key,
+                            values: preflight.itemSpecifics[key] ?? []
+                        )
                     )
                 }
                 if keys.count > Self.collapsedSpecificsCount {
@@ -2254,11 +2256,22 @@ private enum EbayPublishCurrency {
     }
 }
 
-private enum EbayPublishPresentation {
+enum EbayPublishPresentation {
     static func marketplace(_ value: String) -> String {
         value == "EBAY_US"
             ? "eBay US"
             : value.replacingOccurrences(of: "_", with: " ")
+    }
+
+    /// Item specifics arrive as the stored values, and Condition's is a slug
+    /// ("very-good"). Show it the way the Details row does.
+    static func specificValue(named name: String, values: [String]) -> String {
+        let isCondition = name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare("Condition") == .orderedSame
+        return values
+            .map { isCondition ? condition($0) : $0 }
+            .joined(separator: ", ")
     }
 
     static func condition(_ value: String) -> String {
@@ -2269,8 +2282,16 @@ private enum EbayPublishPresentation {
         case "USED_VERY_GOOD": "Used, very good"
         case "USED_GOOD": "Used, good"
         case "USED_ACCEPTABLE": "Used, acceptable"
-        case "FOR_PARTS_OR_NOT_WORKING": "For parts or not working"
-        default: value.replacingOccurrences(of: "_", with: " ").capitalized
+        case "FOR_PARTS_OR_NOT_WORKING", "for-parts": "For parts or not working"
+        case "new": "New"
+        case "like-new": "Like new"
+        case "very-good": "Used, very good"
+        case "good": "Used, good"
+        case "acceptable": "Used, acceptable"
+        default: value
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .capitalized
         }
     }
 }
