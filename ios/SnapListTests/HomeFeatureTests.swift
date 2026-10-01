@@ -2214,7 +2214,7 @@ final class TrophyWallDomainTests: XCTestCase {
             TrophyWallProcessingView.CollectionMessage(
                 heading: "Nothing to list.",
                 action: .scan(label: "Scan an item"),
-                scoutImageName: "ScoutReassurance",
+                scoutImageName: "ActivationScoutACT04",
                 scoutAccessibilityLabel: "Scout, the SnapList camera helper"
             )
         )
@@ -2915,6 +2915,67 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
+    /// The Scout line above the rows. Scout inspects while anything is still
+    /// being worked on, and holds a packed box once everything is ready to
+    /// review. Any other mix gets no line, because neither clip would be true.
+    func testProcessingActivityShowsScoutInspectingWhileAnythingIsStillWorking() {
+        let presentation = processingPresentation(states: [
+            .readyToReview,
+            .workingPricing,
+            .accepted,
+        ])
+
+        XCTAssertEqual(
+            presentation.activity,
+            .init(scout: .inspection, text: "2 in progress")
+        )
+    }
+
+    func testProcessingActivityShowsScoutWithABoxOnceEverythingIsReady() {
+        let presentation = processingPresentation(states: [
+            .readyToReview,
+            .readyToReviewLocked,
+        ])
+
+        XCTAssertEqual(
+            presentation.activity,
+            .init(scout: .boxLift, text: "2 ready")
+        )
+    }
+
+    func testProcessingActivityStaysQuietWhenNothingIsWorkingAndNotEverythingIsReady() {
+        let presentation = processingPresentation(states: [
+            .readyToReview,
+            .needsRetryLocked(detail: "The last attempt did not finish."),
+        ])
+
+        XCTAssertNil(presentation.activity)
+    }
+
+    private func processingPresentation(
+        states: [TrophyWallCardState]
+    ) -> TrophyWallProcessingView.Presentation {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(
+            cards: states.enumerated().map { index, state in
+                .accepted(
+                    principalScope: fixture.principal,
+                    runID: UUID(),
+                    state: state,
+                    itemName: "Item \(index)",
+                    lastMeaningfulUpdateAt: Date(timeIntervalSince1970: Double(100 - index))
+                )
+            }
+        )
+        return TrophyWallProcessingView.presentation(
+            from: store.processingRows,
+            collectionOutcome: .loaded,
+            refreshRecovery: .idle,
+            availableHeight: 844,
+            isExpanded: false
+        )
+    }
+
     func testCollectionMessageContainsItsActionAccessibilityElements() {
         let cases: [(
             name: String,
@@ -2926,7 +2987,7 @@ final class TrophyWallDomainTests: XCTestCase {
                 .init(
                     heading: "Nothing to list.",
                     action: .scan(label: "Scan an item"),
-                    scoutImageName: "ScoutReassurance",
+                    scoutImageName: "ActivationScoutACT04",
                     scoutAccessibilityLabel: "Scout"
                 ),
                 "trophy.processing.collection.scan"

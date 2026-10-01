@@ -53,12 +53,31 @@ final class AccountInitialsTests: XCTestCase {
 /// resolve to a distinct clip/fallback/legacy asset and never to a duplicate
 /// video file already bundled elsewhere (#1051).
 final class TrophyWallScoutMappingTests: XCTestCase {
-    func testReassuranceMapsToTheBundledFirstValueOnboardingClipWithNoDuplicateFile() {
-        let scout = TrophyWallScout.reassurance
-        XCTAssertEqual(scout.clipResource, "042-seedance-reassurance")
-        XCTAssertEqual(scout.resourceSubdirectory, "FirstValueOnboarding")
-        XCTAssertEqual(scout.legacyFallbackAsset, "FirstValueScoutONB06")
+    func testThumbsUpMapsToTheBundledActivationGuidanceClipWithNoDuplicateFile() {
+        let scout = TrophyWallScout.thumbsUp
+        XCTAssertEqual(scout.clipResource, "act-04")
+        XCTAssertEqual(scout.resourceSubdirectory, "ActivationGuidance")
+        XCTAssertEqual(scout.legacyFallbackAsset, "ActivationScoutACT04")
         XCTAssertEqual(scout.canvasAspectRatio, 1)
+    }
+
+    func testBarcodeScanMapsToTheBundledFirstValueOnboardingClipWithNoDuplicateFile() {
+        let scout = TrophyWallScout.barcodeScan
+        XCTAssertEqual(scout.clipResource, "032-seedance-barcode-scan")
+        XCTAssertEqual(scout.resourceSubdirectory, "FirstValueOnboarding")
+        XCTAssertEqual(scout.legacyFallbackAsset, "FirstValueScoutONB03")
+        XCTAssertEqual(scout.canvasAspectRatio, 1)
+    }
+
+    func testInspectionAndBoxLiftMapToTheirBundledFirstValueOnboardingClips() {
+        XCTAssertEqual(TrophyWallScout.inspection.clipResource, "007-seedance-magnifier-inspection")
+        XCTAssertEqual(TrophyWallScout.inspection.legacyFallbackAsset, "FirstValueScoutONB02")
+        XCTAssertEqual(TrophyWallScout.boxLift.clipResource, "030-seedance-box-lower-lift-hflip-candidate")
+        XCTAssertEqual(TrophyWallScout.boxLift.legacyFallbackAsset, "FirstValueScoutONB05")
+        for scout: TrophyWallScout in [.inspection, .boxLift] {
+            XCTAssertEqual(scout.resourceSubdirectory, "FirstValueOnboarding")
+            XCTAssertEqual(scout.canvasAspectRatio, 1)
+        }
     }
 
     func testUncertaintyAndRecoveryStillResolveUnderHomeScoutMotion() {
@@ -69,47 +88,51 @@ final class TrophyWallScoutMappingTests: XCTestCase {
     }
 
     func testEveryCaseResolvesToADistinctClipAndLegacyAsset() {
-        let cases: [TrophyWallScout] = [.uncertainty, .recovery, .reassurance]
+        let cases: [TrophyWallScout] = [
+            .uncertainty, .recovery, .barcodeScan, .thumbsUp, .inspection, .boxLift,
+        ]
         XCTAssertEqual(Set(cases.map(\.clipResource)).count, cases.count)
         XCTAssertEqual(Set(cases.map(\.legacyFallbackAsset)).count, cases.count)
     }
 
     /// This target is app-hosted, so `Bundle.main` is the built SnapList.app —
-    /// the same lookup `TrophyWallScoutView` performs. Proves the reassurance
-    /// clip resolves for real, without duplicating the FirstValueOnboarding
-    /// video files into HomeScoutMotion.
-    func testNormalMotionResolvesTheReassuranceClipsAcceptedRuntimeDerivative() {
-        let rendering = TrophyWallScout.reassurance.rendering(
-            reduceMotion: false,
-            arguments: [],
-            bundle: .main
-        )
-        guard case .acceptedRuntimeDerivative(let sourceURL, let url) = rendering else {
-            XCTFail("Reassurance did not resolve its accepted runtime derivative: \(rendering)")
-            return
+    /// the same lookup `TrophyWallScoutView` performs. Proves each reused clip
+    /// resolves for real from the folder its own screen bundles, without a
+    /// duplicate video file in HomeScoutMotion.
+    func testNormalMotionResolvesEachReusedClipsAcceptedRuntimeDerivative() {
+        for scout: TrophyWallScout in [.barcodeScan, .thumbsUp, .inspection, .boxLift] {
+            let rendering = scout.rendering(
+                reduceMotion: false,
+                arguments: [],
+                bundle: .main
+            )
+            guard case .acceptedRuntimeDerivative(let sourceURL, let url) = rendering else {
+                XCTFail("\(scout) did not resolve its accepted runtime derivative: \(rendering)")
+                continue
+            }
+            XCTAssertEqual(sourceURL.deletingPathExtension().lastPathComponent, scout.clipResource)
+            XCTAssertEqual(url.deletingPathExtension().lastPathComponent, scout.clipResource)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         }
-        XCTAssertEqual(sourceURL.deletingPathExtension().lastPathComponent, "042-seedance-reassurance")
-        XCTAssertEqual(url.deletingPathExtension().lastPathComponent, "042-seedance-reassurance")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
     }
 
-    func testReducedMotionYieldsTheReassuranceStaticFallback() {
-        let rendering = TrophyWallScout.reassurance.rendering(
-            reduceMotion: true,
-            arguments: [],
-            bundle: .main
-        )
-        guard case .staticPNG(let url) = rendering else {
-            XCTFail("Reduced Motion did not select the reassurance static fallback: \(rendering)")
-            return
+    /// The reused clips ship no loose PNG, so Reduced Motion shows the static
+    /// frame their own screens already use from the asset catalog.
+    func testReducedMotionYieldsEachReusedClipsCatalogStill() {
+        for scout: TrophyWallScout in [.barcodeScan, .thumbsUp, .inspection, .boxLift] {
+            XCTAssertEqual(
+                scout.rendering(reduceMotion: true, arguments: [], bundle: .main),
+                .legacyStaticAsset(name: scout.legacyFallbackAsset)
+            )
+            XCTAssertNotNil(UIImage(named: scout.legacyFallbackAsset), "\(scout)")
         }
-        XCTAssertEqual(url.deletingPathExtension().lastPathComponent, "042-reassurance")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
     }
 
     func testUnresolvableBundleDegradesToTheLegacyStaticAsset() {
         let emptyBundle = Bundle(for: XCTestCase.self)
-        for scout: TrophyWallScout in [.uncertainty, .recovery, .reassurance] {
+        for scout: TrophyWallScout in [
+            .uncertainty, .recovery, .barcodeScan, .thumbsUp, .inspection, .boxLift,
+        ] {
             XCTAssertEqual(
                 scout.rendering(reduceMotion: false, arguments: [], bundle: emptyBundle),
                 .legacyStaticAsset(name: scout.legacyFallbackAsset)
@@ -122,7 +145,7 @@ final class TrophyWallScoutMappingTests: XCTestCase {
 /// visibly different clips so the seller does not see the same animation
 /// twice back to back; unavailable keeps the existing recovery clip (#1051).
 final class TrophyWallCollectionMessageScoutTests: XCTestCase {
-    func testEmptyCollectionMessageUsesReassurance() {
+    func testEmptyCollectionMessageGivesAThumbsUp() {
         let presentation = TrophyWallProcessingView.presentation(
             from: [],
             collectionOutcome: .loaded,
@@ -130,7 +153,7 @@ final class TrophyWallCollectionMessageScoutTests: XCTestCase {
             availableHeight: 800,
             isExpanded: false
         )
-        XCTAssertEqual(presentation.collectionMessage?.scout, .reassurance)
+        XCTAssertEqual(presentation.collectionMessage?.scout, .thumbsUp)
     }
 
     /// The Processing dock slot now opens its screen with nothing in flight,
@@ -152,7 +175,7 @@ final class TrophyWallCollectionMessageScoutTests: XCTestCase {
         )
 
         XCTAssertTrue(wallEmpty.showsEmptyView)
-        XCTAssertEqual(TrophyWallView.emptyWallScout, .uncertainty)
+        XCTAssertEqual(TrophyWallView.emptyWallScout, .barcodeScan)
         XCTAssertEqual(processingEmpty.collectionMessage?.heading, "Nothing to list.")
         XCTAssertNotEqual(processingEmpty.collectionMessage?.scout, TrophyWallView.emptyWallScout)
     }

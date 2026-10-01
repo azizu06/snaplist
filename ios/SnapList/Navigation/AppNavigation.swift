@@ -56,7 +56,7 @@ enum DockSlot: Hashable, Identifiable {
     func systemImage(isSelected: Bool) -> String {
         switch self {
         case .primary(let tab): tab.systemImage(isSelected: isSelected)
-        case .processing: "progress.indicator"
+        case .processing: isSelected ? "square.stack.3d.up.fill" : "square.stack.3d.up"
         }
     }
 
@@ -76,11 +76,18 @@ enum DockSlot: Hashable, Identifiable {
 /// Which slots the dock shows and which one reads as selected. Pure, so the
 /// three presence values and the selection rule are unit-tested directly.
 enum DockSlotPolicy {
+    /// Flips, then the camera, then To list. The camera raises the Scan
+    /// drawer instead of opening a screen, so it sits in the middle rather
+    /// than leading like a destination; the owner chose this order over a
+    /// restyled dock. Flips leads as home, and To list's badge takes the
+    /// outer edge.
+    private static let primaryOrder: [PrimaryTab] = [.trophyWall, .scan]
+
     static func slots(
         processingCount: Int,
         presence: ProcessingDockSlotPresence = .current
     ) -> [DockSlot] {
-        let primary = PrimaryTab.allCases.map(DockSlot.primary)
+        let primary = primaryOrder.map(DockSlot.primary)
         let showsProcessing: Bool
         switch presence {
         case .always: showsProcessing = true
