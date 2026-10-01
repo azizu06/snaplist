@@ -55,6 +55,8 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
   **adapter**. Caffein Apify is the intended primary automatic adapter behind an operator-controlled
   activation gate; the public-page provider is the immediate fallback. Both feed the same canonical
   matcher and fail soft when blocked or too thin.
+- **Broader sold research** — a model-family or specific-category comparison of actual sold amounts,
+  visibly labeled and assigned lower confidence; it does not verify the seller's exact configuration.
 - **Comp** — a comparable price point. A **sold comp** is a verified completed sale; an **asking comp**
   is an active listing and is weaker evidence. Never represent an asking price as a sold amount.
 - **Price recommendation** — `{ suggested, range, confidence, sources[] }`, always editable.

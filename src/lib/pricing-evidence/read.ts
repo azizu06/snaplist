@@ -172,7 +172,8 @@ export function buildPricingEvidenceProjection(
   const prices = comparables.map((record) => record.price);
   const minimum = prices.length > 0 ? Math.min(...prices) : null;
   const maximum = prices.length > 0 ? Math.max(...prices) : null;
-  const strong = comparables.length >= PRICING_EVIDENCE_STRONG_MINIMUM;
+  const strong = comparables.length >= PRICING_EVIDENCE_STRONG_MINIMUM &&
+    !row.price_result.sources.some(source => source.kind === "family-sold-comp" || source.kind === "category-sold-comp");
   const acceptedPriceResult = priceResultSchema.parse({
     ...row.price_result,
     evidence: comparables.map((record) => {

@@ -274,7 +274,7 @@ describe("createDefaultPricer Apify composition", () => {
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
-  it("expands one thin ten-candidate match to twenty and caches the deterministic best five", async () => {
+  it("expands a thin precise batch to fifty family candidates and caches the deterministic best five", async () => {
     const initial = [
       apifyItem("initial-a", { endedAt: "2026-07-20T12:00:00.000Z" }),
       apifyItem("initial-b", { endedAt: "2026-07-04T12:00:00.000Z" }),
@@ -308,7 +308,7 @@ describe("createDefaultPricer Apify composition", () => {
       requests.push(request);
       return {
         status: "SUCCEEDED",
-        items: request.maxItems === 10 ? initial : expanded,
+        items: request.maxItems === 30 ? initial : expanded,
       };
     });
     const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
@@ -326,7 +326,7 @@ describe("createDefaultPricer Apify composition", () => {
     const retry = await price(SIGNAL);
     const redelivery = await price(SIGNAL);
 
-    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 20]);
+    expect(requests.map(({ maxItems }) => maxItems)).toEqual([30, 50]);
     expect(first.evidence?.map(({ sourceUrl }) => sourceUrl)).toEqual([
       "https://www.ebay.com/itm/initial-a",
       "https://www.ebay.com/itm/best-newest",
@@ -367,7 +367,7 @@ describe("createDefaultPricer Apify composition", () => {
 
     const result = await price(SIGNAL);
 
-    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 20]);
+    expect(requests.map(({ maxItems }) => maxItems)).toEqual([30, 50, 50]);
     expect(result.tier).toBe("llm-only");
     expect(result.evidence).toEqual([]);
   });
@@ -414,19 +414,19 @@ describe("createDefaultPricer Apify composition", () => {
 
     expect(result.tier).toBe("ebay-sold");
     expect(result.suggested).toBe(180);
-    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10]);
+    expect(requests.map(({ maxItems }) => maxItems)).toEqual([30]);
     expect(runActor).toHaveBeenCalledTimes(1);
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
-  it("does not reuse a ten-only cache entry across matcher-sensitive conditions", async () => {
+  it("does not reuse a precise-query cache entry across matcher-sensitive conditions", async () => {
     const requests: Parameters<RunApifySoldActor>[0][] = [];
     const runActor = vi.fn<RunApifySoldActor>(async (request) => {
       requests.push(request);
       return {
         status: "SUCCEEDED",
         items:
-          request.maxItems === 10
+          request.maxItems === 30
             ? apifyItems()
             : [
                 apifyItem("new-a", { condition: "Brand New" }),
@@ -454,7 +454,7 @@ describe("createDefaultPricer Apify composition", () => {
     await price(SIGNAL);
     await price({ ...SIGNAL, condition: "new" });
 
-    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 10, 20]);
+    expect(requests.map(({ maxItems }) => maxItems)).toEqual([30, 30, 50]);
   });
 
   it("joins a same-runtime paid winner before considering public fallback", async () => {
@@ -951,7 +951,7 @@ describe("createDefaultPricer Apify composition", () => {
       });
       await expect(result).resolves.toMatchObject({ tier: "ebay-sold" });
       expect(runActor).toHaveBeenCalledTimes(1);
-      expect(fetchPage).toHaveBeenCalledTimes(2);
+      expect(fetchPage).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -1295,7 +1295,7 @@ describe("createDefaultPricer Apify composition", () => {
     expect(priceResultSchema.safeParse(result).success).toBe(true);
   });
 
-  it("falls through when Actor retrieval has fewer than two matcher-approved anchors", async () => {
+  it("retains limited evidence from a lone actual Actor sale", async () => {
     const requests: Parameters<RunApifySoldActor>[0][] = [];
     const runActor = vi.fn<RunApifySoldActor>(async (request) => {
       requests.push(request);
@@ -1325,12 +1325,13 @@ describe("createDefaultPricer Apify composition", () => {
     const result = await price(SIGNAL);
 
     expect(result.tier).toBe("ebay-sold");
-    expect(result.suggested).toBe(190);
-    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 20]);
-    expect(runActor).toHaveBeenCalledTimes(2);
+    expect(result.suggested).toBe(175);
+    expect(result.evidence?.[0].title).toMatch(/^Single sold comparison:/);
+    expect(requests.map(({ maxItems }) => maxItems)).toEqual([30, 50, 50]);
+    expect(runActor).toHaveBeenCalledTimes(3);
     expect(
       fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
-    ).toEqual(["10", "20"]);
+    ).toEqual([]);
   });
 });
 

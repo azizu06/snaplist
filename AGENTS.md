@@ -85,7 +85,8 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   item, generic ones included, so it is not identification: it routes no tier and keys no sold or web
   query. It may travel to the model-backed pricing tiers only as a clearly labeled non-identity hint
   that cannot raise confidence. The canonical matcher anchors on brand, model, or a resolved product
-  name — with none of them an identity-less query can never produce a verified match.
+  name — with none of them a query can never produce a verified exact-item match. Specific-category
+  research may return explicitly labeled weaker comparisons of actual sales, never manufacture identity.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
   search agent, not a price source.
 - **Env-configurable everything.** Sandbox→production is a credential / `EBAY_BASE_URL` flip.

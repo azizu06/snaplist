@@ -102,6 +102,8 @@ function pricingTierToConfidenceTier(price: PriceResult): ConfidenceTier {
     case "isbn-lookup":
       return hasSoldComp(price) ? "isbn" : "depreciation";
     case "ebay-sold":
+      if (price.sources.some(s => s.kind === "category-sold-comp")) return "llm_only";
+      if (price.sources.some(s => s.kind === "family-sold-comp")) return "web_wide";
       // eBay sold comps are completed sales — sold-grounded by construction, so
       // the only question is tightness. A tight cluster earns the first-class
       // `sold` tier (above the asking-based web tiers, #60); a scattered sold set

@@ -1176,6 +1176,67 @@ export function finalizeVerifiedSoldResult<T extends EbaySoldComp>(
   );
 }
 
+/** Specific research categories are weaker comparisons, never item identification. */
+export function soldResearchCategory(signal: ItemSignal): string | null {
+  const category = signal.category?.trim();
+  if (!category || /^(?:item|product|other|unknown|electronics|goods|accessories)$/i.test(category)) return null;
+  return category;
+}
+
+/** Broaden only the comparison basis; every row still passes canonical sold safeguards. */
+export function finalizeSoldResearchResult<T extends EbaySoldComp>(
+  comps: readonly T[], signal: ItemSignal, options: VerifiedSoldFinalizationOptions,
+): PriceResult | null {
+  const canonical = normalizeEbaySoldCompUrls(comps).filter(c => Number.isFinite(c.price) && c.price > 0) as T[];
+  const fresh = options.now == null ? canonical : selectFreshComps(canonical, options.now, options.staleDays);
+  const matches = [...selectSoldCompEvidence(fresh, signal).anchors];
+  const basis = new Map(matches.map(m => [m.comp.url, { kind: "sold-comp", label: null as string | null }]));
+  const addBroader = (broaderSignal: ItemSignal, kind: string, label: string, scoreCap: number) => {
+    const evidence = selectSoldCompEvidence(fresh, broaderSignal);
+    for (const match of [...evidence.anchors, ...evidence.corroboration]) {
+      if (basis.has(match.comp.url) || !match.reasons.includes("identity-equivalent") ||
+          match.reasons.includes("composition-mismatch")) continue;
+      basis.set(match.comp.url, { kind, label });
+      matches.push({ ...match, classification: "anchor", score: Math.min(match.score, scoreCap) });
+    }
+  };
+  if (matches.length < 3 && buildSoldSearchQuery(signal)) {
+    addBroader({ ...signal, specs: [], condition: undefined }, "family-sold-comp", "Model family match", 0.5);
+  }
+  const category = soldResearchCategory(signal);
+  if (matches.length < 3 && category) {
+    // A category supplies relevance for broader research, never seller identity.
+    // The same parts/accessory/lot/unknown accepted-price rules remain in force.
+    addBroader({ category, resolvedName: category, condition: undefined, specs: [] },
+      "category-sold-comp", "Category comparison", 0.35);
+  }
+  if (matches.length === 0) return null;
+  const retained = selectVerifiedSoldMatches(matches);
+  const weights = new Map(retained.map(m => [m.comp.url, m.score]));
+  const result = synthesizeSoldResult(retained.map(m => m.comp), {
+    ...options, evidenceWeight: comp => weights.get(comp.url) ?? 1,
+  });
+  if (retained.length === 1 && basis.get(retained[0].comp.url)?.kind === "sold-comp") {
+    basis.set(retained[0].comp.url, { kind: "sold-comp", label: "Single sold comparison" });
+  }
+  const acceptedBasis = result.sources.map(source => basis.get(source.url)!);
+  const broader = acceptedBasis.some(row => row.label != null);
+  const agreementCap = acceptedBasis.some(row => row.kind === "category-sold-comp") ? 0.3 : broader ? 0.4 : 1;
+  return {
+    ...result,
+    confidence: Math.min(result.confidence, broader ? 0.6 : 1),
+    compAgreement: Math.min(result.compAgreement ?? 0, retained.length === 1 ? 0.3 : agreementCap),
+    sources: result.sources.map(source => {
+      const { kind, label } = basis.get(source.url)!;
+      return { ...source, kind, ...(label ? { title: `${label}: ${source.title ?? "Sold item"}` } : {}) };
+    }),
+    evidence: result.evidence?.map(row => {
+      const { label } = basis.get(row.sourceUrl)!;
+      return { ...row, ...(label ? { title: `${label}: ${row.title ?? "Sold item"}` } : {}) };
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The provider
 // ---------------------------------------------------------------------------

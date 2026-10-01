@@ -18,7 +18,8 @@ import { recordSoldCompOutcome, recordSoldCompUsage } from "../../provider-usage
 import {
   buildSoldSearchQuery,
   canonicalEbayItemUrl,
-  finalizeVerifiedSoldResult,
+  finalizeSoldResearchResult,
+  soldResearchCategory,
   normalizeEbaySoldCompUrls,
   type EbaySoldComp,
 } from "./ebay-sold";
@@ -40,18 +41,18 @@ export const APIFY_SOLD_ACTOR_ID = "oTtB3VgfuE9GtxQt2";
  * operator decision backed by a live check, not a routine dependency bump.
  */
 export const APIFY_SOLD_ACTOR_BUILD_DEFAULT = "1.23.3";
-export const APIFY_SOLD_INITIAL_RESULTS = 10;
-export const APIFY_SOLD_MAX_RESULTS_DEFAULT = 20;
+export const APIFY_SOLD_INITIAL_RESULTS = 30;
+export const APIFY_SOLD_MAX_RESULTS_DEFAULT = 50;
 export const APIFY_SOLD_EXPANSION_THRESHOLD = 3;
 export const APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT = 90;
 export const APIFY_SOLD_REQUEST_RETRIES_DEFAULT = 2;
-export const APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT = 55;
-export const APIFY_SOLD_WAIT_SECS_DEFAULT = 60;
+export const APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT = 120;
+export const APIFY_SOLD_WAIT_SECS_DEFAULT = 125;
 /**
- * Fail closed if the tested per-result economics drift above the #188 envelope.
- * This is a per-run platform ceiling, not an authorization to activate or spend.
+ * Captain-authorized demo reliability ceiling: at most three starts ($0.75 total).
+ * Activation remains operator-controlled; the paid-start POST is never retried.
  */
-export const APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT = 0.11;
+export const APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT = 0.25;
 export const APIFY_SOLD_CIRCUIT_FAILURE_THRESHOLD_DEFAULT = 3;
 export const APIFY_SOLD_CIRCUIT_COOLDOWN_MS_DEFAULT = 60_000;
 const APIFY_SOLD_COORDINATION_ALLOWANCE_MS = 500;
@@ -611,7 +612,7 @@ export function createApifySoldPricingProvider(
     ),
   );
   const pricingWindowMs =
-    Math.max(timeoutSecs, waitSecs) * 1_000 * 2 +
+    Math.min(225_000, Math.max(timeoutSecs, waitSecs) * 1_000 * (options.timeoutSecs != null || options.waitSecs != null ? 2 : 3)) +
     APIFY_SOLD_COORDINATION_ALLOWANCE_MS;
   const claimAuthorityWindowMsMax = Math.max(
     APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
@@ -697,14 +698,12 @@ export function createApifySoldPricingProvider(
   const runActor = options.runActor ?? createDefaultApifySoldActorRunner(token);
   const runtimeState = runtimeStateFor(cache);
   const inFlight = runtimeState.inFlight;
-  const circuit = circuitStateFor(
-    runtimeState,
-    JSON.stringify({ actorId, actorBuild }),
-  );
+  const circuitFor = (query: string) => circuitStateFor(runtimeState, JSON.stringify({ actorId, actorBuild, query }));
 
-  const queryFor = (signal: ItemSignal): string | null => buildSoldSearchQuery(signal);
+  const queryFor = (signal: ItemSignal): string | null => buildSoldSearchQuery(signal) ?? soldResearchCategory(signal);
 
-  function requestFor(query: string, maxItems: number): ApifySoldRunRequest {
+  function requestFor(query: string, maxItems: number, deadline: number): ApifySoldRunRequest {
+    const remainingSecs = Math.max(1, Math.floor((deadline - Date.now()) / 1_000));
     return {
       actorId,
       build: actorBuild,
@@ -720,8 +719,8 @@ export function createApifySoldPricingProvider(
       },
       maxItems,
       maxTotalChargeUsd,
-      timeoutSecs,
-      waitSecs,
+      timeoutSecs: Math.min(timeoutSecs, Math.max(1, remainingSecs - 5)),
+      waitSecs: Math.min(waitSecs, remainingSecs),
       requestRetries,
       restartOnError: false,
     };
@@ -732,7 +731,7 @@ export function createApifySoldPricingProvider(
       actorId,
       actorBuild,
       query,
-      retrievalPolicy: "initial-10-expand-20-v1",
+      retrievalPolicy: "precise-30-family-50-category-50-v2",
       daysToScrape,
       matcherSignal: {
         isbn: signal.isbn?.trim() ?? "",
@@ -765,7 +764,7 @@ export function createApifySoldPricingProvider(
         });
         return null;
       }
-      return cacheRead;
+      return cacheRead?.length ? cacheRead : null;
     } catch {
       emitDiagnostic("pricing.apify_sold.cache_error", { op: "get", reason: "unavailable" });
       return null;
@@ -1170,7 +1169,8 @@ export function createApifySoldPricingProvider(
     }
   }
 
-  function recordFailure(reason: string): void {
+  function recordFailure(query: string, reason: string): void {
+    const circuit = circuitFor(query);
     circuit.consecutiveFailures += 1;
     emitDiagnostic("pricing.apify_sold.actor_failed", { reason });
     if (circuit.consecutiveFailures >= circuitFailureThreshold) {
@@ -1182,13 +1182,16 @@ export function createApifySoldPricingProvider(
     query: string,
     maxItems: number,
     pricingDeadline: number,
+    outcome: { allTerminalKnown: boolean },
   ): Promise<ApifySoldComp[] | null> {
+    const circuit = circuitFor(query);
     if (Date.now() >= pricingDeadline) return null;
     let attemptStarted = false;
     let attemptRecorded = false;
     function recordUnconfirmedAttempt(): void {
       if (!attemptStarted || attemptRecorded) return;
       attemptRecorded = true;
+      outcome.allTerminalKnown = false;
       try {
         // Invocation is known; terminal status and charge are not. Never infer
         // a free or empty successful run from an ambiguous transport failure.
@@ -1208,22 +1211,23 @@ export function createApifySoldPricingProvider(
       const actorResult = await settleBeforeApifyPricingDeadline(
         () => {
           attemptStarted = true;
-          return runActor(requestFor(query, maxItems));
+          return runActor(requestFor(query, maxItems, pricingDeadline));
         },
         pricingDeadline,
       );
       if (actorResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
         recordUnconfirmedAttempt();
-        recordFailure("request-timeout");
+        recordFailure(query, "request-timeout");
         return null;
       }
       const result = actorResult;
+      if (!["SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"].includes(result.status)) outcome.allTerminalKnown = false;
       // Recorded before the non-success branch (#716): a paid Actor run that
       // returned nothing still cost money, and a cost record that only counts
       // successes would understate the tier's real price.
       //
       // Guarded locally rather than left to the enclosing try (#716 AC5): that
-      // catch maps anything thrown here to `recordFailure("request-failed")` and
+      // catch maps anything thrown here to `recordFailure(query, "request-failed")` and
       // returns null, so a throwing counter would discard the comps of an Actor
       // run we already paid for and report the tier as failed. Telemetry never
       // costs a run its evidence.
@@ -1259,7 +1263,7 @@ export function createApifySoldPricingProvider(
         });
       }
       if (failedProviderSide) {
-        recordFailure(boundedStatus(result.status));
+        recordFailure(query, boundedStatus(result.status));
         return null;
       }
       if (result.items.length === 0) {
@@ -1277,7 +1281,7 @@ export function createApifySoldPricingProvider(
       return comps;
     } catch {
       recordUnconfirmedAttempt();
-      recordFailure("request-failed");
+      recordFailure(query, "request-failed");
       return null;
     }
   }
@@ -1287,33 +1291,24 @@ export function createApifySoldPricingProvider(
     query: string,
     signal: ItemSignal,
     pricingDeadline: number,
+    outcome: { allTerminalKnown: boolean },
   ): Promise<ApifySoldComp[] | null> {
-    const initial = await runBatch(
-      query,
-      APIFY_SOLD_INITIAL_RESULTS,
-      pricingDeadline,
-    );
-    if (initial == null) {
-      // The paid-start claim remains fenced until its TTL. A failed retrieval
-      // has no successful dataset to cache, including a negative cache entry.
-      return null;
+    const queries = [query,
+      buildSoldSearchQuery({ ...signal, specs: [] }) ?? query,
+      soldResearchCategory(signal) ? [signal.brand, soldResearchCategory(signal)].filter(Boolean).join(" ") : (buildSoldSearchQuery({ ...signal, specs: [] }) ?? query),
+    ];
+    let combined: ApifySoldComp[] = [];
+    for (const [index, expandedQuery] of queries.entries()) {
+      const batch = await runBatch(expandedQuery, index === 0 ? APIFY_SOLD_INITIAL_RESULTS : APIFY_SOLD_MAX_RESULTS_DEFAULT, pricingDeadline, outcome);
+      if (!outcome.allTerminalKnown) break; // ambiguous paid starts must remain fenced
+      if (batch) combined = normalizeEbaySoldCompUrls([...combined, ...batch]);
+      if (selectSoldCompEvidence(combined, signal).anchors.length >= APIFY_SOLD_EXPANSION_THRESHOLD) break;
     }
-
-    let combined = normalizeEbaySoldCompUrls(initial);
-    const initialEvidence = selectSoldCompEvidence(combined, signal);
-    if (initialEvidence.anchors.length < APIFY_SOLD_EXPANSION_THRESHOLD) {
-      const expanded = await runBatch(
-        query,
-        APIFY_SOLD_MAX_RESULTS_DEFAULT,
-        pricingDeadline,
-      );
-      if (expanded != null) {
-        combined = normalizeEbaySoldCompUrls([...expanded, ...combined]);
-      }
-    }
-    return (await writeCache(key, combined, pricingDeadline)) === "unconfirmed"
-      ? null
-      : combined;
+    const result = finalizeSoldResearchResult(combined, signal, { now: now?.(), staleDays, halfLifeDays });
+    if (!result) return combined; // preserve discard reasons without caching unusable rows
+    // A transient cache write failure cannot erase real, already-paid evidence.
+    await writeCache(key, combined, pricingDeadline);
+    return combined;
   }
 
   async function loadComps(
@@ -1347,9 +1342,10 @@ export function createApifySoldPricingProvider(
       });
       return null;
     }
-    if (cached != null) return cached;
+    if (cached?.length && finalizeSoldResearchResult(cached, signal, { now: now?.(), staleDays, halfLifeDays })) return cached;
 
     const clock = now?.() ?? Date.now();
+    const circuit = circuitFor(query);
     if (clock < circuit.openUntil) {
       emitDiagnostic("pricing.apify_sold.circuit_open", {
         retryAfterMs: Math.max(0, circuit.openUntil - clock),
@@ -1414,12 +1410,14 @@ export function createApifySoldPricingProvider(
         claimOwnerToken,
         ownerWorkDeadline,
       );
+      const outcome = { allTerminalKnown: true };
       try {
         return await fetchAndCache(
           key,
           query,
           signal,
           ownerWorkDeadline,
+          outcome,
         );
       } finally {
         await stopMaintainingAuthority();
@@ -1428,6 +1426,11 @@ export function createApifySoldPricingProvider(
           claimOwnerToken,
           pricingDeadline,
         );
+        if (outcome.allTerminalKnown && cache?.releaseTerminalClaim) {
+          try {
+            await settleBeforeApifyPricingDeadline(abortSignal => cache.releaseTerminalClaim!(key, claimOwnerToken, abortSignal), pricingDeadline);
+          } catch { /* Retaining a fence on an unconfirmed release is safe. */ }
+        }
       }
     })().finally(() => {
       inFlight.delete(key);
@@ -1447,10 +1450,8 @@ export function createApifySoldPricingProvider(
       if (!query) return null;
       const pricingDeadline = Date.now() + pricingWindowMs;
       const comps = await loadComps(query, signal, pricingDeadline);
-      if (comps == null) return null;
-
       const evidence = selectSoldCompEvidence(
-        normalizeEbaySoldCompUrls(comps),
+        normalizeEbaySoldCompUrls(comps ?? []),
         signal,
       );
       // #1138: report what the provider-neutral matcher kept. Recorded here, at
@@ -1458,19 +1459,15 @@ export function createApifySoldPricingProvider(
       // rather than per attempt — anchors are decided over the combined candidate
       // set, and a run served entirely from cache still contributed evidence even
       // though it made no paid attempt.
+      const result = finalizeSoldResearchResult(comps ?? [], signal, { now: now?.(), staleDays, halfLifeDays });
       recordSoldCompOutcome({
         strategy: "apify",
-        accepted: evidence.anchors.length,
+        accepted: result?.evidence?.length ?? 0,
         reason: soldCompRetrievalReason(evidence),
       });
       // Retrieval is Actor-specific; every evidence decision after canonical
       // matching runs through the one shared finalization seam (#363).
-      const clock = now?.();
-      return finalizeVerifiedSoldResult(evidence, {
-        ...(clock != null ? { now: clock } : {}),
-        staleDays,
-        halfLifeDays,
-      });
+      return result;
     },
   };
 }

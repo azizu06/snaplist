@@ -43,6 +43,8 @@ export interface TtlCache<T> {
     ownerToken: string,
     signal?: AbortSignal,
   ): Promise<boolean>;
+  /** Release only a confirmed terminal claim belonging to this exact owner. */
+  releaseTerminalClaim?(key: string, ownerToken: string, signal?: AbortSignal): Promise<boolean>;
   /** Mark this exact owner's authority terminal without releasing the paid claim. */
   terminateClaimAuthority?(
     key: string,
@@ -130,6 +132,12 @@ export function createInMemoryTtlCache<T>(
       claim.authority = { ownerToken, state: "live", updatedAt: now() };
       return true;
     },
+    async releaseTerminalClaim(key, ownerToken) {
+      const claim = activeClaim(key);
+      if (!claim || claim.authority.ownerToken !== ownerToken || claim.authority.state !== "terminal") return false;
+      claims.delete(key);
+      return true;
+    },
     async terminateClaimAuthority(key, ownerToken) {
       const claim = activeClaim(key);
       if (!claim || claim.authority.ownerToken !== ownerToken) return false;
@@ -200,6 +208,20 @@ elseif nextState ~= "terminal" then
 end
 
 redis.call("SET", KEYS[2], ARGV[3], "EX", tonumber(ARGV[4]))
+return 1
+`;
+
+const RELEASE_TERMINAL_CLAIM_SCRIPT = `
+local claimRaw = redis.call("GET", KEYS[1])
+local authorityRaw = redis.call("GET", KEYS[2])
+if not claimRaw or not authorityRaw then return 0 end
+local ok, claim = pcall(cjson.decode, claimRaw)
+local owner = claimRaw
+if ok and type(claim) == "table" then owner = claim["ownerToken"] end
+local authorityOk, authority = pcall(cjson.decode, authorityRaw)
+if owner ~= ARGV[1] or not authorityOk or type(authority) ~= "table" then return 0 end
+if authority["ownerToken"] ~= ARGV[1] or authority["state"] ~= "terminal" then return 0 end
+redis.call("DEL", KEYS[1], KEYS[2])
 return 1
 `;
 
@@ -391,6 +413,15 @@ export function createUpstashTtlCache<T>(
         "live",
         signal,
       );
+    },
+    async releaseTerminalClaim(key, ownerToken, signal) {
+      const redis = await client(signal);
+      if (typeof redis.eval !== "function") return false;
+      const keys = [claimKey(key), claimAuthorityKey(key, ownerToken)];
+      const result = injected
+        ? await redis.eval(RELEASE_TERMINAL_CLAIM_SCRIPT, keys, [ownerToken], signal)
+        : await redis.eval(RELEASE_TERMINAL_CLAIM_SCRIPT, keys, [ownerToken]);
+      return result === 1 || result === "1" || result === true;
     },
     async terminateClaimAuthority(key, ownerToken, signal) {
       const redis = await client(signal);

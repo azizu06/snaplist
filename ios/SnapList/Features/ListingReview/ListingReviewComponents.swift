@@ -1768,6 +1768,13 @@ struct ListingReviewSoldCard: View {
                         .accessibilityHidden(true)
                 }
 
+                if let label = match.researchMatchLabel {
+                    Text(label)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        .accessibilityIdentifier("listing-review.sold-match-basis.\(index)")
+                }
+
                 Text(match.soldDateLabel)
                     .font(.caption)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
@@ -1794,6 +1801,12 @@ struct ListingReviewSoldCard: View {
 }
 
 extension ListingReviewSoldMatch {
+    /// Existing title carries the disclosed comparison basis for older clients.
+    var researchMatchLabel: String? {
+        ["Model family match", "Category comparison", "Single sold comparison"]
+            .first { title?.hasPrefix("\($0):") == true }
+    }
+
     var soldDateLabel: String {
         guard let soldAt else { return "Date not provided" }
         return Date(

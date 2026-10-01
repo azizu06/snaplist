@@ -402,6 +402,10 @@ function capacityTokens(value: string): Set<string> {
   );
 }
 
+function displaySizeTokens(value: string): Set<string> {
+  return new Set(Array.from(value.matchAll(/\b(\d+(?:\.\d+)?)[- ]inch\b/gi), m => m[1]));
+}
+
 function numericSizeTokens(value: string): Set<string> {
   const normalized = normalizeComparableText(value);
   const matches = [
@@ -523,6 +527,7 @@ function compareSpecs(title: string, signal: ItemSignal): "equivalent" | "unveri
 
   const relations = [
     relation(capacityTokens(specs), capacityTokens(title)),
+    relation(displaySizeTokens(specs), displaySizeTokens(title)),
     relation(numericSizeTokens(specs), numericSizeTokens(title)),
     relation(namedSizeTokens(specs), namedSizeTokens(title)),
     relation(dimensionTokens(specs), dimensionTokens(title)),
@@ -558,6 +563,7 @@ interface VariantTokenPattern {
 }
 
 const VARIANT_TOKEN_PATTERNS: readonly VariantTokenPattern[] = [
+  { pattern: /\b\d+(?:\.\d+)?[- ]inch\b/gi, group: 0 }, // display size
   { pattern: /\b\d+(?:\.\d+)?\s*(?:gb|tb|mb)\b/gi, group: 0 }, // capacityTokens
   { pattern: /\b(?:size|sz)\s*\d+(?:\.\d+)?\b/gi, group: 0 }, // numericSizeTokens
   // Gendered sizes keep only the NUMBER: the "mens"/"womens" prefix is how the
