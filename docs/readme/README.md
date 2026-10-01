@@ -1,23 +1,61 @@
 # Showcase screenshot provenance
 
-All four showcase images are captures of the running SwiftUI app on an iPhone 16 Pro, iOS 27.0, normal signed Release at `56ed76107a143e4d85962bdf3afee5b93fd5695a`. Each source and final image was visually inspected before committing; captures with account details were excluded. No UI was composited or retouched.
+The README uses real captures of the running native app inside one original,
+repository-authored generic iPhone-style presentation frame. Every phone image
+is transparent, 480 × 996 px and displayed at 220 px wide. The frame is illustrative;
+it is not an Apple marketing asset or a photographed device. The animated Scout
+below remains the app animation described later in this file.
 
 | Image | Phone worker source | What it demonstrates |
 | --- | --- | --- |
-| `phone-to-list.jpg` | `devpost-screens/to-list-1790835303-1179x2556.png` | A retained keyboard item ready for review and the Scout/dock layout. |
-| `phone-listing-review.jpg` | `phone-visual-56ed7610/02-review-workflow-done-restored.png` | Compact editable review fields. The $90 value has **no verified sold matches**, as the screen states. |
-| `phone-flips.jpg` | `devpost-screens/flips-1790835301-1179x2556.png` | The empty finished-items destination and Scout; no sold/published history is implied. |
-| `scout-pro.jpg` | `devpost-screens/scout-pro-paywall-1790835302-1179x2556.png` | The actual Scout paywall opened from Settings. Account details were scrolled offscreen before capture. The displayed $9.99 is the product price in this build, not a purchase receipt or a permanent public price commitment. |
+| `phone-to-list.webp` | `devpost-screens/to-list-1790835303-1179x2556.png` | A retained keyboard item ready for review. Native screenshot attachment from signed Release `56ed76107a143e4d85962bdf3afee5b93fd5695a`. |
+| `phone-listing-review.webp` | `devpost-screens/mirroring-set/shoes-ready-review-hero-phone.png` | Air Jordan 3 Retro White Cement Reimagined, Men's Size 10: four photos and editable $160 price. |
+| `phone-price-evidence.webp` | `devpost-screens/mirroring-set/shoes-review-comp-cards-1-2-phone.png` | The same item's actual five sold matches, $100–$219.99 range, and $155 / $219.99 eBay sale cards. |
+| `scout-pro.webp` | `devpost-screens/mirroring-set/pro-paywall-before-purchase-phone.png` | Scout Pro opened after saving shoe intake; $9.99 monthly terms, Subscribe, Restore, Terms and Privacy. This is a pre-purchase screen, not a purchase receipt. |
 
-All source paths are relative to the phone worker's local `ios/Artifacts/input-keyboard-followup/` folder. The source artifacts and private test logs remain ignored. This README task did not operate the phone or make a purchase. These screenshots do not establish a live App Store purchase or restore.
+Source paths are relative to the phone worker's local ignored
+`ios/Artifacts/input-keyboard-followup/` folder. The Mirroring captures came from
+installed native source `408bddc0d01811958b9c27f115783f9488c7e1e5`; the worker's
+`sandbox-shoes-capture-manifest.json` documents the review captures and source
+commit. They were cropped by that worker from 652 × 1436 windows to the observed
+620 × 1344 phone bounds at +16+76, without content edits. Pointer decorations
+inside the screen are retained; the Mac window and surrounding background are
+excluded. No UI, prices, sold cards or item photos were fabricated or painted in.
 
-To list, Flips, and Pro came from on-device XCTest screenshot attachments. Their 1206 × 2622 originals were exported by the phone worker to 1179 × 2556 using an explicitly authorized proportional resize and center crop, preserving the real status bar. They have no device/Mirroring frame. This task compressed To list and Flips to JPEG at 780 px high and Pro at 1000 px high.
+Each selected full-resolution source and framed output was visually inspected.
+No email, name, account ID, credential or notification is visible. All files
+marked private and all account-background captures were excluded. The earlier
+empty Flips screenshot and review placeholder were removed from the showcase;
+a populated Flips/sharing capture can replace this interim price-evidence shot
+when the phone worker supplies it. Actual price-evidence wording is shown as
+captured; framing does not independently validate the matcher or every sale.
+Prepared/shared export packs must remain distinct from eBay publish or sold status.
 
-The review image retains the iPhone Mirroring frame, status bar, and pointer/focus decoration and is stored at 560 px high. It shows more editable fields than the newer review capture, whose main photo falls back to a placeholder; that newer capture was not selected. Neither review capture provides verified sold-comp evidence.
+This task did not operate the physical phone, publish a listing or purchase a
+subscription. Screenshots do not establish an App Store release or a live Apple
+purchase/restore. The selected paywall price is this build's product price, not a
+permanent public price commitment.
 
-Only item content and a one-letter avatar are visible in the selected root/review screens; no name, email, address, account ID, notification, or credential is displayed. No Subscribe or Restore action was taken for the paywall capture.
+## Reproduce the framed images
 
-The older `listing-review.png` and `trophy-wall.png` filenames remain for the historical simulator evidence described in the [developer guide](../developer-guide.md#screenshot-provenance). Those fixture matches are not live sales research and are not the current hero images.
+See [the framing tool instructions](../../scripts/readme/README.md). Copy the
+selected raw files under their original filenames to ignored
+`ios/Artifacts/readme-input/`, then run from the repository root:
+
+```sh
+python3 scripts/readme/frame-screens.py \
+  --manifest scripts/readme/sources.json --output-dir docs/readme
+```
+
+The tool preserves screen proportions, clips the rounded screen aperture, adds
+the original device enclosure and hardware island, and encodes WebP with
+transparent alpha. [frame-receipt.json](frame-receipt.json) records exact source,
+frame and output hashes, crop rectangles, encoder version, size and dimensions.
+Raw files and private test logs remain ignored.
+
+The older `listing-review.png` and `trophy-wall.png` filenames remain only for
+historical simulator evidence in the [developer guide](../developer-guide.md#screenshot-provenance).
+Those fixture matches are not live sales research or current hero images.
 
 ## Scout hero animation
 
