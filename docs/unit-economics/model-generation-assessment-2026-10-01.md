@@ -1,9 +1,13 @@
 # Model rates and draft economics — October 1, 2026
 
-Keep GPT-5.6 Terra for vision, listing, export, pricingAgent and judge. The
+The approved runtime profile now uses GPT-6 Luna (vision/pricing low; listing/export none),
+the unchanged Terra offline judge, and GPT-Transcribe for recorded voice.
+See the [runtime profile and rollout gates](runtime-profile-2026-10-01.md). The
 [live screening report](../benchmarks/model-generations/2026-10-01/REPORT.md)
 contains fixtures, per-stage quality/latency, service terms, provenance and receipts.
-No production defaults or model environment values change.
+The original screening retained Terra; that historical assessment is superseded by the
+approved profile, subject to hosted verification using the actual production key.
+Preview has no OpenAI key; Firstmate approved the post-merge production smoke route.
 
 ## Current rates
 
@@ -12,7 +16,7 @@ USD per million short-context Standard tokens:
 
 | Model | Input | Cached input | Output |
 |---|---:|---:|---:|
-| GPT-5.6 Terra (retained) | $2.00 | $0.20 | $12.00 |
+| GPT-5.6 Terra (rollback baseline) | $2.00 | $0.20 | $12.00 |
 | GPT-6 Luna | $0.10 | $0.01 | $0.50 |
 | GPT-6.1 Sol | $2.00 | $0.10 | $10.00 |
 | GPT-6 Astra | $10.00 | $1.00 | $50.00 |
@@ -22,9 +26,10 @@ processing. They are excluded from the demo path and this Standard-cost comparis
 6.x account promotion was verified. Rates have no stated expiry; the separate GPT-5.6 Sol
 time-limited offer is stated to continue at least through November 21, 2026.
 
-Voice remains mini-transcribe at $0.003/minute. Newer GPT-Transcribe is $0.0045/minute; a maximum
-15-second note costs approximately $0.000750 versus $0.001125. Without audio quality/latency
-evidence, a newer name alone does not justify that increase. Embeddings remain
+Voice defaults to GPT-Transcribe at $0.0045/minute; the rollback mini-transcribe is
+$0.003/minute. A maximum
+15-second note costs approximately $0.000750 versus $0.001125. The switch is owner-approved; the original screening contained no audio quality/latency
+evidence, so the hosted rollout still needs a real voice smoke. Embeddings remain
 text-embedding-3-small at $0.02/M tokens with the 1536-dimension lock; optional retrieval is off
 by default.
 
@@ -58,10 +63,10 @@ access to any newer model.
 
 Keep the July `snaplist-pro-model.json` and generated `snaplist-pro-results.json` as dated
 assumption artifacts. They use GPT-5.5 and an embedding-per-attempt assumption; current runtime
-uses Terra and default-off retrieval. Replacing historical estimates with these two easy photos
+uses the Luna profile and default-off retrieval. Replacing historical estimates with these two easy photos
 would imply unsupported durable cost precision. The existing owner decision remains provisional.
 
-Before a future switch, evaluate representative variant/barcode/generic/voice and multi-photo
+For broader quality validation, evaluate representative variant/barcode/generic/voice and multi-photo
 fixtures, human-grounded quality, repeated latency distributions and production-key access using
 the intended preview. Measure durable successful-listing cost including retries, failures,
 corrections and actual sold/web route shares before refreshing the allowance calculator.

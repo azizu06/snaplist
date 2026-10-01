@@ -19,6 +19,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("oppositeProvider", () => {
@@ -113,7 +114,8 @@ describe("resolveProvider", () => {
 
 describe("resolveModelId", () => {
   it("falls back to the active provider's per-role default", () => {
-    expect(resolveModelId("vision", { provider: "openai", env: {} })).toBe("gpt-5.6-terra");
+    expect(resolveModelId("vision", { provider: "openai", env: {} })).toBe("gpt-6-luna");
+    expect(resolveModelId("judge", { provider: "openai", env: {} })).toBe("gpt-5.6-terra");
     expect(resolveModelId("vision", { provider: "google", env: {} })).toBe("gemini-2.5-flash");
     expect(resolveModelId("judge", { provider: "google", env: {} })).toBe("gemini-2.5-flash");
   });
@@ -125,7 +127,7 @@ describe("resolveModelId", () => {
       "explicit-id",
     );
     // A role's env var only affects that role.
-    expect(resolveModelId("listing", { provider: "openai", env })).toBe("gpt-5.6-terra");
+    expect(resolveModelId("listing", { provider: "openai", env })).toBe("gpt-6-luna");
   });
 
   it("maps each role to its own env override var", () => {
@@ -186,7 +188,7 @@ describe("seller context transcription activation", () => {
       }),
     ).resolves.toMatchObject({
       provider: "openai",
-      modelId: "gpt-4o-mini-transcribe",
+      modelId: "gpt-transcribe",
     });
   });
 
@@ -222,5 +224,74 @@ describe("resolveLanguageModel", () => {
       const model = await resolveLanguageModel(role, { provider: "openai", apiKey: "test-key" });
       expect(model).toBeTruthy();
     }
+  });
+});
+
+
+describe("OpenAI role requests", () => {
+  it("honors per-stage effort rollback and rejects misspelled effort before a call", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      body = JSON.parse(init.body);
+      return Response.json({ id: "fixture", created: 0, model: "fixture",
+        choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+      });
+    }));
+    const { generateText } = await import("ai");
+    for (const [override, expected] of [["medium", "medium"], ["default", undefined]] as const) {
+      await generateText({ model: await resolveLanguageModel("vision", {
+        provider: "openai", apiKey: "fixture", env: { VISION_MODEL: "gpt-5.6-terra", VISION_REASONING_EFFORT: override },
+      }), prompt: "fixture", maxRetries: 0 });
+      expect(body).toMatchObject({ model: "gpt-5.6-terra" });
+      expect(body.reasoning_effort).toBe(expected);
+    }
+    await expect(resolveLanguageModel("vision", { provider: "openai", env: { VISION_REASONING_EFFORT: "typo" } })).rejects.toThrow(/VISION_REASONING_EFFORT/);
+    await expect(resolveLanguageModel("vision", { provider: "google", env: { VISION_REASONING_EFFORT: "typo" } })).resolves.toBeTruthy();
+  });
+
+  it("uploads completed audio with the new model and accepts its JSON response", async () => {
+    let endpoint: unknown;
+    let form: FormData | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      endpoint = url;
+      form = init.body;
+      return Response.json({ text: "Sony headphones in good condition", languages: [{ code: "en" }] });
+    }));
+    const resolved = await resolveTranscriptionModel("sellerContext", { provider: "openai", apiKey: "fixture", env: { SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "true" } });
+    if (!resolved) throw new Error("Transcription was not enabled");
+    const { experimental_transcribe: transcribe } = await import("ai");
+    const result = await transcribe({ model: resolved.model, audio: new Uint8Array([1, 2]), maxRetries: 0 });
+    expect(result.text).toBe("Sony headphones in good condition");
+    expect(endpoint).toBe("https://api.openai.com/v1/audio/transcriptions");
+    expect(form?.get("model")).toBe("gpt-transcribe");
+    expect(form?.get("file")).toBeInstanceOf(File);
+    // No legacy language/timestamp/verbose-json options; API defaults to JSON.
+    expect(form?.get("response_format")).toBeNull();
+    expect(form?.get("language")).toBeNull();
+  });
+
+  it("sends the approved model and effort per role through the SDK", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return Response.json({
+        id: "fixture", created: 0, model: "fixture",
+        choices: [{ index: 0, message: { role: "assistant", content: '{"ok":true}' }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+    }));
+    const { generateObject } = await import("ai");
+    const { z } = await import("zod");
+    for (const role of LLM_ROLES) {
+      await generateObject({
+        model: await resolveLanguageModel(role, { provider: "openai", apiKey: "fixture", env: {} }),
+        schema: z.object({ ok: z.boolean() }), prompt: "fixture", maxRetries: 0,
+      });
+    }
+    expect(bodies.map(body => [body.model, body.reasoning_effort])).toEqual([
+      ["gpt-6-luna", "low"], ["gpt-6-luna", "none"],
+      ["gpt-6-luna", "none"], ["gpt-6-luna", "low"],
+      ["gpt-5.6-terra", undefined],
+    ]);
   });
 });

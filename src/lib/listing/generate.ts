@@ -48,7 +48,7 @@ import {
  * stays swappable — AGENTS.md "env-configurable everything"). Confirm exact IDs
  * against live OpenAI docs at build time.
  */
-export const DEFAULT_LISTING_MODEL = "gpt-5.6-terra";
+export const DEFAULT_LISTING_MODEL = "gpt-6-luna";
 
 /** Default count of few-shot exemplars retrieved to ground the generation. */
 export const DEFAULT_FEW_SHOT_COUNT = 5;

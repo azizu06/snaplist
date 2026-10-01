@@ -1,5 +1,11 @@
 # Model generation screening — 2026-10-01
 
+The original screening below retained Terra. The later owner-approved
+[Luna runtime profile](../../../unit-economics/runtime-profile-2026-10-01.md) supersedes
+that selection, with explicit role efforts and GPT-Transcribe for completed recordings.
+Historical samples retain their original omitted-effort semantics; they do not measure
+the new mixed profile or prove production-key access.
+
 Keep the OpenAI defaults at **gpt-5.6-terra for all five roles** for the Shipaton demo. Keep voice notes at **gpt-4o-mini-transcribe** and embeddings at **text-embedding-3-small**. No runtime, production environment, account, billing, or phone configuration changed.
 
 ## Official capabilities, rates, tiers and discounts

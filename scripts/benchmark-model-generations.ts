@@ -49,12 +49,17 @@ async function main() {
   if (prior?.completeListings?.length || prior?.unknownReservedUsd) throw new Error("Cannot repeat or resume uncertain paid outcomes");
   const plan = { models, stages, photoFixtures, fixturesPerStage: 2, maximumRequests: 40,
     limitUsd: LIMIT_USD, maxOutputTokens: MAX_OUTPUT, serviceTier: "default", completeListings: complete,
-    reasoning: "production wrapper default; unchanged", externalSearchCalls: 0,
+    reasoning: "provider default; role effort overrides explicitly set to default", externalSearchCalls: 0,
     databaseWrites: 0, live };
   if (!live) { console.log(JSON.stringify(plan, null, 2)); return; }
   process.env.OPENAI_API_KEY = execFileSync("security", ["find-generic-password", "-s",
     "snaplist-openai-benchmark", "-a", "benchmark", "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   process.env.LLM_PROVIDER = "openai";
+  // Preserve the historical comparison's omitted effort despite newer runtime defaults.
+  for (const name of ["VISION_REASONING_EFFORT", "LISTING_REASONING_EFFORT",
+    "EXPORT_PACK_REASONING_EFFORT", "PRICING_REASONING_EFFORT"]) {
+    process.env[name] = "default";
+  }
   const priorCost = prior?.measuredTokenCostUsd ?? 0;
   const budget = createBenchmarkBudget(LIMIT_USD - priorCost);
   const originalFetch = globalThis.fetch;
