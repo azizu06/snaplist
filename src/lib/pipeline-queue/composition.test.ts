@@ -434,7 +434,7 @@ describe("provider-neutral pipeline worker composition", () => {
           transcriptionAttempt: {
             role: "sellerContext",
             provider: "openai",
-            model: "gpt-4o-mini-transcribe",
+            model: "gpt-transcribe",
             calls: 1,
             chargedUsd: null,
           },
@@ -447,7 +447,7 @@ describe("provider-neutral pipeline worker composition", () => {
           transcriptionAttempt: {
             role: "sellerContext",
             provider: "openai",
-            model: "gpt-4o-mini-transcribe",
+            model: "gpt-transcribe",
             calls: 1,
             chargedUsd: null,
           },
@@ -499,7 +499,7 @@ describe("provider-neutral pipeline worker composition", () => {
           ? [{
               role: "sellerContext",
               provider: "openai",
-              model: "gpt-4o-mini-transcribe",
+              model: "gpt-transcribe",
               calls: 1,
               chargedUsd: null,
             }]

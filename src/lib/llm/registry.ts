@@ -1,6 +1,7 @@
 import {
   wrapLanguageModel,
   type LanguageModel,
+  type LanguageModelMiddleware,
   type TranscriptionModel,
 } from "ai";
 import { usageRecordingMiddleware } from "./usage-recording";
@@ -75,6 +76,42 @@ const ROLE_ENV_VAR: Record<LlmRole, string> = {
   judge: "EVAL_JUDGE_MODEL",
 };
 
+/** `default` omits effort for rollback to the provider's own default. */
+type RuntimeRole = Exclude<LlmRole, "judge">;
+const ROLE_EFFORT_ENV_VAR: Record<RuntimeRole, string> = {
+  vision: "VISION_REASONING_EFFORT",
+  listing: "LISTING_REASONING_EFFORT",
+  export: "EXPORT_PACK_REASONING_EFFORT",
+  pricingAgent: "PRICING_REASONING_EFFORT",
+};
+const OPENAI_EFFORT_DEFAULTS: Record<RuntimeRole, string> = {
+  vision: "low",
+  listing: "none",
+  export: "none",
+  pricingAgent: "low",
+};
+const SDK_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+
+function roleEffortMiddleware(role: RuntimeRole, env: EnvLike): LanguageModelMiddleware {
+  const effort = env[ROLE_EFFORT_ENV_VAR[role]]?.trim() || OPENAI_EFFORT_DEFAULTS[role];
+  if (effort !== "default" && !SDK_REASONING_EFFORTS.has(effort)) {
+    throw new Error(`${ROLE_EFFORT_ENV_VAR[role]} is not an SDK-supported reasoning effort`);
+  }
+  return {
+    specificationVersion: "v3",
+    async transformParams({ params }) {
+      if (effort === "default") return params;
+      return {
+        ...params,
+        providerOptions: {
+          ...params.providerOptions,
+          openai: { ...params.providerOptions?.openai, reasoningEffort: effort },
+        },
+      };
+    },
+  };
+}
+
 const TRANSCRIPTION_ROLE_ENV_VAR: Record<TranscriptionRole, string> = {
   sellerContext: "SELLER_CONTEXT_TRANSCRIPTION_MODEL",
 };
@@ -137,24 +174,24 @@ const TRANSCRIPTION_MODEL_DEFAULTS: Record<
   LlmProvider,
   Record<TranscriptionRole, string | null>
 > = {
-  openai: { sellerContext: "gpt-4o-mini-transcribe" },
+  openai: { sellerContext: "gpt-transcribe" },
   google: { sellerContext: null },
 };
 
 /**
- * Provider-specific default model id per role. OpenAI uses `gpt-5.6-terra`
- * (text + image input, structured outputs, and 60% cheaper per token than the
- * `gpt-5.5` it replaced — see docs/unit-economics); Google defaults to
+ * Provider-specific default model id per role. OpenAI uses `gpt-6-luna`
+ * for runtime roles and the unchanged `gpt-5.6-terra` for the offline OpenAI judge
+ * (see docs/unit-economics); Google defaults to
  * `gemini-2.5-flash` (multimodal — covers vision —
  * and free-tier friendly). Confirm against live docs before changing (AGENTS.md);
  * every entry is overridable via the role env var above.
  */
 const MODEL_DEFAULTS: Record<LlmProvider, Record<LlmRole, string>> = {
   openai: {
-    vision: "gpt-5.6-terra",
-    listing: "gpt-5.6-terra",
-    export: "gpt-5.6-terra",
-    pricingAgent: "gpt-5.6-terra",
+    vision: "gpt-6-luna",
+    listing: "gpt-6-luna",
+    export: "gpt-6-luna",
+    pricingAgent: "gpt-6-luna",
     judge: "gpt-5.6-terra",
   },
   google: {
@@ -508,5 +545,9 @@ export async function resolveLanguageModel(
   }
   const { createOpenAI } = await import("@ai-sdk/openai");
   const openai = createOpenAI(apiKey ? { apiKey } : {});
-  return wrapLanguageModel({ model: openai.chat(modelId), middleware: recordUsage });
+  return wrapLanguageModel({
+    model: openai.chat(modelId),
+    middleware:
+      role === "judge" ? recordUsage : [roleEffortMiddleware(role, env), recordUsage],
+  });
 }

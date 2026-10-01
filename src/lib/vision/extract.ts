@@ -32,11 +32,11 @@ export const MAX_IMAGES = 5;
 
 /**
  * Current default multimodal model (confirmed against OpenAI docs at build time —
- * gpt-5.6-terra takes text + image input and supports structured outputs). Overridable
+ * gpt-6-luna takes text + image input and supports structured outputs). Overridable
  * via `VISION_MODEL` so the provider/model stays swappable (AGENTS.md: env-configurable
  * everything; PRD: "Exact model IDs confirmed against current OpenAI docs at build time").
  */
-export const DEFAULT_VISION_MODEL = "gpt-5.6-terra";
+export const DEFAULT_VISION_MODEL = "gpt-6-luna";
 
 /**
  * One image fed to the vision call. Either a URL string (e.g. a signed Storage URL)

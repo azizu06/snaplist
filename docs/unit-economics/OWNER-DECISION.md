@@ -36,10 +36,12 @@ default-path spend. Refresh the assumptions with representative telemetry before
 as a current allowance or launch commitment.
 
 The machine model preserves its July GPT-5.5 rate and token assumptions; it is not a statement of
-the current runtime default. As of October 1, the OpenAI role registry defaults to GPT-5.6 Terra
-($2/M input, $0.20/M cached input, $12/M output). The
+the current runtime default. As of October 1, the OpenAI role registry defaults to GPT-6 Luna
+($0.10/M input, $0.01/M cached input, $0.50/M output) for runtime generation,
+with the offline judge unchanged on GPT-5.6 Terra. The
 [October model assessment](./model-generation-assessment-2026-10-01.md) records official 6.x rates,
-live token costs, and why all current defaults are retained for the demo. Its small, model-only
+live token costs and the original Terra-retention decision, superseded by the
+[approved runtime profile](runtime-profile-2026-10-01.md). Its small, model-only
 draft sample does not replace this calculator's durable-listing cost assumptions. The development
 provider remains Gemini; its assumptions and #188's historical Apify spend are likewise preserved
 in the dated machine model rather than silently repriced.
