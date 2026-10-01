@@ -84,15 +84,20 @@ function adoptSellerFamily(raw: VisionGenerateResult, context?: SellerContext): 
 } {
   const claim = sellerIdentitySchema.safeParse(raw.sellerIdentity);
   if (!context || !claim.success || claim.data.contradicted ||
-      !spokenIdentity(context.text, claim.data.sourceText) ||
+      !spokenProductPhrase(context.text, claim.data.sourceText, raw.category) ||
       isHedgedIdentity(claim.data.brand) || isHedgedIdentity(claim.data.model)) {
     return { raw, adopted: false };
   }
   const family = claim.data;
   const key = (s: string) => s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const differentModel = raw.model && !isHedgedIdentity(raw.model) && key(raw.model) !== key(family.model);
+  const uncertainVariant = differentModel && raw.ambiguous === true && family.variantUncertain &&
+    key(raw.model!).startsWith(key(family.model));
   // An independently returned incompatible identity wins over a voice claim.
+  // A shorter family may replace a variant only when that variant is explicitly
+  // uncertain. A confirmed AirPods Pro must never become merely AirPods.
   if ((raw.brand && !isHedgedIdentity(raw.brand) && key(raw.brand) !== key(family.brand)) ||
-      (raw.model && !isHedgedIdentity(raw.model) && !key(raw.model).startsWith(key(family.model)))) {
+      (differentModel && !uncertainVariant)) {
     return { raw, adopted: false };
   }
   // The literal phrase grounds provenance even when canonicalization means the
@@ -273,6 +278,24 @@ const COMMON_WORD_MODEL_NAMES = new Set([
   "view", "watch", "wave",
 ]);
 
+const GENERIC_PRODUCT_WORDS = new Set([
+  "a", "an", "the", "this", "that", "these", "those", "is", "are", "my", "it", "its",
+  "item", "product", "device", "keyboard", "mechanical", "computer", "laptop", "phone",
+  "tablet", "camera", "earbuds", "headphones", "speaker", "console", "controller",
+]);
+
+function identityTokens(text: string): string[] {
+  return text.normalize("NFKC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+}
+
+function spokenProductPhrase(transcript: string, phrase: string, category?: string): boolean {
+  if (!spokenIdentity(transcript, phrase)) return false;
+  const generic = new Set([...COMMON_WORD_MODEL_NAMES, ...GENERIC_PRODUCT_WORDS, ...identityTokens(category ?? "")]);
+  // Literal occurrence alone is insufficient: "mechanical keyboard" names no
+  // product family. Retain a distinctive name token, including imperfect speech.
+  return identityTokens(phrase).some((token) => /\p{L}/u.test(token) && !generic.has(token));
+}
+
 /**
  * Did the seller actually say this identity? Folds case and punctuation, requires the
  * tokens in order and on whole-token boundaries — "Pro" must not match inside
@@ -287,15 +310,18 @@ const COMMON_WORD_MODEL_NAMES = new Set([
  * composite for a hint the seller never gave.
  */
 function spokenIdentity(transcript: string, identity: string): boolean {
-  const tokens = identity.toLowerCase().match(/[a-z0-9]+/g);
-  if (!tokens?.length) return false;
+  const tokens = identityTokens(identity);
+  if (!tokens.length) return false;
   if (tokens.length === 1 && COMMON_WORD_MODEL_NAMES.has(tokens[0])) {
     return false;
   }
-  const spoken = transcript.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const spoken = transcript.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, " ");
+  // These scripts routinely join product names to surrounding speech without
+  // spaces. Latin and other spaced scripts still require whole-token boundaries.
+  const continuousScript = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(identity);
   const pattern = new RegExp(
-    `(?<![a-z0-9])${tokens.join("\\s+")}s?(?![a-z0-9])`,
-    "i",
+    `${continuousScript ? "" : "(?<![\\p{L}\\p{M}\\p{N}])"}${tokens.join("\\s+")}s?${continuousScript ? "" : "(?![\\p{L}\\p{M}\\p{N}])"}`,
+    "iu",
   );
   return pattern.test(spoken);
 }

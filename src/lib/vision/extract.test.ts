@@ -110,6 +110,56 @@ describe("vision/extract — schema validation + retry", () => {
     expect(attributes.identitySource).toBe("seller-stated");
   });
 
+  it("preserves a confirmed photo model when speech names a shorter family", async () => {
+    const { attributes } = await extractItemAttributes({
+      images: ["airpods-pro-label.jpg"],
+      sellerContext: { text: "These are AirPods.", language: "en", provenance: "seller_voice", verification: "unverified" },
+      generate: async () => ({
+        brand: "Apple", model: "AirPods Pro", category: "Wireless earbuds", ambiguous: false,
+        sellerIdentity: { sourceText: "AirPods", brand: "Apple", model: "AirPods", contradicted: false, variantUncertain: true },
+      }),
+    });
+    expect(attributes.model).toBe("AirPods Pro");
+    expect(attributes.identitySource).toBe("photos");
+  });
+
+  it.each(["keyboard", "mechanical keyboard"])("rejects a specific family grounded only by generic %j speech", async (sourceText) => {
+    const { attributes } = await extractItemAttributes({
+      images: ["unmarked-keyboard.jpg"],
+      sellerContext: { text: `This is a ${sourceText}.`, language: "en", provenance: "seller_voice", verification: "unverified" },
+      generate: async () => ({
+        category: "Mechanical keyboard",
+        sellerIdentity: { sourceText, brand: "WOBKEY", model: "Rainy75", contradicted: false, variantUncertain: true },
+      }),
+    });
+    expect(attributes.brand).toBeUndefined();
+    expect(attributes.model).toBeUndefined();
+  });
+
+  it("grounds an exact Japanese product phrase embedded in continuous speech", async () => {
+    const { attributes } = await extractItemAttributes({
+      images: ["console.jpg"],
+      sellerContext: { text: "これは任天堂スイッチです", language: "ja", provenance: "seller_voice", verification: "unverified" },
+      generate: async () => ({
+        category: "Game console",
+        sellerIdentity: { sourceText: "任天堂スイッチ", brand: "Nintendo", model: "Switch", contradicted: false, variantUncertain: true },
+      }),
+    });
+    expect(attributes).toMatchObject({ brand: "Nintendo", model: "Switch", identitySource: "seller-stated" });
+  });
+
+  it("falls back from an explicitly uncertain photo variant to its spoken family", async () => {
+    const { attributes } = await extractItemAttributes({
+      images: ["unmarked-keyboard.jpg"],
+      sellerContext: { text: "This is my Rainy 75 Pro, I think V3.", language: "en", provenance: "seller_voice", verification: "unverified" },
+      generate: async () => ({
+        brand: "WOBKEY", model: "Rainy75 Pro", category: "Mechanical keyboard", ambiguous: true,
+        sellerIdentity: { sourceText: "Rainy 75 Pro", brand: "WOBKEY", model: "Rainy75", contradicted: false, variantUncertain: true },
+      }),
+    });
+    expect(attributes).toMatchObject({ model: "Rainy75", identitySource: "seller-stated", identityVariantUncertain: true });
+  });
+
   it.each([
     [undefined, "Raining 75", false],
     ["This is a keyboard.", "Raining 75", false],
