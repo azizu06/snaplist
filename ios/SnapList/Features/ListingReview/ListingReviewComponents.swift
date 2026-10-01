@@ -937,33 +937,67 @@ struct ListingReviewStatusBanner: View {
 struct ListingReviewInlineField<Content: View>: View {
     let label: String
     var pending = false
+    var embeddedCaption = false
+    var centeredPrice = false
     @ViewBuilder let content: () -> Content
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var caption: some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+            if pending {
+                Circle()
+                    .fill(SnapListColorToken.action.color)
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                if pending {
-                    Circle()
-                        .fill(SnapListColorToken.action.color)
-                        .frame(width: 6, height: 6)
-                        .accessibilityHidden(true)
+        Group {
+            if embeddedCaption {
+                content().overlay(alignment: .topLeading) {
+                    caption
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 11)
+                        .padding(.bottom, 0)
+                        .background(SnapListColorToken.canvas.color)
                 }
+            } else if centeredPrice {
+                // UITextField centers its glyphs within the 44pt target.
+                // Put the caption in that existing room, keeping a 3pt gap.
+                let traits = UITraitCollection(
+                    preferredContentSizeCategory: dynamicTypeSize.contentSizeCategory
+                )
+                let captionHeight = UIFont.preferredFont(
+                    forTextStyle: .caption1, compatibleWith: traits
+                ).lineHeight
+                let valueHeight = UIFont.preferredFont(
+                    forTextStyle: .title3, compatibleWith: traits
+                ).lineHeight
+                let centeredRoom = max(0, (44 - valueHeight) / 2)
+                content()
+                    .padding(.top, max(0, captionHeight + 10 - centeredRoom))
+                    .overlay(alignment: .topLeading) {
+                        caption.padding(.top, 11)
+                    }
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    caption
+                    content()
+                }
+                .padding(.top, 11)
+                .padding(.bottom, 7)
             }
-            // Every caller gives its own control an accessibility label, so
-            // the printed caption would otherwise be read twice.
-            .accessibilityHidden(true)
-            content()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 2)
-        .frame(
-            maxWidth: .infinity,
-            minHeight: SnapListMetrics.minimumTouchTarget,
-            alignment: .leading
-        )
+        .frame(maxWidth: .infinity,
+               minHeight: SnapListMetrics.minimumTouchTarget,
+               alignment: .leading)
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(SnapListColorToken.inputBorder.color)
@@ -1091,7 +1125,7 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
     }
 
     var body: some View {
-        ListingReviewInlineField(label: label, pending: pending) {
+        ListingReviewInlineField(label: label, pending: pending, embeddedCaption: true) {
             ListingReviewInlineTextEditor(
                 text: $text,
                 accessibilityLabel: label,
@@ -1103,6 +1137,11 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
                     legibilityWeight: legibilityWeight
                 ),
                 lineLimit: lineLimit,
+                captionFont: ListingReviewInlineTextEditor.font(
+                    dynamicTypeSize: dynamicTypeSize,
+                    legibilityWeight: legibilityWeight,
+                    textStyle: .caption1
+                ),
                 isFocused: focus == focusValue,
                 focusChanged: { editing in
                     if editing {
@@ -1113,6 +1152,8 @@ struct ListingReviewInlineTextField<Focus: Hashable>: View {
                 }
             )
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier + ".box")
         // The control fills the box now, so what is left for this to pick up
         // is the label band and the padding around the glyphs.
         //
@@ -1238,6 +1279,50 @@ final class ListingReviewInlineTextView: UITextView {
     }
 }
 
+/// A plain dismissal action whose accessible target includes its full room.
+/// Removing an iOS 26 toolbar's capsule exposes a glyph-sized bar item.
+private final class ListingReviewKeyboardAccessoryView: UIView {
+    private let done = UIButton(type: .system)
+
+    init(font: UIFont, target: AnyObject, action: Selector) {
+        super.init(frame: .zero)
+        autoresizingMask = [.flexibleWidth]
+        backgroundColor = UIColor(SnapListColorToken.canvas.color)
+        done.setTitle(ListingReviewCopy.done, for: .normal)
+        done.tintColor = UIColor(SnapListColorToken.inkPrimary.color)
+        done.accessibilityLabel = "Done editing, keeps it on this phone"
+        done.accessibilityIdentifier = "listing-review.keyboard-done"
+        done.addTarget(target, action: action, for: .touchUpInside)
+        addSubview(done)
+        update(font: font)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func update(font: UIFont) {
+        let descriptor = font.fontDescriptor.withSymbolicTraits(.traitBold)
+            ?? font.fontDescriptor
+        done.titleLabel?.font = UIFont(descriptor: descriptor, size: font.pointSize)
+        frame.size.height = intrinsicContentSize.height
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric,
+               height: max(SnapListMetrics.minimumTouchTarget,
+                           done.titleLabel?.font.lineHeight ?? 0) + 14)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let width = max(SnapListMetrics.minimumTouchTarget,
+                        done.intrinsicContentSize.width + 16)
+        done.frame = CGRect(x: bounds.width - width - 12, y: 7,
+                            width: width, height: bounds.height - 14)
+    }
+}
+
 /// The control every inline text field publishes.
 ///
 /// SwiftUI's vertical-axis `TextField` is backed by a text view that hugs its
@@ -1260,6 +1345,7 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
     let identifier: String
     let font: UIFont
     let lineLimit: ClosedRange<Int>
+    var captionFont: UIFont? = nil
     let isFocused: Bool
     let focusChanged: (Bool) -> Void
 
@@ -1270,10 +1356,11 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
     /// one. The size is resolved from the environment and handed down.
     static func font(
         dynamicTypeSize: DynamicTypeSize,
-        legibilityWeight: LegibilityWeight?
+        legibilityWeight: LegibilityWeight?,
+        textStyle: UIFont.TextStyle = .body
     ) -> UIFont {
         let body = UIFont.preferredFont(
-            forTextStyle: .body,
+            forTextStyle: textStyle,
             compatibleWith: UITraitCollection(
                 preferredContentSizeCategory:
                     dynamicTypeSize.contentSizeCategory
@@ -1294,9 +1381,9 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
         view.delegate = context.coordinator
         context.coordinator.textView = view
         view.backgroundColor = .clear
-        // The box owns the padding, so the text view contributes none of its
-        // own; otherwise the glyphs sit inset from the caption above them.
-        view.textContainerInset = .zero
+        // The native target includes the caption band, instead of reserving
+        // another 44pt row below it. Uncaptioned editors keep zero insets.
+        view.textContainerInset = contentInsets
         view.textContainer.lineFragmentPadding = 0
         view.textAlignment = .natural
         // Scrolling is what a value longer than `lineLimit`'s upper bound does
@@ -1322,7 +1409,11 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
         }
         if uiView.font != font {
             uiView.font = font
+            (uiView.inputAccessoryView as? ListingReviewKeyboardAccessoryView)?
+                .update(font: font)
+            if uiView.isFirstResponder { uiView.reloadInputViews() }
         }
+        uiView.textContainerInset = contentInsets
         apply(accessibility: uiView)
 
         if isFocused, !uiView.isFirstResponder {
@@ -1330,6 +1421,12 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
         } else if !isFocused, uiView.isFirstResponder {
             uiView.resignFirstResponder()
         }
+    }
+
+    private var contentInsets: UIEdgeInsets {
+        guard let captionFont else { return .zero }
+        return UIEdgeInsets(top: captionFont.lineHeight + 10,
+                            left: 0, bottom: 7, right: 0)
     }
 
     /// The identifier, label and value go on the text view rather than on the
@@ -1356,21 +1453,24 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
         let lineHeight = (uiView.font ?? font).lineHeight
         let lowerBound = max(
             SnapListMetrics.minimumTouchTarget,
-            (lineHeight * CGFloat(lineLimit.lowerBound)).rounded(.up)
+            (lineHeight * CGFloat(lineLimit.lowerBound)
+                + contentInsets.top + contentInsets.bottom).rounded(.up)
         )
         let upperBound = max(
             lowerBound,
-            (lineHeight * CGFloat(lineLimit.upperBound)).rounded(.up)
+            (lineHeight * CGFloat(lineLimit.upperBound)
+                + contentInsets.top + contentInsets.bottom).rounded(.up)
         )
         let fitting = uiView
             .sizeThatFits(
                 CGSize(width: width, height: .greatestFiniteMagnitude)
             )
             .height
-        return CGSize(
-            width: width,
-            height: min(max(fitting, lowerBound), upperBound)
-        )
+        let height = min(max(fitting, lowerBound), upperBound)
+        // Only an overflowing value needs an inner scroll view. Otherwise
+        // a drag across this field must scroll the surrounding review.
+        uiView.isScrollEnabled = fitting > height + 1
+        return CGSize(width: width, height: height)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -1386,26 +1486,11 @@ struct ListingReviewInlineTextEditor: UIViewRepresentable {
         /// here rather than left missing. Only one view is first responder at
         /// a time, so this and the screen's own keyboard toolbar are never on
         /// screen together.
-        func keyboardAccessory() -> UIToolbar {
-            let done = UIBarButtonItem(
-                title: ListingReviewCopy.done,
-                style: .done,
-                target: self,
+        func keyboardAccessory() -> UIView {
+            ListingReviewKeyboardAccessoryView(
+                font: owner.font, target: self,
                 action: #selector(dismissKeyboard)
             )
-            done.accessibilityLabel = "Done editing, keeps it on this phone"
-            done.accessibilityIdentifier = "listing-review.keyboard-done"
-            let toolbar = UIToolbar()
-            toolbar.items = [
-                UIBarButtonItem(
-                    barButtonSystemItem: .flexibleSpace,
-                    target: nil,
-                    action: nil
-                ),
-                done,
-            ]
-            toolbar.sizeToFit()
-            return toolbar
         }
 
         @objc private func dismissKeyboard() {

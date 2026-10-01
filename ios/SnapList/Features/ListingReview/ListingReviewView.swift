@@ -30,6 +30,7 @@ private enum ListingReviewInlineFocus: Hashable {
     case price
     case title
     case description
+    case type
 }
 
 @MainActor
@@ -49,13 +50,12 @@ struct ListingReviewView: View {
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var destination: ListingReviewDestination?
+    @State private var typeCorrectionPresented = false
     @State private var sharingPresentation: ListingReviewSharingPresentation?
     @State private var returnFocus: ListingReviewFocus = .back
     @State private var hasAppeared = false
     @State private var priceText = ""
     @State private var priceInvalid = false
-    @State private var conditionDrawerPresented = false
-    @State private var conditionSelection = ListingReviewCondition.good
     // The seller's own live eBay posting, once eBay has confirmed it. Nil
     // until then, and for every draft, so the row stays Publish to eBay.
     @State private var ownEbayPostingURL: URL?
@@ -119,18 +119,14 @@ struct ListingReviewView: View {
                 .accessibilityIdentifier("listing-review.back")
                 .buttonStyle(.plain)
             }
-            // The price uses a decimal pad, which has no Return key, so
-            // dismissing the keyboard is the only way to commit by hand.
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    focusedField = nil
-                    inlineFocus = nil
-                }
-                .fontWeight(.bold)
-                .accessibilityLabel("Done editing, keeps it on this phone")
-                .accessibilityIdentifier("listing-review.keyboard-done")
+            if #available(iOS 26.0, *) {
+                keyboardDone.sharedBackgroundVisibility(.hidden)
+            } else {
+                keyboardDone
             }
+        }
+        .navigationDestination(isPresented: $typeCorrectionPresented) {
+            ListingReviewCorrectionBoundaryView()
         }
         .navigationDestination(item: $destination) { destination in
             destinationView(destination)
@@ -170,10 +166,6 @@ struct ListingReviewView: View {
             Text(
                 "The review is out of date and saving will need a reload first."
             )
-        }
-        .sheet(isPresented: $conditionDrawerPresented) {
-            conditionDrawer
-                .presentationDetents([.medium, .large])
         }
         .sheet(item: $sharingPresentation, onDismiss: {
             focusedElement = .assistedExport
@@ -275,43 +267,62 @@ struct ListingReviewView: View {
         snapshot: ListingReviewResult,
         draft: ListingReviewDraft
     ) -> some View {
-        ScrollView {
-            // Four bounded children, not a feed. A lazy stack would leave the
-            // ones below the fold out of the accessibility tree until the
-            // seller scrolls them into view, which at the largest Dynamic Type
-            // sizes is most of the review — including the title control that
-            // Voice Control and the rotor need to be able to name.
-            VStack(alignment: .leading, spacing: 0) {
-                ListingReviewPhotoPager(photos: snapshot.photos)
+        ScrollViewReader { proxy in
+            ScrollView {
+                // Four bounded children, not a feed. A lazy stack would leave the
+                // ones below the fold out of the accessibility tree until the
+                // seller scrolls them into view, which at the largest Dynamic Type
+                // sizes is most of the review — including the title control that
+                // Voice Control and the rotor need to be able to name.
+                VStack(alignment: .leading, spacing: 0) {
+                    ListingReviewPhotoPager(photos: snapshot.photos)
 
-                VStack(alignment: .leading, spacing: 18) {
-                    stateBanner
+                    VStack(alignment: .leading, spacing: 18) {
+                        stateBanner
 
-                    identityAndPricing(snapshot: snapshot, draft: draft)
+                        identityAndPricing(snapshot: snapshot, draft: draft)
 
-                    details(snapshot: snapshot, draft: draft)
+                        details(snapshot: snapshot, draft: draft)
 
-                    if let ownEbayPostingURL {
-                        viewOnEbayEntry(ownEbayPostingURL)
-                    } else {
-                        ebayPublishEntry
+                        if let ownEbayPostingURL {
+                            viewOnEbayEntry(ownEbayPostingURL)
+                        } else {
+                            ebayPublishEntry
+                        }
+
+                        assistedExportEntry
                     }
-
-                    assistedExportEntry
+                    .padding(.horizontal, 18)
+                    .padding(.top, 14)
+                    .padding(.bottom, 20)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-                .padding(.bottom, 20)
+                .padding(.top, 9)
             }
-            .padding(.top, 9)
+            .onChange(of: focusedField) { _, current in
+                if let current { proxy.scrollTo(current, anchor: .top) }
+            }
+            .onChange(of: inlineFocus) { _, current in
+                if let current { proxy.scrollTo(current, anchor: .top) }
+            }
+            .onReceive(NotificationCenter.default.publisher(
+                for: UIResponder.keyboardDidShowNotification
+            )) { _ in
+                // The keyboard and root dock change the viewport after focus.
+                // Position the actual editor again once that layout settles.
+                if let editing = focusedField ?? inlineFocus {
+                    proxy.scrollTo(editing, anchor: .top)
+                }
+            }
         }
         // #1056. ACT-04's line names every field rather than one control, so
         // the editable body is the spotlight's hole: the back button and the
         // dock stay behind the scrim, the fields stay usable.
         .activationSpotlightTarget(.listingReviewForm)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            footer
-                .background(SnapListColorToken.canvas.color)
+            if focusedField == nil && inlineFocus == nil {
+                footer
+                    .background(SnapListColorToken.canvas.color)
+            }
         }
     }
 
@@ -368,9 +379,11 @@ struct ListingReviewView: View {
             Text(snapshot.identity.label)
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
 
             price(snapshot: snapshot, draft: draft)
+                .id(ListingReviewInlineFocus.price)
                 .padding(.top, 6)
 
             if !snapshot.verifiedSoldMatches.isEmpty {
@@ -436,7 +449,8 @@ struct ListingReviewView: View {
         let pending = draft.sellerPriceOverride != snapshot.pricing.sellerPriceOverride
         return ListingReviewInlineField(
             label: "Price",
-            pending: pending
+            pending: pending,
+            centeredPrice: true
         ) {
             // #1060: the issue names ListingReviewComponents.swift for this
             // control, but the editable price field itself lives here — a
@@ -584,6 +598,7 @@ struct ListingReviewView: View {
                 focus: $inlineFocus,
                 lineLimit: 1...3
             )
+            .id(ListingReviewInlineFocus.title)
             .accessibilityFocused($focusedElement, equals: .title)
 
             ListingReviewInlineTextField(
@@ -597,29 +612,55 @@ struct ListingReviewView: View {
                 focus: $inlineFocus,
                 lineLimit: 1...10
             )
+            .id(ListingReviewInlineFocus.description)
             .accessibilityFocused($focusedElement, equals: .description)
 
-            ListingReviewChoiceField(
-                label: "Condition",
-                value: draft.condition.sellerLabel,
-                identifier: "listing-review.condition",
-                hint: "Opens the condition options",
-                accessory: .drawer,
-                pending: draft.condition != snapshot.listing.condition
-            ) {
-                activationInteraction()
-                returnFocus = .condition
-                conditionSelection = draft.condition
-                // Presenting the sheet cannot race whatever is still sitting
-                // in Title or Description behind it.
-                Task {
-                    await inlineEdits.flush(into: store)
-                    await commitPrice()
-                    await store.flushPendingAutosave()
-                    conditionDrawerPresented = true
+            Menu {
+                ForEach(ListingReviewCondition.allCases, id: \.self) { condition in
+                    Button {
+                        activationInteraction()
+                        focusedField = nil
+                        inlineFocus = nil
+                        Task {
+                            await inlineEdits.flush(into: store)
+                            await commitPrice()
+                            await store.setCondition(condition)
+                        }
+                    } label: {
+                        if draft.condition == condition {
+                            Label(condition.sellerLabel, systemImage: "checkmark")
+                        } else {
+                            Text(condition.sellerLabel)
+                        }
+                    }
+                    .accessibilityIdentifier("listing-review.condition.\(condition.rawValue)")
+                }
+            } label: {
+                ListingReviewInlineField(
+                    label: "Condition",
+                    pending: draft.condition != snapshot.listing.condition
+                ) {
+                    HStack {
+                        Text(draft.condition.sellerLabel)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    }
                 }
             }
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .accessibilityLabel("Condition")
+            .accessibilityValue(draft.condition.sellerLabel)
+            .accessibilityIdentifier("listing-review.condition")
             .accessibilityFocused($focusedElement, equals: .condition)
+
+            if let type = draft.specifics.first(where: {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .caseInsensitiveCompare("Type") == .orderedSame
+            }) {
+                inlineType(type, snapshot: snapshot)
+                    .id(ListingReviewInlineFocus.type)
+            }
 
             ListingReviewChoiceField(
                 label: "Item specifics",
@@ -642,38 +683,75 @@ struct ListingReviewView: View {
         }
     }
 
-    private var conditionDrawer: some View {
-        ListingReviewDrawer(
-            title: "Condition",
-            commitLabel: "Save",
-            commitIdentifier: "listing-review.condition.save",
-            reset: {
-                conditionSelection = store.snapshot?.listing.condition
-                    ?? conditionSelection
-            },
-            close: { conditionDrawerPresented = false },
-            commit: {
-                let chosen = conditionSelection
-                conditionDrawerPresented = false
-                Task { await store.setCondition(chosen) }
-            }
+    @ViewBuilder
+    private func inlineType(
+        _ type: ListingReviewSpecific, snapshot: ListingReviewResult
+    ) -> some View {
+        let pending = snapshot.listing.specifics.first(where: {
+            $0.name == type.name
+        })?.value != type.value
+        switch ListingReviewSpecificEditing.mode(
+            forSpecificNamed: type.name,
+            correctionAvailability: correctionAvailability
         ) {
-            VStack(spacing: 0) {
-                ForEach(ListingReviewCondition.allCases, id: \.self) {
-                    condition in
-                    ListingReviewDrawerOptionRow(
-                        label: condition.sellerLabel,
-                        selected: conditionSelection == condition,
-                        identifier:
-                            "listing-review.condition.\(condition.rawValue)"
-                    ) {
-                        conditionSelection = condition
+        case .inPlace:
+            ListingReviewInlineTextField(
+                label: type.name, value: type.value, pending: pending,
+                identifier: "listing-review.specific.type",
+                field: .fallbackIdentitySpecific(type.name),
+                edits: inlineEdits,
+                focusValue: ListingReviewInlineFocus.type,
+                focus: $inlineFocus, lineLimit: 1...3
+            )
+        case .guidedCorrection, .spent:
+            Menu {
+                Section {
+                    Button("Continue to guided correction") {
+                        Task {
+                            await inlineEdits.flush(into: store)
+                            await commitPrice()
+                            await store.flushPendingAutosave()
+                            typeCorrectionPresented = true
+                        }
                     }
-                    if condition != ListingReviewCondition.allCases.last {
-                        Divider()
+                } header: {
+                    Text(ListingReviewCopy.identityRerunWarning)
+                    Text(ListingReviewCopy.identityCorrectionCost)
+                }
+            } label: {
+                ListingReviewInlineField(label: type.name, pending: pending) {
+                    HStack {
+                        Text(type.value)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
                     }
                 }
             }
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .disabled(correctionAvailability == .spent)
+            .accessibilityLabel(type.name)
+            .accessibilityValue(type.value)
+            .accessibilityHint(correctionAvailability == .offered
+                ? "Opens guided correction" : "Guided correction unavailable")
+            .accessibilityIdentifier("listing-review.specific.type")
+        }
+    }
+
+    private var keyboardDone: some ToolbarContent {
+        ToolbarItemGroup(placement: .keyboard) {
+            Spacer()
+            Button {
+                focusedField = nil
+                inlineFocus = nil
+            } label: {
+                Text("Done")
+                    .fontWeight(.bold)
+                    .frame(minWidth: SnapListMetrics.minimumTouchTarget,
+                           minHeight: SnapListMetrics.minimumTouchTarget)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Done editing, keeps it on this phone")
+            .accessibilityIdentifier("listing-review.keyboard-done")
         }
     }
 

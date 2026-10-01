@@ -26,6 +26,143 @@ final class ListingReviewUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    func testEditingPriceHasOneKeyboardDoneAndRestoresWorkflowDoneAfterDismissal() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        let price = app.textFields["listing-review.price"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        scrollUntilClearOfFooter(
+            price, footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch, in: app
+        )
+        price.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        price.typeText("1")
+
+        let editing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        editing.name = "actual-root-price-editing-keyboard-actions"
+        editing.lifetime = .keepAlways
+        add(editing)
+        XCTAssertFalse(
+            app.buttons["listing-review.done"].exists,
+            "Workflow Done must be absent while the price keyboard is editing."
+        )
+        let keyboardDone = app.buttons["listing-review.keyboard-done"]
+        XCTAssertEqual(app.buttons.matching(identifier: "listing-review.keyboard-done").count, 1)
+        XCTAssertTrue(keyboardDone.isHittable)
+        assertMeetsTouchTargetFloor(keyboardDone.frame.height, "keyboard Done")
+        assertMeetsTouchTargetFloor(keyboardDone.frame.width, "keyboard Done")
+        keyboardDone.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["listing-review.done"].isHittable)
+        XCTAssertTrue(app.otherElements["listing-review"].exists,
+                      "Keyboard Done must keep the seller in listing review.")
+    }
+
+    func testFocusedPriceStaysVisibleAboveTheKeyboardWhileEditing() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        let price = app.textFields["listing-review.price"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        scrollUntilClearOfFooter(
+            price,
+            footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch,
+            in: app
+        )
+        price.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        price.typeText("1")
+        XCTAssertTrue(app.buttons["listing-review.keyboard-done"].isHittable)
+        let editing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        editing.name = "actual-root-focused-price-visibility"
+        editing.lifetime = .keepAlways
+        add(editing)
+        XCTAssertGreaterThanOrEqual(price.frame.minY, 0)
+        XCTAssertLessThanOrEqual(
+            price.frame.maxY, keyboard.frame.minY,
+            "The edited currency value must remain visible above its keyboard."
+        )
+        XCTAssertTrue(price.isHittable)
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3))
+    }
+
+    func testConditionAndTypeAreEditableInlineWithoutOpeningSpecifics() {
+        let app = launch(fixture: nil, resetDraft: true)
+        _ = openReview(in: app)
+        let type = app.textViews["listing-review.specific.type"]
+        XCTAssertTrue(type.waitForExistence(timeout: 3),
+                      "Type belongs inline in listing review, beside Condition.")
+        scrollUntilClearOfFooter(
+            type,
+            footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch,
+            in: app
+        )
+        type.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        type.typeText(" — edited")
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(String(describing: type.value).contains("edited"))
+        let condition = app.buttons["listing-review.condition"]
+        scrollUntilClearOfFooter(
+            condition, footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch, in: app
+        )
+        condition.tap()
+        let option = app.buttons["listing-review.condition.like-new"]
+        XCTAssertTrue(option.waitForExistence(timeout: 3))
+        option.tap()
+        XCTAssertFalse(app.buttons["listing-review.condition.save"].exists,
+                       "A small inline choice must not require a nested Save drawer.")
+        XCTAssertTrue(app.otherElements["listing-review"].exists)
+        let inline = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        inline.name = "actual-root-inline-condition-and-type"
+        inline.lifetime = .keepAlways
+        add(inline)
+    }
+
+    func testSingleLineTitleUsesACompactCaptionedTouchTarget() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        let title = app.textViews["listing-review.title"]
+        scrollUntilClearOfFooter(
+            title, footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch, in: app
+        )
+        title.tap()
+        title.press(forDuration: 1)
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 2))
+        selectAll.tap()
+        title.typeText("Camera")
+        XCTAssertFalse(app.buttons["listing-review.done"].exists)
+        let keyboardDone = app.buttons["listing-review.keyboard-done"]
+        XCTAssertEqual(app.buttons.matching(identifier: "listing-review.keyboard-done").count, 1)
+        assertMeetsTouchTargetFloor(keyboardDone.frame.height, "native keyboard Done: \(keyboardDone.frame)")
+        assertMeetsTouchTargetFloor(keyboardDone.frame.width, "native keyboard Done: \(keyboardDone.frame)")
+        let editing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        editing.name = "actual-root-title-keyboard-done"
+        editing.lifetime = .keepAlways
+        add(editing)
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        let box = app.otherElements["listing-review.title.box"]
+        XCTAssertTrue(box.exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "actual-root-single-line-title-box"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTContext.runActivity(named: "compact title box=\(box.frame), native target=\(title.frame)") { _ in
+            XCTAssertGreaterThanOrEqual(title.frame.height.rounded(), 44)
+        }
+        XCTAssertLessThanOrEqual(box.frame.height, title.frame.height + 1,
+                                "The caption and short value must share a compact field.")
+    }
+
     func testDescriptionFitsShortTextAndGrowsWhenTheSellerAddsDetails() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
@@ -43,10 +180,17 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(selectAll.waitForExistence(timeout: 2))
         selectAll.tap()
         description.typeText("Boxed.")
+        XCTAssertFalse(app.buttons["listing-review.done"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "listing-review.keyboard-done").count, 1)
+        let editing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        editing.name = "actual-root-description-keyboard-done"
+        editing.lifetime = .keepAlways
+        add(editing)
         app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(String(describing: description.value).contains("Boxed."))
-        XCTAssertEqual(description.frame.height, 44, accuracy: 1,
-                       "Short descriptions must not reserve three empty lines.")
+        let shortHeight = description.frame.height
+        XCTAssertLessThanOrEqual(shortHeight, 64,
+                                 "Short descriptions must not reserve empty lines.")
         let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         compact.name = "compact-listing-inputs"
         compact.lifetime = .keepAlways
@@ -55,7 +199,7 @@ final class ListingReviewUITests: XCTestCase {
         description.tap()
         description.typeText(String(repeating: " Original accessories included.", count: 5))
         app.buttons["listing-review.keyboard-done"].tap()
-        XCTAssertGreaterThan(description.frame.height, 44)
+        XCTAssertGreaterThan(description.frame.height, shortHeight)
         let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         expanded.name = "description-grows-with-content"
         expanded.lifetime = .keepAlways
@@ -522,13 +666,11 @@ final class ListingReviewUITests: XCTestCase {
             String(describing: description.value as Any).contains("Boxed.")
         )
 
-        // Condition has a fixed option set, so it opens the drawer and only
-        // commits on the drawer's own save.
+        // Condition commits the small inline menu choice directly.
         app.buttons["listing-review.condition"].tap()
         let acceptable = app.buttons["listing-review.condition.acceptable"]
         XCTAssertTrue(acceptable.waitForExistence(timeout: 3))
         acceptable.tap()
-        app.buttons["listing-review.condition.save"].tap()
         let condition = app.buttons["listing-review.condition"]
         XCTAssertTrue(condition.waitForExistence(timeout: 3))
         XCTAssertTrue(
@@ -618,43 +760,23 @@ final class ListingReviewUITests: XCTestCase {
     /// specific glyph, because that container spans the fixed header the
     /// drag has to originate from, above the options `ScrollView` a swipe
     /// starting inside would just scroll instead of dismissing.
-    func testConditionDrawerSlidesDownToDismissWithoutSaving() {
+    func testConditionMenuDismissesWithoutChangingTheSelection() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
-
         let condition = app.buttons["listing-review.condition"]
-        XCTAssertTrue(condition.waitForExistence(timeout: loadedTreeTimeout))
-        let before = String(describing: condition.value as Any)
-
+        scrollUntilClearOfFooter(
+            condition, footerTopEdge: app.buttons["listing-review.done"],
+            scrollView: app.scrollViews.firstMatch, in: app
+        )
+        let before = stringValue(of: condition)
         condition.tap()
-        // Whichever condition is not already selected, so a swipe that
-        // wrongly committed the pending pick would change `condition`'s
-        // value and this could tell.
-        let candidate = before.localizedCaseInsensitiveContains("Poor")
-            ? "new" : "poor"
-        let pick = app.buttons["listing-review.condition.\(candidate)"]
-        XCTAssertTrue(pick.waitForExistence(timeout: 3))
-        pick.tap()
-
-        let drawer = anyElement("listing-review.drawer", in: app)
-        XCTAssertTrue(drawer.waitForExistence(timeout: 3))
-        dragDownToDismiss(from: drawer, in: app)
-
-        XCTAssertTrue(condition.waitForExistence(timeout: 3))
-        XCTAssertFalse(
-            app.buttons["listing-review.condition.save"].exists,
-            "The drawer must actually be gone, not just covered."
-        )
-        XCTAssertEqual(
-            String(describing: condition.value as Any),
-            before,
-            "A swipe-down cancels, the same as Close; it must not commit "
-                + "the pending selection."
-        )
+        XCTAssertTrue(app.buttons["listing-review.condition.poor"].waitForExistence(timeout: 3))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.25)).tap()
+        XCTAssertTrue(app.buttons["listing-review.condition.poor"].waitForNonExistence(timeout: 3))
+        XCTAssertEqual(stringValue(of: condition), before)
+        XCTAssertFalse(anyElement("listing-review.drawer", in: app).exists)
     }
 
-    /// The identity drawer pushed from Item specifics shares the same chrome
-    /// and the same close semantics, so it gets the same proof.
     func testSpecificsIdentityDrawerSlidesDownToDismiss() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)

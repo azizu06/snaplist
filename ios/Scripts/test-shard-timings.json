@@ -82,7 +82,7 @@
     "SnapListUITests/ListingReviewUITests/testAPublishedListingReopenedFromTrophyWallOpensItsOwnEbayPosting": 30.209,
     "SnapListUITests/ListingReviewUITests/testATapOnTheGlyphsPutsTheCaretWhereTheFingerIsAndNotAtTheEnd": 16.351,
     "SnapListUITests/ListingReviewUITests/testCanonicalRunOpensListingReviewAndCleanDoneRestoresExactOpener": 52.618,
-    "SnapListUITests/ListingReviewUITests/testConditionDrawerSlidesDownToDismissWithoutSaving": 15.0,
+    "SnapListUITests/ListingReviewUITests/testConditionMenuDismissesWithoutChangingTheSelection": 23.217,
     "SnapListUITests/ListingReviewUITests/testConflictDefaultsToKeepEditingAndOnlyExplicitDiscardReloads": 46.291,
     "SnapListUITests/ListingReviewUITests/testCorrectionBoundaryAndAdaptiveManualFallbackRemainReachable": 65.617,
     "SnapListUITests/ListingReviewUITests/testEditThenBackFlushesBeforeTheScreenDismisses": 12.0,
@@ -266,6 +266,10 @@
     "SnapListUITests/HomeUITests/testTappedNotificationForAnItemTheServerWillNotOpenLandsOnTheWall": 8.991,
     "SnapListUITests/HomeUITests/testTappedNotificationOpensTheItemItAnnounced": 18.13,
     "SnapListUITests/HomeUITests/testTappedNotificationWithNoUsableIdentityLandsOnTheWall": 5.669,
-    "SnapListUITests/ListingReviewUITests/testDescriptionFitsShortTextAndGrowsWhenTheSellerAddsDetails": 32.941
+    "SnapListUITests/ListingReviewUITests/testDescriptionFitsShortTextAndGrowsWhenTheSellerAddsDetails": 48.011,
+    "SnapListUITests/ListingReviewUITests/testEditingPriceHasOneKeyboardDoneAndRestoresWorkflowDoneAfterDismissal": 15.242,
+    "SnapListUITests/ListingReviewUITests/testFocusedPriceStaysVisibleAboveTheKeyboardWhileEditing": 14.733,
+    "SnapListUITests/ListingReviewUITests/testConditionAndTypeAreEditableInlineWithoutOpeningSpecifics": 30.909,
+    "SnapListUITests/ListingReviewUITests/testSingleLineTitleUsesACompactCaptionedTouchTarget": 26.609
   }
 }
