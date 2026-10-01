@@ -169,6 +169,8 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
   candidates and fifty specific-category candidates when fewer than three exact anchors survive. Keep
   actual sold amounts only, with at most five ranked cards. A lone sale is limited evidence; configuration,
   condition and category differences receive visible weaker-comparison labels and reduced confidence.
+  Derive the recommendation and its range from the strongest available comparison basis: exact item,
+  then model family, then category. Broader cards must not outvote an available exact sale.
   Category research never resolves the seller's identity or promotes asking/unknown accepted amounts.
   Never cache empty, failed or unusable results. Each Actor is capped at 120 seconds/$0.25 with bounded
   status observation up to 125 seconds; all research has a 225.5-second deadline inside the 300-second

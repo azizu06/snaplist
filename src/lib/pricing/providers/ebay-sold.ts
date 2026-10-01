@@ -1213,11 +1213,25 @@ export function finalizeSoldResearchResult<T extends EbaySoldComp>(
   if (matches.length === 0) return null;
   const retained = selectVerifiedSoldMatches(matches);
   const weights = new Map(retained.map(m => [m.comp.url, m.score]));
-  const result = synthesizeSoldResult(retained.map(m => m.comp), {
+  // Weaker cards describe another comparison basis. Even many cheap category
+  // sales must not outvote one exact sale or trim it as a global price outlier.
+  const strongestKind = ["sold-comp", "family-sold-comp", "category-sold-comp"]
+    .find(kind => retained.some(match => basis.get(match.comp.url)?.kind === kind))!;
+  const strongest = retained.filter(match => basis.get(match.comp.url)?.kind === strongestKind);
+  const recommendation = synthesizeSoldResult(strongest.map(m => m.comp), {
     ...options, evidenceWeight: comp => weights.get(comp.url) ?? 1,
   });
-  if (retained.length === 1 && basis.get(retained[0].comp.url)?.kind === "sold-comp") {
-    basis.set(retained[0].comp.url, { kind: "sold-comp", label: "Single sold comparison" });
+  const coreUrls = new Set(recommendation.sources.map(source => source.url));
+  const cards = retained.filter(match => basis.get(match.comp.url)?.kind !== strongestKind || coreUrls.has(match.comp.url))
+    .map(match => synthesizeSoldResult([match.comp]));
+  const result = {
+    ...recommendation,
+    sources: cards.flatMap(card => card.sources),
+    evidence: cards.flatMap(card => card.evidence ?? []),
+  };
+  const singlePricingSale = recommendation.sources.length === 1;
+  if (singlePricingSale && strongestKind === "sold-comp") {
+    basis.set(recommendation.sources[0].url, { kind: "sold-comp", label: "Single sold comparison" });
   }
   const acceptedBasis = result.sources.map(source => basis.get(source.url)!);
   const broader = acceptedBasis.some(row => row.label != null);
@@ -1225,7 +1239,7 @@ export function finalizeSoldResearchResult<T extends EbaySoldComp>(
   return {
     ...result,
     confidence: Math.min(result.confidence, broader ? 0.6 : 1),
-    compAgreement: Math.min(result.compAgreement ?? 0, retained.length === 1 ? 0.3 : agreementCap),
+    compAgreement: Math.min(result.compAgreement ?? 0, singlePricingSale ? 0.3 : agreementCap),
     sources: result.sources.map(source => {
       const { kind, label } = basis.get(source.url)!;
       return { ...source, kind, ...(label ? { title: `${label}: ${source.title ?? "Sold item"}` } : {}) };

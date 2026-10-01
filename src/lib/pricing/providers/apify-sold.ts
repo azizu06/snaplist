@@ -1,6 +1,7 @@
 import { ApifyClient } from "apify-client";
 import type { TtlCache } from "../comp-cache";
 import {
+  selectFreshComps,
   SOLD_HALFLIFE_DAYS_DEFAULT,
   SOLD_STALE_DAYS_DEFAULT,
 } from "../freshness";
@@ -646,7 +647,8 @@ export function createApifySoldPricingProvider(
   );
   const halfLifeDays = positiveNumber(
     options.halfLifeDays ?? process.env.EBAY_SOLD_HALFLIFE_DAYS,
-    SOLD_HALFLIFE_DAYS_DEFAULT,
+    selectFreshComps,
+  SOLD_HALFLIFE_DAYS_DEFAULT,
   );
   const circuitFailureThreshold = positiveInteger(
     options.circuitFailureThreshold,
@@ -1302,7 +1304,9 @@ export function createApifySoldPricingProvider(
       const batch = await runBatch(expandedQuery, index === 0 ? APIFY_SOLD_INITIAL_RESULTS : APIFY_SOLD_MAX_RESULTS_DEFAULT, pricingDeadline, outcome);
       if (!outcome.allTerminalKnown) break; // ambiguous paid starts must remain fenced
       if (batch) combined = normalizeEbaySoldCompUrls([...combined, ...batch]);
-      if (selectSoldCompEvidence(combined, signal).anchors.length >= APIFY_SOLD_EXPANSION_THRESHOLD) break;
+      const clock = now?.();
+      const fresh = clock == null ? combined : selectFreshComps(combined, clock, staleDays);
+      if (selectSoldCompEvidence(fresh, signal).anchors.length >= APIFY_SOLD_EXPANSION_THRESHOLD) break;
     }
     const result = finalizeSoldResearchResult(combined, signal, { now: now?.(), staleDays, halfLifeDays });
     if (!result) return combined; // preserve discard reasons without caching unusable rows

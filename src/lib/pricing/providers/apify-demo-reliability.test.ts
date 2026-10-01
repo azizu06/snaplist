@@ -80,6 +80,38 @@ describe("bounded demo sold research", () => {
     expect(runActor).toHaveBeenCalledTimes(2);
   });
 
+  it("prices from exact evidence while preserving labeled broader category cards", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValueOnce({ status: "SUCCEEDED", items: [sale("Apple AirPods Pro Wireless Earbuds", 150, 1)] })
+      .mockResolvedValueOnce({ status: "SUCCEEDED", items: [] })
+      .mockResolvedValue({ status: "SUCCEEDED", items: [2, 3, 4, 5].map(id => sale("Generic Wireless Earbuds", 20, id)) });
+    const result = await provider(runActor).price({ brand: "Apple", model: "AirPods Pro", category: "Wireless earbuds", condition: "good" });
+    expect(result?.suggested).toBe(150);
+    expect(result?.range).toEqual({ min: 150, max: 150 });
+    expect(result?.evidence).toHaveLength(5);
+    expect(result?.sources.filter(row => row.kind === "category-sold-comp")).toHaveLength(4);
+    expect(result?.sources.some(row => row.url.endsWith("001"))).toBe(true);
+  });
+
+  it("expands when three precise anchors are stale instead of letting them mask fresh family sales", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValueOnce({ status: "SUCCEEDED", items: [1, 2, 3].map(id => sale("Apple MacBook Pro 14-inch 48GB", 1500, id, { endedAt: "2026-01-01T12:00:00Z" })) })
+      .mockResolvedValueOnce({ status: "SUCCEEDED", items: [sale("Apple MacBook Pro 14-inch 16GB", 900, 4), sale("Apple MacBook Pro 14-inch 16GB", 1000, 5)] })
+      .mockResolvedValue({ status: "SUCCEEDED", items: [] });
+    const result = await provider(runActor).price(macbook);
+    expect(runActor).toHaveBeenCalledTimes(3);
+    expect(result?.evidence).toHaveLength(2);
+    expect(result?.sources.every(row => row.kind === "family-sold-comp")).toBe(true);
+  });
+
+  it("keeps one exact sale below eligibility with every identification field resolved", async () => {
+    const runActor = vi.fn<RunApifySoldActor>().mockResolvedValueOnce({ status: "SUCCEEDED", items: [sale("Apple AirPods Pro", 90, 1)] }).mockResolvedValue({ status: "SUCCEEDED", items: [] });
+    const signal = { brand: "Apple", model: "AirPods Pro", category: "Wireless earbuds", condition: "good", upc: "194253397168", isbn: "9780306406157" };
+    const result = await provider(runActor).price(signal);
+    expect(result?.compAgreement).toBe(0.3);
+    const confidence = priceToConfidence(signal, result!, { autopilotEnabled: true });
+    expect(confidence.score).toBeCloseTo(0.655);
+    expect(confidence.autopilotEligible).toBe(false);
+  });
+
   it("never caches empty successes and permits a later independent research attempt", async () => {
     const runActor = vi.fn<RunApifySoldActor>().mockResolvedValue({ status: "SUCCEEDED", items: [] });
     const p = provider(runActor);
