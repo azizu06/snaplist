@@ -423,7 +423,13 @@ export function buildCoreListingDescription(
       ? `${name} in ${conditionPhrase}`
       : `${name} in ${conditionPhrase} condition`
     : name;
-  const sentences = [asSentence(identity)];
+  const sentences = attributes.identitySource === "seller-stated"
+    ? [
+        asSentence(`The seller identifies this as ${name}`),
+        ...(conditionPhrase ? [asSentence(`It is in ${conditionPhrase}${/\bcondition\b/i.test(conditionPhrase) ? "" : " condition"}`)] : []),
+        ...(attributes.identityVariantUncertain ? ["Exact version or trim is unconfirmed."] : []),
+      ]
+    : [asSentence(identity)];
   const specs = (attributes.specs ?? [])
     .map((spec) => safeSellerCoreValue(spec))
     .filter((spec): spec is string => Boolean(spec))
@@ -547,7 +553,9 @@ export async function generateEbayListing(
     const reconciled: UnvalidatedEbayListing = modelCopyViolates || modelTagsViolate
       ? fallbackEbayListing(attributes)
       : {
-          title: enforceTitleLength(raw.title),
+          title: enforceTitleLength(attributes.identitySource === "seller-stated"
+            ? [fallbackListingName(attributes), safeSellerCoreValue(attributes.category)].filter(Boolean).join(" ")
+            : raw.title),
           itemSpecifics: reconcileSpecifics(attributes),
           // Descriptions cannot be completely fact-checked after generation. Build
           // this seller-visible field from the validated core instead.

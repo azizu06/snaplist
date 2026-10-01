@@ -121,11 +121,8 @@ export function createOrderedSoldProvider(
 ): PricingProvider {
   return {
     tier: "ebay-sold",
-    canHandle(signal) {
-      return strategies.some(
-        ({ provider }) => provider.canHandle?.(signal) ?? true,
-      );
-    },
+    // Enter price even when every strategy declines, so the per-strategy skip
+    // reason is recorded. Each adapter still gates its own external invocation.
     async price(signal) {
       for (const strategy of strategies) {
         const { provider } = strategy;

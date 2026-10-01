@@ -58,13 +58,18 @@ export const extractedAttributesSchema = z.object({
    * vision step read the identity off the item itself; `"seller-hinted"` means it
    * adopted an identity the seller NAMED in their voice note after checking the
    * photos were visually consistent with it.
+   * `"seller-stated"` is a canonical family resolved from imperfect voice plus
+   * product knowledge when the photos do not contradict it. Unknown trim does
+   * not erase the family; the identity remains unverified and discounted.
    *
    * Seller speech is unverified context, never verified evidence (PRD user story
    * 11), so this rides into `prediction_logs.extracted_attrs` and discounts the
    * identification term of the confidence composite. Optional: absent on every row
    * written before the hint existed, read as `"photos"`.
    */
-  identitySource: z.enum(["photos", "seller-hinted"]).optional(),
+  identitySource: z.enum(["photos", "seller-hinted", "seller-stated"]).optional(),
+  /** The family is usable, but a spoken generation/version/trim is not established. */
+  identityVariantUncertain: z.boolean().optional(),
   /**
    * Garment flat-lay measurements (issue #104), present ONLY for clothing. Each is
    * a DRAFT the seller confirms on review — never silently auto-filled into item

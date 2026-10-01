@@ -114,12 +114,14 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
   follows item/account deletion. It cannot override image, catalog, sold-evidence, or marketplace
   truth. Issue #351 owns the behavior contract; #774 implements the accepted voice-to-listing path
   with photos-only fallback for every terminal non-transcribed outcome.
-- The transcript is also offered to the vision step as an unverified identity HINT (#1120). Vision may
-  adopt a brand or model the seller named only when the photos are visually consistent with it, and
-  must ignore it when they conflict; it never overrides image, catalog, or marketplace truth. A
-  hinted identity is recorded as such and earns reduced identification completeness in the confidence
-  composite. Transcription therefore resolves before identification, and its failure still degrades to
-  photos-only identification.
+- The transcript also supplies an unverified seller-stated identity. Vision combines photos,
+  imperfect transcription and product knowledge to resolve the best canonical brand/model family
+  when the photos do not contradict it; missing labels or uncertain generation/version/trim do not
+  justify erasing a usable family. Sold research uses that family and retains its existing cost,
+  count and matching limits. Contradictory visible identity wins. Seller-stated identity is recorded
+  and disclosed in the coherent listing, never called photo-verified, and earns reduced identification
+  completeness. Unknown variants remain unconfirmed. Transcription resolves before identification;
+  failure still degrades to photos-only identification.
 - The existing durable Pipeline remains the only analysis path. Supabase Queues carry the strict
   `{ run_id, schema_version }` wake-up envelope; the tenant-owned `pipeline_runs` record is product
   truth. Queue authority is not tenant-domain authority.

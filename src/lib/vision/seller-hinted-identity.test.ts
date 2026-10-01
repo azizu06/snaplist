@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PriceRouter } from "../pricing/router";
 import { buildSoldSearchQuery } from "../pricing/providers/ebay-sold";
 import type {
@@ -11,6 +11,11 @@ import type { SellerContext } from "../pipeline/types";
 import { createVisionPipelineStages } from "./pipeline";
 import type { VisionGenerate, VisionGenerateResult } from "./extract";
 import type { DownloadClient } from "./photos";
+import { createDefaultPricer } from "../pricing/default-pricer";
+import { createInMemoryTtlCache } from "../pricing/comp-cache";
+import type { ApifySoldComp, RunApifySoldActor } from "../pricing/providers/apify-sold";
+import { generateEbayListing } from "../listing/generate";
+import { priceToConfidence } from "../confidence/from-price";
 
 /**
  * Issue #1120 regression: a genuine, unmistakably branded item (Apple AirPods Pro,
@@ -148,5 +153,123 @@ describe("issue #1120 — seller-hinted identity reaches the sold-comp tier", ()
     });
     const price = await stages.price({ attributes: identified.attributes });
     expect(price.tier).toBe("llm-only");
+  });
+});
+
+describe("voice family with an unconfirmed keyboard variant", () => {
+  it.each([
+    ["So this is the Rainy 75 Pro, I think V3.", "Rainy 75 Pro"],
+    ["This is my Raining 75, not sure which version.", "Raining 75"],
+  ])("uses the seller-stated family from %j throughout the real pipeline and invokes bounded Apify research", async (text, sourceText) => {
+    const runActor = vi.fn<RunApifySoldActor>(async () => ({
+      status: "SUCCEEDED",
+      items: [80, 90, 100].map((price, i) => ({
+        url: `https://www.ebay.com/itm/12345678900${i}`,
+        title: "WOBKEY Rainy75 Mechanical Keyboard",
+        condition: "Pre-Owned",
+        endedAt: "2026-09-29T12:00:00.000Z",
+        soldPrice: String(price),
+        soldCurrency: "USD",
+        isBestOfferAccepted: false,
+      })),
+    }));
+    const stages = createVisionPipelineStages({
+      supabase: fakeDownloadClient(),
+      generate: async () => ({
+        title: "Compact 75% Mechanical Keyboard",
+        category: "Mechanical keyboard",
+        condition: "good",
+        ambiguous: true,
+        uncertaintyReason: "Version and trim are not confirmed.",
+        sellerIdentity: {
+          sourceText, brand: "WOBKEY", model: "Rainy75",
+          contradicted: false, variantUncertain: true,
+        },
+      }),
+      priceItem: createDefaultPricer({
+        apifySold: {
+          enabled: true, token: "offline-placeholder", runActor,
+          cache: createInMemoryTtlCache<ApifySoldComp[]>(60_000, Date.now, "shared"),
+          now: () => Date.parse("2026-09-30T12:00:00Z"),
+        },
+        ebaySold: { enabled: false },
+        llmOnly: { estimatePrice: async () => ({ suggested: 90, min: 55, max: 120 }) },
+      }),
+      generateListing: async ({ attributes, sellerContext }) => {
+        const result = await generateEbayListing({
+          attributes, sellerContext, fewShot: { examples: [], matches: [] },
+          generate: async () => ({ title: "Compact Mechanical Keyboard", description: "Keyboard.", itemSpecifics: [], tags: [] }),
+        });
+        return { copy: result.copy, model: result.model };
+      },
+    });
+    const result = await stages.run({
+      photos: ["user-1/keyboard-front.jpg", "user-1/keyboard-side.jpg"],
+      sellerContext: { text, language: "en", provenance: "seller_voice", verification: "unverified" },
+      autopilotEnabled: false,
+    });
+    expect(runActor).toHaveBeenCalledOnce();
+    expect(runActor.mock.calls[0]?.[0]).toMatchObject({
+      input: { keywords: ["WOBKEY Rainy75"], count: 10 },
+      timeoutSecs: 55, maxTotalChargeUsd: 0.11, requestRetries: 2, restartOnError: false,
+    });
+    expect(result.attributes).toMatchObject({ brand: "WOBKEY", model: "Rainy75", identitySource: "seller-stated" });
+    expect(result.price.tier).toBe("ebay-sold");
+    expect(result.listing.title).toContain("WOBKEY Rainy75");
+    expect(result.listing.description).toMatch(/seller.*identif/i);
+    expect(result.listing.description).not.toContain("V3");
+    expect(result.identification?.label).toMatch(/seller-stated/i);
+    expect(result.identification?.confident).toBe(false);
+    expect(result.attributes.identityVariantUncertain).toBe(true);
+    const photoIdentified = priceToConfidence({ ...result.attributes, identitySource: "photos" }, result.price, { autopilotEnabled: false });
+    expect(result.confidence.score).toBeLessThan(photoIdentified.score);
+  });
+
+  it("retains the photo identity when the spoken keyboard family is contradicted", async () => {
+    const runActor = vi.fn<RunApifySoldActor>(async () => ({ status: "SUCCEEDED", items: [] }));
+    const stages = createVisionPipelineStages({
+      supabase: fakeDownloadClient(),
+      generate: async () => ({
+        brand: "Keychron", model: "K2", category: "Mechanical keyboard", condition: "good",
+        title: "Keychron K2 Mechanical Keyboard", ambiguous: false,
+        sellerIdentity: {
+          sourceText: "Raining 75", brand: "WOBKEY", model: "Rainy75",
+          contradicted: true, variantUncertain: true,
+        },
+      }),
+      priceItem: createDefaultPricer({
+        apifySold: {
+          enabled: true, token: "offline-placeholder", runActor,
+          cache: createInMemoryTtlCache<ApifySoldComp[]>(60_000, Date.now, "shared"),
+        },
+        ebaySold: { enabled: false },
+        llmOnly: { estimatePrice: async () => ({ suggested: 90, min: 55, max: 120 }) },
+      }),
+    });
+    const sellerContext: SellerContext = { text: "This is my Raining 75.", language: "en", provenance: "seller_voice", verification: "unverified" };
+    const identified = await stages.identify({ photos: ["user-1/keychron-label.jpg"], sellerContext });
+    await stages.price({ attributes: identified.attributes, sellerContext });
+    expect(identified.attributes).toMatchObject({ brand: "Keychron", model: "K2", identitySource: "photos" });
+    expect(runActor).toHaveBeenCalled();
+    for (const [request] of runActor.mock.calls) expect(request.input.keywords).toEqual(["Keychron K2"]);
+  });
+
+  it("records a genuinely unusable identity skip without invoking paid research", async () => {
+    const runActor = vi.fn<RunApifySoldActor>();
+    const emitDiagnostic = vi.fn();
+    const stages = createVisionPipelineStages({
+      supabase: fakeDownloadClient(),
+      generate: async () => ({ category: "Mechanical keyboard", title: "Generic keyboard", ambiguous: true }),
+      priceItem: createDefaultPricer({
+        apifySold: { enabled: true, token: "offline-placeholder", runActor, emitDiagnostic },
+        ebaySold: { enabled: false },
+        llmOnly: { estimatePrice: async () => ({ suggested: 90, min: 55, max: 120 }) },
+      }),
+    });
+    const identified = await stages.identify({ photos: ["user-1/generic-keyboard.jpg"] });
+    const price = await stages.price({ attributes: identified.attributes });
+    expect(runActor).not.toHaveBeenCalled();
+    expect(price.tier).toBe("llm-only");
+    expect(emitDiagnostic).toHaveBeenCalledWith("pricing.sold_comps.strategy_skipped", { strategy: "apify-sold", reason: "signal-not-identifiable" });
   });
 });

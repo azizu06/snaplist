@@ -98,6 +98,36 @@ describe("vision/extract — single multimodal call over all images", () => {
 });
 
 describe("vision/extract — schema validation + retry", () => {
+  it("keeps a normalized misheard voice identity seller-stated even when the provider omits its hint flag", async () => {
+    const { attributes } = await extractItemAttributes({
+      images: ["keyboard.jpg"],
+      sellerContext: { text: "This is my Raining 75.", language: "en", provenance: "seller_voice", verification: "unverified" },
+      generate: async () => ({
+        brand: "WOBKEY", model: "Rainy75", category: "Mechanical keyboard", ambiguous: false,
+        sellerIdentity: { sourceText: "Raining 75", brand: "WOBKEY", model: "Rainy75", contradicted: false, variantUncertain: true },
+      }),
+    });
+    expect(attributes.identitySource).toBe("seller-stated");
+  });
+
+  it.each([
+    [undefined, "Raining 75", false],
+    ["This is a keyboard.", "Raining 75", false],
+    ["This is my Raining 75.", "Raining 75", true],
+  ] as const)("does not adopt a family without grounded, uncontradicted speech (%j)", async (text, sourceText, contradicted) => {
+    const { attributes } = await extractItemAttributes({
+      images: ["keyboard.jpg"],
+      ...(text ? { sellerContext: { text, language: "en", provenance: "seller_voice" as const, verification: "unverified" as const } } : {}),
+      generate: async () => ({
+        category: "Mechanical keyboard",
+        sellerIdentity: { sourceText, brand: "WOBKEY", model: "Rainy75", contradicted, variantUncertain: true },
+      }),
+    });
+    expect(attributes.brand).toBeUndefined();
+    expect(attributes.model).toBeUndefined();
+    expect(attributes.identitySource).toBe("photos");
+  });
+
   it("returns the validated attributes when the model response is valid", async () => {
     const { generate } = scriptedGenerate([STRONG]);
     const { attributes } = await extractItemAttributes({
@@ -235,6 +265,7 @@ describe("vision/extract — the provider schema constrains condition (#798)", (
     uncertaintyReason: null,
     candidates: null,
     identityHintUsed: null,
+    sellerIdentity: null,
   };
 
   it("accepts every canonical taxonomy value", () => {
