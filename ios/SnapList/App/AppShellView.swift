@@ -836,8 +836,8 @@ struct AppShellView: View {
 
     /// #1129: what Done means now. The item is already on its way — the
     /// acceptance was ingested when the server took it — so finishing drops
-    /// the drawer onto Trophy Wall rather than returning to the camera, which
-    /// is what left the owner asking where the item had gone. Scanning another
+    /// the drawer onto To list, where that item now is, rather than returning
+    /// to the camera, which left the owner asking where it had gone. Scanning another
     /// item stays one tap on the Scan entry control.
     private func completeSavedSubmission(eventID: UUID) {
         submissionHost.acknowledgePresentation(eventID: eventID)
@@ -847,10 +847,11 @@ struct AppShellView: View {
     /// Done's landing, shared by a live submission and the Photo Review
     /// fixtures so both end in the same place.
     private func finishOnTrophyWall() {
-        router.resetWallPath()
+        // The new item is in progress, so it is on To list, not Flips.
+        router.showToListForSubmittedItem()
         applyScanDrawer(.submissionCompleted)
-        // The wall may be scrolled anywhere from before the item was started,
-        // so the seller is put back at the top where the newest work is.
+        // Back from To list returns to the top of the wall, where the newest
+        // work lands once it finishes.
         trophyWallScrollToTopToken += 1
         AccessibilityNotification.Announcement(
             AppShellSubmissionCompletionCopy.announcement

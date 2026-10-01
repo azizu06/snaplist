@@ -42,6 +42,11 @@ describe("itemLabel", () => {
     expect(itemLabel({ model: "WH-1000XM4" }, "abcdef123456")).toBe("WH-1000XM4");
   });
 
+  it("uses the caller's untitled placeholder instead of the id when nothing else is available", () => {
+    expect(itemLabel({}, "abcdef123456", null, "New item")).toBe("New item");
+    expect(itemLabel({ title: "Lamp" }, "abcdef123456", null, "New item")).toBe("Lamp");
+  });
+
   it("falls back to a truncated id when nothing else is available", () => {
     expect(itemLabel({}, "abcdef123456")).toBe("Item abcdef12");
   });

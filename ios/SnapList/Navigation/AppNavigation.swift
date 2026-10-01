@@ -392,6 +392,13 @@ final class AppRouter {
         wallPath = [.home(.processing)]
     }
 
+    /// Done after a saved submission lands on To list, where the item the
+    /// seller just sent is. Flips holds only finished items, so landing there
+    /// showed an empty wall right after an item was created.
+    func showToListForSubmittedItem() {
+        wallPath = [.home(.processing)]
+    }
+
     /// The shell closes Scan through its camera-safe dismissal; the item then
     /// opens from the wall's root through the normal authenticated opener.
     func showTrophyWallForPushTap() {

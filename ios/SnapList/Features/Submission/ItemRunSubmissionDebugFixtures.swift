@@ -94,6 +94,15 @@ private struct SessionRejectedItemRunSubmitter: ItemRunSubmitting {
     }
 }
 
+private struct SubscriptionInactiveItemRunSubmitter: ItemRunSubmitting {
+    func submit(
+        _ payload: ItemRunSubmissionPayload,
+        bearerToken: String
+    ) async -> ItemRunSubmissionTransportOutcome {
+        .creditDenied(reason: "storekit-entitlement-unavailable")
+    }
+}
+
 @MainActor
 final class ItemRunSubmissionAcknowledgmentNotificationGate {
     private typealias PendingAcknowledgment = (
@@ -239,6 +248,20 @@ enum ItemRunSubmissionDebugFixtureFactory {
             return ItemRunSubmissionHost(
                 coordinator: ItemRunSubmissionCoordinator(
                     submitter: SessionRejectedItemRunSubmitter(),
+                    attemptStore: LocalItemRunSubmissionAttemptStore(),
+                    draftStore: draftStore,
+                    tokenProvider:
+                        AcceptedPresentationGatedBearerTokenProvider(),
+                    readData: { @Sendable url in
+                        try AcceptedPresentationGatedItemRunSubmitter
+                            .readRestoredPhoto(at: url)
+                    }
+                )
+            )
+        case .subscriptionInactive:
+            return ItemRunSubmissionHost(
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: SubscriptionInactiveItemRunSubmitter(),
                     attemptStore: LocalItemRunSubmissionAttemptStore(),
                     draftStore: draftStore,
                     tokenProvider:
