@@ -251,7 +251,7 @@ struct ProGateSheet: View {
 
     private func slip(_ product: SubscriptionProductMetadata) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: "\(product.localizedTitle) · \(product.proGatePlanName)".uppercased())
+            Text(verbatim: product.proGatePlanLabel.uppercased())
                 .font(.system(size: slipHeaderSize, weight: .bold, design: .monospaced))
                 .tracking(1)
                 .fixedSize(horizontal: false, vertical: true)
@@ -314,7 +314,7 @@ struct ProGateSheet: View {
         .rotationEffect(.degrees(isAccessibilitySize ? 0 : 1.2))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(product.localizedTitle), \(product.proGatePlanName), \(product.proGatePriceDisplay)"
+            "\(product.proGatePlanLabel), \(product.proGatePriceDisplay)"
         )
         .accessibilityValue("\(ProGateCopy.slipIncludes). Renews \(product.proGateRenewsLine).")
         .accessibilityIdentifier("pro-gate.plan")
@@ -758,6 +758,13 @@ struct ProGateLegalFooter: View {
         .foregroundStyle(SnapListColorToken.textSecondary.color)
         .accessibilityLabel(destination.label)
         .accessibilityIdentifier(identifier)
+    }
+}
+
+extension SubscriptionProductMetadata {
+    var proGatePlanLabel: String {
+        // Store titles may already contain a cadence; derive it only from the period.
+        "\(ProGateCopy.plansTitle) · \(proGatePlanName)"
     }
 }
 

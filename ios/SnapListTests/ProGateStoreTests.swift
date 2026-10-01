@@ -20,6 +20,31 @@ final class ProGateStoreTests: XCTestCase {
         )
     }
 
+    func testPlanLabelShowsCadenceOnceWhenProductTitleAlreadyIncludesIt() {
+        let monthly = SubscriptionProductMetadata(
+            id: "monthly", localizedTitle: "SnapList Pro Monthly",
+            localizedDescription: "", localizedPrice: "$9.99",
+            billingPeriod: .init(value: 1, unit: .month)
+        )
+        XCTAssertEqual(monthly.proGatePlanLabel, "SnapList Pro · Monthly")
+    }
+
+    func testPlanLabelDerivesEachCadenceFromTheBillingPeriod() {
+        let cases: [(String, SubscriptionPeriodUnit, String)] = [
+            ("SnapList Pro", .day, "SnapList Pro · Daily"),
+            ("SnapList Pro Weekly", .week, "SnapList Pro · Weekly"),
+            ("SnapList Pro Annual", .year, "SnapList Pro · Yearly"),
+        ]
+        for (title, unit, expected) in cases {
+            let plan = SubscriptionProductMetadata(
+                id: "plan", localizedTitle: title,
+                localizedDescription: "", localizedPrice: "$9.99",
+                billingPeriod: .init(value: 1, unit: unit)
+            )
+            XCTAssertEqual(plan.proGatePlanLabel, expected)
+        }
+    }
+
     func testNotEntitledServerTruthLoadsTheLocalizedOffer() async {
         let api = ProGateMobileAPIStub(
             entitlements: [.includedUsed],
