@@ -340,7 +340,7 @@ struct VoiceNoteSheet: View {
     /// Voice Note A1 (captain pick, 2026-09-30): the empty recorder, a live
     /// take, a stopped take and a saved note share one header, one transport
     /// row, one reserved line and one action row. Stopping swaps what sits in
-    /// each slot and moves nothing around it, so Save recording lands in the
+    /// each slot and moves nothing around it, so Done lands in the
     /// exact frame Stop used.
     private func steadySheet(
         headerControl: some View,
@@ -486,18 +486,18 @@ struct VoiceNoteSheet: View {
         )
     }
 
-    /// A stopped take waiting on the seller. The chevron keeps the take and
-    /// Save recording saves it; either closes the panel. Delete and Re-record
-    /// keep it open.
+    /// A stopped take waiting on the seller. The close control and Done both
+    /// save it and close the panel, matching a reopened saved note's header
+    /// and finish verb. Delete and Re-record keep it open.
     private func takeReview(duration: TimeInterval) -> some View {
         steadySheet(
             headerControl: Button {
                 saveAndDismissWhenCommitted()
             } label: {
-                headerGlyph("chevron.down", size: 18)
+                headerGlyph("xmark", size: 20)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Collapse and keep voice note")
+            .accessibilityLabel("Close and keep voice note")
             .accessibilityIdentifier("voice-note.collapse"),
             leadingSlot: playbackButton(isPlaying: store.isPlayingTake) {
                 toggleTakePlayback()
@@ -527,7 +527,7 @@ struct VoiceNoteSheet: View {
             action: Button {
                 saveAndDismissWhenCommitted()
             } label: {
-                actionLabel("Save recording")
+                actionLabel("Done")
             }
             .buttonStyle(VoiceNoteSheetActionStyle(kind: .action))
             .accessibilityIdentifier("voice-note.save-recording")

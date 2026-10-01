@@ -128,7 +128,14 @@ private enum PhotoReviewHeroNavigationDirection: CaseIterable, Hashable {
 /// cross-fades in place; the drawer slides — the iOS sheet convention the
 /// owner picked once the two stopped sharing one container.
 enum PhotoReviewVoiceNoteTransitionPolicy {
-    static let scrimTransition: AnyTransition = .opacity
+    /// The sheet shares the page's canvas color, so a scrim fading in from
+    /// clear left its edge invisible while it slid up and its helper line
+    /// floated under the voice row as ghost text (bugs.md #11). The scrim
+    /// lands dimmed on open and still fades out on close.
+    static let scrimTransition: AnyTransition = .asymmetric(
+        insertion: .identity,
+        removal: .opacity
+    )
     static let sheetTransition: AnyTransition = .move(edge: .bottom)
 }
 

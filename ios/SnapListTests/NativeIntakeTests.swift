@@ -548,6 +548,21 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertFalse(files.fileExists(atPath: later.photos[1].photoURL.path))
         XCTAssertFalse(files.fileExists(atPath: later.voice!.mediaURL.path))
     }
+    /// Removing the last photo ends that item, so its voice note must not
+    /// carry into the next photo set (bugs.md #16).
+    func testRemovingLastPhotoClearsVoiceSoTheNextSetStartsWithout() async throws {
+        let (harness, session) = try await makeSession(.clerk("user_native_intake_last_photo"))
+        let added = try await session.commit(.addPhotos([harness.photoInput(seed: 1)]))
+        let voiced = try await session.commit(.setVoice(voice("stale voice", duration: 10)))
+        let voiceURL = try XCTUnwrap(voiced.voice?.mediaURL)
+        let emptied = try await session.commit(.removePhoto(id: added.photos[0].id))
+        XCTAssertTrue(emptied.photos.isEmpty)
+        XCTAssertNil(emptied.voice)
+        XCTAssertFalse(files.fileExists(atPath: voiceURL.path))
+        let next = try await session.commit(.addPhotos([harness.photoInput(seed: 2)]))
+        XCTAssertEqual(next.photos.count, 1)
+        XCTAssertNil(next.voice)
+    }
     func testClosedMutationsPublishAndRecoverOneCompleteBundleRevision() async throws {
         let (harness, session) = try await makeSession(.clerk("user_native_intake_mutations"))
         let inputs = try (0..<3).map(harness.photoInput(seed:))
