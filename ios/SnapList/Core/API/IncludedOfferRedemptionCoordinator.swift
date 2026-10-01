@@ -220,6 +220,7 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
     private let newIdempotencyKey: @Sendable () -> String
     private let waitBeforeFollowUp: @Sendable (_ milliseconds: Int) async -> Void
     private let maximumFollowUps: Int
+    private let followUpBudgetMilliseconds: Int
     private let report: @Sendable (IncludedOfferRedemptionReport) -> Void
 
     /// The longest this client will wait between follow-ups.
@@ -228,6 +229,25 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
     /// constraint on it, and near enough to keep a launch from parking on a
     /// value nobody meant to send.
     static let maximumFollowUpDelayMilliseconds = 60_000
+
+    /**
+     How long one drive keeps following a claim that has not settled, counted
+     in the server's own `retryAfterMs` waits rather than in requests.
+
+     The fence only opens a claim's 30-second token window on a worker tick,
+     and that tick runs once a minute. A claim replayed after its window lapsed
+     is requeued and has to wait for the next tick, so a budget shorter than a
+     tick plus the window is never there when it reopens: the claim sits in
+     `awaiting_device_token` and the seller never reaches the included run.
+     Two and a half minutes covers a full tick, the window, and a slow
+     request either side.
+     */
+    static let followUpBudgetMilliseconds = 150_000
+
+    /// A ceiling on requests, independent of the waits. The fence never sends
+    /// a `retryAfterMs` under 1000, so the time budget binds first; this only
+    /// stops a server answering 0 from turning a drive into a tight loop.
+    static let maximumFollowUps = 200
 
     /**
      Issue #854 item 2. Turns the server's `retryAfterMs` into a sleep.
@@ -260,7 +280,8 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
                 )
             )
         },
-        maximumFollowUps: Int = 4
+        maximumFollowUps: Int = Self.maximumFollowUps,
+        followUpBudgetMilliseconds: Int = Self.followUpBudgetMilliseconds
     ) {
         self.redemption = redemption
         self.store = store
@@ -268,6 +289,7 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
         self.newIdempotencyKey = newIdempotencyKey
         self.waitBeforeFollowUp = waitBeforeFollowUp
         self.maximumFollowUps = maximumFollowUps
+        self.followUpBudgetMilliseconds = followUpBudgetMilliseconds
     }
 
     @discardableResult
@@ -287,10 +309,17 @@ struct IncludedOfferRedemptionCoordinator: Sendable {
 
         var result = await redemption.redeem(idempotencyKey: idempotencyKey)
         var followUps = 0
-        while followUps < maximumFollowUps, let next = followUp(after: result) {
+        var waitedMilliseconds = 0
+        while followUps < maximumFollowUps,
+              waitedMilliseconds < followUpBudgetMilliseconds,
+              let next = followUp(after: result) {
             followUps += 1
             switch next {
             case .read(let claimID, let retryAfterMs):
+                waitedMilliseconds += Int(
+                    Self.followUpNanoseconds(forRetryAfterMs: retryAfterMs)
+                        / 1_000_000
+                )
                 await waitBeforeFollowUp(retryAfterMs)
                 result = await redemption.readClaim(claimID: claimID)
             case .answerRendezvous(let claimID):

@@ -196,6 +196,43 @@ final class IncludedOfferRedemptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(server.deviceTokenCallCount, 1)
     }
 
+    /// The live shape behind a seller who never reached their free listing.
+    ///
+    /// Launch replays the claim while its 30-second token window has already
+    /// lapsed, so the fence requeues the token and answers `queued`. The window
+    /// only reopens on the next once-a-minute worker tick. A client that stops
+    /// following after a few seconds is never there when it opens, and the claim
+    /// sits in `awaiting_device_token` forever.
+    func testAClaimRequeuedPastItsTokenWindowIsFollowedUntilTheWorkerReopensIt() async {
+        let stale = "2026-10-01T15:22:30.000Z"
+        let fresh = "2026-10-01T15:24:30.000Z"
+        let server = IncludedOfferFenceStub(
+            redeemOutcome: .deviceTokenRequired(
+                claimID: Self.claimID,
+                tokenDeadlineAt: stale
+            ),
+            // One worker period of 2-second reads before the tick reopens it.
+            claimReads: Array(
+                repeating: .queued(claimID: Self.claimID, retryAfterMs: 2_000),
+                count: 30
+            ) + [.deviceTokenRequired(claimID: Self.claimID, tokenDeadlineAt: fresh)],
+            deviceTokenOutcomes: [
+                .queued(claimID: Self.claimID, retryAfterMs: 2_000),
+                .reserved(claimID: Self.claimID),
+            ]
+        )
+        let store = makeStore()
+
+        let disposition = await Self.makeCoordinator(
+            server: server,
+            store: store
+        ).redeem()
+
+        XCTAssertEqual(disposition, .granted)
+        XCTAssertEqual(server.deviceTokenCallCount, 2)
+        XCTAssertEqual(store.load()?.disposition, .granted)
+    }
+
     func testAFenceThatGaveUpOnAppleIsRecordedRatherThanAskedForever() async {
         let server = IncludedOfferFenceStub(
             redeemOutcome: .deniedAppleUnavailable(claimID: Self.claimID)
@@ -218,7 +255,7 @@ final class IncludedOfferRedemptionCoordinatorTests: XCTestCase {
     func testAClaimThatNeverSettlesStopsFollowingAndKeepsTheOffer() async {
         // The stub runs out of scripted reads and reports queued forever.
         let server = IncludedOfferFenceStub(
-            redeemOutcome: .queued(claimID: Self.claimID, retryAfterMs: 1)
+            redeemOutcome: .queued(claimID: Self.claimID, retryAfterMs: 2_000)
         )
         let store = makeStore()
 
@@ -227,11 +264,14 @@ final class IncludedOfferRedemptionCoordinatorTests: XCTestCase {
             store: store
         ).redeem()
 
-        // Bounded, because the app is not the thing doing the work. Stopping
-        // records nothing, so the next sign-in or launch picks the same claim
-        // back up under the same key.
+        // Bounded by the server's own waits, because the app is not the thing
+        // doing the work. Stopping records nothing, so the next sign-in or
+        // launch picks the same claim back up under the same key.
         XCTAssertEqual(disposition, .retryable)
-        XCTAssertEqual(server.claimReadCallCount, 4)
+        XCTAssertEqual(
+            server.claimReadCallCount,
+            IncludedOfferRedemptionCoordinator.followUpBudgetMilliseconds / 2_000
+        )
         XCTAssertNil(store.load()?.disposition)
     }
 
@@ -480,7 +520,7 @@ final class IncludedOfferRedemptionCoordinatorTests: XCTestCase {
 
         let disposition = await Self.makeCoordinator(
             server: IncludedOfferFenceStub(
-                redeemOutcome: .queued(claimID: Self.claimID, retryAfterMs: 1)
+                redeemOutcome: .queued(claimID: Self.claimID, retryAfterMs: 2_000)
             ),
             store: makeStore(),
             report: { reports.record($0) }
@@ -489,7 +529,11 @@ final class IncludedOfferRedemptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(disposition, .retryable)
         XCTAssertEqual(
             reports.all,
-            [IncludedOfferRedemptionReport(disposition: .retryable, followUps: 4)]
+            [IncludedOfferRedemptionReport(
+                disposition: .retryable,
+                followUps: IncludedOfferRedemptionCoordinator
+                    .followUpBudgetMilliseconds / 2_000
+            )]
         )
     }
 
@@ -666,6 +710,7 @@ private final class IncludedOfferFenceStub: IncludedOfferRedeeming, @unchecked S
     private let lock = NSLock()
     private let redeemOutcome: Result<IncludedOfferOutcome, any Error>
     private let deviceTokenOutcome: Result<IncludedOfferOutcome, any Error>
+    private var pendingDeviceTokenOutcomes: [IncludedOfferOutcome] = []
     private var pendingClaimReads: [Result<IncludedOfferOutcome, any Error>]
     private var redeemCalls = 0
     private var deviceTokenCalls = 0
@@ -682,10 +727,12 @@ private final class IncludedOfferFenceStub: IncludedOfferRedeeming, @unchecked S
         claimReads: [IncludedOfferOutcome] = [],
         deviceTokenOutcome: IncludedOfferOutcome = .reserved(
             claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"
-        )
+        ),
+        deviceTokenOutcomes: [IncludedOfferOutcome] = []
     ) {
         self.redeemOutcome = .success(redeemOutcome)
         self.deviceTokenOutcome = .success(deviceTokenOutcome)
+        pendingDeviceTokenOutcomes = deviceTokenOutcomes
         pendingClaimReads = claimReads.map { .success($0) }
     }
 
@@ -717,7 +764,7 @@ private final class IncludedOfferFenceStub: IncludedOfferRedeeming, @unchecked S
         // Running out of scripted reads means the claim never settled, which is
         // exactly what a claim still in flight looks like.
         guard let next else {
-            return .queued(claimID: claimID, retryAfterMs: 1)
+            return .queued(claimID: claimID, retryAfterMs: 2_000)
         }
         return try next.get()
     }
@@ -727,7 +774,13 @@ private final class IncludedOfferFenceStub: IncludedOfferRedeeming, @unchecked S
         deviceToken: String,
         proof: AppAttestProofPayload
     ) async throws -> IncludedOfferOutcome {
-        lock.withLock { deviceTokenCalls += 1 }
+        let scripted = lock.withLock { () -> IncludedOfferOutcome? in
+            deviceTokenCalls += 1
+            return pendingDeviceTokenOutcomes.isEmpty
+                ? nil
+                : pendingDeviceTokenOutcomes.removeFirst()
+        }
+        if let scripted { return scripted }
         return try deviceTokenOutcome.get()
     }
 }
