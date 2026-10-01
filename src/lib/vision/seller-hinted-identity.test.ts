@@ -216,9 +216,11 @@ describe("voice family with an unconfirmed keyboard variant", () => {
     expect(result.attributes).toMatchObject({ brand: "WOBKEY", model: "Rainy75", identitySource: "seller-stated" });
     expect(result.price.tier).toBe("ebay-sold");
     expect(result.listing.title).toContain("WOBKEY Rainy75");
-    expect(result.listing.description).toMatch(/seller.*identif/i);
+    expect(result.listing.description).not.toMatch(/seller/i);
+    expect(result.listing.title).not.toMatch(/seller-stated/i);
     expect(result.listing.description).not.toContain("V3");
-    expect(result.identification?.label).toMatch(/seller-stated/i);
+    expect(result.identification?.label).not.toMatch(/seller-stated/i);
+    expect(result.identification?.reason).toMatch(/seller-stated/i);
     expect(result.identification?.confident).toBe(false);
     expect(result.attributes.identityVariantUncertain).toBe(true);
     const photoIdentified = priceToConfidence({ ...result.attributes, identitySource: "photos" }, result.price, { autopilotEnabled: false });

@@ -417,7 +417,8 @@ export function deriveIdentification(
       : "Not enough strong identifiers (brand, model, barcode, or unambiguous category) to confirm the item.");
 
   return {
-    label: attrs.identitySource === "seller-stated" ? `${label} (seller-stated)` : label,
+    // The label is the Listing Review headline; seller-stated provenance rides `reason`.
+    label,
     confident: false,
     evidence,
     reason,
