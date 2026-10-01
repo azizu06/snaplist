@@ -155,8 +155,13 @@ struct EbayConnectionSettingsView: View {
     }
 
     private var checking: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             ProgressView()
+                .controlSize(.large)
+                .tint(SnapListColorToken.ebayAccent.color)
+                .frame(width: 96, height: 96)
+                .background(SnapListColorToken.ebayAccent.color.opacity(0.12))
+                .clipShape(Circle())
             Text("Checking your eBay connection")
                 .snapListTypography(.body)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
@@ -165,22 +170,60 @@ struct EbayConnectionSettingsView: View {
         .accessibilityIdentifier("ebay-connection-settings.checking")
     }
 
+    private func statusBadge(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 40, weight: .semibold))
+            .foregroundStyle(SnapListColorToken.ebayAccent.color)
+            .frame(width: 96, height: 96)
+            .background(SnapListColorToken.ebayAccent.color.opacity(0.12))
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+    }
+
+    private func reassurance(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(SnapListColorToken.ebayAccent.color)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            Text(text)
+                .snapListTypography(.body)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var notConnected: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(spacing: 18) {
                 // #1116: the eBay wordmark, as the marketplace rows use theirs.
                 Image("MarketplaceMarkEbay")
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 32)
+                    .frame(height: 36)
+                    .padding(.top, 24)
                     .accessibilityHidden(true)
                 Text("Connect your eBay account")
                     .snapListTypography(.displayTitle)
+                    .multilineTextAlignment(.center)
                     .accessibilityAddTraits(.isHeader)
-                Text(
-                    "You sign in on eBay's own page. SnapList never sees your eBay password. You can remove this connection at any time."
-                )
-                .snapListTypography(.body)
+                VStack(alignment: .leading, spacing: 14) {
+                    reassurance(
+                        "lock.shield",
+                        "You sign in on eBay's own page. SnapList never sees your eBay password."
+                    )
+                    Divider()
+                    reassurance(
+                        "hand.raised",
+                        "Nothing posts until you review it and tap Post."
+                    )
+                    Divider()
+                    reassurance(
+                        "xmark.circle",
+                        "You can remove this connection at any time."
+                    )
+                }
                 .ebayCard()
                 if store.state == .connecting {
                     SnapListPrimaryButton(
@@ -209,13 +252,16 @@ struct EbayConnectionSettingsView: View {
     }
 
     private var notAvailable: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(spacing: 18) {
+            Spacer(minLength: 0)
+            statusBadge("wifi.exclamationmark")
             Text("eBay connection")
                 .snapListTypography(.displayTitle)
                 .accessibilityAddTraits(.isHeader)
             Text("SnapList could not check your eBay connection. Try again in a moment.")
                 .snapListTypography(.body)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .multilineTextAlignment(.center)
             SnapListSecondaryButton(
                 title: "Try again",
                 action: {
@@ -226,9 +272,10 @@ struct EbayConnectionSettingsView: View {
                 }
             )
             .accessibilityIdentifier("ebay-connection-settings.retry")
+            Spacer(minLength: 0)
         }
         .padding(SnapListMetrics.screenGutter)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .accessibilityIdentifier("ebay-connection-settings.not-available")
     }
 }
