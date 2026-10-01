@@ -18,19 +18,36 @@ final class EbayPublishUITests: XCTestCase {
             extraArguments: ["--reduced-motion"]
         )
         assertScreen("ebay-publish.connection.not-connected", in: notConnected)
-        XCTAssertTrue(notConnected.staticTexts["Connect your eBay account."].exists)
+        XCTAssertTrue(notConnected.staticTexts["Post to eBay"].exists)
+        // B2+: the listing stays in view, an inset card whose photos page.
         XCTAssertTrue(
-            notConnected.staticTexts[
-                "SnapList needs your permission before it can put a listing on eBay for you."
-            ].exists
+            notConnected.staticTexts["Sony DualSense wireless controller, white"].exists,
+            notConnected.debugDescription
         )
-        for scope in [
-            "SnapList prepares the listing. You confirm before anything posts.",
-            "You sign in on eBay’s own page. SnapList never sees your eBay password.",
-            "You can remove this connection at any time.",
-        ] {
-            XCTAssertTrue(notConnected.staticTexts[scope].exists)
+        XCTAssertTrue(notConnected.staticTexts["$58.00"].exists, notConnected.debugDescription)
+        XCTAssertTrue(notConnected.staticTexts["1 of 4"].exists, notConnected.debugDescription)
+        let listingCard = notConnected.descendants(matching: .any)[
+            "ebay-publish.connection.listing"
+        ]
+        let window = notConnected.windows.firstMatch
+        XCTAssertGreaterThan(listingCard.frame.minX, window.frame.minX, "The photo card stays inset.")
+        XCTAssertLessThan(listingCard.frame.maxX, window.frame.maxX, "The photo card stays inset.")
+        // The path to eBay: three steps that end at the seller's account.
+        for (index, step) in [
+            "Step 1 of 3, Sign in on eBay. SnapList never sees your password",
+            "Step 2 of 3, Let SnapList post. Turn it off any time in Settings",
+            "Step 3 of 3, Review and post. Nothing posts until you tap Post",
+        ].enumerated() {
+            let element = notConnected.descendants(matching: .any)[
+                "ebay-publish.connection.step-\(index + 1)"
+            ]
+            XCTAssertTrue(element.exists, notConnected.debugDescription)
+            XCTAssertEqual(element.label, step)
         }
+        XCTAssertTrue(
+            notConnected.descendants(matching: .any)["ebay-publish.connection.account"].exists,
+            notConnected.debugDescription
+        )
         assertHittableButton(
             "button.primary.continue-to-ebay",
             in: notConnected
@@ -43,7 +60,12 @@ final class EbayPublishUITests: XCTestCase {
         )
         assertScreen("ebay-publish.confirmation", in: confirmation)
         XCTAssertTrue(confirmation.staticTexts["Post this to eBay?"].exists)
-        XCTAssertTrue(confirmation.staticTexts["eBay US, as azizu"].exists)
+        XCTAssertEqual(
+            confirmation.descendants(matching: .any)[
+                "ebay-publish.confirmation.destination"
+            ].label,
+            "Posting to eBay as azizu, eBay US"
+        )
         let listingThumbnail = confirmation.images[
             "ebay-publish.confirmation.listing-thumbnail"
         ]
@@ -69,15 +91,19 @@ final class EbayPublishUITests: XCTestCase {
             confirmation.staticTexts["Condition"].frame.maxX,
             confirmation.debugDescription
         )
-        XCTAssertTrue(confirmation.staticTexts["4 photos, in this order"].exists)
+        XCTAssertTrue(confirmation.staticTexts["4, in this order"].exists)
         XCTAssertTrue(confirmation.staticTexts["$58.00"].exists)
-        // #893. `state == .ready` no longer draws the ordinary consent line:
-        // the destination card above already says "eBay US, as azizu" once.
+        // #893. `state == .ready` draws no consent line: the "Posting to"
+        // row already names the account once.
         XCTAssertFalse(
             marker("ebay-publish.confirmation.consent", in: confirmation).exists,
             "state == .ready must not draw the ordinary consent line.\n\(confirmation.debugDescription)"
         )
         XCTAssertFalse(confirmation.staticTexts["GOES TO"].exists)
+        XCTAssertTrue(
+            confirmation.staticTexts["Shipping and returns come from your eBay account."].exists,
+            confirmation.debugDescription
+        )
         assertHittableButton(
             "button.primary.post-to-ebay",
             in: confirmation
@@ -218,20 +244,20 @@ final class EbayPublishUITests: XCTestCase {
         assertHittableButton("ebay-publish.back", in: confirmation)
     }
 
-    /// #893. `EbayValueRow` used `.multilineTextAlignment(.trailing)`, so a
-    /// title long enough to wrap read with a ragged left edge, as if it were
-    /// cut off. The fixed row instead lets a wrapping value fall back to a
-    /// left-aligned block under its own label. "Condition" (`Used, good`)
-    /// never wraps and shares the row's typography, so its single-line
-    /// height is this screen's true one-line baseline; the title must clear
-    /// a multiple of it to prove it wrapped, and its left edge must land on
-    /// its label's left edge to prove it did not stay trailing-aligned.
+    /// #893. A title long enough to wrap once read with a ragged left edge,
+    /// as if it were cut off. The review list now shows the title beside the
+    /// listing thumbnail. "Condition" (`Used, good`) never wraps and shares
+    /// the row's typography, so its single-line height is this screen's
+    /// one-line baseline; the title must clear a multiple of it to prove it
+    /// wrapped, and keep one left edge beside the thumbnail.
     func testConfirmationLongTitleWrapsLeftAlignedInsteadOfRaggedTrailing() {
         let confirmation = launch(
             fixture: "confirmation",
             extraArguments: ["--reduced-motion", "--dynamic-type=accessibility3"]
         )
-        let titleLabel = confirmation.staticTexts["Title"]
+        let thumbnail = confirmation.images[
+            "ebay-publish.confirmation.listing-thumbnail"
+        ]
         // #926. This was still the denim jacket the confirmation fixture used
         // before #887/#912 moved it to a Sony DualSense, so the wait was on a
         // string the app no longer contains at any Dynamic Type size. The two
@@ -241,21 +267,23 @@ final class EbayPublishUITests: XCTestCase {
             "Sony DualSense wireless controller, white"
         ]
         let conditionValue = confirmation.staticTexts["Used, good"]
-        XCTAssertTrue(titleLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(thumbnail.waitForExistence(timeout: 10))
         XCTAssertTrue(titleValue.waitForExistence(timeout: 5))
         XCTAssertTrue(conditionValue.waitForExistence(timeout: 5))
 
         let receipt =
-            "titleLabel.frame=\(titleLabel.frame), titleValue.frame=\(titleValue.frame), conditionValue.frame=\(conditionValue.frame)"
+            "thumbnail.frame=\(thumbnail.frame), titleValue.frame=\(titleValue.frame), conditionValue.frame=\(conditionValue.frame)"
 
         XCTAssertGreaterThan(
             titleValue.frame.height,
             conditionValue.frame.height * 1.6,
             receipt
         )
+        // The item row is a thumbnail with its title beside it; a wrapped
+        // title keeps one left edge just past the thumbnail.
         XCTAssertEqual(
             titleValue.frame.minX,
-            titleLabel.frame.minX,
+            thumbnail.frame.maxX + 12,
             accuracy: 2,
             receipt
         )
@@ -313,25 +341,19 @@ final class EbayPublishUITests: XCTestCase {
         )
     }
 
-    /// #865. Before this, the account/disconnect screen was reachable only
-    /// from mid-publish (`Publish to eBay → connected → Manage connection`),
-    /// so a seller who was not mid-publish had no route to it at all. `SET-01`
-    /// reports a confirmed connection on the Settings SELLING row, which is
-    /// exactly the condition that must now make the row a real destination.
-    func testConnectedMarketplacesRowFromSettingsOpensTheSharedEbayAccountScreen() {
+    /// A2 quiet: the connected eBay account sits inline in Settings' Selling
+    /// section, with Disconnect as its one action and the only red control.
+    /// `SET-01` reports a confirmed connection with no policy problem.
+    func testSettingsShowsTheConnectedEbayAccountInlineWithDisconnectAsItsOnlyAction() {
         let app = launchSettings()
-        let row = app.buttons["settings.selling.marketplaces"]
+        let row = app.descendants(matching: .any)["settings.selling.marketplaces"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(row.isHittable, app.debugDescription)
-        row.tap()
-
-        let account = app.scrollViews["ebay-publish.account"]
-        XCTAssertTrue(
-            account.waitForExistence(timeout: 5),
-            "Settings must reach the same `ebay-publish.account` screen the publish journey uses, not a second one.\n\(app.debugDescription)"
-        )
-        XCTAssertTrue(app.staticTexts["Connected as Jordan Hale"].exists, app.debugDescription)
-        assertHittableButton("ebay-account.disconnect", in: app)
+        XCTAssertEqual(row.label, "eBay, Jordan Hale, Connected")
+        XCTAssertFalse(app.buttons["settings.selling.marketplaces"].exists)
+        assertHittableButton("settings.ebay.disconnect", in: app)
+        XCTAssertEqual(app.buttons["settings.ebay.disconnect"].label, "Disconnect eBay")
+        XCTAssertFalse(app.buttons["settings.ebay.connect"].exists, app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Connected marketplaces"].exists, app.debugDescription)
         attachEvidence(for: "settings-account", app: app)
     }
 
@@ -341,8 +363,7 @@ final class EbayPublishUITests: XCTestCase {
     /// seller to a state with no disconnect control left to tap twice.
     func testDisconnectFromSettingsShowsTheUnchangedEbayDisclosureThenLeavesNoDisconnectControl() {
         let app = launchSettings()
-        app.buttons["settings.selling.marketplaces"].tap()
-        let disconnect = app.buttons["ebay-account.disconnect"]
+        let disconnect = app.buttons["settings.ebay.disconnect"]
         XCTAssertTrue(disconnect.waitForExistence(timeout: 5), app.debugDescription)
 
         disconnect.tap()
@@ -364,9 +385,8 @@ final class EbayPublishUITests: XCTestCase {
         // Cancel must not disconnect. SwiftUI renders this confirmationDialog's
         // cancel action as either an explicit "Cancel" button (compact/
         // actionSheet presentation) or an outside-tap dismiss region (popover
-        // presentation, which is what this device/OS combination actually
-        // uses); this test asserts the behavior — cancelling leaves the
-        // account connected — not which chrome Apple happens to draw it with.
+        // presentation); this test asserts the behavior, cancelling leaves the
+        // account connected, not which chrome Apple happens to draw it with.
         let cancel = app.buttons["Cancel"]
         if cancel.waitForExistence(timeout: 2) {
             cancel.tap()
@@ -375,21 +395,22 @@ final class EbayPublishUITests: XCTestCase {
             XCTAssertTrue(dismissRegion.waitForExistence(timeout: 3), app.debugDescription)
             dismissRegion.tap()
         }
-        XCTAssertTrue(
-            app.staticTexts["Connected as Jordan Hale"].waitForExistence(timeout: 5),
-            "Cancelling the dialog must leave the account connected.\n\(app.debugDescription)"
+        XCTAssertTrue(disconnect.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(
+            app.descendants(matching: .any)["settings.selling.marketplaces"].label,
+            "eBay, Jordan Hale, Connected",
+            "Cancelling the dialog must leave the account connected."
         )
 
         disconnect.tap()
         app.buttons["Disconnect"].tap()
 
-        let notConnected = app.descendants(matching: .any)["ebay-connection-settings.not-connected"]
         XCTAssertTrue(
-            notConnected.waitForExistence(timeout: 5),
+            app.buttons["settings.ebay.connect"].waitForExistence(timeout: 5),
             "Disconnecting must land on the not-connected state.\n\(app.debugDescription)"
         )
         XCTAssertFalse(
-            app.buttons["ebay-account.disconnect"].exists,
+            app.buttons["settings.ebay.disconnect"].exists,
             "A disconnected seller must not be offered disconnect again.\n\(app.debugDescription)"
         )
         attachEvidence(for: "settings-disconnected", app: app)
@@ -400,46 +421,51 @@ final class EbayPublishUITests: XCTestCase {
     /// reachable from the same Settings screen, with no item to open.
     func testAfterDisconnectingFromSettingsTheSellerCanReconnectWithoutOpeningAnItem() {
         let app = launchSettings()
-        app.buttons["settings.selling.marketplaces"].tap()
-        app.buttons["ebay-account.disconnect"].tap()
+        let disconnect = app.buttons["settings.ebay.disconnect"]
+        XCTAssertTrue(disconnect.waitForExistence(timeout: 5), app.debugDescription)
+        disconnect.tap()
         app.buttons["Disconnect"].tap()
+
+        let connectRow = app.buttons["settings.ebay.connect"]
+        XCTAssertTrue(connectRow.waitForExistence(timeout: 5), app.debugDescription)
+        connectRow.tap()
 
         let connect = app.buttons["ebay-connection-settings.connect"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5), app.debugDescription)
         connect.tap()
 
         XCTAssertTrue(
-            app.staticTexts["Connected as Jordan Hale"].waitForExistence(timeout: 5),
-            "Reconnecting from Settings must reach the connected account screen again, without visiting an item.\n\(app.debugDescription)"
+            app.buttons["settings.ebay.disconnect"].waitForExistence(timeout: 5),
+            "Reconnecting from Settings must return to the connected account, without visiting an item.\n\(app.debugDescription)"
         )
-        assertHittableButton("ebay-account.disconnect", in: app)
+        XCTAssertEqual(
+            app.descendants(matching: .any)["settings.selling.marketplaces"].label,
+            "eBay, Jordan Hale, Connected"
+        )
         attachEvidence(for: "settings-reconnected", app: app)
     }
 
     /// No clipping/overlap at default and at the largest accessibility Dynamic
     /// Type size (`accessibilityExtraExtraExtraLarge` / `.accessibility5`) on
-    /// the screen Settings now reaches.
-    func testEbayAccountScreenFromSettingsHasNoClippingAtDefaultAndLargestAccessibilityDynamicType() {
+    /// the inline eBay account.
+    func testInlineEbayAccountInSettingsHasNoClippingAtDefaultAndLargestAccessibilityDynamicType() {
         for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
             let app = launchSettings(extraArguments: arguments)
-            app.buttons["settings.selling.marketplaces"].tap()
-
-            let disconnect = app.buttons["ebay-account.disconnect"]
+            let account = app.descendants(matching: .any)["settings.selling.marketplaces"]
+            let disconnect = app.buttons["settings.ebay.disconnect"]
             XCTAssertTrue(disconnect.waitForExistence(timeout: 5), app.debugDescription)
             let window = app.windows.firstMatch
             for _ in 0..<8 where disconnect.frame.maxY > window.frame.maxY {
                 app.swipeUp()
             }
-            let receipt = "arguments=\(arguments), disconnect=\(disconnect.frame), window=\(window.frame)"
+            let receipt = "arguments=\(arguments), account=\(account.frame), disconnect=\(disconnect.frame), window=\(window.frame)"
             XCTAssertTrue(disconnect.isHittable, receipt)
             XCTAssertGreaterThanOrEqual(disconnect.frame.minX, window.frame.minX, receipt)
             XCTAssertLessThanOrEqual(disconnect.frame.maxX, window.frame.maxX, receipt)
             XCTAssertLessThanOrEqual(disconnect.frame.maxY, window.frame.maxY, receipt)
-
-            let connectedLabel = app.staticTexts["Connected as Jordan Hale"]
-            XCTAssertTrue(connectedLabel.exists, receipt)
-            XCTAssertGreaterThanOrEqual(connectedLabel.frame.minX, window.frame.minX, receipt)
-            XCTAssertLessThanOrEqual(connectedLabel.frame.maxX, window.frame.maxX, receipt)
+            XCTAssertGreaterThanOrEqual(account.frame.minX, window.frame.minX, receipt)
+            XCTAssertLessThanOrEqual(account.frame.maxX, window.frame.maxX, receipt)
+            XCTAssertLessThanOrEqual(account.frame.maxY, disconnect.frame.minY, receipt)
             attachEvidence(
                 for: "settings-account-\(arguments.isEmpty ? "default" : "accessibility5")",
                 app: app

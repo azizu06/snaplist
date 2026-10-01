@@ -1379,13 +1379,18 @@ extension SettingsTests {
     func testSellingSectionShowsNoHintUntilTheConnectionIsKnown() {
         let loading = SettingsSellingPresentation(connection: nil, loadPhase: .loading)
 
-        XCTAssertEqual(loading.marketplaceValue, "Checking")
+        XCTAssertEqual(loading.accountTitle, "Checking")
+        XCTAssertNil(loading.status)
+        XCTAssertEqual(loading.action, .none)
         XCTAssertNil(loading.hint)
         XCTAssertFalse(loading.isConnected)
 
         let failed = SettingsSellingPresentation(connection: nil, loadPhase: .failed)
 
-        XCTAssertEqual(failed.marketplaceValue, "Not available")
+        // The connection was not readable, so it claims neither way.
+        XCTAssertEqual(failed.accountTitle, "Couldn't check")
+        XCTAssertEqual(failed.status, "Nothing changed")
+        XCTAssertEqual(failed.action, .retry)
         XCTAssertNil(failed.hint)
         XCTAssertFalse(failed.isConnected)
     }
@@ -1400,7 +1405,9 @@ extension SettingsTests {
             loadPhase: .loaded
         )
 
-        XCTAssertEqual(presentation.marketplaceValue, "Not connected")
+        XCTAssertEqual(presentation.accountTitle, "Not connected")
+        XCTAssertNil(presentation.status)
+        XCTAssertEqual(presentation.action, .connect)
         XCTAssertNil(presentation.hint)
         XCTAssertFalse(presentation.isConnected)
     }
@@ -1419,6 +1426,36 @@ extension SettingsTests {
         )
 
         XCTAssertTrue(presentation.isConnected)
+        XCTAssertEqual(presentation.accountTitle, "sandbox-seller")
+        XCTAssertEqual(presentation.action, .disconnect)
+    }
+
+    /// No policy answer yet is not proof the account can post, so it only
+    /// claims what is known: the account is connected.
+    func testSellingSectionSaysConnectedWhenPolicyReadinessIsUnknown() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: nil
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.status, "Connected")
+    }
+
+    func testSellingSectionFallsBackToAPlainAccountNameWithoutAUsername() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: nil,
+                policySetup: nil
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.accountTitle, "eBay account")
     }
 
     func testSellingSectionShowsNoHintForAConnectedSellerWhoIsReadyToPublish() {
@@ -1431,7 +1468,7 @@ extension SettingsTests {
             loadPhase: .loaded
         )
 
-        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertEqual(presentation.status, "Ready to post")
         XCTAssertNil(presentation.hint)
         XCTAssertTrue(presentation.isConnected)
     }
@@ -1450,7 +1487,7 @@ extension SettingsTests {
             loadPhase: .loaded
         )
 
-        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertEqual(presentation.status, "Connected")
         XCTAssertNil(presentation.hint)
     }
 
@@ -1470,7 +1507,7 @@ extension SettingsTests {
             loadPhase: .loaded
         )
 
-        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertEqual(presentation.status, "Fix this on eBay before you post")
         XCTAssertEqual(presentation.hint?.message, message)
         XCTAssertEqual(
             presentation.hint?.helpURL,
@@ -1505,7 +1542,7 @@ extension SettingsTests {
             loadPhase: .loaded
         )
 
-        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertEqual(presentation.status, "Connected")
         XCTAssertNil(presentation.hint)
     }
 

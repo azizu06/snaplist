@@ -438,50 +438,66 @@ struct SettingsSellingPresentation: Equatable {
         let helpURL: URL?
     }
 
-    let marketplaceValue: String
+    /// The one control the eBay card offers under the account row. Only a
+    /// confirmed connection may offer `disconnect` (#865); a connection that
+    /// could not be read offers `retry`, never `connect`, because SnapList
+    /// does not know the seller is disconnected.
+    enum Action: Equatable {
+        case none
+        case retry
+        case connect
+        case disconnect
+    }
+
+    /// The account row's main line: the eBay username once connected,
+    /// otherwise what SnapList knows about the connection.
+    let accountTitle: String
+    /// The account row's second line, or nil when the title says it all.
+    let status: String?
+    let action: Action
     let hint: Hint?
-    /// #865: the row only becomes a route to the account/disconnect screen
-    /// once a connection is confirmed. `checking`/`failed`/not-connected all
-    /// stay a plain, non-misleading value row that offers no disconnect.
     let isConnected: Bool
 
     init(connection: EbayConnectionStatus?, loadPhase: LoadPhase) {
         switch loadPhase {
         case .loading:
-            marketplaceValue = "Checking"
-            hint = nil
-            isConnected = false
+            (accountTitle, status, action, hint, isConnected) =
+                ("Checking", nil, .none, nil, false)
             return
         case .failed:
             // The connection was not readable. Saying "Not connected" would
             // claim something SnapList does not know.
-            marketplaceValue = "Not available"
-            hint = nil
-            isConnected = false
+            (accountTitle, status, action, hint, isConnected) =
+                ("Couldn't check", "Nothing changed", .retry, nil, false)
             return
         case .loaded:
             break
         }
         guard let connection, connection.connected else {
-            marketplaceValue = "Not connected"
-            hint = nil
-            isConnected = false
+            (accountTitle, status, action, hint, isConnected) =
+                ("Not connected", nil, .connect, nil, false)
             return
         }
         isConnected = true
-        marketplaceValue = "eBay"
+        action = .disconnect
+        let username = connection.ebayUsername?.trimmingCharacters(in: .whitespacesAndNewlines)
+        accountTitle = (username?.isEmpty ?? true) ? "eBay account" : username!
         // `ready` and any state this build does not recognise both stay silent.
         // A hint with no message would be a warning the seller cannot act on.
-        guard
-            let setup = connection.policySetup,
-            setup.state != "ready",
-            let message = setup.message,
-            !message.isEmpty
-        else {
+        if let setup = connection.policySetup,
+           setup.state != "ready",
+           let message = setup.message,
+           !message.isEmpty {
+            hint = Hint(message: message, helpURL: setup.helpURL)
+            status = "Fix this on eBay before you post"
+        } else {
             hint = nil
-            return
+            // Only the server's explicit `ready` proves the account can post.
+            // `notChecked` is every seller before their first publish.
+            status = connection.policySetup?.state == "ready"
+                ? "Ready to post"
+                : "Connected"
         }
-        hint = Hint(message: message, helpURL: setup.helpURL)
     }
 }
 

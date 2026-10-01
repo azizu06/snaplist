@@ -53,6 +53,60 @@ final class EbayPublishDeliveryTests: XCTestCase {
     /// the modifier which owns its accessibility-focus binding. Result headings
     /// additionally carry live-update semantics; no announcement text is
     /// synthesized by this contract.
+    /// B2+ connect and return: one screen whose three steps tick off as the
+    /// seller signs in on eBay and comes back, ending at their account.
+    func testConnectPathTicksStepsAsTheSellerSignsInAndComesBack() {
+        let first = EbayConnectionCopy(state: .notConnected)
+        XCTAssertEqual(first.headline, "Post to eBay")
+        XCTAssertEqual(first.steps.map(\.title), [
+            "Sign in on eBay", "Let SnapList post", "Review and post",
+        ])
+        XCTAssertEqual(first.steps.map(\.phase), [.active, .upcoming, .upcoming])
+        XCTAssertEqual(first.accountTitle, "Your eBay account")
+        XCTAssertEqual(first.primary, "Continue to eBay")
+        XCTAssertNil(first.secondary)
+
+        let waiting = EbayConnectionCopy(state: .connecting)
+        XCTAssertEqual(waiting.steps.map(\.phase), [.waiting, .upcoming, .upcoming])
+        XCTAssertEqual(waiting.steps[0].detail, "Waiting for eBay")
+        XCTAssertNil(waiting.primary)
+        XCTAssertEqual(waiting.secondary, "Cancel")
+
+        let connected = EbayConnectionCopy(state: .connected, username: " jordanhale ")
+        XCTAssertEqual(connected.headline, "Connected as jordanhale")
+        XCTAssertEqual(connected.steps.map(\.phase), [.done, .done, .active])
+        XCTAssertEqual(connected.accountTitle, "jordanhale")
+        XCTAssertEqual(connected.primary, "Review before posting")
+        XCTAssertNil(connected.secondary)
+
+        let unnamed = EbayConnectionCopy(state: .connected, username: nil)
+        XCTAssertEqual(unnamed.headline, "Connected to eBay")
+        XCTAssertEqual(unnamed.accountTitle, "Your eBay account")
+    }
+
+    /// Every retry state keeps the same screen, marks the one step that
+    /// stopped, says nothing was posted, and offers one way forward.
+    func testConnectRetryStatesMarkTheStepThatStoppedAndSayNothingPosted() {
+        let expected: [(EbayConnectionViewState, Int, String, String)] = [
+            (.cancelled, 0, "Sign in not finished. Nothing posted.", "Continue to eBay"),
+            (.declined, 1, "Access not granted. Nothing posted.", "Continue to eBay"),
+            (.timedOut, 0, "Sign in timed out. Nothing posted.", "Continue to eBay"),
+            (.failed, 0, "eBay didn't connect. Nothing posted.", "Continue to eBay"),
+            (.reconnectNeeded, 0, "Connection expired. Nothing posted.", "Reconnect eBay"),
+        ]
+        for (state, index, detail, primary) in expected {
+            let copy = EbayConnectionCopy(state: state, username: "jordanhale")
+            XCTAssertEqual(
+                copy.steps.filter { $0.phase == .warning }.count, 1, "\(state)"
+            )
+            XCTAssertEqual(copy.steps[index].phase, .warning, "\(state)")
+            XCTAssertEqual(copy.steps[index].detail, detail, "\(state)")
+            XCTAssertEqual(copy.primary, primary, "\(state)")
+            XCTAssertNil(copy.secondary, "\(state)")
+            XCTAssertEqual(copy.accountTitle, "Your eBay account", "\(state)")
+        }
+    }
+
     func testSellerVisibleScreenTransitionsBindTheirRealHeadingFocusTargets() async {
         struct Fixture {
             let screen: EbayPublishScreen
@@ -64,7 +118,7 @@ final class EbayPublishDeliveryTests: XCTestCase {
         let fixtures = [
             Fixture(
                 screen: .connection(.notConnected),
-                heading: "Connect your eBay account.",
+                heading: "Post to eBay",
                 identifier: "ebay-publish.connection.not-connected",
                 isLiveRegion: false
             ),
