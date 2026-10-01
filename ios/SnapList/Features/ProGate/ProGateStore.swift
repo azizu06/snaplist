@@ -32,6 +32,8 @@ final class ProGateStore {
             isRestoring: Bool
         )
         case confirming
+        /// The App Store outcome is advisory; the server has not granted Pro.
+        case verificationPending
         case ready(source: ReadySource)
     }
 
@@ -48,6 +50,10 @@ final class ProGateStore {
     private let subscriptionStore: SubscriptionStore
     private let verificationAttempts: Int
     private let sleep: Sleep
+    private let currentAccountID: @MainActor () -> String?
+    private let ownerAccountID: String?
+    private let confirmationTimeout: Duration
+    private var deadlineTask: Task<Void, Never>?
     fileprivate var offerProduct: SubscriptionProductMetadata?
     private var pendingVerification: ReadySource?
     private var pendingVerificationID: UUID?
@@ -56,6 +62,10 @@ final class ProGateStore {
         mobileAPIClient: any MobileAPIClient,
         subscriptionClient: any SubscriptionClient,
         verificationAttempts: Int = 6,
+        confirmationTimeout: Duration = .seconds(20),
+        currentAccountID: @escaping @MainActor () -> String? = {
+            ClerkAuthenticationComposition.currentUserID()
+        },
         sleep: @escaping Sleep = { duration in
             try? await Task.sleep(for: duration)
         }
@@ -64,6 +74,9 @@ final class ProGateStore {
         subscriptionStore = SubscriptionStore(client: subscriptionClient)
         self.verificationAttempts = max(verificationAttempts, 1)
         self.sleep = sleep
+        self.confirmationTimeout = confirmationTimeout
+        self.currentAccountID = currentAccountID
+        ownerAccountID = currentAccountID()
     }
 
     var isPresented: Bool {
@@ -74,9 +87,23 @@ final class ProGateStore {
         state != .confirming
     }
 
+    var belongsToCurrentAccount: Bool {
+        currentAccountID() == ownerAccountID
+    }
+
+    func accountChanged() {
+        if !belongsToCurrentAccount { hide() }
+    }
+
     func prepare() async -> PrepareOutcome {
+        guard belongsToCurrentAccount else {
+            hide()
+            return .fallbackToAccountClaim
+        }
+        deadlineTask?.cancel()
         pendingVerification = nil
-        pendingVerificationID = nil
+        let preparationID = UUID()
+        pendingVerificationID = preparationID
         intakeAdvisory = nil
 
         let entitlement: ServerVerifiedSubscription
@@ -88,6 +115,7 @@ final class ProGateStore {
         } catch MobileAPIClientError.unauthenticated(
             credential: .guestCapability
         ) {
+            guard isCurrent(preparationID) else { return .fallbackToPhotoReview }
             // #846. A capability bearer proves an installation and never a
             // subject, and this route authenticates a Clerk subject, so its
             // refusal is not a failure to report — it is the account demand
@@ -96,12 +124,15 @@ final class ProGateStore {
             hide()
             return .fallbackToAccountClaim
         } catch {
+            guard isCurrent(preparationID) else { return .fallbackToPhotoReview }
             // Every other refusal, including a rejected Clerk session and a
             // phone with no signal, proves nothing about whether an account
             // exists. Those stay on the retry that can still succeed.
             hide()
             return .fallbackToPhotoReview
         }
+
+        guard isCurrent(preparationID) else { return .fallbackToPhotoReview }
 
         if Self.serverPermitsResume(entitlement) {
             state = .ready(source: .existingSubscription)
@@ -118,7 +149,9 @@ final class ProGateStore {
                 .getRevenueCatConfiguration()
                 .data
                 .subscriptionConfiguration
+            guard isCurrent(preparationID) else { return .fallbackToPhotoReview }
             await subscriptionStore.load(configuration: configuration)
+            guard isCurrent(preparationID) else { return .fallbackToPhotoReview }
             guard case .available(let products) = subscriptionStore.state,
                   let productID = configuration.monthlyProductID,
                   let product = products.first(where: { $0.id == productID })
@@ -134,22 +167,26 @@ final class ProGateStore {
             )
             return .presented
         } catch {
+            guard isCurrent(preparationID) else { return .fallbackToPhotoReview }
             hide()
             return .fallbackToPhotoReview
         }
     }
 
     func purchase() async {
-        guard case .offer(let product, _, _) = state else { return }
+        guard belongsToCurrentAccount,
+              case .offer(let product, _, false) = state else { return }
         let verificationID = UUID()
         pendingVerification = .purchase
         pendingVerificationID = verificationID
         state = .confirming
+        startDeadline(verificationID)
         await subscriptionStore.purchase(productID: product.id)
-        guard pendingVerificationID == verificationID else { return }
+        guard isCurrent(verificationID) else { return }
 
         switch subscriptionStore.state {
         case .available:
+            deadlineTask?.cancel()
             pendingVerification = nil
             pendingVerificationID = nil
             state = .offer(
@@ -160,6 +197,7 @@ final class ProGateStore {
         case .pending, .awaitingServerVerification:
             await verifyPendingEntitlement(verificationID: verificationID)
         case .failed:
+            deadlineTask?.cancel()
             pendingVerification = nil
             pendingVerificationID = nil
             state = .offer(
@@ -169,6 +207,7 @@ final class ProGateStore {
             )
         case .verified(let entitlement):
             if Self.serverPermitsResume(entitlement) {
+                deadlineTask?.cancel()
                 pendingVerification = nil
                 pendingVerificationID = nil
                 state = .ready(source: .purchase)
@@ -180,7 +219,8 @@ final class ProGateStore {
     }
 
     func restore() async -> PrepareOutcome {
-        guard case .offer(let product, _, _) = state else {
+        guard belongsToCurrentAccount, let product = offerProduct,
+              canRestore else {
             return .presented
         }
         let verificationID = UUID()
@@ -191,13 +231,15 @@ final class ProGateStore {
             advisory: nil,
             isRestoring: true
         )
+        startDeadline(verificationID)
         await subscriptionStore.restore()
-        guard pendingVerificationID == verificationID else {
+        guard isCurrent(verificationID) else {
             return .presented
         }
 
         switch subscriptionStore.state {
         case .restoreNotFound:
+            deadlineTask?.cancel()
             pendingVerification = nil
             pendingVerificationID = nil
             state = .offer(
@@ -211,6 +253,7 @@ final class ProGateStore {
             hide()
             return .fallbackToPhotoReview
         case .available:
+            deadlineTask?.cancel()
             pendingVerification = nil
             pendingVerificationID = nil
             state = .offer(
@@ -220,6 +263,7 @@ final class ProGateStore {
             )
         case .verified(let entitlement):
             if Self.serverPermitsResume(entitlement) {
+                deadlineTask?.cancel()
                 pendingVerification = nil
                 pendingVerificationID = nil
                 state = .ready(source: .restoredPurchase)
@@ -230,11 +274,20 @@ final class ProGateStore {
         return .presented
     }
 
-    /// PAY-03 and PAY-07 remain truthful while the server bridge catches up.
-    /// The excluded pending/unavailable screens are never synthesized here.
+    /// Rechecks server truth without repeating the App Store purchase.
     func refreshPendingVerification() async {
-        guard let pendingVerificationID else { return }
-        await verifyPendingEntitlement(verificationID: pendingVerificationID)
+        guard belongsToCurrentAccount, state == .verificationPending,
+              pendingVerification != nil else { return }
+        let verificationID = UUID()
+        pendingVerificationID = verificationID
+        state = .confirming
+        startDeadline(verificationID)
+        await verifyPendingEntitlement(verificationID: verificationID)
+    }
+
+    private var canRestore: Bool {
+        if case .offer(_, _, false) = state { return true }
+        return state == .verificationPending
     }
 
     func dismiss() {
@@ -252,7 +305,7 @@ final class ProGateStore {
     }
 
     func consumeResumeIntent() -> Bool {
-        guard case .ready = state else { return false }
+        guard belongsToCurrentAccount, case .ready = state else { return false }
         hide()
         intakeAdvisory = nil
         return true
@@ -264,48 +317,57 @@ final class ProGateStore {
     }
 
     private func verifyPendingEntitlement(verificationID: UUID) async {
-        guard pendingVerificationID == verificationID,
+        guard isCurrent(verificationID),
               let pendingVerification else { return }
         for attempt in 0..<verificationAttempts {
+            if Task.isCancelled { break }
             let entitlement = try? await mobileAPIClient
                 .getAiItemEntitlement()
                 .data
                 .serverVerifiedSubscription
-            guard pendingVerificationID == verificationID else { return }
+            guard isCurrent(verificationID) else { return }
+            if Task.isCancelled { break }
             if let entitlement,
                Self.serverPermitsResume(entitlement) {
                 subscriptionStore.applyServerVerification(entitlement)
                 state = .ready(source: pendingVerification)
                 self.pendingVerification = nil
                 pendingVerificationID = nil
+                deadlineTask?.cancel()
                 return
             }
             if attempt + 1 < verificationAttempts {
                 await sleep(.seconds(1))
-                guard pendingVerificationID == verificationID else { return }
+                guard isCurrent(verificationID) else { return }
             }
         }
 
-        // Purchase pending and delayed bridge delivery remain on PAY-03. A
-        // restore with an active local entitlement remains PAY-07. Neither
-        // path invents the excluded PAY-05 or PAY-09 states.
-        switch pendingVerification {
-        case .purchase:
-            state = .confirming
-        case .restoredPurchase:
-            if let offerProduct {
-                state = .offer(
-                    product: offerProduct,
-                    advisory: nil,
-                    isRestoring: true
-                )
-            }
-        case .existingSubscription:
-            break
+        state = .verificationPending
+        deadlineTask?.cancel()
+    }
+
+    private func isCurrent(_ id: UUID) -> Bool {
+        guard belongsToCurrentAccount else {
+            hide()
+            return false
+        }
+        return pendingVerificationID == id
+    }
+
+    /// A hung SDK or HTTP call cannot hold the seller in a modal forever.
+    /// Its result can still arrive, but only the current account/attempt may apply it.
+    private func startDeadline(_ id: UUID) {
+        deadlineTask?.cancel()
+        let timeout = confirmationTimeout
+        deadlineTask = Task { [weak self] in
+            do { try await Task.sleep(for: timeout) } catch { return }
+            guard let self, self.isCurrent(id) else { return }
+            self.state = .verificationPending
         }
     }
 
     private func hide() {
+        deadlineTask?.cancel()
         state = .hidden
         pendingVerification = nil
         pendingVerificationID = nil
@@ -347,6 +409,19 @@ extension ProGateStore {
             localizedPrice: "$9.99",
             billingPeriod: .init(value: 1, unit: .month)
         )
+        if fixture.exercisesPurchase {
+            return ProGateStore(
+                mobileAPIClient: ProGatePurchaseFixtureAPI(fixture: fixture),
+                subscriptionClient: FixtureSubscriptionClient(
+                    products: [product],
+                    purchaseOutcome: fixture == .purchaseCancelled ? .cancelled : .awaitingServerVerification
+                ),
+                verificationAttempts: 2,
+                confirmationTimeout: .milliseconds(100),
+                currentAccountID: { "fixture-purchase-user" },
+                sleep: { _ in }
+            )
+        }
         let store = ProGateStore(
             mobileAPIClient: ZeroNetworkMobileAPIClient(),
             subscriptionClient: FixtureSubscriptionClient(products: [product])
@@ -385,8 +460,42 @@ extension ProGateStore {
             )
         case .pay10:
             store.state = .hidden
+        case .purchaseVerified, .purchaseDelayed, .purchaseMissing, .purchaseIgnored,
+             .purchaseTimeout, .purchaseCancelled:
+            break
         }
         return store
+    }
+}
+extension ProGateFixtureState {
+    var exercisesPurchase: Bool {
+        switch self {
+        case .purchaseVerified, .purchaseDelayed, .purchaseMissing, .purchaseIgnored,
+             .purchaseTimeout, .purchaseCancelled: true
+        default: false
+        }
+    }
+}
+
+/// Controlled delivery at the public API seam; purchase runs the production store and sheet.
+private actor ProGatePurchaseFixtureAPI: MobileAPIClient {
+    let fixture: ProGateFixtureState
+    var reads = 0
+    init(fixture: ProGateFixtureState) { self.fixture = fixture }
+    func getHealth() async throws -> HealthEnvelope { throw MobileAPIClientError.httpStatus(500) }
+    func getSession() async throws -> SessionEnvelope { throw MobileAPIClientError.httpStatus(500) }
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope { throw MobileAPIClientError.httpStatus(500) }
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope { throw MobileAPIClientError.httpStatus(500) }
+    func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope {
+        .init(data: .init(configured: true, appUserId: "fixture-purchase-user", publicSdkKey: "appl_fixture", entitlementId: "pro", monthlyProductId: "fixture-monthly", offeringId: nil, transitionState: .notRequired, legacyStripeStatus: nil), meta: .init(requestId: "fixture-configuration"))
+    }
+    func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
+        reads += 1
+        if reads > 1, fixture == .purchaseMissing { throw MobileAPIClientError.httpStatus(503) }
+        if reads > 1, fixture == .purchaseTimeout { try await Task.sleep(for: .seconds(2)) }
+        let granted = reads > 1 && (fixture == .purchaseVerified || fixture == .purchaseTimeout)
+            || reads > 3 && fixture == .purchaseDelayed
+        return .init(data: .init(billingSource: granted ? .storeKit : .included, status: granted ? .active : .included, remainingItems: granted ? 7 : 1, periodStart: nil, periodEnd: nil, gracePeriodEnd: nil, transitionState: .notRequired, legacyStripeStatus: nil), meta: .init(requestId: "fixture-entitlement"))
     }
 }
 #endif

@@ -505,25 +505,104 @@ enum SettingsValueRowLayout {
 @Observable
 final class SettingsSubscriptionAccountScope {
     private(set) var identity: SettingsIdentity
+    private(set) var accountID: String?
     private(set) var store: SubscriptionStore
+    var loadPhase = SettingsSubscriptionPresentation.LoadPhase.loading
     @ObservationIgnored private let makeStore: () -> SubscriptionStore
+    @ObservationIgnored private let currentAccountID: (@MainActor () -> String?)?
+    private var requestID = UUID()
 
     init(
         identity: SettingsIdentity,
+        accountID: String? = nil,
+        currentAccountID: (@MainActor () -> String?)? = nil,
         makeStore: @escaping () -> SubscriptionStore
     ) {
         self.identity = identity
+        self.accountID = accountID
+        self.currentAccountID = currentAccountID
         self.makeStore = makeStore
         store = makeStore()
     }
 
     /// Returns `true` when the account changed and the reading was reset.
     @discardableResult
-    func rebind(to identity: SettingsIdentity) -> Bool {
-        guard identity != self.identity else { return false }
+    func rebind(to identity: SettingsIdentity, accountID: String? = nil) -> Bool {
+        guard accountID != self.accountID || identity != self.identity else { return false }
         self.identity = identity
+        self.accountID = accountID
+        requestID = UUID()
         store = makeStore()
+        loadPhase = .loading
         return true
+    }
+
+    func isCurrent(_ reading: SubscriptionStore) -> Bool {
+        reading === store && (currentAccountID.map { $0() == accountID } ?? true)
+    }
+
+    func preparePlans(_ plans: ProGateStore) async -> ProGateStore.PrepareOutcome? {
+        let reading = store
+        let outcome = await plans.prepare()
+        guard isCurrent(reading), plans.belongsToCurrentAccount else {
+            plans.fallbackToPhotoReview()
+            return nil
+        }
+        return outcome
+    }
+
+    func load(
+        configuration: () async throws -> NativeSubscriptionConfiguration,
+        entitlement: () async throws -> ServerVerifiedSubscription
+    ) async {
+        let reading = store
+        let id = UUID()
+        requestID = id
+        loadPhase = .loading
+        do {
+            let configuration = try await configuration()
+            guard isCurrent(reading), requestID == id else { return }
+            await reading.load(configuration: configuration)
+            guard isCurrent(reading), requestID == id else { return }
+            let plan = SettingsEntitlementRefreshPlan.afterInitialLoad(reading.state)
+            loadPhase = plan.deletionDisclosureLoadPhase
+            guard plan == .requestServerTruth else { return }
+            await refresh(reading: reading, id: id, entitlement: entitlement)
+        } catch {
+            guard isCurrent(reading), requestID == id else { return }
+            loadPhase = .failed
+        }
+    }
+
+    func restore(entitlement: () async throws -> ServerVerifiedSubscription) async {
+        let reading = store
+        let id = UUID()
+        requestID = id
+        loadPhase = .loaded
+        await reading.restore()
+        guard isCurrent(reading), requestID == id else { return }
+        let plan = SettingsEntitlementRefreshPlan.afterRestore(reading.state)
+        loadPhase = plan.deletionDisclosureLoadPhase
+        guard plan == .requestServerTruth else { return }
+        await refresh(reading: reading, id: id, entitlement: entitlement)
+    }
+
+    private func refresh(
+        reading: SubscriptionStore,
+        id: UUID,
+        entitlement: () async throws -> ServerVerifiedSubscription
+    ) async {
+        await SettingsEntitlementServerRefresh.perform(
+            fetch: entitlement,
+            apply: { [self] value in
+                guard isCurrent(reading), requestID == id else { return }
+                reading.applyServerVerification(value)
+            },
+            setLoadPhase: { [self] phase in
+                guard isCurrent(reading), requestID == id else { return }
+                loadPhase = phase
+            }
+        )
     }
 }
 

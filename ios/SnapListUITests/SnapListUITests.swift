@@ -4375,6 +4375,59 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
+    func testCompletedPurchaseWithMissingOrIgnoredGrantOffersRecoveryWithoutAnotherPurchase() {
+        for fixture in ["purchase-missing", "purchase-ignored", "purchase-timeout"] {
+            let app = launch(extraArguments: ["--pro-gate-fixture=\(fixture)"])
+            let purchase = app.buttons["pro-gate.primary"]
+            XCTAssertTrue(purchase.waitForExistence(timeout: 5))
+            purchase.tap()
+            let check = app.buttons["pro-gate.check-again"]
+            XCTAssertTrue(check.waitForExistence(timeout: 4), fixture)
+            XCTAssertFalse(app.descendants(matching: .any)["pro-gate.confirming"].exists)
+            XCTAssertFalse(app.buttons["Subscribe"].exists)
+            let restore = app.buttons["pro-gate.restore-purchase"]
+            XCTAssertTrue(restore.exists)
+            if fixture != "purchase-timeout" {
+                restore.tap()
+                XCTAssertTrue(check.waitForExistence(timeout: 4))
+                XCTAssertFalse(app.buttons["Subscribe"].exists)
+            }
+            app.buttons["pro-gate.close"].tap()
+            XCTAssertFalse(app.staticTexts["pro-gate.title"].waitForExistence(timeout: 1))
+            app.terminate()
+        }
+    }
+
+    func testDelayedPurchaseGrantCanBeRecheckedAndVerifiedPurchaseCanFinish() {
+        for fixture in ["purchase-delayed", "purchase-verified"] {
+            let app = launch(extraArguments: ["--pro-gate-fixture=\(fixture)"])
+            let purchase = app.buttons["pro-gate.primary"]
+            XCTAssertTrue(purchase.waitForExistence(timeout: 5))
+            purchase.tap()
+            if fixture == "purchase-delayed" {
+                let check = app.buttons["pro-gate.check-again"]
+                XCTAssertTrue(check.waitForExistence(timeout: 4))
+                check.tap()
+            }
+            XCTAssertTrue(app.staticTexts["SnapList Pro is on"].waitForExistence(timeout: 4))
+            XCTAssertFalse(app.buttons["pro-gate.check-again"].exists)
+            app.buttons["pro-gate.primary"].tap()
+            XCTAssertFalse(app.staticTexts["pro-gate.title"].waitForExistence(timeout: 1))
+            app.terminate()
+        }
+    }
+
+    func testCancelledPurchaseReturnsToTheOfferWithoutClaimingPro() {
+        let app = launch(extraArguments: ["--pro-gate-fixture=purchase-cancelled"])
+        let purchase = app.buttons["pro-gate.primary"]
+        XCTAssertTrue(purchase.waitForExistence(timeout: 5))
+        purchase.tap()
+        XCTAssertTrue(purchase.waitForExistence(timeout: 3))
+        XCTAssertEqual(purchase.label, "Subscribe")
+        XCTAssertFalse(app.staticTexts["SnapList Pro is on"].exists)
+        XCTAssertFalse(app.buttons["pro-gate.check-again"].exists)
+    }
+
     func testProGatePurchasePendingHasNoDismissOrRestoreAction() {
         let app = launch(extraArguments: ["--pro-gate-fixture=PAY-03"])
 

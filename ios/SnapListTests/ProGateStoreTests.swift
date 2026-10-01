@@ -123,6 +123,81 @@ final class ProGateStoreTests: XCTestCase {
         XCTAssertEqual(subscriptionCalls.purchase, 1)
     }
 
+    func testSlowVerificationStopsLoadingAndDismissRejectsTheLateGrant() async {
+        let api = ProGateMobileAPIStub(entitlements: [.includedUsed, .activeStoreKit], configuration: .configured)
+        let store = ProGateStore(
+            mobileAPIClient: api,
+            subscriptionClient: FixtureSubscriptionClient(products: [product]),
+            confirmationTimeout: .milliseconds(30)
+        )
+        _ = await store.prepare()
+        await api.suspendNextRead()
+        let purchase = Task { await store.purchase() }
+        await api.waitUntilSuspended()
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(store.state, .verificationPending)
+        XCTAssertTrue(store.isDismissible)
+        store.dismiss()
+        await api.resumeRead()
+        await purchase.value
+        XCTAssertEqual(store.state, .hidden)
+        XCTAssertFalse(store.consumeResumeIntent())
+    }
+
+    func testAccountSwitchDuringPurchaseVerificationDiscardsTheOldGrant() async {
+        var accountID = "user_A"
+        let api = ProGateMobileAPIStub(entitlements: [.includedUsed, .activeStoreKit], configuration: .configured)
+        let store = ProGateStore(
+            mobileAPIClient: api,
+            subscriptionClient: FixtureSubscriptionClient(products: [product]),
+            currentAccountID: { accountID }
+        )
+        _ = await store.prepare()
+        await api.suspendNextRead()
+        let purchase = Task { await store.purchase() }
+        await api.waitUntilSuspended()
+        accountID = "user_B"
+        await api.resumeRead()
+        await purchase.value
+        XCTAssertEqual(store.state, .hidden)
+        XCTAssertFalse(store.consumeResumeIntent())
+    }
+
+    func testCancelledVerificationStopsPollingWithoutClaimingPro() async {
+        let api = ProGateMobileAPIStub(entitlements: [.includedUsed], configuration: .configured)
+        let store = ProGateStore(mobileAPIClient: api, subscriptionClient: FixtureSubscriptionClient(products: [product]))
+        _ = await store.prepare()
+        await api.suspendNextRead()
+        let purchase = Task { await store.purchase() }
+        await api.waitUntilSuspended()
+        purchase.cancel()
+        await api.resumeRead()
+        await purchase.value
+        XCTAssertEqual(store.state, .verificationPending)
+        XCTAssertFalse(store.consumeResumeIntent())
+        let calls = await api.calls()
+        XCTAssertEqual(calls.entitlement, 2)
+    }
+
+    func testRepeatedPurchaseAndForegroundChecksCannotBuyAgainWhilePending() async {
+        let api = ProGateMobileAPIStub(entitlements: [.includedUsed], configuration: .configured)
+        let subscriptions = FixtureSubscriptionClient(products: [product])
+        let store = makeStore(api: api, subscriptions: subscriptions)
+        _ = await store.prepare()
+        await store.purchase()
+        await store.purchase()
+        await store.refreshPendingVerification()
+        await store.purchase()
+        XCTAssertEqual(store.state, .verificationPending)
+        let calls = await subscriptions.callCounts()
+        XCTAssertEqual(calls.purchase, 1)
+        _ = await store.restore()
+        XCTAssertEqual(store.state, .verificationPending)
+        let restored = await subscriptions.callCounts()
+        XCTAssertEqual(restored.purchase, 1)
+        XCTAssertEqual(restored.restore, 1)
+    }
+
     func testCancelledPurchaseReturnsTheUnchangedOffer() async {
         let api = ProGateMobileAPIStub(
             entitlements: [.includedUsed],
@@ -141,6 +216,26 @@ final class ProGateStoreTests: XCTestCase {
             store.state,
             .offer(product: product, advisory: nil, isRestoring: false)
         )
+    }
+
+    func testSuccessfulPurchaseWithoutServerGrantStopsLoadingAndCanBeDismissed() async {
+        let api = ProGateMobileAPIStub(
+            entitlements: [.includedUsed],
+            configuration: .configured
+        )
+        let subscriptions = FixtureSubscriptionClient(products: [product])
+        let store = makeStore(api: api, subscriptions: subscriptions)
+        _ = await store.prepare()
+
+        await store.purchase()
+
+        XCTAssertNotEqual(store.state, .confirming, "An exhausted check must stop the spinner.")
+        XCTAssertTrue(store.isDismissible, "A successful purchase with no grant must not trap the seller.")
+        XCTAssertFalse(store.consumeResumeIntent(), "Included allowance must never become Pro.")
+        store.dismiss()
+        XCTAssertEqual(store.state, .hidden)
+        let calls = await subscriptions.callCounts()
+        XCTAssertEqual(calls.purchase, 1)
     }
 
     func testFailedPurchaseUsesTheApprovedPAY06Advisory() async {
@@ -167,7 +262,7 @@ final class ProGateStoreTests: XCTestCase {
         )
     }
 
-    func testPendingPurchaseStaysOnApprovedPAY03() async {
+    func testPendingPurchaseStopsAtRecoverablePendingWithoutGrantingPro() async {
         let api = ProGateMobileAPIStub(
             entitlements: [.includedUsed, .includedUsed],
             configuration: .configured
@@ -181,8 +276,8 @@ final class ProGateStoreTests: XCTestCase {
 
         await store.purchase()
 
-        XCTAssertEqual(store.state, .confirming)
-        XCTAssertFalse(store.isDismissible)
+        XCTAssertEqual(store.state, .verificationPending)
+        XCTAssertTrue(store.isDismissible)
         XCTAssertFalse(store.consumeResumeIntent())
     }
 
@@ -246,17 +341,10 @@ final class ProGateStoreTests: XCTestCase {
             switch source {
             case .purchase:
                 await store.purchase()
-                XCTAssertEqual(store.state, .confirming)
+                XCTAssertEqual(store.state, .verificationPending)
             case .restoredPurchase:
                 _ = await store.restore()
-                XCTAssertEqual(
-                    store.state,
-                    .offer(
-                        product: product,
-                        advisory: nil,
-                        isRestoring: true
-                    )
-                )
+                XCTAssertEqual(store.state, .verificationPending)
             case .existingSubscription:
                 XCTFail("Existing subscriptions do not enter pending verification.")
             }
@@ -534,6 +622,19 @@ private actor ProGateMobileAPIStub: MobileAPIClient {
     private let configuration: RevenueCatConfigurationEnvelope
     private var entitlementCalls = 0
     private var configurationCalls = 0
+    private var suspendRead = false
+    private var readContinuation: CheckedContinuation<Void, Never>?
+    private var readWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func suspendNextRead() { suspendRead = true }
+    func waitUntilSuspended() async {
+        if readContinuation != nil { return }
+        await withCheckedContinuation { readWaiters.append($0) }
+    }
+    func resumeRead() {
+        readContinuation?.resume()
+        readContinuation = nil
+    }
 
     init(
         entitlements: [EntitlementResult],
@@ -567,6 +668,14 @@ private actor ProGateMobileAPIStub: MobileAPIClient {
 
     func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
         entitlementCalls += 1
+        if suspendRead {
+            suspendRead = false
+            await withCheckedContinuation { continuation in
+                readContinuation = continuation
+                readWaiters.forEach { $0.resume() }
+                readWaiters.removeAll()
+            }
+        }
         let index = min(entitlementCalls - 1, entitlements.count - 1)
         switch entitlements[index] {
         case .value(let value): return value

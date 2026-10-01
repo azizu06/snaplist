@@ -220,6 +220,12 @@ enum ProGateFixtureState: String, Equatable {
     /// The same offer and ready outcome opened on purpose from Settings.
     case pay01Plans = "PAY-01-plans"
     case pay04aPlans = "PAY-04a-plans"
+    case purchaseVerified = "purchase-verified"
+    case purchaseDelayed = "purchase-delayed"
+    case purchaseMissing = "purchase-missing"
+    case purchaseIgnored = "purchase-ignored"
+    case purchaseTimeout = "purchase-timeout"
+    case purchaseCancelled = "purchase-cancelled"
 }
 
 /// The four owner-approved eBay v5 seller-visible projections (issue #742).
