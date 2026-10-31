@@ -2,7 +2,9 @@
 
 <p align="center"><b>SnapList is an iPhone app that turns a few photos of something you own into a priced, ready-to-post resale listing. AI identifies the item, checks real eBay sales for a price, and writes the listing for you to edit.</b></p>
 
-<p align="center">Built for RevenueCat Shipaton 2026 · Next Gen track · Native iPhone app (SwiftUI) with a TypeScript backend</p>
+<p align="center"><a href="https://devpost.com/software/snaplist-x2o47p"><img src="https://img.shields.io/badge/RevenueCat%20Shipaton%202026-Next%20Gen%20track-F25A5A" alt="Built for RevenueCat Shipaton 2026, Next Gen track"></a></p>
+
+<p align="center">Built for <a href="https://devpost.com/software/snaplist-x2o47p">RevenueCat Shipaton 2026</a> · Next Gen track · Native iPhone app (SwiftUI) with a TypeScript backend</p>
 
 <p align="center">
   <img src="docs/readme/phone-capture.webp" width="220" alt="Native iPhone capture: real Jordan 3 shoes in SnapList's camera.">
@@ -14,17 +16,9 @@
 
 <p align="center"><sub>Capture → To list → review. Stills from the native iPhone demo recording. <a href="docs/readme/README.md">Screenshot notes and source timestamps</a>.</sub></p>
 
-<!--
-TODO(Aziz): add the demo video link here once it is recorded (the README
-currently says "Demo video: coming soon"). Suggested: a 30-60 second screen
-recording that opens on the camera, snaps an item, and lands on the priced
-review screen. Then replace this comment with:
+<p align="center"><a href="https://youtu.be/nuw5bjnxSY0"><img src="https://img.youtube.com/vi/nuw5bjnxSY0/maxresdefault.jpg" width="560" alt="SnapList demo"></a></p>
 
-<p align="center"><a href="VIDEO_URL"><b>Watch the 60-second demo</b></a></p>
-
-Also update the "See it in action" section further down so it stops saying
-"coming soon".
--->
+<p align="center"><a href="https://youtu.be/nuw5bjnxSY0"><b>Watch the demo video</b></a></p>
 
 ## Run it
 
@@ -105,7 +99,7 @@ The integration is implemented and covered by purchase/restore fixtures and serv
 
 ## See it in action
 
-**Demo video: coming soon.** This repository is the Shipaton showcase; an App Store release is not available yet.
+[Watch the demo video](https://youtu.be/nuw5bjnxSY0) or read the [Devpost write-up](https://devpost.com/software/snaplist-x2o47p). This repository is the Shipaton showcase.
 
 To explore locally, open [`ios/SnapList.xcodeproj`](ios/SnapList.xcodeproj) in Xcode and follow the [iOS setup guide](ios/README.md). The [developer guide](docs/developer-guide.md#getting-started) covers the API, local Supabase, and verification commands.
 
