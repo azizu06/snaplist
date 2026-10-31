@@ -557,6 +557,8 @@ supabase/migrations/20260924220123_guest_recovery_expiry_remapped_photo_scrub.sq
 supabase/migrations/20260930190000_revenuecat_scoped_sandbox_grant.sql
 supabase/migrations/20261001071500_expand_voice_note_to_45_seconds.sql
 supabase/migrations/20261001073019_queue_stall_recovery.sql
+supabase/migrations/20261001160000_device_fenced_lapsed_storekit_paywall.sql
+supabase/migrations/20261001163000_mobile_published_listing_review_read.sql
 tsconfig.json
 vercel.json
 vitest.config.ts
