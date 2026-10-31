@@ -1,15 +1,8 @@
 <h1 align="center">SnapList</h1>
 
-<p align="center"><b>Turn the stuff you own into listings worth posting.</b></p>
+<p align="center"><b>SnapList is an iPhone app that turns a few photos of something you own into a priced, ready-to-post resale listing. AI identifies the item, checks real eBay sales for a price, and writes the listing for you to edit.</b></p>
 
-<p align="center">
-  Snap a few photos, add a quick voice note, and get an editable resale listing with a starting price.<br>
-  Spend less time researching and writing. Keep the final say on what goes out.
-</p>
-
-<p align="center"><b>Built for RevenueCat Shipaton 2026 · Next Gen track</b><br>Native iPhone app · Meet Scout, your listing companion</p>
-
-<p align="center"><img src="docs/readme/scout-barcode.gif" width="180" alt="Scout, SnapList’s camera mascot, scanning a barcode on a cardboard parcel in a looping animation."></p>
+<p align="center">Built for RevenueCat Shipaton 2026 · Next Gen track · Native iPhone app (SwiftUI) with a TypeScript backend</p>
 
 <p align="center">
   <img src="docs/readme/phone-capture.webp" width="220" alt="Native iPhone capture: real Jordan 3 shoes in SnapList's camera.">
@@ -19,7 +12,46 @@
   <img src="docs/readme/phone-listing-review.webp" width="220" alt="Native Jordan 3 review: $155 price, three sold matches from $100 to $180, and editable listing details.">
 </p>
 
-<p align="center"><sub>Capture → To list → review. Stills from the native iPhone demo recording in matching device frames.<br><a href="docs/readme/README.md">Screenshot notes and source timestamps</a>.</sub></p>
+<p align="center"><sub>Capture → To list → review. Stills from the native iPhone demo recording. <a href="docs/readme/README.md">Screenshot notes and source timestamps</a>.</sub></p>
+
+<!--
+TODO(Aziz): add the demo video link here once it is recorded (the README
+currently says "Demo video: coming soon"). Suggested: a 30-60 second screen
+recording that opens on the camera, snaps an item, and lands on the priced
+review screen. Then replace this comment with:
+
+<p align="center"><a href="VIDEO_URL"><b>Watch the 60-second demo</b></a></p>
+
+Also update the "See it in action" section further down so it stops saying
+"coming soon".
+-->
+
+## Run it
+
+The backend needs Node.js 22.19.0 and pnpm 10. From a fresh clone:
+
+```bash
+nvm use                           # picks Node 22.19.0 from .nvmrc
+pnpm install --frozen-lockfile
+cp .env.example .env.local        # fill in the keys you need
+pnpm test                         # unit tests (Vitest)
+pnpm dev                          # start the Next.js API server
+```
+
+For the iPhone app, open [`ios/SnapList.xcodeproj`](ios/SnapList.xcodeproj) in Xcode 26.5, pick the `SnapList` scheme and an iPhone simulator. The [developer guide](docs/developer-guide.md#getting-started) covers local Supabase and the full set of checks.
+
+The original overview, how it works, and the Pro subscription details continue below.
+
+## What it does
+
+<p align="center"><b>Turn the stuff you own into listings worth posting.</b></p>
+
+<p align="center">
+  Snap a few photos, add a quick voice note, and get an editable resale listing with a starting price.<br>
+  Spend less time researching and writing. Keep the final say on what goes out.
+</p>
+
+<p align="center"><img src="docs/readme/scout-barcode.gif" width="180" alt="Scout, SnapList’s camera mascot, scanning a barcode on a cardboard parcel in a looping animation."></p>
 
 ## From photo to flip
 
